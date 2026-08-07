@@ -33,3 +33,28 @@ test("keeps only safe inventory fields and filters sensitive domains", () => {
   });
   assert.doesNotMatch(JSON.stringify(output), /192\.168|00:11|secret|playing/);
 });
+
+test("sorts inventory without depending on ICU locale data", () => {
+  const originalLocaleCompare = String.prototype.localeCompare;
+  String.prototype.localeCompare = () => { throw new Error("Internal error. Icu error."); };
+  try {
+    const output = sanitiseInventory({
+      areas: [
+        { id: "living_room", name: "Living room" },
+        { id: "kitchen", name: "Kitchen" }
+      ],
+      entities: [
+        { entity_id: "media_player.living_room" },
+        { entity_id: "light.kitchen" }
+      ]
+    });
+
+    assert.deepEqual(output.areas.map((area) => area.id), ["kitchen", "living_room"]);
+    assert.deepEqual(output.entities.map((entity) => entity.entity_id), [
+      "light.kitchen",
+      "media_player.living_room"
+    ]);
+  } finally {
+    String.prototype.localeCompare = originalLocaleCompare;
+  }
+});

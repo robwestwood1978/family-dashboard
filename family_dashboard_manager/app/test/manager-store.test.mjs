@@ -81,3 +81,28 @@ test("rejects untrusted snapshot identifiers", async (context) => {
     /expected_active_hash|snapshot_id/
   );
 });
+
+test("sorts multiple snapshots without depending on ICU locale data", async (context) => {
+  const { root, store } = await fixture();
+  context.after(() => rm(root, { recursive: true, force: true }));
+
+  for (const title of ["First", "Second", "Third"]) {
+    const candidate = structuredClone(example);
+    candidate.product.title = title;
+    const prepared = store.validate(candidate);
+    await store.deploy(candidate, {
+      expectedConfigHash: prepared.config_hash,
+      confirm: true
+    });
+  }
+
+  const originalLocaleCompare = String.prototype.localeCompare;
+  String.prototype.localeCompare = () => { throw new Error("Internal error. Icu error."); };
+  try {
+    const snapshots = (await store.getStatus()).snapshots;
+    assert.equal(snapshots.length, 2);
+    assert.ok(snapshots[0].created_at > snapshots[1].created_at);
+  } finally {
+    String.prototype.localeCompare = originalLocaleCompare;
+  }
+});
