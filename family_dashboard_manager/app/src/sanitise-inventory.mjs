@@ -1,3 +1,5 @@
+import { compareText } from "./compare-text.mjs";
+
 const BLOCKED_DOMAINS = new Set(["camera", "device_tracker", "geo_location", "image", "person", "zone"]);
 const SAFE_ENTITY_FIELDS = [
   "entity_id",
@@ -21,7 +23,7 @@ export function sanitiseInventory(input) {
   const safeAreas = areas
     .map((area) => ({ id: cleanString(area?.id, 80), name: cleanString(area?.name, 80) }))
     .filter((area) => area.id && area.name)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => compareText(a.name, b.name));
 
   const safeEntities = entities
     .filter((entity) => typeof entity?.entity_id === "string")
@@ -36,7 +38,7 @@ export function sanitiseInventory(input) {
       safe.domain = safe.entity_id.split(".", 1)[0];
       return safe;
     })
-    .sort((a, b) => a.entity_id.localeCompare(b.entity_id));
+    .sort((a, b) => compareText(a.entity_id, b.entity_id));
 
   return {
     schema_version: 1,

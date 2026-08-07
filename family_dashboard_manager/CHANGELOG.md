@@ -1,3 +1,8 @@
+## 0.1.2
+
+- Make sanitised inventory and rollback snapshot ordering independent of ICU locale data in the minimal Home Assistant app image.
+- Add regression coverage for the exact `Internal error. Icu error.` runtime failure.
+
 ## 0.1.1
 
 - Fix Home Assistant OS startup by granting the S6 `/init` launcher the read permission required by its shell interpreter.

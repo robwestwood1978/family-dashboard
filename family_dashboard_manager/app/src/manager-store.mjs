@@ -9,6 +9,7 @@ import {
   writeFile
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { compareText } from "./compare-text.mjs";
 import { compileDashboard } from "./compile-dashboard.mjs";
 import { validateConfig } from "./validate-config.mjs";
 
@@ -112,7 +113,7 @@ export class DashboardStore {
       this.listSnapshots()
     ]);
     return {
-      app_version: process.env.APP_VERSION || "0.1.1",
+      app_version: process.env.APP_VERSION || "0.1.2",
       installed: configText !== null && dashboard !== null,
       active_config_hash: configText === null ? null : sha256(configText),
       active_dashboard_hash: dashboard === null ? null : sha256(dashboard),
@@ -150,7 +151,7 @@ export class DashboardStore {
       const metadata = await readJson(join(this.snapshotDir, entry.name, "metadata.json"));
       if (metadata) snapshots.push(metadata);
     }
-    return snapshots.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return snapshots.sort((a, b) => compareText(b.created_at, a.created_at));
   }
 
   async createSnapshot(reason) {
