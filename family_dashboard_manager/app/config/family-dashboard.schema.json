@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/family-dashboard.schema.json",
+  "title": "Family Dashboard household configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "product",
+    "display",
+    "people",
+    "features",
+    "calendar",
+    "rooms",
+    "media",
+    "chores",
+    "football",
+    "school"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "locale", "timezone"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "locale": { "type": "string", "pattern": "^[a-z]{2}-[A-Z]{2}$" },
+        "timezone": { "type": "string", "minLength": 1 }
+      }
+    },
+    "display": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["orientation", "kiosk", "legacy_ios", "default_view"],
+      "properties": {
+        "orientation": { "enum": ["landscape", "portrait"] },
+        "kiosk": { "type": "boolean" },
+        "legacy_ios": { "type": "boolean" },
+        "default_view": {
+          "enum": ["today", "calendar", "home", "music", "chores", "football", "school"]
+        }
+      }
+    },
+    "theme": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "accent": { "$ref": "#/$defs/colour" },
+        "background": { "$ref": "#/$defs/colour" }
+      }
+    },
+    "people": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "role", "colour"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "role": { "enum": ["parent", "child", "household"] },
+          "colour": { "$ref": "#/$defs/colour" }
+        }
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["calendar", "home", "music", "chores", "football", "school"],
+      "properties": {
+        "calendar": { "type": "boolean" },
+        "home": { "type": "boolean" },
+        "music": { "type": "boolean" },
+        "chores": { "type": "boolean" },
+        "football": { "type": "boolean" },
+        "school": { "type": "boolean" }
+      }
+    },
+    "calendar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card_type", "default_view", "rolling_days", "entities"],
+      "properties": {
+        "card_type": {
+          "enum": ["custom:daylight-calendar-card", "custom:skylight-calendar-card"]
+        },
+        "default_view": { "type": "string", "minLength": 1 },
+        "rolling_days": { "type": "integer", "minimum": 1, "maximum": 31 },
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "entity_id", "label", "colour", "person_ids"],
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "entity_id": { "$ref": "#/$defs/entityId" },
+              "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "colour": { "$ref": "#/$defs/colour" },
+              "person_ids": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/id" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "rooms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "area_id", "lights"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "area_id": { "$ref": "#/$defs/id" },
+          "lights": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/entityId" }
+          },
+          "climate": { "$ref": "#/$defs/entityId" },
+          "scene": { "$ref": "#/$defs/entityId" }
+        }
+      }
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card_type", "initial_player", "players"],
+      "properties": {
+        "card_type": { "const": "custom:mediocre-multi-media-player-card" },
+        "initial_player": { "$ref": "#/$defs/entityId" },
+        "players": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["entity_id", "name"],
+            "properties": {
+              "entity_id": { "$ref": "#/$defs/entityId" },
+              "name": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "ma_entity_id": { "$ref": "#/$defs/entityId" },
+              "speaker_group_entity_id": { "$ref": "#/$defs/entityId" },
+              "can_be_grouped": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "chores": { "$ref": "#/$defs/summaryEntityCollection" },
+    "football": { "$ref": "#/$defs/entityCollection" },
+    "school": { "$ref": "#/$defs/entityCollection" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "entityId": {
+      "type": "string",
+      "pattern": "^[a-z_][a-z0-9_]*\\.[a-z0-9_]+$"
+    },
+    "colour": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "entityCollection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entities"],
+      "properties": {
+        "entities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/entityId" }
+        }
+      }
+    },
+    "summaryEntityCollection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary_entities"],
+      "properties": {
+        "summary_entities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/entityId" }
+        }
+      }
+    }
+  }
+}

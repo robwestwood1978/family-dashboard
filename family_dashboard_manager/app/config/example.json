@@ -1,0 +1,97 @@
+{
+  "$schema": "./family-dashboard.schema.json",
+  "schema_version": 1,
+  "product": {
+    "title": "Family Dashboard",
+    "locale": "en-GB",
+    "timezone": "Europe/London"
+  },
+  "display": {
+    "orientation": "landscape",
+    "kiosk": true,
+    "legacy_ios": true,
+    "default_view": "today"
+  },
+  "theme": {
+    "accent": "#5B5BD6",
+    "background": "#F7F5F2"
+  },
+  "people": [
+    {
+      "id": "parent",
+      "name": "Parent",
+      "role": "parent",
+      "colour": "#5B5BD6"
+    },
+    {
+      "id": "child_one",
+      "name": "Child one",
+      "role": "child",
+      "colour": "#E76F51"
+    },
+    {
+      "id": "child_two",
+      "name": "Child two",
+      "role": "child",
+      "colour": "#2A9D8F"
+    }
+  ],
+  "features": {
+    "calendar": true,
+    "home": true,
+    "music": true,
+    "chores": true,
+    "football": true,
+    "school": false
+  },
+  "calendar": {
+    "card_type": "custom:daylight-calendar-card",
+    "default_view": "week-standard",
+    "rolling_days": 7,
+    "entities": [
+      {
+        "id": "family",
+        "entity_id": "calendar.family",
+        "label": "Family",
+        "colour": "#5B5BD6",
+        "person_ids": [
+          "parent",
+          "child_one",
+          "child_two"
+        ]
+      }
+    ]
+  },
+  "rooms": [
+    {
+      "id": "living_room",
+      "name": "Living room",
+      "area_id": "living_room",
+      "lights": [
+        "light.living_room"
+      ],
+      "climate": "climate.living_room"
+    }
+  ],
+  "media": {
+    "card_type": "custom:mediocre-multi-media-player-card",
+    "initial_player": "media_player.living_room",
+    "players": [
+      {
+        "entity_id": "media_player.living_room",
+        "name": "Living room",
+        "ma_entity_id": "media_player.living_room_music_assistant",
+        "can_be_grouped": true
+      }
+    ]
+  },
+  "chores": {
+    "summary_entities": []
+  },
+  "football": {
+    "entities": []
+  },
+  "school": {
+    "entities": []
+  }
+}

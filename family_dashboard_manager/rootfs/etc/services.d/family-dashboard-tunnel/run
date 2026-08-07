@@ -1,0 +1,41 @@
+#!/usr/bin/with-contenv bashio
+
+if ! bashio::config.true 'tunnel_enabled'; then
+  bashio::log.info "Secure MCP Tunnel is disabled"
+  exec sleep infinity
+fi
+
+declare tunnel_id control_plane_api_key
+tunnel_id=$(bashio::config 'tunnel_id')
+control_plane_api_key=$(bashio::config 'control_plane_api_key')
+
+if ! [[ "${tunnel_id}" =~ ^tunnel_[a-f0-9]{32}$ ]]; then
+  bashio::log.fatal "tunnel_id must use the OpenAI tunnel_ plus 32 lowercase hexadecimal format"
+  exit 1
+fi
+if [[ ${#control_plane_api_key} -lt 10 ]]; then
+  bashio::log.fatal "A tunnel runtime API key is required when Secure MCP Tunnel is enabled"
+  exit 1
+fi
+
+for attempt in $(seq 1 30); do
+  if wget -q -O /dev/null http://127.0.0.1:8099/healthz; then
+    break
+  fi
+  if [[ "${attempt}" -eq 30 ]]; then
+    bashio::log.fatal "Family Dashboard Manager did not become healthy"
+    exit 1
+  fi
+  sleep 1
+done
+
+export CONTROL_PLANE_API_KEY="${control_plane_api_key}"
+export CONTROL_PLANE_TUNNEL_ID="${tunnel_id}"
+export MCP_SERVER_URL="http://127.0.0.1:8099/mcp"
+export HEALTH_LISTEN_ADDR="127.0.0.1:8100"
+export LOG_LEVEL="info"
+export LOG_FORMAT="json"
+
+unset control_plane_api_key
+bashio::log.info "Starting outbound-only Secure MCP Tunnel"
+exec /usr/bin/tunnel-client run

@@ -1,0 +1,13 @@
+configuration:
+  snapshot_limit:
+    name: Rollback snapshots
+    description: Number of previous Family Dashboard deployments retained for rollback.
+  tunnel_enabled:
+    name: Secure MCP Tunnel
+    description: Enable the outbound-only connection used for managed ChatGPT/Codex access.
+  tunnel_id:
+    name: Tunnel ID
+    description: OpenAI Platform tunnel identifier. Required only when the tunnel is enabled.
+  control_plane_api_key:
+    name: Tunnel runtime API key
+    description: Runtime key with Tunnels Read and Use permission. Never stored in Git or returned by the manager.
