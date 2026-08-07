@@ -19,7 +19,7 @@ RUN set -eux; \
     curl --fail --silent --show-error --location --retry 3 \
       "https://persistent.oaistatic.com/tunnel-client/v${TUNNEL_CLIENT_VERSION}/${tunnel_asset}" \
       --output "/tmp/${tunnel_asset}"; \
-    echo "${tunnel_sha256}  /tmp/${tunnel_asset}" | sha256sum --check; \
+    echo "${tunnel_sha256}  /tmp/${tunnel_asset}" | sha256sum -c; \
     unzip -q "/tmp/${tunnel_asset}" -d /tmp/tunnel-client; \
     cp /tmp/tunnel-client/tunnel-client /usr/bin/tunnel-client; \
     cp /tmp/tunnel-client/cloudflared /usr/bin/cloudflared; \
