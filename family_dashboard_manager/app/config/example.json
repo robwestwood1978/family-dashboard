@@ -1,6 +1,6 @@
 {
   "$schema": "./family-dashboard.schema.json",
-  "schema_version": 1,
+  "schema_version": 2,
   "product": {
     "title": "Family Dashboard",
     "locale": "en-GB",
@@ -10,11 +10,16 @@
     "orientation": "landscape",
     "kiosk": true,
     "legacy_ios": true,
-    "default_view": "today"
+    "default_view": "today",
+    "panel_path": "family-dashboard"
   },
   "theme": {
     "accent": "#5B5BD6",
-    "background": "#F7F5F2"
+    "background": "#F3F1EC",
+    "surface": "#FFFFFF",
+    "text": "#202432",
+    "muted": "#697080",
+    "radius_px": 20
   },
   "people": [
     {
@@ -42,6 +47,8 @@
     "music": true,
     "chores": true,
     "football": true,
+    "lists": true,
+    "weather": true,
     "school": false
   },
   "calendar": {
@@ -62,13 +69,24 @@
       }
     ]
   },
+  "weather": {
+    "entity_id": "weather.home"
+  },
+  "lists": {
+    "reminders_entity": "todo.reminders",
+    "shopping_entity": "todo.shopping_list"
+  },
   "rooms": [
     {
       "id": "living_room",
       "name": "Living room",
       "area_id": "living_room",
+      "icon": "mdi:sofa-outline",
       "lights": [
         "light.living_room"
+      ],
+      "covers": [
+        "cover.living_room"
       ],
       "climate": "climate.living_room"
     }
@@ -86,10 +104,30 @@
     ]
   },
   "chores": {
-    "summary_entities": []
+    "profile": "legacy-lite",
+    "users": [
+      {
+        "person_id": "child_one",
+        "dashboard_helper_entity": "sensor.child_one_choreops_ui_dashboard_helper",
+        "points_entity": "sensor.child_one_choreops_points",
+        "chores_entity": "sensor.child_one_choreops_chores"
+      },
+      {
+        "person_id": "child_two",
+        "dashboard_helper_entity": "sensor.child_two_choreops_ui_dashboard_helper",
+        "points_entity": "sensor.child_two_choreops_points",
+        "chores_entity": "sensor.child_two_choreops_chores"
+      }
+    ]
   },
   "football": {
-    "entities": []
+    "card_type": "custom:teamtracker-card",
+    "entities": [
+      {
+        "entity_id": "sensor.team_tracker",
+        "label": "Premier League"
+      }
+    ]
   },
   "school": {
     "entities": []

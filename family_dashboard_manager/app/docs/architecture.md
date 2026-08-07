@@ -6,7 +6,7 @@ Status: accepted for Phase 0
 
 The product is a dedicated Home Assistant YAML dashboard. Home Assistant remains in storage mode for existing dashboards and loads Family Dashboard as one additional YAML dashboard. This preserves all current dashboards and lets the new product reuse installed HACS cards directly.
 
-The initial views are Today, Calendar, Home, Music, Chores, Football, and an optional School view. The tablet uses a separate non-admin Home Assistant user and Family Dashboard as its personal default.
+The initial views are Today, Calendar, Home, Music, Chores, Football, and an optional School view. The tablet uses a separate non-admin Home Assistant user and Family Dashboard as its personal default. Kiosk mode hides Home Assistant chrome for non-admin users only; administrators retain normal chrome, and a large persistent footer links every enabled product view.
 
 ## Calendar
 
@@ -15,6 +15,10 @@ Apple/iCloud remains the household system of record. Home Assistant's existing C
 ## Media
 
 Mediocre Multi Media Player Card is the incumbent UI. It is configured with each Sonos player plus its corresponding Music Assistant entity. The large Music view owns browsing, search, queue and grouping; Today uses the compact presentation. Sonos Card and SpotifyPlus are optional supporting surfaces only if real-device testing proves a clear gap.
+
+## Chores and football
+
+The Chores view uses ChoreOps dashboard-helper attributes through Auto-Entities and emits native tile actions. The `legacy-lite` profile follows the integration's conservative dashboard pattern and avoids animation-heavy presentation. Football uses Team Tracker Card against explicitly configured Team Tracker sensor entities.
 
 ## Code and configuration
 
@@ -30,4 +34,4 @@ One static entry in `configuration.yaml` points Home Assistant to the generated 
 
 ## Compatibility
 
-The target is an older iPad in landscape. Phase 1 must capture the exact model, iPadOS and Safari versions. Until then the dashboard uses native Home Assistant sections, standard cards, restrained animation and no required WebGL or bleeding-edge browser API.
+The target is an older iPad in landscape. Until exact-device qualification is complete, the dashboard uses native Home Assistant sections, standard cards, no required WebGL and no bleeding-edge browser API. Schema v2 carries a `legacy_ios` switch; when enabled, card animation and transitions are disabled. The tracked 1024 by 768 SVG preview is a deterministic composition reference, while real-device qualification remains the authority for rendering and interaction.

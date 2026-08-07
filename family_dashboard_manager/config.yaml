@@ -1,5 +1,5 @@
 name: Family Dashboard Manager
-version: "0.1.2"
+version: "0.2.0"
 slug: family_dashboard_manager
 description: Safely validates, deploys and rolls back a dedicated Family Dashboard.
 url: https://github.com/robwestwood1978/family-dashboard/tree/main/family_dashboard_manager

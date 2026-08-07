@@ -6,7 +6,7 @@ import { validateConfig } from "../src/validate-config.mjs";
 const example = JSON.parse(await readFile(new URL("../config/example.json", import.meta.url), "utf8"));
 
 test("accepts the public example configuration", () => {
-  assert.equal(validateConfig(structuredClone(example)).schema_version, 1);
+  assert.equal(validateConfig(structuredClone(example)).schema_version, 2);
 });
 
 test("rejects secret-bearing keys anywhere in config", () => {
@@ -31,4 +31,28 @@ test("requires the initial media player to be configured", () => {
   const config = structuredClone(example);
   config.media.initial_player = "media_player.missing";
   assert.throws(() => validateConfig(config), /must match one configured player/);
+});
+
+test("requires the default view to be enabled", () => {
+  const config = structuredClone(example);
+  config.display.default_view = "school";
+  assert.throws(() => validateConfig(config), /must be enabled in config.features/);
+});
+
+test("requires controls to use the expected entity domain", () => {
+  const config = structuredClone(example);
+  config.rooms[0].covers[0] = "light.not_a_cover";
+  assert.throws(() => validateConfig(config), /must use the cover domain/);
+});
+
+test("requires ChoreOps users to reference children", () => {
+  const config = structuredClone(example);
+  config.chores.users[0].person_id = "parent";
+  assert.throws(() => validateConfig(config), /must reference a child/);
+});
+
+test("rejects unsafe panel paths", () => {
+  const config = structuredClone(example);
+  config.display.panel_path = "../../lovelace";
+  assert.throws(() => validateConfig(config), /must be a lowercase dashboard path/);
 });

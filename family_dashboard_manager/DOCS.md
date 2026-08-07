@@ -4,7 +4,15 @@ The manager owns only the dedicated Family Dashboard files. It validates househo
 
 ## Before installation
 
-This first release requires Home Assistant OS 2026.8.0 or newer. Install the dashboard cards used by your private configuration through HACS before deploying the dashboard; the public example uses Daylight Calendar Card and Mediocre Multi Media Player Card.
+This release requires Home Assistant OS 2026.8.0 or newer. Install the integrations and frontend cards used by your private configuration before deploying the dashboard.
+
+The v0.2 presentation profile expects:
+
+- Daylight Calendar Card, Mushroom, Auto-Entities, Team Tracker Card, Mediocre Multi Media Player Card, card-mod and kiosk-mode from HACS;
+- ChoreOps and Team Tracker entities when their corresponding views are enabled;
+- built-in Home Assistant weather, to-do, light, climate, cover and scene entities for the configured surfaces.
+
+The generated dashboard deliberately avoids WebGL, required animation and event-write controls. With `legacy_ios` enabled, card animation and transitions are suppressed. The non-admin tablet account receives kiosk chrome while an administrator retains the normal Home Assistant header as the parent escape route. Every enabled view also has a large footer navigation control.
 
 ## Install
 
@@ -32,6 +40,10 @@ lovelace:
 ```
 
 Check the configuration and restart Home Assistant. The dashboard file will be created by the first confirmed deployment.
+
+The private household file must use schema version 2 for manager v0.2. In addition to the existing product and entity mappings it supplies `display.panel_path`, the presentation theme, weather and list mappings, room icons and covers, the `legacy-lite` ChoreOps helper mapping, and Team Tracker entries. Run `validate_household_config` before any deployment; validation is read-only and returns the exact hash required for a separately confirmed deploy.
+
+Calendar event creation, editing and deletion remain disabled. Apple/iCloud or another CalDAV-backed Home Assistant calendar remains the source of truth until live write behavior is independently proven.
 
 ## Secure MCP Tunnel
 

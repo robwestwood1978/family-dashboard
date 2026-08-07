@@ -1,3 +1,11 @@
+## 0.2.0
+
+- Add the schema-v2 presentation contract for landscape, kiosk, legacy-iOS, theme, weather, lists, covers, ChoreOps helper and Team Tracker mappings.
+- Replace placeholder view content with Daylight calendar, native weather/to-do/home controls, Mediocre media, ChoreOps legacy-lite and Team Tracker surfaces.
+- Add persistent large-touch navigation for every enabled view and preserve normal Home Assistant chrome for administrators.
+- Keep calendar event management disabled pending separate live write qualification.
+- Add a deterministic 1024 by 768 generic preview and presentation-layer regression coverage.
+
 ## 0.1.2
 
 - Make sanitised inventory and rollback snapshot ordering independent of ICU locale data in the minimal Home Assistant app image.

@@ -2,6 +2,8 @@
 
 Family Dashboard is a Home Assistant-native family display for calendars, room controls, music, chores, football and school information. It is designed for a landscape tablet and keeps household configuration separate from the public installation code.
 
+![Generic 1024 by 768 Today view preview](./family_dashboard_manager/app/preview/family-dashboard-preview.svg)
+
 The repository currently contains one experimental Home Assistant app:
 
 ## Family Dashboard Manager
@@ -23,6 +25,8 @@ See [the app documentation](./family_dashboard_manager/DOCS.md) for installation
 This public repository contains generic source, schemas, tests and release packaging only. Names, calendar IDs, room mappings, entity IDs and feature choices belong in a separate private configuration repository. Passwords, tokens and API keys belong only in Home Assistant app options or integration storage and are rejected by the household configuration validator.
 
 HACS remains the installer for third-party dashboard cards such as Daylight Calendar Card and Mediocre Multi Media Player Card. The manager itself is installed from Home Assistant's app store using this repository.
+
+The v0.2 presentation layer uses Daylight Calendar Card, Mushroom, Auto-Entities, Team Tracker Card, Mediocre Multi Media Player Card, card-mod and kiosk-mode. Native Home Assistant weather, to-do and tile cards supply the remaining surfaces. Calendar event-management controls stay disabled until write behavior is qualified separately.
 
 ## Development
 

@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { compareText } from "./compare-text.mjs";
-import { compileDashboard } from "./compile-dashboard.mjs";
+import { compileDashboard, getEnabledViewPaths } from "./compile-dashboard.mjs";
 import { validateConfig } from "./validate-config.mjs";
 
 function sortValue(value) {
@@ -86,16 +86,13 @@ export class DashboardStore {
     const config = validateConfig(structuredClone(candidate));
     const configText = canonicalJson(config);
     const dashboard = compileDashboard(config);
-    const enabledViews = Object.entries(config.features)
-      .filter(([, enabled]) => enabled)
-      .map(([name]) => name);
     return {
       config,
       configText,
       dashboard,
       config_hash: sha256(configText),
       dashboard_hash: sha256(dashboard),
-      enabled_views: ["today", ...enabledViews.filter((view) => view !== "today")]
+      enabled_views: getEnabledViewPaths(config)
     };
   }
 
@@ -113,7 +110,7 @@ export class DashboardStore {
       this.listSnapshots()
     ]);
     return {
-      app_version: process.env.APP_VERSION || "0.1.2",
+      app_version: process.env.APP_VERSION || "0.2.0",
       installed: configText !== null && dashboard !== null,
       active_config_hash: configText === null ? null : sha256(configText),
       active_dashboard_hash: dashboard === null ? null : sha256(dashboard),
