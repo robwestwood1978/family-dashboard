@@ -1,0 +1,31 @@
+#include <tunables/global>
+
+profile family_dashboard_manager flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  network inet stream,
+  network inet6 stream,
+  signal (send) set=(kill,term,int,hup,cont),
+
+  /init ix,
+  /bin/** ix,
+  /usr/bin/** ix,
+  /usr/lib/** mr,
+  /lib/** mr,
+  /lib64/** mr,
+  /run/{,**} rwk,
+  /dev/null rw,
+  /dev/tty rw,
+  /dev/urandom r,
+  /etc/{,**} r,
+  /etc/services.d/** rwix,
+  /package/** rix,
+  /command/** rix,
+  /usr/lib/bashio/** rix,
+  /opt/family-dashboard/{,**} rix,
+  /tmp/{,**} rwk,
+  /data/{,**} rwk,
+
+  /config/family-dashboard/ rw,
+  /config/family-dashboard/** rwk,
+}

@@ -1,0 +1,8 @@
+#!/usr/bin/with-contenv bashio
+
+declare snapshot_limit
+snapshot_limit=$(bashio::config 'snapshot_limit')
+export MANAGER_SNAPSHOT_LIMIT="${snapshot_limit}"
+
+bashio::log.info "Starting Family Dashboard Manager on its private loopback interface"
+exec node /opt/family-dashboard/src/server.mjs

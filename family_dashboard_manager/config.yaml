@@ -1,0 +1,30 @@
+name: Family Dashboard Manager
+version: "0.1.0"
+slug: family_dashboard_manager
+description: Safely validates, deploys and rolls back a dedicated Family Dashboard.
+url: https://github.com/robwestwood1978/family-dashboard/tree/main/family_dashboard_manager
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: application
+boot: auto
+stage: experimental
+homeassistant: "2026.8.0"
+homeassistant_api: true
+map:
+  - type: homeassistant_config
+    read_only: false
+    path: /config
+options:
+  snapshot_limit: 5
+  tunnel_enabled: false
+  tunnel_id: ""
+  control_plane_api_key: ""
+schema:
+  snapshot_limit: int(1,20)
+  tunnel_enabled: bool
+  tunnel_id: str?
+  control_plane_api_key: password?
+backup: hot
+image: ghcr.io/robwestwood1978/family-dashboard-manager
