@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="768" viewBox="0 0 1024 768" role="img" aria-labelledby="title description">
+<title id="title">Family Dashboard — warm-glass controls preview</title>
+<desc id="description">Lighting, heating, cameras and entry, and media controls in the approved warm-glass style.</desc>
+<style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}</style>
+<defs><linearGradient id="fd-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14233A"/><stop offset="0.48" stop-color="#5D3E5C"/><stop offset="1" stop-color="#D98B6E"/></linearGradient><linearGradient id="fd-surface" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFDFC" stop-opacity="0.98"/><stop offset="1" stop-color="#F6EEE9" stop-opacity="0.93"/></linearGradient><linearGradient id="fd-coral" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF7968"/><stop offset="1" stop-color="#C94865"/></linearGradient><linearGradient id="fd-navy" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#243653"/><stop offset="1" stop-color="#17233A"/></linearGradient><filter id="fd-shadow" x="-30%" y="-30%" width="160%" height="180%"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#131A2E" flood-opacity="0.25"/></filter></defs>
+<rect width="1024" height="768" fill="url(#fd-bg)"/>
+<circle cx="900" cy="70" r="155" fill="#F7B66E" stroke="none" stroke-width="1" opacity="0.18"/>
+<rect x="18" y="30" width="62" height="707" rx="31" fill="#17233A" stroke="#FFFFFF" opacity="0.94" filter="url(#fd-shadow)"/>
+<circle cx="49" cy="65" r="21" fill="#34425D" stroke="none" stroke-width="1" opacity="1"/>
+<text x="49" y="73" fill="#FFFFFF" font-size="21" font-weight="820" text-anchor="middle" letter-spacing="0">W</text>
+<text x="49" y="127" fill="#D6D9E3" font-size="17" font-weight="760" text-anchor="middle" letter-spacing="0">●</text>
+<text x="49" y="149" fill="#AAB0C0" font-size="8.5" font-weight="730" text-anchor="middle" letter-spacing="0">Today</text>
+<text x="49" y="205" fill="#D6D9E3" font-size="17" font-weight="760" text-anchor="middle" letter-spacing="0">▦</text>
+<text x="49" y="227" fill="#AAB0C0" font-size="8.5" font-weight="730" text-anchor="middle" letter-spacing="0">Week</text>
+<rect x="26" y="258" width="46" height="61" rx="20" fill="url(#fd-coral)" stroke="#FFFFFF" opacity="1" filter="url(#fd-shadow)"/>
+<text x="49" y="283" fill="#FFFFFF" font-size="17" font-weight="760" text-anchor="middle" letter-spacing="0">⌂</text>
+<text x="49" y="305" fill="#FFFFFF" font-size="8.5" font-weight="730" text-anchor="middle" letter-spacing="0">Home</text>
+<text x="49" y="361" fill="#D6D9E3" font-size="17" font-weight="760" text-anchor="middle" letter-spacing="0">♫</text>
+<text x="49" y="383" fill="#AAB0C0" font-size="8.5" font-weight="730" text-anchor="middle" letter-spacing="0">Music</text>
+<text x="49" y="439" fill="#D6D9E3" font-size="17" font-weight="760" text-anchor="middle" letter-spacing="0">✓</text>
+<text x="49" y="461" fill="#AAB0C0" font-size="8.5" font-weight="730" text-anchor="middle" letter-spacing="0">Chores</text>
+<text x="49" y="517" fill="#D6D9E3" font-size="17" font-weight="760" text-anchor="middle" letter-spacing="0">⚽</text>
+<text x="49" y="539" fill="#AAB0C0" font-size="8.5" font-weight="730" text-anchor="middle" letter-spacing="0">Scores</text>
+<text x="104" y="49" fill="#FFFFFF" font-size="29" font-weight="820" text-anchor="start" letter-spacing="0">Home controls</text>
+<text x="105" y="74" fill="#FFFFFF" font-size="13" font-weight="650" text-anchor="start" letter-spacing="0">Focused controls · large touch targets · details only when needed</text>
+<rect x="790" y="22" width="208" height="64" rx="25" fill="#FFFFFF" stroke="#FFFFFF" opacity="0.16"/>
+<circle cx="829" cy="54" r="18" fill="#F2B85C" stroke="none" stroke-width="1" opacity="0.98"/>
+<text x="859" y="52" fill="#FFFFFF" font-size="23" font-weight="820" text-anchor="start" letter-spacing="0">18°</text>
+<text x="859" y="70" fill="#FFFFFF" font-size="9.5" font-weight="650" text-anchor="start" letter-spacing="0">Partly cloudy · 16:42</text>
+<text x="982" y="100" fill="#FFFFFF" font-size="8" font-weight="700" text-anchor="end" letter-spacing="0.6">Family Dashboard</text>
+<rect x="101" y="112" width="438" height="278" rx="26" fill="url(#fd-surface)" stroke="#FFFFFF" opacity="0.96" filter="url(#fd-shadow)"/>
+<circle cx="143" cy="155" r="22" fill="#F2B85C" stroke="none" stroke-width="1" opacity="0.18"/>
+<text x="143" y="162" fill="#F2B85C" font-size="20" font-weight="820" text-anchor="middle" letter-spacing="0">☀</text>
+<text x="177" y="148" fill="#202637" font-size="18" font-weight="800" text-anchor="start" letter-spacing="0">Lighting</text>
+<text x="177" y="169" fill="#74798A" font-size="10" font-weight="650" text-anchor="start" letter-spacing="0">Living room · 3 lights on</text>
+<text x="129" y="204" fill="#8A8E9D" font-size="9" font-weight="820" text-anchor="start" letter-spacing="1">LIVING ROOM</text>
+<text x="129" y="245" fill="#202637" font-size="34" font-weight="840" text-anchor="start" letter-spacing="0">68%</text>
+<text x="208" y="242" fill="#74798A" font-size="11" font-weight="650" text-anchor="start" letter-spacing="0">warm white</text>
+<line x1="129" y1="284" x2="505" y2="284" stroke="#D9D4D0" stroke-width="12" opacity="1"/>
+<line x1="129" y1="284" x2="384" y2="284" stroke="#F2B85C" stroke-width="12" opacity="1"/>
+<circle cx="384" cy="284" r="13" fill="#FFFFFF" stroke="#F2B85C" stroke-width="4" opacity="1"/>
+<rect x="129" y="321" width="106" height="42" rx="18" fill="#F2B85C" stroke="#F2B85C" opacity="1"/>
+<text x="182" y="347" fill="#FFFFFF" font-size="10" font-weight="760" text-anchor="middle" letter-spacing="0">Relax</text>
+<rect x="250" y="321" width="106" height="42" rx="18" fill="#FFFFFF" stroke="#F2B85C" opacity="0.72"/>
+<text x="303" y="347" fill="#8B6723" font-size="10" font-weight="760" text-anchor="middle" letter-spacing="0">Bright</text>
+<rect x="371" y="321" width="106" height="42" rx="18" fill="#FFFFFF" stroke="#F2B85C" opacity="0.72"/>
+<text x="424" y="347" fill="#8B6723" font-size="10" font-weight="760" text-anchor="middle" letter-spacing="0">Movie</text>
+<rect x="558" y="112" width="440" height="278" rx="26" fill="url(#fd-surface)" stroke="#FFFFFF" opacity="0.96" filter="url(#fd-shadow)"/>
+<circle cx="600" cy="155" r="22" fill="#EE6C62" stroke="none" stroke-width="1" opacity="0.18"/>
+<text x="600" y="162" fill="#EE6C62" font-size="20" font-weight="820" text-anchor="middle" letter-spacing="0">♨</text>
+<text x="634" y="148" fill="#202637" font-size="18" font-weight="800" text-anchor="start" letter-spacing="0">Heating</text>
+<text x="634" y="169" fill="#74798A" font-size="10" font-weight="650" text-anchor="start" letter-spacing="0">Main zone · scheduled until 18:30</text>
+<circle cx="683" cy="273" r="67" fill="#FBE4DF" stroke="#EE6C62" stroke-width="8" opacity="1"/>
+<text x="683" y="268" fill="#202637" font-size="31" font-weight="840" text-anchor="middle" letter-spacing="0">20.5°</text>
+<text x="683" y="292" fill="#8A8E9D" font-size="8" font-weight="820" text-anchor="middle" letter-spacing="0.8">CURRENT</text>
+<text x="812" y="220" fill="#8A8E9D" font-size="9" font-weight="820" text-anchor="start" letter-spacing="0.8">TARGET</text>
+<text x="812" y="263" fill="#202637" font-size="35" font-weight="840" text-anchor="start" letter-spacing="0">21°</text>
+<rect x="812" y="292" width="146" height="48" rx="20" fill="#EE6C62" stroke="none" opacity="1"/>
+<text x="885" y="321" fill="#FFFFFF" font-size="9" font-weight="820" text-anchor="middle" letter-spacing="0">+30 MIN BOOST</text>
+<rect x="101" y="409" width="438" height="313" rx="26" fill="url(#fd-surface)" stroke="#FFFFFF" opacity="0.96" filter="url(#fd-shadow)"/>
+<circle cx="143" cy="452" r="22" fill="#3FA99D" stroke="none" stroke-width="1" opacity="0.18"/>
+<text x="143" y="459" fill="#3FA99D" font-size="20" font-weight="820" text-anchor="middle" letter-spacing="0">◉</text>
+<text x="177" y="445" fill="#202637" font-size="18" font-weight="800" text-anchor="start" letter-spacing="0">Cameras &amp; Entry</text>
+<text x="177" y="466" fill="#74798A" font-size="10" font-weight="650" text-anchor="start" letter-spacing="0">Front doorbell live · garage closed</text>
+<rect x="129" y="493" width="251" height="141" rx="18" fill="url(#fd-navy)" stroke="#FFFFFF" opacity="0.96"/>
+<rect x="154" y="535" width="140" height="77" rx="3" fill="#5A6577" stroke="#D7DEE9" opacity="0.82"/>
+<rect x="205" y="559" width="45" height="53" rx="2" fill="#2B3548" stroke="#FFFFFF" opacity="0.8"/>
+<circle cx="354" cy="512" r="5" fill="#EE6C62" stroke="none" stroke-width="1" opacity="1"/>
+<text x="342" y="516" fill="#FFFFFF" font-size="8" font-weight="820" text-anchor="end" letter-spacing="0">LIVE</text>
+<rect x="397" y="493" width="114" height="64" rx="20" fill="#DDF1ED" stroke="#3FA99D" opacity="0.96"/>
+<text x="454" y="519" fill="#26877E" font-size="8" font-weight="820" text-anchor="middle" letter-spacing="0.8">GARAGE</text>
+<text x="454" y="542" fill="#202637" font-size="13" font-weight="820" text-anchor="middle" letter-spacing="0">CLOSED</text>
+<rect x="397" y="570" width="114" height="64" rx="20" fill="#17233A" stroke="#FFFFFF" opacity="0.96"/>
+<text x="454" y="596" fill="#FFFFFF" font-size="8" font-weight="820" text-anchor="middle" letter-spacing="0">HOLD TO</text>
+<text x="454" y="618" fill="#FFFFFF" font-size="10" font-weight="820" text-anchor="middle" letter-spacing="0">REVIEW OPEN</text>
+<text x="129" y="675" fill="#74798A" font-size="10" font-weight="650" text-anchor="start" letter-spacing="0">Check the live driveway view before confirming movement.</text>
+<rect x="558" y="409" width="440" height="313" rx="26" fill="url(#fd-surface)" stroke="#FFFFFF" opacity="0.96" filter="url(#fd-shadow)"/>
+<circle cx="600" cy="452" r="22" fill="#5B5BD6" stroke="none" stroke-width="1" opacity="0.18"/>
+<text x="600" y="459" fill="#5B5BD6" font-size="20" font-weight="820" text-anchor="middle" letter-spacing="0">♫</text>
+<text x="634" y="445" fill="#202637" font-size="18" font-weight="800" text-anchor="start" letter-spacing="0">Media</text>
+<text x="634" y="466" fill="#74798A" font-size="10" font-weight="650" text-anchor="start" letter-spacing="0">Kitchen · grouped with Living room</text>
+<rect x="586" y="494" width="112" height="112" rx="24" fill="url(#fd-coral)" stroke="#FFFFFF" opacity="0.98"/>
+<circle cx="642" cy="550" r="31" fill="#FFFFFF" stroke="none" stroke-width="1" opacity="0.2"/>
+<text x="642" y="560" fill="#FFFFFF" font-size="28" font-weight="820" text-anchor="middle" letter-spacing="0">♫</text>
+<text x="724" y="518" fill="#202637" font-size="17" font-weight="800" text-anchor="start" letter-spacing="0">Family favourites</text>
+<text x="724" y="542" fill="#74798A" font-size="10" font-weight="650" text-anchor="start" letter-spacing="0">Kitchen + Living room</text>
+<text x="724" y="580" fill="#5B5BD6" font-size="20" font-weight="800" text-anchor="start" letter-spacing="0">◀     ▶     ▶▶</text>
+<line x1="586" y1="641" x2="962" y2="641" stroke="#D9D4D0" stroke-width="10" opacity="1"/>
+<line x1="586" y1="641" x2="828" y2="641" stroke="#5B5BD6" stroke-width="10" opacity="1"/>
+<circle cx="828" cy="641" r="12" fill="#FFFFFF" stroke="#5B5BD6" stroke-width="4" opacity="1"/>
+<text x="586" y="680" fill="#74798A" font-size="9" font-weight="820" text-anchor="start" letter-spacing="0.9">QUEUE</text>
+<text x="962" y="680" fill="#5B5BD6" font-size="9" font-weight="820" text-anchor="end" letter-spacing="0.9">BROWSE MUSIC</text>
+<text x="105" y="752" fill="#FFFFFF" font-size="8" font-weight="650" text-anchor="start" letter-spacing="0.4">Deterministic preview · camera scene is illustrative</text>
+</svg>

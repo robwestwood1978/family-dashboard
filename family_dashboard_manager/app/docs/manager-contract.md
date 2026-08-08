@@ -21,7 +21,7 @@ Every write tool returns the previous and resulting config hashes. Deploy and ro
 ## Explicitly excluded
 
 - general shell or arbitrary file access;
-- reads of `secrets.yaml`, `.storage`, backups, cameras, images, location history or recorder history;
+- reads of `secrets.yaml`, `.storage`, backups, camera entities/images/streams, location history or recorder history (explicit camera entity IDs may exist only in user-supplied non-secret household configuration);
 - raw IP or MAC addresses;
 - arbitrary Home Assistant service calls;
 - credential or token transport;

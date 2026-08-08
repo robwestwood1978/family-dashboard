@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="768" viewBox="0 0 1024 768" role="img" aria-labelledby="title description">
+<title id="title">Family Dashboard — warm-glass Today view preview</title>
+<desc id="description">Landscape family command centre with a calendar-first warm-glass layout.</desc>
+<style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}</style>
+<defs><linearGradient id="fd-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14233A"/><stop offset="0.48" stop-color="#5D3E5C"/><stop offset="1" stop-color="#D98B6E"/></linearGradient><linearGradient id="fd-surface" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFDFC" stop-opacity="0.98"/><stop offset="1" stop-color="#F6EEE9" stop-opacity="0.93"/></linearGradient><linearGradient id="fd-coral" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF7968"/><stop offset="1" stop-color="#C94865"/></linearGradient><linearGradient id="fd-navy" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#243653"/><stop offset="1" stop-color="#17233A"/></linearGradient><filter id="fd-shadow" x="-30%" y="-30%" width="160%" height="180%"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#131A2E" flood-opacity="0.25"/></filter></defs>
+<rect width="1024" height="768" fill="url(#fd-bg)"/>
+<circle cx="890" cy="62" r="145" fill="#F7B66E" stroke="none" stroke-width="1" opacity="0.2"/>
+<circle cx="950" cy="230" r="105" fill="#EF6C73" stroke="none" stroke-width="1" opacity="0.1"/>
+<rect x="18" y="30" width="62" height="707" rx="31" fill="#17233A" stroke="#FFFFFF" opacity="0.94" filter="url(#fd-shadow)"/>
+<circle cx="49" cy="65" r="21" fill="#34425D" stroke="none" stroke-width="1" opacity="1"/>
+<text x="49" y="73" fill="#FFFFFF" font-size="21" font-weight="820" text-anchor="middle" letter-spacing="0">W</text>
+<rect x="26" y="102" width="46" height="61" rx="20" fill="url(#fd-coral)" stroke="#FFFFFF" opacity="1" filter="url(#fd-shadow)"/>
+<text x="49" y="127" fill="#FFFFFF" font-size="17" font-weight="760" text-anchor="middle" letter-spacing="0">●</text>
+<text x="49" y="149" fill="#FFFFFF" font-size="8.5" font-weight="730" text-anchor="middle" letter-spacing="0">Today</text>
+<text x="49" y="205" fill="#D6D9E3" font-size="17" font-weight="760" text-anchor="middle" letter-spacing="0">▦</text>
+<text x="49" y="227" fill="#AAB0C0" font-size="8.5" font-weight="730" text-anchor="middle" letter-spacing="0">Week</text>
+<text x="49" y="283" fill="#D6D9E3" font-size="17" font-weight="760" text-anchor="middle" letter-spacing="0">⌂</text>
+<text x="49" y="305" fill="#AAB0C0" font-size="8.5" font-weight="730" text-anchor="middle" letter-spacing="0">Home</text>
+<text x="49" y="361" fill="#D6D9E3" font-size="17" font-weight="760" text-anchor="middle" letter-spacing="0">♫</text>
+<text x="49" y="383" fill="#AAB0C0" font-size="8.5" font-weight="730" text-anchor="middle" letter-spacing="0">Music</text>
+<text x="49" y="439" fill="#D6D9E3" font-size="17" font-weight="760" text-anchor="middle" letter-spacing="0">✓</text>
+<text x="49" y="461" fill="#AAB0C0" font-size="8.5" font-weight="730" text-anchor="middle" letter-spacing="0">Chores</text>
+<text x="49" y="517" fill="#D6D9E3" font-size="17" font-weight="760" text-anchor="middle" letter-spacing="0">⚽</text>
+<text x="49" y="539" fill="#AAB0C0" font-size="8.5" font-weight="730" text-anchor="middle" letter-spacing="0">Scores</text>
+<text x="104" y="49" fill="#FFFFFF" font-size="29" font-weight="820" text-anchor="start" letter-spacing="0">Good afternoon, family</text>
+<text x="105" y="74" fill="#FFFFFF" font-size="13" font-weight="650" text-anchor="start" letter-spacing="0">Friday feels organised · two things left today</text>
+<rect x="790" y="22" width="208" height="64" rx="25" fill="#FFFFFF" stroke="#FFFFFF" opacity="0.16"/>
+<circle cx="829" cy="54" r="18" fill="#F2B85C" stroke="none" stroke-width="1" opacity="0.98"/>
+<text x="859" y="52" fill="#FFFFFF" font-size="23" font-weight="820" text-anchor="start" letter-spacing="0">18°</text>
+<text x="859" y="70" fill="#FFFFFF" font-size="9.5" font-weight="650" text-anchor="start" letter-spacing="0">Partly cloudy · 16:42</text>
+<text x="982" y="100" fill="#FFFFFF" font-size="8" font-weight="700" text-anchor="end" letter-spacing="0.6">Family Dashboard</text>
+<rect x="101" y="111" width="623" height="612" rx="32" fill="url(#fd-surface)" stroke="#FFFFFF" opacity="0.98" filter="url(#fd-shadow)"/>
+<text x="128" y="145" fill="#5B5BD6" font-size="9" font-weight="820" text-anchor="start" letter-spacing="1.3">YOUR WEEK</text>
+<text x="166" y="177" fill="#74798A" font-size="8" font-weight="820" text-anchor="middle" letter-spacing="0.7">MON</text>
+<text x="166" y="207" fill="#202637" font-size="21" font-weight="830" text-anchor="middle" letter-spacing="0">3</text>
+<circle cx="166" cy="219" r="3.5" fill="#5B5BD6" stroke="none" stroke-width="1" opacity="1"/>
+<text x="246" y="177" fill="#74798A" font-size="8" font-weight="820" text-anchor="middle" letter-spacing="0.7">TUE</text>
+<text x="246" y="207" fill="#202637" font-size="21" font-weight="830" text-anchor="middle" letter-spacing="0">4</text>
+<circle cx="246" cy="219" r="3.5" fill="#2A9D8F" stroke="none" stroke-width="1" opacity="1"/>
+<text x="326" y="177" fill="#74798A" font-size="8" font-weight="820" text-anchor="middle" letter-spacing="0.7">WED</text>
+<text x="326" y="207" fill="#202637" font-size="21" font-weight="830" text-anchor="middle" letter-spacing="0">5</text>
+<circle cx="326" cy="219" r="3.5" fill="#5B5BD6" stroke="none" stroke-width="1" opacity="1"/>
+<text x="406" y="177" fill="#74798A" font-size="8" font-weight="820" text-anchor="middle" letter-spacing="0.7">THU</text>
+<text x="406" y="207" fill="#202637" font-size="21" font-weight="830" text-anchor="middle" letter-spacing="0">6</text>
+<circle cx="406" cy="219" r="3.5" fill="#2A9D8F" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="462" y="156" width="48" height="74" rx="22" fill="#17233A" stroke="none" opacity="1" filter="url(#fd-shadow)"/>
+<text x="486" y="177" fill="#FFFFFF" font-size="8" font-weight="820" text-anchor="middle" letter-spacing="0.7">FRI</text>
+<text x="486" y="207" fill="#FFFFFF" font-size="21" font-weight="830" text-anchor="middle" letter-spacing="0">7</text>
+<circle cx="486" cy="219" r="3.5" fill="#EE6C62" stroke="none" stroke-width="1" opacity="1"/>
+<text x="566" y="177" fill="#74798A" font-size="8" font-weight="820" text-anchor="middle" letter-spacing="0.7">SAT</text>
+<text x="566" y="207" fill="#202637" font-size="21" font-weight="830" text-anchor="middle" letter-spacing="0">8</text>
+<circle cx="566" cy="219" r="3.5" fill="#2A9D8F" stroke="none" stroke-width="1" opacity="1"/>
+<text x="646" y="177" fill="#74798A" font-size="8" font-weight="820" text-anchor="middle" letter-spacing="0.7">SUN</text>
+<text x="646" y="207" fill="#202637" font-size="21" font-weight="830" text-anchor="middle" letter-spacing="0">9</text>
+<circle cx="646" cy="219" r="3.5" fill="#5B5BD6" stroke="none" stroke-width="1" opacity="1"/>
+<line x1="128" y1="246" x2="696" y2="246" stroke="#DCD7D5" stroke-width="1" opacity="0.76"/>
+<text x="128" y="280" fill="#202637" font-size="22" font-weight="820" text-anchor="start" letter-spacing="0">Today’s rhythm</text>
+<rect x="530" y="259" width="91" height="27" rx="14" fill="#5B5BD6" stroke="none" opacity="0.1"/>
+<text x="575" y="277" fill="#5B5BD6" font-size="8" font-weight="820" text-anchor="middle" letter-spacing="0.8">4 EVENTS</text>
+<line x1="178" y1="314" x2="178" y2="681" stroke="#BFC2CA" stroke-width="2" opacity="0.58"/>
+<text x="128" y="333" fill="#8B8E9C" font-size="12" font-weight="760" text-anchor="start" letter-spacing="0">08:15</text>
+<circle cx="178" cy="328" r="6" fill="#5B5BD6" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="198" y="302" width="416" height="52" rx="18" fill="#FFFFFF" stroke="#5B5BD6" opacity="0.88"/>
+<circle cx="225" cy="328" r="16" fill="#5B5BD6" stroke="none" stroke-width="1" opacity="0.14"/>
+<text x="253" y="324" fill="#202637" font-size="14" font-weight="760" text-anchor="start" letter-spacing="0">Holiday club drop-off</text>
+<text x="253" y="341" fill="#8B8E9C" font-size="9.5" font-weight="650" text-anchor="start" letter-spacing="0">Finished · everyone checked in</text>
+<text x="128" y="408" fill="#8B8E9C" font-size="12" font-weight="760" text-anchor="start" letter-spacing="0">15:45</text>
+<circle cx="178" cy="403" r="6" fill="#4F7EA3" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="198" y="377" width="416" height="52" rx="18" fill="#FFFFFF" stroke="#4F7EA3" opacity="0.88"/>
+<circle cx="225" cy="403" r="16" fill="#4F7EA3" stroke="none" stroke-width="1" opacity="0.14"/>
+<text x="253" y="399" fill="#202637" font-size="14" font-weight="760" text-anchor="start" letter-spacing="0">Library books collected</text>
+<text x="253" y="416" fill="#8B8E9C" font-size="9.5" font-weight="650" text-anchor="start" letter-spacing="0">Finished · 3 books renewed</text>
+<text x="128" y="505" fill="#8B8E9C" font-size="12" font-weight="760" text-anchor="start" letter-spacing="0">17:00</text>
+<circle cx="178" cy="500" r="6" fill="#E76F51" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="198" y="474" width="416" height="52" rx="18" fill="#FFFFFF" stroke="#E76F51" opacity="0.88"/>
+<circle cx="225" cy="500" r="16" fill="#E76F51" stroke="none" stroke-width="1" opacity="0.14"/>
+<text x="253" y="496" fill="#202637" font-size="14" font-weight="760" text-anchor="start" letter-spacing="0">Football training</text>
+<text x="253" y="513" fill="#8B8E9C" font-size="9.5" font-weight="650" text-anchor="start" letter-spacing="0">Leave 16:35 · kit is packed</text>
+<text x="128" y="588" fill="#8B8E9C" font-size="12" font-weight="760" text-anchor="start" letter-spacing="0">18:30</text>
+<circle cx="178" cy="583" r="6" fill="#2A9D8F" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="198" y="557" width="416" height="52" rx="18" fill="#FFFFFF" stroke="#2A9D8F" opacity="0.88"/>
+<circle cx="225" cy="583" r="16" fill="#2A9D8F" stroke="none" stroke-width="1" opacity="0.14"/>
+<text x="253" y="579" fill="#202637" font-size="14" font-weight="760" text-anchor="start" letter-spacing="0">Family dinner</text>
+<text x="253" y="596" fill="#8B8E9C" font-size="9.5" font-weight="650" text-anchor="start" letter-spacing="0">Everyone home · kitchen</text>
+<line x1="128" y1="459" x2="630" y2="459" stroke="#E76F51" stroke-width="1.4" opacity="0.7" stroke-dasharray="5 6"/>
+<rect x="128" y="448" width="68" height="23" rx="12" fill="#E76F51" stroke="none" opacity="1"/>
+<text x="162" y="464" fill="#FFFFFF" font-size="8" font-weight="820" text-anchor="middle" letter-spacing="0">NOW 16:42</text>
+<rect x="649" y="208" width="349" height="226" rx="28" fill="url(#fd-coral)" stroke="#FFFFFF" opacity="0.98" filter="url(#fd-shadow)"/>
+<text x="675" y="248" fill="#FFFFFF" font-size="9" font-weight="820" text-anchor="start" letter-spacing="0.9">UP NEXT · 18M</text>
+<text x="675" y="299" fill="#FFFFFF" font-size="42" font-weight="850" text-anchor="start" letter-spacing="0">17:00</text>
+<text x="675" y="331" fill="#FFFFFF" font-size="21" font-weight="800" text-anchor="start" letter-spacing="0">Football training</text>
+<text x="675" y="355" fill="#FFFFFF" font-size="11" font-weight="650" text-anchor="start" letter-spacing="0">Child one · Sports Park</text>
+<rect x="674" y="378" width="194" height="34" rx="17" fill="#7E2E4B" stroke="#FFFFFF" opacity="0.38"/>
+<circle cx="692" cy="395" r="6" fill="#F2B85C" stroke="none" stroke-width="1" opacity="1"/>
+<text x="707" y="399" fill="#FFFFFF" font-size="9" font-weight="720" text-anchor="start" letter-spacing="0">Leave by 16:35 · kit packed</text>
+<circle cx="959" cy="395" r="19" fill="#FFFFFF" stroke="none" stroke-width="1" opacity="1"/>
+<text x="959" y="402" fill="#E76F51" font-size="18" font-weight="850" text-anchor="middle" letter-spacing="0">✓</text>
+<rect x="686" y="456" width="312" height="126" rx="25" fill="#FFFFFF" stroke="#FFFFFF" opacity="0.16"/>
+<text x="708" y="485" fill="#FFFFFF" font-size="9" font-weight="820" text-anchor="start" letter-spacing="0.9">CHORES TODAY</text>
+<circle cx="733" cy="535" r="27" fill="none" stroke="#FFFFFF" stroke-width="5" opacity="0.22"/>
+<circle cx="733" cy="535" r="27" fill="none" stroke="#E76F51" stroke-width="5" opacity="0.96"/>
+<circle cx="733" cy="535" r="18" fill="#E76F51" stroke="none" stroke-width="1" opacity="1"/>
+<text x="733" y="541" fill="#FFFFFF" font-size="16" font-weight="840" text-anchor="middle" letter-spacing="0">3</text>
+<text x="772" y="526" fill="#FFFFFF" font-size="11" font-weight="760" text-anchor="start" letter-spacing="0">Child one · 75 pts</text>
+<text x="772" y="547" fill="#FFFFFF" font-size="9" font-weight="650" text-anchor="start" letter-spacing="0">one left</text>
+<circle cx="875" cy="535" r="27" fill="none" stroke="#FFFFFF" stroke-width="5" opacity="0.22"/>
+<circle cx="875" cy="535" r="27" fill="none" stroke="#2A9D8F" stroke-width="5" opacity="0.96"/>
+<circle cx="875" cy="535" r="18" fill="#2A9D8F" stroke="none" stroke-width="1" opacity="1"/>
+<text x="875" y="541" fill="#FFFFFF" font-size="16" font-weight="840" text-anchor="middle" letter-spacing="0">2</text>
+<text x="914" y="526" fill="#FFFFFF" font-size="11" font-weight="760" text-anchor="start" letter-spacing="0">Child two · 50 pts</text>
+<text x="914" y="547" fill="#FFFFFF" font-size="9" font-weight="650" text-anchor="start" letter-spacing="0">one left</text>
+<rect x="686" y="602" width="312" height="120" rx="25" fill="url(#fd-navy)" stroke="#FFFFFF" opacity="0.98" filter="url(#fd-shadow)"/>
+<circle cx="727" cy="662" r="29" fill="#F2B85C" stroke="none" stroke-width="1" opacity="0.2"/>
+<text x="727" y="670" fill="#F2B85C" font-size="24" font-weight="800" text-anchor="middle" letter-spacing="0">♫</text>
+<text x="763" y="633" fill="#FFFFFF" font-size="8" font-weight="820" text-anchor="start" letter-spacing="1">NOW PLAYING</text>
+<text x="763" y="659" fill="#FFFFFF" font-size="16" font-weight="780" text-anchor="start" letter-spacing="0">Family favourites</text>
+<text x="763" y="681" fill="#FFFFFF" font-size="10" font-weight="650" text-anchor="start" letter-spacing="0">Living room</text>
+<text x="105" y="752" fill="#FFFFFF" font-size="8" font-weight="650" text-anchor="start" letter-spacing="0.4">Deterministic preview · privacy-safe sample content</text>
+</svg>

@@ -25,5 +25,5 @@ jobs:
         working-directory: family_dashboard_manager/app
       - run: npm run check
         working-directory: family_dashboard_manager/app
-      - name: Ensure generated example is current
-        run: git diff --exit-code -- family_dashboard_manager/app/generated/example-dashboard.yaml
+      - name: Ensure generated examples are current
+        run: git diff --exit-code -- family_dashboard_manager/app/generated/example-dashboard.yaml family_dashboard_manager/app/preview/family-dashboard-preview.svg family_dashboard_manager/app/preview/family-dashboard-controls-preview.svg

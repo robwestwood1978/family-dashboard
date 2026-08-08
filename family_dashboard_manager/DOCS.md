@@ -4,7 +4,15 @@ The manager owns only the dedicated Family Dashboard files. It validates househo
 
 ## Before installation
 
-This first release requires Home Assistant OS 2026.8.0 or newer. Install the dashboard cards used by your private configuration through HACS before deploying the dashboard; the public example uses Daylight Calendar Card and Mediocre Multi Media Player Card.
+This release requires Home Assistant OS 2026.8.0 or newer. Install the integrations and frontend cards used by your private configuration before deploying the dashboard.
+
+The v0.3 warm-glass presentation profile expects:
+
+- Daylight Calendar Card, button-card, layout-card, Mushroom, Auto-Entities, Team Tracker Card, Mediocre Multi Media Player Card, card-mod and kiosk-mode from HACS;
+- ChoreOps and Team Tracker entities when their corresponding views are enabled;
+- built-in Home Assistant weather, to-do, light, climate, cover, camera, binary-sensor and scene entities for the configured surfaces.
+
+The generated dashboard deliberately avoids WebGL, live blur, required animation and event-write controls. It creates depth with static gradients, opacity and bounded shadows. With `legacy_ios` enabled, card animation and transitions are suppressed. The non-admin tablet account receives kiosk chrome while an administrator retains the normal Home Assistant header as the parent escape route. Every enabled view retains the same large-touch navigation rail.
 
 ## Install
 
@@ -33,6 +41,12 @@ lovelace:
 
 Check the configuration and restart Home Assistant. The dashboard file will be created by the first confirmed deployment.
 
+The private household file must use schema version 3 for manager v0.3. In addition to the existing product and entity mappings it supplies the warm-glass backdrop colours, weather and list mappings, room lights/heating/covers, the `legacy-lite` ChoreOps helper mapping, Team Tracker entries, camera IDs, safe doorbell status sensors and the garage cover. Run `validate_household_config` before any deployment; validation is read-only and returns the exact hash required for a separately confirmed deploy.
+
+The Cameras & Entry view loads only the configured primary camera as a live stream; secondary cameras remain lightweight until opened. When a camera maps Home Assistant button entities for stream control, the view provides explicit Start live and Stop live actions. Camera images, streams, states and history are never fetched through the manager MCP tools. Camera entity IDs may appear only in the explicit non-secret household configuration. Garage movement is available only from a press-and-hold action followed by an on-screen confirmation instructing the user to check the relevant camera view.
+
+Calendar event creation, editing and deletion remain disabled. Apple/iCloud or another CalDAV-backed Home Assistant calendar remains the source of truth until live write behavior is independently proven.
+
 ## Secure MCP Tunnel
 
 The tunnel is optional and disabled by default. To enable managed deployments:
@@ -50,5 +64,5 @@ The runtime key is stored only in Home Assistant app options and passed to `tunn
 - Validation never writes live files.
 - Deployment requires `confirm=true` plus the exact hash returned by validation.
 - Rollback requires `confirm=true`, a known snapshot ID and the exact active hash.
-- Inventory excludes cameras, people, location trackers, current states, history, IP/MAC addresses, credentials and arbitrary attributes.
+- Inventory excludes camera entities and all camera images/streams, people, location trackers, current states, history, IP/MAC addresses, credentials and arbitrary attributes.
 - The manager cannot run arbitrary commands, read arbitrary files or call arbitrary Home Assistant services.
