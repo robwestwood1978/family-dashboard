@@ -3381,60 +3381,264 @@ views:
         cards:
         - type: vertical-stack
           cards:
-            - type: picture-entity
-              entity: "camera.example_doorbell"
-              name: "Front doorbell"
-              camera_view: live
-              show_name: true
-              show_state: false
-              tap_action:
-                action: more-info
-              card_mod:
-                style: |
-                  ha-card {
-                    --primary-color: #EE6C62;
-                    --accent-color: #EE6C62;
-                    --primary-text-color: #202432;
-                    --secondary-text-color: #697080;
-                    --state-icon-color: #EE6C62;
-                    --paper-item-icon-color: #EE6C62;
-                    background: rgba(255, 255, 255, 0.94);
-                    color: #202432;
-                    border: 1px solid rgba(238, 108, 98, 0.22);
-                    border-radius: 20px;
-                    box-shadow: 0 14px 34px rgba(19, 26, 46, 0.18);
-                  }
-                  ha-card, ha-card * {
-                    animation: none !important;
-                    transition: none !important;
-                  }
-            - type: picture-entity
-              entity: "camera.example_driveway"
-              name: "Driveway camera"
-              camera_view: auto
-              show_name: true
-              show_state: false
-              tap_action:
-                action: more-info
-              card_mod:
-                style: |
-                  ha-card {
-                    --primary-color: #3FA99D;
-                    --accent-color: #3FA99D;
-                    --primary-text-color: #202432;
-                    --secondary-text-color: #697080;
-                    --state-icon-color: #3FA99D;
-                    --paper-item-icon-color: #3FA99D;
-                    background: rgba(255, 255, 255, 0.94);
-                    color: #202432;
-                    border: 1px solid rgba(63, 169, 157, 0.22);
-                    border-radius: 20px;
-                    box-shadow: 0 14px 34px rgba(19, 26, 46, 0.18);
-                  }
-                  ha-card, ha-card * {
-                    animation: none !important;
-                    transition: none !important;
-                  }
+            - type: vertical-stack
+              cards:
+                - type: picture-entity
+                  entity: "camera.example_doorbell"
+                  name: "Front doorbell"
+                  camera_view: live
+                  show_name: true
+                  show_state: false
+                  tap_action:
+                    action: more-info
+                  card_mod:
+                    style: |
+                      ha-card {
+                        --primary-color: #EE6C62;
+                        --accent-color: #EE6C62;
+                        --primary-text-color: #202432;
+                        --secondary-text-color: #697080;
+                        --state-icon-color: #EE6C62;
+                        --paper-item-icon-color: #EE6C62;
+                        background: rgba(255, 255, 255, 0.94);
+                        color: #202432;
+                        border: 1px solid rgba(238, 108, 98, 0.22);
+                        border-radius: 20px;
+                        box-shadow: 0 14px 34px rgba(19, 26, 46, 0.18);
+                      }
+                      ha-card, ha-card * {
+                        animation: none !important;
+                        transition: none !important;
+                      }
+                - type: horizontal-stack
+                  cards:
+                    - type: custom:button-card
+                      entity: "button.example_doorbell_start_stream"
+                      name: "Start live"
+                      icon: mdi:play
+                      show_state: false
+                      tap_action:
+                        action: perform-action
+                        perform_action: button.press
+                        target:
+                          entity_id: "button.example_doorbell_start_stream"
+                      styles:
+                        card:
+                          - background: "rgba(255, 255, 255, 0.91)"
+                          - color: "#202432"
+                          - border: "1px solid rgba(255, 255, 255, 0.46)"
+                          - border-radius: 20px
+                          - box-shadow: "0 14px 34px rgba(19, 26, 46, 0.20)"
+                          - min-height: "64px"
+                          - padding: "10px"
+                        grid:
+                          - grid-template-areas: "\"i n\" \"i s\" \"i l\""
+                          - grid-template-columns: "54px minmax(0, 1fr)"
+                          - grid-template-rows: "auto auto auto"
+                          - column-gap: "12px"
+                        img_cell:
+                          - justify-self: center
+                          - align-self: center
+                          - width: "44px"
+                          - height: "44px"
+                          - border-radius: "50%"
+                          - background: "rgba(63, 169, 157, 0.15)"
+                          - color: "#3FA99D"
+                        name:
+                          - justify-self: start
+                          - text-align: left
+                          - font-size: "17px"
+                          - font-weight: 760
+                        state:
+                          - justify-self: start
+                          - text-align: left
+                          - font-size: "13px"
+                          - font-weight: 680
+                        label:
+                          - justify-self: start
+                          - text-align: left
+                          - color: "#697080"
+                          - font-size: "11px"
+                          - font-weight: 620
+                      extra_styles: "* { animation: none !important; transition: none !important; }"
+                    - type: custom:button-card
+                      entity: "button.example_doorbell_stop_stream"
+                      name: "Stop live"
+                      icon: mdi:stop
+                      show_state: false
+                      tap_action:
+                        action: perform-action
+                        perform_action: button.press
+                        target:
+                          entity_id: "button.example_doorbell_stop_stream"
+                      styles:
+                        card:
+                          - background: "rgba(255, 255, 255, 0.91)"
+                          - color: "#202432"
+                          - border: "1px solid rgba(255, 255, 255, 0.46)"
+                          - border-radius: 20px
+                          - box-shadow: "0 14px 34px rgba(19, 26, 46, 0.20)"
+                          - min-height: "64px"
+                          - padding: "10px"
+                        grid:
+                          - grid-template-areas: "\"i n\" \"i s\" \"i l\""
+                          - grid-template-columns: "54px minmax(0, 1fr)"
+                          - grid-template-rows: "auto auto auto"
+                          - column-gap: "12px"
+                        img_cell:
+                          - justify-self: center
+                          - align-self: center
+                          - width: "44px"
+                          - height: "44px"
+                          - border-radius: "50%"
+                          - background: "rgba(238, 108, 98, 0.15)"
+                          - color: "#EE6C62"
+                        name:
+                          - justify-self: start
+                          - text-align: left
+                          - font-size: "17px"
+                          - font-weight: 760
+                        state:
+                          - justify-self: start
+                          - text-align: left
+                          - font-size: "13px"
+                          - font-weight: 680
+                        label:
+                          - justify-self: start
+                          - text-align: left
+                          - color: "#697080"
+                          - font-size: "11px"
+                          - font-weight: 620
+                      extra_styles: "* { animation: none !important; transition: none !important; }"
+            - type: vertical-stack
+              cards:
+                - type: picture-entity
+                  entity: "camera.example_driveway"
+                  name: "Driveway camera"
+                  camera_view: auto
+                  show_name: true
+                  show_state: false
+                  tap_action:
+                    action: more-info
+                  card_mod:
+                    style: |
+                      ha-card {
+                        --primary-color: #3FA99D;
+                        --accent-color: #3FA99D;
+                        --primary-text-color: #202432;
+                        --secondary-text-color: #697080;
+                        --state-icon-color: #3FA99D;
+                        --paper-item-icon-color: #3FA99D;
+                        background: rgba(255, 255, 255, 0.94);
+                        color: #202432;
+                        border: 1px solid rgba(63, 169, 157, 0.22);
+                        border-radius: 20px;
+                        box-shadow: 0 14px 34px rgba(19, 26, 46, 0.18);
+                      }
+                      ha-card, ha-card * {
+                        animation: none !important;
+                        transition: none !important;
+                      }
+                - type: horizontal-stack
+                  cards:
+                    - type: custom:button-card
+                      entity: "button.example_driveway_start_stream"
+                      name: "Start live"
+                      icon: mdi:play
+                      show_state: false
+                      tap_action:
+                        action: perform-action
+                        perform_action: button.press
+                        target:
+                          entity_id: "button.example_driveway_start_stream"
+                      styles:
+                        card:
+                          - background: "rgba(255, 255, 255, 0.91)"
+                          - color: "#202432"
+                          - border: "1px solid rgba(255, 255, 255, 0.46)"
+                          - border-radius: 20px
+                          - box-shadow: "0 14px 34px rgba(19, 26, 46, 0.20)"
+                          - min-height: "64px"
+                          - padding: "10px"
+                        grid:
+                          - grid-template-areas: "\"i n\" \"i s\" \"i l\""
+                          - grid-template-columns: "54px minmax(0, 1fr)"
+                          - grid-template-rows: "auto auto auto"
+                          - column-gap: "12px"
+                        img_cell:
+                          - justify-self: center
+                          - align-self: center
+                          - width: "44px"
+                          - height: "44px"
+                          - border-radius: "50%"
+                          - background: "rgba(63, 169, 157, 0.15)"
+                          - color: "#3FA99D"
+                        name:
+                          - justify-self: start
+                          - text-align: left
+                          - font-size: "17px"
+                          - font-weight: 760
+                        state:
+                          - justify-self: start
+                          - text-align: left
+                          - font-size: "13px"
+                          - font-weight: 680
+                        label:
+                          - justify-self: start
+                          - text-align: left
+                          - color: "#697080"
+                          - font-size: "11px"
+                          - font-weight: 620
+                      extra_styles: "* { animation: none !important; transition: none !important; }"
+                    - type: custom:button-card
+                      entity: "button.example_driveway_stop_stream"
+                      name: "Stop live"
+                      icon: mdi:stop
+                      show_state: false
+                      tap_action:
+                        action: perform-action
+                        perform_action: button.press
+                        target:
+                          entity_id: "button.example_driveway_stop_stream"
+                      styles:
+                        card:
+                          - background: "rgba(255, 255, 255, 0.91)"
+                          - color: "#202432"
+                          - border: "1px solid rgba(255, 255, 255, 0.46)"
+                          - border-radius: 20px
+                          - box-shadow: "0 14px 34px rgba(19, 26, 46, 0.20)"
+                          - min-height: "64px"
+                          - padding: "10px"
+                        grid:
+                          - grid-template-areas: "\"i n\" \"i s\" \"i l\""
+                          - grid-template-columns: "54px minmax(0, 1fr)"
+                          - grid-template-rows: "auto auto auto"
+                          - column-gap: "12px"
+                        img_cell:
+                          - justify-self: center
+                          - align-self: center
+                          - width: "44px"
+                          - height: "44px"
+                          - border-radius: "50%"
+                          - background: "rgba(238, 108, 98, 0.15)"
+                          - color: "#EE6C62"
+                        name:
+                          - justify-self: start
+                          - text-align: left
+                          - font-size: "17px"
+                          - font-weight: 760
+                        state:
+                          - justify-self: start
+                          - text-align: left
+                          - font-size: "13px"
+                          - font-weight: 680
+                        label:
+                          - justify-self: start
+                          - text-align: left
+                          - color: "#697080"
+                          - font-size: "11px"
+                          - font-weight: 620
+                      extra_styles: "* { animation: none !important; transition: none !important; }"
         - type: vertical-stack
           cards:
             - type: custom:button-card

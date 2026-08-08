@@ -693,7 +693,8 @@ function addLightingView(lines, config) {
     activePath: "home"
   });
   addEmbeddedGridStart(lines, "      ", "repeat(3, minmax(0, 1fr))", null, null, "calc(100vh - 116px)");
-  for (const room of config.rooms) addRoomControlStack(lines, config, "        ", room);
+  const lightingRooms = config.rooms.filter((room) => room.lights.length || room.covers.length || room.scene);
+  for (const room of lightingRooms) addRoomControlStack(lines, config, "        ", room);
 }
 
 function addHeatingView(lines, config) {
@@ -711,19 +712,48 @@ function addHeatingView(lines, config) {
   }
 }
 
-function addCameraCard(lines, config, indent, camera) {
-  const primary = camera.id === config.entry.primary_camera_id;
-  lines.push(indent + "- type: picture-entity");
-  lines.push(indent + "  entity: " + q(camera.entity_id));
-  lines.push(indent + "  name: " + q(camera.name));
-  lines.push(indent + "  camera_view: " + (primary ? "live" : "auto"));
-  lines.push(indent + "  show_name: true");
+function addCameraStreamButton(lines, config, indent, entity, name, icon, accent) {
+  if (!entity) return;
+  lines.push(indent + "- type: custom:button-card");
+  lines.push(indent + "  entity: " + q(entity));
+  lines.push(indent + "  name: " + q(name));
+  lines.push(indent + "  icon: " + icon);
   lines.push(indent + "  show_state: false");
   lines.push(indent + "  tap_action:");
-  lines.push(indent + "    action: more-info");
-  addCardStyle(lines, indent + "  ", config, {
+  lines.push(indent + "    action: perform-action");
+  lines.push(indent + "    perform_action: button.press");
+  lines.push(indent + "    target:");
+  lines.push(indent + "      entity_id: " + q(entity));
+  addButtonCardStyles(lines, indent + "  ", config, {
+    background: rgba(config.theme.surface, 0.91),
+    accent,
+    height: "64px",
+    padding: "10px"
+  });
+}
+
+function addCameraCard(lines, config, indent, camera) {
+  const primary = camera.id === config.entry.primary_camera_id;
+  const cardIndent = indent + "    ";
+  lines.push(indent + "- type: vertical-stack");
+  lines.push(indent + "  cards:");
+  lines.push(cardIndent + "- type: picture-entity");
+  lines.push(cardIndent + "  entity: " + q(camera.entity_id));
+  lines.push(cardIndent + "  name: " + q(camera.name));
+  lines.push(cardIndent + "  camera_view: " + (primary ? "live" : "auto"));
+  lines.push(cardIndent + "  show_name: true");
+  lines.push(cardIndent + "  show_state: false");
+  lines.push(cardIndent + "  tap_action:");
+  lines.push(cardIndent + "    action: more-info");
+  addCardStyle(lines, cardIndent + "  ", config, {
     accent: camera.role === "doorbell" ? "#EE6C62" : "#3FA99D"
   });
+  if (camera.start_stream_entity || camera.stop_stream_entity) {
+    lines.push(cardIndent + "- type: horizontal-stack");
+    lines.push(cardIndent + "  cards:");
+    addCameraStreamButton(lines, config, cardIndent + "    ", camera.start_stream_entity, "Start live", "mdi:play", "#3FA99D");
+    addCameraStreamButton(lines, config, cardIndent + "    ", camera.stop_stream_entity, "Stop live", "mdi:stop", "#EE6C62");
+  }
 }
 
 function addEntryStatusCard(lines, config, indent, entity, name, icon, accent) {

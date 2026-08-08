@@ -74,6 +74,26 @@ test("uses native touch controls for home devices", () => {
   assert.match(yaml, /speakers · browse, group and play/);
 });
 
+test("omits heating-only rooms from the Lighting subview", () => {
+  const config = structuredClone(example);
+  config.rooms.push({
+    id: "heating_only",
+    name: "Heating only",
+    area_id: "heating_only",
+    icon: "mdi:radiator",
+    lights: [],
+    covers: [],
+    climate: "climate.heating_only"
+  });
+  const yaml = compileDashboard(config);
+  const lighting = yaml.slice(yaml.indexOf("    path: lighting"), yaml.indexOf("    path: heating"));
+  const heating = yaml.slice(yaml.indexOf("    path: heating"), yaml.indexOf("    path: entry"));
+  assert.doesNotMatch(lighting, /Heating only/);
+  assert.doesNotMatch(lighting, /No lighting controls are configured/);
+  assert.match(heating, /entity: "climate\.heating_only"/);
+  assert.match(heating, /name: "Heating only"/);
+});
+
 test("uses one live camera and a confirmed hold action for the garage", () => {
   const yaml = compileDashboard(example);
   assert.equal((yaml.match(/camera_view: live/g) || []).length, 1);
@@ -81,6 +101,18 @@ test("uses one live camera and a confirmed hold action for the garage", () => {
   assert.match(yaml, /entity: "camera\.example_doorbell"/);
   assert.match(yaml, /entity: "camera\.example_driveway"/);
   assert.match(yaml, /entity: "binary_sensor\.example_doorbell_person"/);
+  for (const entity of [
+    "button.example_doorbell_start_stream",
+    "button.example_doorbell_stop_stream",
+    "button.example_driveway_start_stream",
+    "button.example_driveway_stop_stream"
+  ]) {
+    assert.match(yaml, new RegExp(`entity: "${entity.replace(".", "\\.")}"`));
+    assert.match(yaml, new RegExp(`entity_id: "${entity.replace(".", "\\.")}"`));
+  }
+  assert.equal((yaml.match(/perform_action: button\.press/g) || []).length, 4);
+  assert.equal((yaml.match(/name: "Start live"/g) || []).length, 2);
+  assert.equal((yaml.match(/name: "Stop live"/g) || []).length, 2);
   assert.match(yaml, /hold_action: \|/);
   assert.match(yaml, /perform_action: opening \? 'cover\.open_cover' : 'cover\.close_cover'/);
   assert.match(yaml, /Check the live driveway view is clear/);

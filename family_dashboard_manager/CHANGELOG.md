@@ -4,6 +4,7 @@
 - Move navigation to a slim persistent rail and keep the calendar as the dominant Today and Week surface.
 - Add progressive Home controls for room lighting, zoned heating, Cameras & Entry and the existing full media experience.
 - Add schema-v3 camera, doorbell-event and garage-cover mappings without exposing camera entities, images, streams, states or history through sanitised inventory.
+- Render configured camera start/stop-stream buttons and omit heating-only rooms from the Lighting surface.
 - Limit the entry surface to one live camera and require a press-and-hold action plus explicit confirmation before garage movement.
 - Extend regression coverage for warm-glass rendering, responsive layout, camera-domain validation and garage safety.
 
