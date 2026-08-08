@@ -1,6 +1,6 @@
 {
   "name": "@family-dashboard/manager",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -10,7 +10,7 @@
     "check": "npm test && npm run generate:example",
     "compile": "node src/cli.mjs",
     "compile:example": "node src/cli.mjs config/example.json generated/example-dashboard.yaml",
-    "preview:example": "node preview/render-preview.mjs config/example.json preview/family-dashboard-preview.svg",
+    "preview:example": "node preview/render-preview.mjs config/example.json preview/family-dashboard-preview.svg preview/family-dashboard-controls-preview.svg",
     "generate:example": "npm run compile:example && npm run preview:example",
     "start": "node src/server.mjs",
     "test": "node --test"

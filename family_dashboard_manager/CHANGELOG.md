@@ -1,3 +1,12 @@
+## 0.3.0
+
+- Replace the flat v0.2 card grid with the approved warm-glass family command centre using static gradients, opacity and bounded shadows suitable for the older iPad.
+- Move navigation to a slim persistent rail and keep the calendar as the dominant Today and Week surface.
+- Add progressive Home controls for room lighting, zoned heating, Cameras & Entry and the existing full media experience.
+- Add schema-v3 camera, doorbell-event and garage-cover mappings without exposing camera entities, images, streams, states or history through sanitised inventory.
+- Limit the entry surface to one live camera and require a press-and-hold action plus explicit confirmation before garage movement.
+- Extend regression coverage for warm-glass rendering, responsive layout, camera-domain validation and garage safety.
+
 ## 0.2.0
 
 - Add the schema-v2 presentation contract for landscape, kiosk, legacy-iOS, theme, weather, lists, covers, ChoreOps helper and Team Tracker mappings.

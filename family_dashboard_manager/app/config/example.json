@@ -1,6 +1,6 @@
 {
   "$schema": "./family-dashboard.schema.json",
-  "schema_version": 2,
+  "schema_version": 3,
   "product": {
     "title": "Family Dashboard",
     "locale": "en-GB",
@@ -19,7 +19,11 @@
     "surface": "#FFFFFF",
     "text": "#202432",
     "muted": "#697080",
-    "radius_px": 20
+    "radius_px": 20,
+    "backdrop_start": "#14233A",
+    "backdrop_mid": "#5D3E5C",
+    "backdrop_end": "#D98B6E",
+    "nav_background": "#17233A"
   },
   "people": [
     {
@@ -49,7 +53,8 @@
     "football": true,
     "lists": true,
     "weather": true,
-    "school": false
+    "school": false,
+    "entry": true
   },
   "calendar": {
     "card_type": "custom:daylight-calendar-card",
@@ -131,5 +136,36 @@
   },
   "school": {
     "entities": []
+  },
+  "entry": {
+    "primary_camera_id": "doorbell",
+    "cameras": [
+      {
+        "id": "doorbell",
+        "name": "Front doorbell",
+        "entity_id": "camera.example_doorbell",
+        "role": "doorbell",
+        "motion_entity": "binary_sensor.example_doorbell_motion",
+        "person_entity": "binary_sensor.example_doorbell_person",
+        "ringing_entity": "binary_sensor.example_doorbell_ringing",
+        "start_stream_entity": "button.example_doorbell_start_stream",
+        "stop_stream_entity": "button.example_doorbell_stop_stream"
+      },
+      {
+        "id": "driveway",
+        "name": "Driveway camera",
+        "entity_id": "camera.example_driveway",
+        "role": "driveway",
+        "motion_entity": "binary_sensor.example_driveway_motion",
+        "person_entity": "binary_sensor.example_driveway_person",
+        "start_stream_entity": "button.example_driveway_start_stream",
+        "stop_stream_entity": "button.example_driveway_stop_stream"
+      }
+    ],
+    "garage": {
+      "cover_entity": "cover.example_garage_door",
+      "camera_id": "driveway",
+      "motion_entity": "binary_sensor.example_garage_motion"
+    }
   }
 }

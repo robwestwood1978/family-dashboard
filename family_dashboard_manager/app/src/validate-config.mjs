@@ -76,7 +76,7 @@ export function validateConfig(config) {
   requireObject(config, "config");
   rejectSecrets(config);
 
-  if (config.schema_version !== 2) fail("config.schema_version", "must equal 2");
+  if (config.schema_version !== 3) fail("config.schema_version", "must equal 3");
 
   requireObject(config.product, "config.product");
   requireString(config.product.title, "config.product.title");
@@ -98,7 +98,17 @@ export function validateConfig(config) {
   }
 
   const theme = requireObject(config.theme, "config.theme");
-  for (const key of ["accent", "background", "surface", "text", "muted"]) {
+  for (const key of [
+    "accent",
+    "background",
+    "surface",
+    "text",
+    "muted",
+    "backdrop_start",
+    "backdrop_mid",
+    "backdrop_end",
+    "nav_background"
+  ]) {
     validateColour(theme[key], `config.theme.${key}`);
   }
   if (!Number.isInteger(theme.radius_px) || theme.radius_px < 8 || theme.radius_px > 32) {
@@ -122,8 +132,11 @@ export function validateConfig(config) {
   });
 
   const features = requireObject(config.features, "config.features");
-  for (const feature of ["calendar", "home", "music", "chores", "football", "lists", "weather", "school"]) {
+  for (const feature of ["calendar", "home", "music", "chores", "football", "lists", "weather", "school", "entry"]) {
     requireBoolean(features[feature], `config.features.${feature}`);
+  }
+  if (features.entry && !features.home) {
+    fail("config.features.entry", "requires the Home view");
   }
   if (display.default_view !== "today" && features[display.default_view] !== true) {
     fail("config.display.default_view", "must be enabled in config.features");
@@ -244,6 +257,44 @@ export function validateConfig(config) {
   }
 
   validateEntityCollection(config.school, "config.school");
+
+  const entry = requireObject(config.entry, "config.entry");
+  validateId(entry.primary_camera_id, "config.entry.primary_camera_id");
+  const cameras = requireArray(entry.cameras, "config.entry.cameras");
+  const cameraIds = new Set();
+  cameras.forEach((camera, index) => {
+    const path = `config.entry.cameras[${index}]`;
+    requireObject(camera, path);
+    validateId(camera.id, `${path}.id`);
+    if (cameraIds.has(camera.id)) fail(`${path}.id`, "must be unique");
+    cameraIds.add(camera.id);
+    requireString(camera.name, `${path}.name`);
+    validateEntityId(camera.entity_id, `${path}.entity_id`, "camera");
+    if (!["doorbell", "driveway", "garden", "other"].includes(camera.role)) {
+      fail(`${path}.role`, "unsupported camera role");
+    }
+    if (camera.motion_entity) validateEntityId(camera.motion_entity, `${path}.motion_entity`, "binary_sensor");
+    if (camera.person_entity) validateEntityId(camera.person_entity, `${path}.person_entity`, "binary_sensor");
+    if (camera.ringing_entity) validateEntityId(camera.ringing_entity, `${path}.ringing_entity`, "binary_sensor");
+    if (camera.start_stream_entity) validateEntityId(camera.start_stream_entity, `${path}.start_stream_entity`, "button");
+    if (camera.stop_stream_entity) validateEntityId(camera.stop_stream_entity, `${path}.stop_stream_entity`, "button");
+  });
+  if (features.entry && cameras.length === 0) {
+    fail("config.entry.cameras", "must not be empty when Cameras & Entry is enabled");
+  }
+  if (!cameraIds.has(entry.primary_camera_id)) {
+    fail("config.entry.primary_camera_id", "must match one configured camera");
+  }
+
+  const garage = requireObject(entry.garage, "config.entry.garage");
+  validateEntityId(garage.cover_entity, "config.entry.garage.cover_entity", "cover");
+  validateId(garage.camera_id, "config.entry.garage.camera_id");
+  if (!cameraIds.has(garage.camera_id)) {
+    fail("config.entry.garage.camera_id", "must match one configured camera");
+  }
+  if (garage.motion_entity) {
+    validateEntityId(garage.motion_entity, "config.entry.garage.motion_entity", "binary_sensor");
+  }
 
   return config;
 }

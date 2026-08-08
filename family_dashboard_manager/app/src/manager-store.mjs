@@ -110,7 +110,7 @@ export class DashboardStore {
       this.listSnapshots()
     ]);
     return {
-      app_version: process.env.APP_VERSION || "0.2.0",
+      app_version: process.env.APP_VERSION || "0.3.0",
       installed: configText !== null && dashboard !== null,
       active_config_hash: configText === null ? null : sha256(configText),
       active_dashboard_hash: dashboard === null ? null : sha256(dashboard),

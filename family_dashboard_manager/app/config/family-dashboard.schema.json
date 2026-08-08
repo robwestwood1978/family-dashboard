@@ -18,11 +18,12 @@
     "media",
     "chores",
     "football",
-    "school"
+    "school",
+    "entry"
   ],
   "properties": {
     "$schema": { "type": "string" },
-    "schema_version": { "const": 2 },
+    "schema_version": { "const": 3 },
     "product": {
       "type": "object",
       "additionalProperties": false,
@@ -50,14 +51,29 @@
     "theme": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["accent", "background", "surface", "text", "muted", "radius_px"],
+      "required": [
+        "accent",
+        "background",
+        "surface",
+        "text",
+        "muted",
+        "radius_px",
+        "backdrop_start",
+        "backdrop_mid",
+        "backdrop_end",
+        "nav_background"
+      ],
       "properties": {
         "accent": { "$ref": "#/$defs/colour" },
         "background": { "$ref": "#/$defs/colour" },
         "surface": { "$ref": "#/$defs/colour" },
         "text": { "$ref": "#/$defs/colour" },
         "muted": { "$ref": "#/$defs/colour" },
-        "radius_px": { "type": "integer", "minimum": 8, "maximum": 32 }
+        "radius_px": { "type": "integer", "minimum": 8, "maximum": 32 },
+        "backdrop_start": { "$ref": "#/$defs/colour" },
+        "backdrop_mid": { "$ref": "#/$defs/colour" },
+        "backdrop_end": { "$ref": "#/$defs/colour" },
+        "nav_background": { "$ref": "#/$defs/colour" }
       }
     },
     "people": {
@@ -78,7 +94,7 @@
     "features": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["calendar", "home", "music", "chores", "football", "lists", "weather", "school"],
+      "required": ["calendar", "home", "music", "chores", "football", "lists", "weather", "school", "entry"],
       "properties": {
         "calendar": { "type": "boolean" },
         "home": { "type": "boolean" },
@@ -87,7 +103,8 @@
         "football": { "type": "boolean" },
         "lists": { "type": "boolean" },
         "weather": { "type": "boolean" },
-        "school": { "type": "boolean" }
+        "school": { "type": "boolean" },
+        "entry": { "type": "boolean" }
       }
     },
     "calendar": {
@@ -227,7 +244,44 @@
         }
       }
     },
-    "school": { "$ref": "#/$defs/entityCollection" }
+    "school": { "$ref": "#/$defs/entityCollection" },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary_camera_id", "cameras", "garage"],
+      "properties": {
+        "primary_camera_id": { "$ref": "#/$defs/id" },
+        "cameras": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name", "entity_id", "role"],
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "name": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "entity_id": { "$ref": "#/$defs/cameraEntityId" },
+              "role": { "enum": ["doorbell", "driveway", "garden", "other"] },
+              "motion_entity": { "$ref": "#/$defs/binarySensorEntityId" },
+              "person_entity": { "$ref": "#/$defs/binarySensorEntityId" },
+              "ringing_entity": { "$ref": "#/$defs/binarySensorEntityId" },
+              "start_stream_entity": { "$ref": "#/$defs/buttonEntityId" },
+              "stop_stream_entity": { "$ref": "#/$defs/buttonEntityId" }
+            }
+          }
+        },
+        "garage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cover_entity", "camera_id"],
+          "properties": {
+            "cover_entity": { "$ref": "#/$defs/coverEntityId" },
+            "camera_id": { "$ref": "#/$defs/id" },
+            "motion_entity": { "$ref": "#/$defs/binarySensorEntityId" }
+          }
+        }
+      }
+    }
   },
   "$defs": {
     "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
@@ -242,6 +296,9 @@
     "sceneEntityId": { "type": "string", "pattern": "^scene\\.[a-z0-9_]+$" },
     "mediaPlayerEntityId": { "type": "string", "pattern": "^media_player\\.[a-z0-9_]+$" },
     "sensorEntityId": { "type": "string", "pattern": "^sensor\\.[a-z0-9_]+$" },
+    "cameraEntityId": { "type": "string", "pattern": "^camera\\.[a-z0-9_]+$" },
+    "binarySensorEntityId": { "type": "string", "pattern": "^binary_sensor\\.[a-z0-9_]+$" },
+    "buttonEntityId": { "type": "string", "pattern": "^button\\.[a-z0-9_]+$" },
     "colour": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
     "entityCollection": {
       "type": "object",

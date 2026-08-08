@@ -6,7 +6,7 @@ Status: accepted for Phase 0
 
 The product is a dedicated Home Assistant YAML dashboard. Home Assistant remains in storage mode for existing dashboards and loads Family Dashboard as one additional YAML dashboard. This preserves all current dashboards and lets the new product reuse installed HACS cards directly.
 
-The initial views are Today, Calendar, Home, Music, Chores, Football, and an optional School view. The tablet uses a separate non-admin Home Assistant user and Family Dashboard as its personal default. Kiosk mode hides Home Assistant chrome for non-admin users only; administrators retain normal chrome, and a large persistent footer links every enabled product view.
+The primary views are Today, Calendar, Home, Music, Chores, Football, and an optional School view. Home progressively discloses Lighting, Heating and Cameras & Entry subviews. The tablet uses a separate non-admin Home Assistant user and Family Dashboard as its personal default. Kiosk mode hides Home Assistant chrome for non-admin users only; administrators retain normal chrome, and a slim persistent rail links every primary product view.
 
 ## Calendar
 
@@ -19,6 +19,10 @@ Mediocre Multi Media Player Card is the incumbent UI. It is configured with each
 ## Chores and football
 
 The Chores view uses ChoreOps dashboard-helper attributes through Auto-Entities and emits native tile actions. The `legacy-lite` profile follows the integration's conservative dashboard pattern and avoids animation-heavy presentation. Football uses Team Tracker Card against explicitly configured Team Tracker sensor entities.
+
+## Cameras and entry
+
+The dashboard browser reads camera streams directly from Home Assistant; the manager never proxies, captures or returns them. Only the configured primary camera requests a live view on page load. Doorbell and motion cards use explicitly configured binary sensors. The garage cover opens its normal details on tap and permits movement only on press-and-hold followed by a confirmation that tells the user to check the camera view. This confirmation is a usability safeguard, not a substitute for physical obstruction detection.
 
 ## Code and configuration
 
@@ -34,4 +38,4 @@ One static entry in `configuration.yaml` points Home Assistant to the generated 
 
 ## Compatibility
 
-The target is an older iPad in landscape. Until exact-device qualification is complete, the dashboard uses native Home Assistant sections, standard cards, no required WebGL and no bleeding-edge browser API. Schema v2 carries a `legacy_ios` switch; when enabled, card animation and transitions are disabled. The tracked 1024 by 768 SVG preview is a deterministic composition reference, while real-device qualification remains the authority for rendering and interaction.
+The target is an older iPad in landscape. Until exact-device qualification is complete, the dashboard uses static CSS gradients, established Home Assistant cards, no live blur, no required WebGL and no bleeding-edge browser API. Schema v3 carries a `legacy_ios` switch; when enabled, card animation and transitions are disabled. The tracked 1024 by 768 previews are deterministic composition references, while real-device qualification remains the authority for rendering and interaction.

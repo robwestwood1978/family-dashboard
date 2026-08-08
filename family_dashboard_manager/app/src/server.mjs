@@ -33,7 +33,7 @@ export function createFamilyDashboardMcpServer({
   inventory = getSanitisedHomeAssistantInventory,
   reload = reloadLovelaceResources
 } = {}) {
-  const server = new McpServer({ name: "family-dashboard-manager", version: "0.2.0" });
+  const server = new McpServer({ name: "family-dashboard-manager", version: "0.3.0" });
 
   const readTool = (name, description, handler) => {
     server.registerTool(name, {
@@ -143,7 +143,7 @@ export function createFamilyDashboardMcpServer({
 
 export function createManagerApp(dependencies = {}) {
   const app = createMcpExpressApp({ host: "127.0.0.1" });
-  app.get("/healthz", (_request, response) => response.json({ status: "ok", version: "0.2.0" }));
+  app.get("/healthz", (_request, response) => response.json({ status: "ok", version: "0.3.0" }));
   app.post("/mcp", async (request, response) => {
     const server = createFamilyDashboardMcpServer(dependencies);
     const transport = new StreamableHTTPServerTransport({

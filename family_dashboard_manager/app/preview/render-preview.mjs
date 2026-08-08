@@ -155,7 +155,7 @@ function renderNavigation(lines, config) {
   });
 }
 
-export function renderPreview(input) {
+function renderLegacyPreview(input) {
   const config = validateConfig(structuredClone(input));
   const children = config.people.filter((person) => person.role === "child");
   while (children.length < 2) {
@@ -188,9 +188,244 @@ export function renderPreview(input) {
   return `${lines.join("\n")}\n`;
 }
 
+function warmDefsSvg() {
+  return [
+    "<defs>",
+    '<linearGradient id="fd-bg" x1="0" y1="0" x2="1" y2="1">',
+    '<stop offset="0" stop-color="#14233A"/>',
+    '<stop offset="0.48" stop-color="#5D3E5C"/>',
+    '<stop offset="1" stop-color="#D98B6E"/>',
+    "</linearGradient>",
+    '<linearGradient id="fd-surface" x1="0" y1="0" x2="1" y2="1">',
+    '<stop offset="0" stop-color="#FFFDFC" stop-opacity="0.98"/>',
+    '<stop offset="1" stop-color="#F6EEE9" stop-opacity="0.93"/>',
+    "</linearGradient>",
+    '<linearGradient id="fd-coral" x1="0" y1="0" x2="1" y2="1">',
+    '<stop offset="0" stop-color="#FF7968"/>',
+    '<stop offset="1" stop-color="#C94865"/>',
+    "</linearGradient>",
+    '<linearGradient id="fd-navy" x1="0" y1="0" x2="1" y2="1">',
+    '<stop offset="0" stop-color="#243653"/>',
+    '<stop offset="1" stop-color="#17233A"/>',
+    "</linearGradient>",
+    '<filter id="fd-shadow" x="-30%" y="-30%" width="160%" height="180%">',
+    '<feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#131A2E" flood-opacity="0.25"/>',
+    "</filter>",
+    "</defs>"
+  ].join("");
+}
+
+function warmRect(x, y, width, height, radius, fill, stroke = "none", opacity = 1, shadow = false) {
+  return '<rect x="' + x + '" y="' + y + '" width="' + width + '" height="' + height +
+    '" rx="' + radius + '" fill="' + fill + '" stroke="' + stroke + '" opacity="' + opacity +
+    '"' + (shadow ? ' filter="url(#fd-shadow)"' : "") + "/>";
+}
+
+function warmCircle(cx, cy, radius, fill, stroke = "none", strokeWidth = 1, opacity = 1) {
+  return '<circle cx="' + cx + '" cy="' + cy + '" r="' + radius + '" fill="' + fill +
+    '" stroke="' + stroke + '" stroke-width="' + strokeWidth + '" opacity="' + opacity + '"/>';
+}
+
+function warmLine(x1, y1, x2, y2, stroke, width = 1, opacity = 1, dash = "") {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+    '" stroke="' + stroke + '" stroke-width="' + width + '" opacity="' + opacity + '"' +
+    (dash ? ' stroke-dasharray="' + dash + '"' : "") + "/>";
+}
+
+function warmRail(lines, active) {
+  const nav = [
+    ["Today", "●"],
+    ["Week", "▦"],
+    ["Home", "⌂"],
+    ["Music", "♫"],
+    ["Chores", "✓"],
+    ["Scores", "⚽"]
+  ];
+  lines.push(warmRect(18, 30, 62, 707, 31, "#17233A", "#FFFFFF", 0.94, true));
+  lines.push(warmCircle(49, 65, 21, "#34425D"));
+  lines.push(text({ x: 49, y: 73, value: "W", size: 21, weight: 820, fill: "#FFFFFF", anchor: "middle" }));
+  nav.forEach((entry, index) => {
+    const y = 102 + index * 78;
+    const selected = entry[0].toLowerCase() === active;
+    if (selected) lines.push(warmRect(26, y, 46, 61, 20, "url(#fd-coral)", "#FFFFFF", 1, true));
+    lines.push(text({ x: 49, y: y + 25, value: entry[1], size: 17, weight: 760, fill: selected ? "#FFFFFF" : "#D6D9E3", anchor: "middle" }));
+    lines.push(text({ x: 49, y: y + 47, value: entry[0], size: 8.5, weight: 730, fill: selected ? "#FFFFFF" : "#AAB0C0", anchor: "middle" }));
+  });
+}
+
+function warmHeader(lines, config, title, subtitle) {
+  lines.push(text({ x: 104, y: 49, value: title, size: 29, weight: 820, fill: "#FFFFFF" }));
+  lines.push(text({ x: 105, y: 74, value: subtitle, size: 13, weight: 650, fill: "#FFFFFF", opacity: 0.72 }));
+  lines.push(warmRect(790, 22, 208, 64, 25, "#FFFFFF", "#FFFFFF", 0.16));
+  lines.push(warmCircle(829, 54, 18, "#F2B85C", "none", 1, 0.98));
+  lines.push(text({ x: 859, y: 52, value: "18°", size: 23, weight: 820, fill: "#FFFFFF" }));
+  lines.push(text({ x: 859, y: 70, value: "Partly cloudy · 16:42", size: 9.5, weight: 650, fill: "#FFFFFF", opacity: 0.76 }));
+  lines.push(text({ x: 982, y: 100, value: config.product.title, size: 8, weight: 700, fill: "#FFFFFF", anchor: "end", opacity: 0.44, spacing: 0.6 }));
+}
+
+function warmEvent(lines, y, timeValue, titleValue, colour, subtitleValue) {
+  lines.push(text({ x: 128, y: y + 31, value: timeValue, size: 12, weight: 760, fill: "#8B8E9C" }));
+  lines.push(warmCircle(178, y + 26, 6, colour));
+  lines.push(warmRect(198, y, 416, 52, 18, "#FFFFFF", colour, 0.88));
+  lines.push(warmCircle(225, y + 26, 16, colour, "none", 1, 0.14));
+  lines.push(text({ x: 253, y: y + 22, value: titleValue, size: 14, weight: 760, fill: "#202637" }));
+  lines.push(text({ x: 253, y: y + 39, value: subtitleValue, size: 9.5, weight: 650, fill: "#8B8E9C" }));
+}
+
+export function renderPreview(input) {
+  const config = validateConfig(structuredClone(input));
+  const childColours = config.people.filter((person) => person.role === "child").map((person) => person.colour);
+  const firstChild = childColours[0] || "#EE6C62";
+  const secondChild = childColours[1] || "#3FA99D";
+  const lines = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="768" viewBox="0 0 1024 768" role="img" aria-labelledby="title description">',
+    '<title id="title">' + escapeXml(config.product.title) + " — warm-glass Today view preview</title>",
+    '<desc id="description">Landscape family command centre with a calendar-first warm-glass layout.</desc>',
+    '<style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}</style>',
+    warmDefsSvg(),
+    '<rect width="1024" height="768" fill="url(#fd-bg)"/>',
+    warmCircle(890, 62, 145, "#F7B66E", "none", 1, 0.20),
+    warmCircle(950, 230, 105, "#EF6C73", "none", 1, 0.10)
+  ];
+
+  warmRail(lines, "today");
+  warmHeader(lines, config, "Good afternoon, family", "Friday feels organised · two things left today");
+  lines.push(warmRect(101, 111, 623, 612, 32, "url(#fd-surface)", "#FFFFFF", 0.98, true));
+  lines.push(text({ x: 128, y: 145, value: "YOUR WEEK", size: 9, weight: 820, fill: config.theme.accent, spacing: 1.3 }));
+  const days = [["MON", "3"], ["TUE", "4"], ["WED", "5"], ["THU", "6"], ["FRI", "7"], ["SAT", "8"], ["SUN", "9"]];
+  days.forEach((day, index) => {
+    const x = 166 + index * 80;
+    const current = day[0] === "FRI";
+    if (current) lines.push(warmRect(x - 24, 156, 48, 74, 22, "#17233A", "none", 1, true));
+    lines.push(text({ x, y: 177, value: day[0], size: 8, weight: 820, fill: current ? "#FFFFFF" : "#74798A", anchor: "middle", spacing: 0.7 }));
+    lines.push(text({ x, y: 207, value: day[1], size: 21, weight: 830, fill: current ? "#FFFFFF" : "#202637", anchor: "middle" }));
+    lines.push(warmCircle(x, 219, 3.5, current ? "#EE6C62" : index % 2 ? secondChild : config.theme.accent));
+  });
+  lines.push(warmLine(128, 246, 696, 246, "#DCD7D5", 1, 0.76));
+  lines.push(text({ x: 128, y: 280, value: "Today’s rhythm", size: 22, weight: 820, fill: "#202637" }));
+  lines.push(warmRect(530, 259, 91, 27, 14, config.theme.accent, "none", 0.10));
+  lines.push(text({ x: 575, y: 277, value: "4 EVENTS", size: 8, weight: 820, fill: config.theme.accent, anchor: "middle", spacing: 0.8 }));
+  lines.push(warmLine(178, 314, 178, 681, "#BFC2CA", 2, 0.58));
+  warmEvent(lines, 302, "08:15", "Holiday club drop-off", config.theme.accent, "Finished · everyone checked in");
+  warmEvent(lines, 377, "15:45", "Library books collected", "#4F7EA3", "Finished · 3 books renewed");
+  warmEvent(lines, 474, "17:00", "Football training", firstChild, "Leave 16:35 · kit is packed");
+  warmEvent(lines, 557, "18:30", "Family dinner", secondChild, "Everyone home · kitchen");
+  lines.push(warmLine(128, 459, 630, 459, firstChild, 1.4, 0.70, "5 6"));
+  lines.push(warmRect(128, 448, 68, 23, 12, firstChild));
+  lines.push(text({ x: 162, y: 464, value: "NOW 16:42", size: 8, weight: 820, fill: "#FFFFFF", anchor: "middle" }));
+
+  lines.push(warmRect(649, 208, 349, 226, 28, "url(#fd-coral)", "#FFFFFF", 0.98, true));
+  lines.push(text({ x: 675, y: 248, value: "UP NEXT · 18M", size: 9, weight: 820, fill: "#FFFFFF", spacing: 0.9 }));
+  lines.push(text({ x: 675, y: 299, value: "17:00", size: 42, weight: 850, fill: "#FFFFFF" }));
+  lines.push(text({ x: 675, y: 331, value: "Football training", size: 21, weight: 800, fill: "#FFFFFF" }));
+  lines.push(text({ x: 675, y: 355, value: "Child one · Sports Park", size: 11, weight: 650, fill: "#FFFFFF", opacity: 0.82 }));
+  lines.push(warmRect(674, 378, 194, 34, 17, "#7E2E4B", "#FFFFFF", 0.38));
+  lines.push(warmCircle(692, 395, 6, "#F2B85C"));
+  lines.push(text({ x: 707, y: 399, value: "Leave by 16:35 · kit packed", size: 9, weight: 720, fill: "#FFFFFF" }));
+  lines.push(warmCircle(959, 395, 19, "#FFFFFF"));
+  lines.push(text({ x: 959, y: 402, value: "✓", size: 18, weight: 850, fill: firstChild, anchor: "middle" }));
+
+  lines.push(warmRect(686, 456, 312, 126, 25, "#FFFFFF", "#FFFFFF", 0.16));
+  lines.push(text({ x: 708, y: 485, value: "CHORES TODAY", size: 9, weight: 820, fill: "#FFFFFF", opacity: 0.72, spacing: 0.9 }));
+  [firstChild, secondChild].forEach((colour, index) => {
+    const cx = 733 + index * 142;
+    lines.push(warmCircle(cx, 535, 27, "none", "#FFFFFF", 5, 0.22));
+    lines.push(warmCircle(cx, 535, 27, "none", colour, 5, 0.96));
+    lines.push(warmCircle(cx, 535, 18, colour));
+    lines.push(text({ x: cx, y: 541, value: index ? "2" : "3", size: 16, weight: 840, fill: "#FFFFFF", anchor: "middle" }));
+    lines.push(text({ x: cx + 39, y: 526, value: index ? "Child two · 50 pts" : "Child one · 75 pts", size: 11, weight: 760, fill: "#FFFFFF" }));
+    lines.push(text({ x: cx + 39, y: 547, value: "one left", size: 9, weight: 650, fill: "#FFFFFF", opacity: 0.66 }));
+  });
+
+  lines.push(warmRect(686, 602, 312, 120, 25, "url(#fd-navy)", "#FFFFFF", 0.98, true));
+  lines.push(warmCircle(727, 662, 29, "#F2B85C", "none", 1, 0.20));
+  lines.push(text({ x: 727, y: 670, value: "♫", size: 24, weight: 800, fill: "#F2B85C", anchor: "middle" }));
+  lines.push(text({ x: 763, y: 633, value: "NOW PLAYING", size: 8, weight: 820, fill: "#FFFFFF", opacity: 0.62, spacing: 1 }));
+  lines.push(text({ x: 763, y: 659, value: "Family favourites", size: 16, weight: 780, fill: "#FFFFFF" }));
+  lines.push(text({ x: 763, y: 681, value: config.media.players[0]?.name || "Living room", size: 10, weight: 650, fill: "#FFFFFF", opacity: 0.68 }));
+  lines.push(text({ x: 105, y: 752, value: "Deterministic preview · privacy-safe sample content", size: 8, weight: 650, fill: "#FFFFFF", opacity: 0.44, spacing: 0.4 }));
+  lines.push("</svg>");
+  return lines.join("\n") + "\n";
+}
+
+function controlPanel(lines, x, y, width, height, titleValue, subtitleValue, accent, iconValue) {
+  lines.push(warmRect(x, y, width, height, 26, "url(#fd-surface)", "#FFFFFF", 0.96, true));
+  lines.push(warmCircle(x + 42, y + 43, 22, accent, "none", 1, 0.18));
+  lines.push(text({ x: x + 42, y: y + 50, value: iconValue, size: 20, weight: 820, fill: accent, anchor: "middle" }));
+  lines.push(text({ x: x + 76, y: y + 36, value: titleValue, size: 18, weight: 800, fill: "#202637" }));
+  lines.push(text({ x: x + 76, y: y + 57, value: subtitleValue, size: 10, weight: 650, fill: "#74798A" }));
+}
+
+export function renderControlsPreview(input) {
+  const config = validateConfig(structuredClone(input));
+  const lines = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="768" viewBox="0 0 1024 768" role="img" aria-labelledby="title description">',
+    '<title id="title">' + escapeXml(config.product.title) + " — warm-glass controls preview</title>",
+    '<desc id="description">Lighting, heating, cameras and entry, and media controls in the approved warm-glass style.</desc>',
+    '<style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}</style>',
+    warmDefsSvg(),
+    '<rect width="1024" height="768" fill="url(#fd-bg)"/>',
+    warmCircle(900, 70, 155, "#F7B66E", "none", 1, 0.18)
+  ];
+  warmRail(lines, "home");
+  warmHeader(lines, config, "Home controls", "Focused controls · large touch targets · details only when needed");
+
+  controlPanel(lines, 101, 112, 438, 278, "Lighting", "Living room · 3 lights on", "#F2B85C", "☀");
+  lines.push(text({ x: 129, y: 204, value: "LIVING ROOM", size: 9, weight: 820, fill: "#8A8E9D", spacing: 1 }));
+  lines.push(text({ x: 129, y: 245, value: "68%", size: 34, weight: 840, fill: "#202637" }));
+  lines.push(text({ x: 208, y: 242, value: "warm white", size: 11, weight: 650, fill: "#74798A" }));
+  lines.push(warmLine(129, 284, 505, 284, "#D9D4D0", 12, 1));
+  lines.push(warmLine(129, 284, 384, 284, "#F2B85C", 12, 1));
+  lines.push(warmCircle(384, 284, 13, "#FFFFFF", "#F2B85C", 4));
+  ["Relax", "Bright", "Movie"].forEach((labelValue, index) => {
+    const x = 129 + index * 121;
+    lines.push(warmRect(x, 321, 106, 42, 18, index === 0 ? "#F2B85C" : "#FFFFFF", "#F2B85C", index === 0 ? 1 : 0.72));
+    lines.push(text({ x: x + 53, y: 347, value: labelValue, size: 10, weight: 760, fill: index === 0 ? "#FFFFFF" : "#8B6723", anchor: "middle" }));
+  });
+
+  controlPanel(lines, 558, 112, 440, 278, "Heating", "Main zone · scheduled until 18:30", "#EE6C62", "♨");
+  lines.push(warmCircle(683, 273, 67, "#FBE4DF", "#EE6C62", 8));
+  lines.push(text({ x: 683, y: 268, value: "20.5°", size: 31, weight: 840, fill: "#202637", anchor: "middle" }));
+  lines.push(text({ x: 683, y: 292, value: "CURRENT", size: 8, weight: 820, fill: "#8A8E9D", anchor: "middle", spacing: 0.8 }));
+  lines.push(text({ x: 812, y: 220, value: "TARGET", size: 9, weight: 820, fill: "#8A8E9D", spacing: 0.8 }));
+  lines.push(text({ x: 812, y: 263, value: "21°", size: 35, weight: 840, fill: "#202637" }));
+  lines.push(warmRect(812, 292, 146, 48, 20, "#EE6C62"));
+  lines.push(text({ x: 885, y: 321, value: "+30 MIN BOOST", size: 9, weight: 820, fill: "#FFFFFF", anchor: "middle" }));
+
+  controlPanel(lines, 101, 409, 438, 313, "Cameras & Entry", "Front doorbell live · garage closed", "#3FA99D", "◉");
+  lines.push(warmRect(129, 493, 251, 141, 18, "url(#fd-navy)", "#FFFFFF", 0.96));
+  lines.push(warmRect(154, 535, 140, 77, 3, "#5A6577", "#D7DEE9", 0.82));
+  lines.push(warmRect(205, 559, 45, 53, 2, "#2B3548", "#FFFFFF", 0.80));
+  lines.push(warmCircle(354, 512, 5, "#EE6C62"));
+  lines.push(text({ x: 342, y: 516, value: "LIVE", size: 8, weight: 820, fill: "#FFFFFF", anchor: "end" }));
+  lines.push(warmRect(397, 493, 114, 64, 20, "#DDF1ED", "#3FA99D", 0.96));
+  lines.push(text({ x: 454, y: 519, value: "GARAGE", size: 8, weight: 820, fill: "#26877E", anchor: "middle", spacing: 0.8 }));
+  lines.push(text({ x: 454, y: 542, value: "CLOSED", size: 13, weight: 820, fill: "#202637", anchor: "middle" }));
+  lines.push(warmRect(397, 570, 114, 64, 20, "#17233A", "#FFFFFF", 0.96));
+  lines.push(text({ x: 454, y: 596, value: "HOLD TO", size: 8, weight: 820, fill: "#FFFFFF", anchor: "middle", opacity: 0.64 }));
+  lines.push(text({ x: 454, y: 618, value: "REVIEW OPEN", size: 10, weight: 820, fill: "#FFFFFF", anchor: "middle" }));
+  lines.push(text({ x: 129, y: 675, value: "Check the live driveway view before confirming movement.", size: 10, weight: 650, fill: "#74798A" }));
+
+  controlPanel(lines, 558, 409, 440, 313, "Media", "Kitchen · grouped with Living room", config.theme.accent, "♫");
+  lines.push(warmRect(586, 494, 112, 112, 24, "url(#fd-coral)", "#FFFFFF", 0.98));
+  lines.push(warmCircle(642, 550, 31, "#FFFFFF", "none", 1, 0.20));
+  lines.push(text({ x: 642, y: 560, value: "♫", size: 28, weight: 820, fill: "#FFFFFF", anchor: "middle" }));
+  lines.push(text({ x: 724, y: 518, value: "Family favourites", size: 17, weight: 800, fill: "#202637" }));
+  lines.push(text({ x: 724, y: 542, value: "Kitchen + Living room", size: 10, weight: 650, fill: "#74798A" }));
+  lines.push(text({ x: 724, y: 580, value: "◀     ▶     ▶▶", size: 20, weight: 800, fill: config.theme.accent }));
+  lines.push(warmLine(586, 641, 962, 641, "#D9D4D0", 10));
+  lines.push(warmLine(586, 641, 828, 641, config.theme.accent, 10));
+  lines.push(warmCircle(828, 641, 12, "#FFFFFF", config.theme.accent, 4));
+  lines.push(text({ x: 586, y: 680, value: "QUEUE", size: 9, weight: 820, fill: "#74798A", spacing: 0.9 }));
+  lines.push(text({ x: 962, y: 680, value: "BROWSE MUSIC", size: 9, weight: 820, fill: config.theme.accent, anchor: "end", spacing: 0.9 }));
+  lines.push(text({ x: 105, y: 752, value: "Deterministic preview · camera scene is illustrative", size: 8, weight: 650, fill: "#FFFFFF", opacity: 0.44, spacing: 0.4 }));
+  lines.push("</svg>");
+  return lines.join("\n") + "\n";
+}
+
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : null;
 if (invokedPath === fileURLToPath(import.meta.url)) {
-  const [, , inputPath, outputPath] = process.argv;
+  const [, , inputPath, outputPath, controlsOutputPath] = process.argv;
   if (!inputPath || !outputPath) {
     throw new Error("usage: node preview/render-preview.mjs <input.json> <output.svg>");
   }
@@ -198,5 +433,12 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
   const output = resolve(outputPath);
   await mkdir(dirname(output), { recursive: true });
   await writeFile(output, renderPreview(config), "utf8");
-  process.stdout.write(`${output}\n`);
+  const outputs = [output];
+  if (controlsOutputPath) {
+    const controlsOutput = resolve(controlsOutputPath);
+    await mkdir(dirname(controlsOutput), { recursive: true });
+    await writeFile(controlsOutput, renderControlsPreview(config), "utf8");
+    outputs.push(controlsOutput);
+  }
+  process.stdout.write(`${outputs.join("\n")}\n`);
 }
