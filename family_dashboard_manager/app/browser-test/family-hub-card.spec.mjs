@@ -159,7 +159,7 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
 test("renders the interactive floorplan and sends only the selected low-risk control", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
-  await card.locator('[data-view="rooms"]').click();
+  await card.locator('.nav-button[data-view="rooms"]').click();
   await expect(card.locator(".floorplan-visual")).toHaveAttribute("viewBox", "0 0 100 60.0000");
   await expect(card.locator(".floorplan-image")).toBeVisible();
   await expect(card.locator(".floorplan-image")).toHaveAttribute("href", /\/api\/camera_proxy\/camera\.example_vacuum_map/);
@@ -176,12 +176,12 @@ test("renders the interactive floorplan and sends only the selected low-risk con
 test("keeps the family map private and spotlights both requested clubs", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
-  await card.locator('[data-view="family"]').click();
+  await card.locator('.nav-button[data-view="family"]').click();
   await expect(card.locator('[data-card-type="map"]')).toBeVisible();
   await expect(card.locator(".family-person")).toHaveCount(2);
   await expect(card.locator(".family-person")).toContainText(["Science revision", "Read chapter four"]);
 
-  await card.locator('[data-view="football"]').click();
+  await card.locator('.nav-button[data-view="football"]').click();
   await expect(card.locator(".spotlight-panel")).toContainText("Tottenham & Aston Villa");
   await expect(card.locator(".fixture.is-spotlight")).toHaveCount(2);
   await expect(card.locator(".spotlight-club")).toContainText(["Tottenham Hotspur", "Aston Villa"]);
