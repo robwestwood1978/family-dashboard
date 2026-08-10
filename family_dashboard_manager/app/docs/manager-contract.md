@@ -2,33 +2,33 @@
 
 The manager is intentionally narrower than a general Home Assistant administration tool.
 
-## Read tools
+## Read-only tools
 
-- `get_dashboard_status`: installed version, active config hash, last successful deployment and validation state.
+- `get_dashboard_status`: version, installation/resource state, active hashes, last deployment and snapshots.
 - `get_sanitised_inventory`: approved areas and safe entity metadata only.
 - `read_household_config`: current non-secret Family Dashboard JSON.
-- `get_dashboard_errors`: bounded Family Dashboard compiler/reload errors only.
+- `get_dashboard_errors`: the most recent bounded manager error.
+- `get_classroom_authorization_plan`: per-child read-only Google scope and output contract; never credentials.
+- `validate_household_config`: validate and compile without changing live files.
 
-## Write tools
+## Confirmation-bearing tools
 
-- `validate_household_config`: validate without changing live files.
-- `deploy_household_config`: compile, snapshot, atomically activate and health-check one validated config.
-- `rollback_dashboard`: restore one known Family Dashboard snapshot.
-- `reload_dashboard`: reload only Lovelace resources/config needed by Family Dashboard.
+- `deploy_household_config`: snapshot and atomically activate one already-validated configuration and fixed frontend file set.
+- `rollback_dashboard`: hash-verify and restore one known raw snapshot.
+- `reload_dashboard`: verify managed files and return the bounded storage-mode resource registration/refresh instruction. It does not call arbitrary Home Assistant services.
 
-Every write tool returns the previous and resulting config hashes. Deploy and rollback are confirmation-bearing operations.
+Deploy and rollback require an exact current/validated hash plus `confirm=true`.
 
 ## Explicitly excluded
 
 - general shell or arbitrary file access;
-- reads of `secrets.yaml`, `.storage`, backups, camera entities/images/streams, location history or recorder history (explicit camera entity IDs may exist only in user-supplied non-secret household configuration);
+- reads of `secrets.yaml`, `.storage`, backups, camera entities/images/streams, location history or recorder history;
 - raw IP or MAC addresses;
 - arbitrary Home Assistant service calls;
-- credential or token transport;
-- editing unrelated dashboards or integrations.
+- password, OAuth code or token transport through household configuration;
+- editing unrelated dashboards or integrations;
+- camera or garage operation in v0.4.
 
-## Connection
+## Files and connection
 
-The manager exposes an MCP Streamable HTTP endpoint on `127.0.0.1` inside the Home Assistant app. OpenAI Secure MCP Tunnel runs as an optional second service in the same container and connects outbound over HTTPS. The runtime API key is kept in Home Assistant's password-typed app option and process environment; it is never returned by a tool or stored in Git.
-
-The app receives only the minimum Home Assistant API access required for registry metadata, config validation and Lovelace reload. Filesystem policy allows writes only to the dedicated Family Dashboard directory and its rollback snapshots.
+The MCP endpoint binds to `127.0.0.1` inside the Home Assistant app. Optional OpenAI Secure MCP Tunnel connects outbound only. Filesystem policy grants writes to `/config/family-dashboard`, the manager's fixed file names under `/config/www/family-dashboard`, and private `/data` state/snapshots. Unknown household assets in the frontend directory are preserved.

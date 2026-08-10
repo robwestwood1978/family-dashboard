@@ -34,17 +34,20 @@ COPY app/package.json app/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts \
     && npm cache clean --force
 COPY app/src ./src
+COPY app/config ./config
+COPY app/frontend ./frontend
 
 COPY rootfs /
 RUN chmod a+x \
     /etc/services.d/family-dashboard-manager/run \
     /etc/services.d/family-dashboard-tunnel/run
 
-ENV APP_VERSION=0.3.0 \
+ENV APP_VERSION=0.4.0 \
     MANAGER_HOST=127.0.0.1 \
     MANAGER_PORT=8099 \
     MANAGER_CONFIG_DIR=/config/family-dashboard \
-    MANAGER_DATA_DIR=/data
+    MANAGER_DATA_DIR=/data \
+    MANAGER_RESOURCE_DIR=/config/www/family-dashboard
 
 LABEL \
     org.opencontainers.image.title="Home Assistant App: Family Dashboard Manager" \

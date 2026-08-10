@@ -1,18 +1,18 @@
 # Family Dashboard Manager
 
-The manager owns only the dedicated Family Dashboard files. It validates household configuration, compiles dashboard YAML, keeps bounded rollback snapshots and can expose those operations to ChatGPT/Codex through an optional outbound-only Secure MCP Tunnel.
+The manager owns the dedicated Family Dashboard configuration, generated YAML panel, first-party frontend card and bounded rollback snapshots. Version 0.4 targets a 10.5-inch iPad Pro in landscape (`1112×834` CSS pixels) and keeps `1024×768` as the fallback regression size.
 
 ## Before installation
 
-This release requires Home Assistant OS 2026.8.0 or newer. Install the integrations and frontend cards used by your private configuration before deploying the dashboard.
+This release requires Home Assistant OS 2026.8.0 or newer. The v0.4 Family Hub uses:
 
-The v0.3 warm-glass presentation profile expects:
+- the bundled `custom:family-hub-card` for the shell, navigation, floorplan, room controls, family summaries and Premier League presentation;
+- native Home Assistant Calendar and Map cards;
+- Mediocre Multi Media Player Card when Music is enabled;
+- kiosk-mode when non-admin kiosk chrome is requested;
+- existing Home Assistant calendar, weather, person, light, climate, cover, scene, media-player and ChoreOps sensor entities selected in the private household configuration.
 
-- Daylight Calendar Card, button-card, layout-card, Mushroom, Auto-Entities, Team Tracker Card, Mediocre Multi Media Player Card, card-mod and kiosk-mode from HACS;
-- ChoreOps and Team Tracker entities when their corresponding views are enabled;
-- built-in Home Assistant weather, to-do, light, climate, cover, camera, binary-sensor and scene entities for the configured surfaces.
-
-The generated dashboard deliberately avoids WebGL, live blur, required animation and event-write controls. It creates depth with static gradients, opacity and bounded shadows. With `legacy_ios` enabled, card animation and transitions are suppressed. The non-admin tablet account receives kiosk chrome while an administrator retains the normal Home Assistant header as the parent escape route. Every enabled view retains the same large-touch navigation rail.
+Doorbell/security camera feeds and garage actions are deliberately disabled in v0.4. A map-named vacuum camera may be used only as a read-only Rooms floorplan source; its image stays inside the authenticated Home Assistant frontend. Calendar presentation and Classroom assignment presentation are read-only. The card does not send household locations, vacuum-map imagery or Google credentials to its football source.
 
 ## Install
 
@@ -23,9 +23,9 @@ The generated dashboard deliberately avoids WebGL, live blur, required animation
 
 The app exposes no host port. Its MCP endpoint is reachable only inside its own container by the optional tunnel service.
 
-## One-time dashboard registration
+## One-time Home Assistant registration
 
-Add the following to Home Assistant's `configuration.yaml` once:
+Keep Home Assistant in storage mode and add this one YAML dashboard entry to `configuration.yaml`:
 
 ```yaml
 lovelace:
@@ -39,30 +39,54 @@ lovelace:
       filename: family-dashboard/dashboard.yaml
 ```
 
-Check the configuration and restart Home Assistant. The dashboard file will be created by the first confirmed deployment.
+Because Lovelace resources are stored by Home Assistant, register this JavaScript module once in **Settings → Dashboards → Resources**:
 
-The private household file must use schema version 3 for manager v0.3. In addition to the existing product and entity mappings it supplies the warm-glass backdrop colours, weather and list mappings, room lights/heating/covers, the `legacy-lite` ChoreOps helper mapping, Team Tracker entries, camera IDs, safe doorbell status sensors and the garage cover. Run `validate_household_config` before any deployment; validation is read-only and returns the exact hash required for a separately confirmed deploy.
+```text
+/local/family-dashboard/family-hub-card.js?v=0.4.0
+```
 
-The Cameras & Entry view loads only the configured primary camera as a live stream; secondary cameras remain lightweight until opened. When a camera maps Home Assistant button entities for stream control, the view provides explicit Start live and Stop live actions. Camera images, streams, states and history are never fetched through the manager MCP tools. Camera entity IDs may appear only in the explicit non-secret household configuration. Garage movement is available only from a press-and-hold action followed by an on-screen confirmation instructing the user to check the relevant camera view.
+Select **JavaScript module** as the resource type. Administrators retain normal Home Assistant chrome as the parent escape; kiosk-mode applies only to the non-admin tablet profile.
 
-Calendar event creation, editing and deletion remain disabled. Apple/iCloud or another CalDAV-backed Home Assistant calendar remains the source of truth until live write behavior is independently proven.
+## Private schema-v4 configuration
+
+The private `household.json` supplies only non-secret mappings and presentation choices. In particular:
+
+- each floor supplies either `base_image`, pointing to a private plan below `/config/www/family-dashboard/assets/`, or an explicitly approved `vacuum_map_entity` such as `camera.robovac_map`; when both are present, the private image is the fallback;
+- the vacuum-map image is read through Home Assistant's authenticated `entity_picture` URL and is never copied into Git, manager storage, snapshots, logs or ChatGPT;
+- each floor declares the source plan's natural `aspect_ratio`; every room has a polygon hotspot expressed as 0–100 percentage coordinates and a matching `floor_id`;
+- optional light overlays use transparent images whose opacity follows live light brightness;
+- `location.entities` accepts only explicitly opted-in `person.*` entities;
+- the football contract publishes all 38 Premier League matchweeks and marks `TOT` and `AVL` as spotlight clubs;
+- each child-owned Classroom authorization eventually publishes a read-only assignment sensor named in `school.classroom_students`.
+
+The tracked example floorplans are synthetic. Do not deploy them as a representation of the real house. For the Eufy Clean X10 Pro Omni, use the integration's map camera as the private source and calibrate the percentage-coordinate room hotspots against that image. A separate private static plan remains supported for floors the vacuum has not mapped.
+
+Run `validate_household_config` before deployment. Validation is read-only and returns the exact configuration hash required for a separately confirmed deploy.
+
+## Google Classroom authorization proof
+
+Call `get_classroom_authorization_plan` to inspect the proof contract. Each child signs in through Google's own consent screen using their own Classroom login. The design requests only these read-only scopes:
+
+- `classroom.courses.readonly`
+- `classroom.coursework.me.readonly`
+- `classroom.student-submissions.me.readonly`
+
+No child password is collected. OAuth codes and tokens must never be written to `household.json`, generated YAML, snapshots or logs. The live adapter stays disabled until this per-child authorization flow has been proven separately.
+
+## Football provider
+
+The browser does not call Fantasy Premier League directly. The manager fetches the public FPL bootstrap and fixtures feeds server-side, normalises fixtures/results/scorers and a calculated table, then publishes bounded Home Assistant sensor attributes. A last-good cache is stored in the app's private `/data` directory. If the source is temporarily unavailable, the dashboard retains cached data instead of failing the card.
 
 ## Secure MCP Tunnel
 
-The tunnel is optional and disabled by default. To enable managed deployments:
+The tunnel is optional and disabled by default. Its runtime key is stored only in Home Assistant app options and passed to `tunnel-client` through its process environment. It is never accepted in household configuration, written to Git, returned by a manager tool or printed by the start script.
 
-1. Create or obtain a `tunnel_id` in OpenAI Platform tunnel settings.
-2. Create a runtime API key with Tunnels Read + Use permission.
-3. Associate the tunnel with the ChatGPT workspace and Platform organisation that will use it.
-4. Stop the app, enable **Secure MCP Tunnel**, enter the tunnel ID and runtime key, then start it again.
-5. Confirm the log reports that the tunnel is healthy before adding the tunnel-backed app in ChatGPT developer mode.
-
-The runtime key is stored only in Home Assistant app options and passed to `tunnel-client` through its process environment. It is never accepted in household configuration, written to Git, returned by a manager tool or printed by the start script.
-
-## Tool safety
+## Safety boundary
 
 - Validation never writes live files.
-- Deployment requires `confirm=true` plus the exact hash returned by validation.
-- Rollback requires `confirm=true`, a known snapshot ID and the exact active hash.
-- Inventory excludes camera entities and all camera images/streams, people, location trackers, current states, history, IP/MAC addresses, credentials and arbitrary attributes.
+- Deployment requires `confirm=true` plus the exact validated hash.
+- The manager writes only `/config/family-dashboard`, its fixed frontend allow-list under `/config/www/family-dashboard`, and its private `/data` directory.
+- Unknown household floorplan assets are preserved.
+- Rollback verifies raw snapshot hashes and can restore the already-installed schema-v3 release without trying to reinterpret it as schema v4.
+- Inventory excludes cameras, people, trackers, states, history, addresses, credentials and arbitrary attributes. An explicitly configured vacuum map is rendered only by the authenticated Home Assistant frontend and is never returned by manager tools.
 - The manager cannot run arbitrary commands, read arbitrary files or call arbitrary Home Assistant services.

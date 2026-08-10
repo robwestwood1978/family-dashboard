@@ -1,41 +1,35 @@
-# Architecture decision: Home Assistant-native dashboard
+# Architecture decision: first-party Family Hub card
 
-Status: accepted for Phase 0
+Status: accepted for v0.4 isolated qualification
 
 ## Product shell
 
-The product is a dedicated Home Assistant YAML dashboard. Home Assistant remains in storage mode for existing dashboards and loads Family Dashboard as one additional YAML dashboard. This preserves all current dashboards and lets the new product reuse installed HACS cards directly.
+The dedicated YAML dashboard has one Home Assistant panel view and one bundled `custom:family-hub-card`. The card owns Today, Calendar, Rooms, Family, Music and Football navigation. This avoids constructing a large third-party Lovelace tree on the older tablet while retaining Home Assistant state and service APIs.
 
-The primary views are Today, Calendar, Home, Music, Chores, Football, and an optional School view. Home progressively discloses Lighting, Heating and Cameras & Entry subviews. The tablet uses a separate non-admin Home Assistant user and Family Dashboard as its personal default. Kiosk mode hides Home Assistant chrome for non-admin users only; administrators retain normal chrome, and a slim persistent rail links every primary product view.
+The primary CSS viewport is `1112×834`, matching the 10.5-inch iPad Pro in landscape at device-pixel ratio 2. `1024×768` remains a regression profile. The layout uses static gradients and bounded shadows, avoids WebGL and required motion, and honours reduced-motion settings.
 
-## Calendar
+## Rooms and floorplan
 
-Apple/iCloud remains the household system of record. Home Assistant's existing CalDAV entities supply events to Daylight Calendar Card, formerly Skylight Calendar Card. Event create/edit/delete support must be proven against the live CalDAV entities before write controls are enabled.
+Rooms is a house floorplan, not the geographic family map. Each floor has either a private static base image or an explicitly configured map-named vacuum camera, percentage-coordinate room polygons and optional transparent light overlays. For an Eufy Clean X10 Pro Omni, `camera.robovac_map` is the expected ground-floor source. The authenticated image is rendered directly inside Home Assistant and is never returned through the manager or committed to Git. A room selection reveals only its mapped low-risk controls. Geometry remains explicit private configuration rather than being inferred from entity names or invented from household facts.
 
-## Media
+## Family and school
 
-Mediocre Multi Media Player Card is the incumbent UI. It is configured with each Sonos player plus its corresponding Music Assistant entity. The large Music view owns browsing, search, queue and grouping; Today uses the compact presentation. Sonos Card and SpotifyPlus are optional supporting surfaces only if real-device testing proves a clear gap.
+Family embeds Home Assistant's native Map card using an explicit allow-list of `person.*` entities, so coordinates remain inside Home Assistant. Child panels combine ChoreOps data with read-only assignment sensor attributes. Each child has a separate Google authorization proof; the live adapter remains gated until Google's own consent flow succeeds with read-only scopes.
 
-## Chores and football
+## Football
 
-The Chores view uses ChoreOps dashboard-helper attributes through Auto-Entities and emits native tile actions. The `legacy-lite` profile follows the integration's conservative dashboard pattern and avoids animation-heavy presentation. Football uses Team Tracker Card against explicitly configured Team Tracker sensor entities.
+Fantasy Premier League blocks direct cross-origin browser reads, so the manager fetches its public feeds server-side. The provider publishes one index sensor, one sensor per matchweek and one table sensor. Only changed payloads are republished, and a private last-good cache keeps the UI useful during source failures. Every fixture is retained; Tottenham (`TOT`) and Aston Villa (`AVL`) receive spotlight styling.
 
-## Cameras and entry
+## Media and native cards
 
-The dashboard browser reads camera streams directly from Home Assistant; the manager never proxies, captures or returns them. Only the configured primary camera requests a live view on page load. Doorbell and motion cards use explicitly configured binary sensors. The garage cover opens its normal details on tap and permits movement only on press-and-hold followed by a confirmation that tells the user to check the camera view. This confirmation is a usability safeguard, not a substitute for physical obstruction detection.
+The card creates native Home Assistant Calendar and Map child cards through `loadCardHelpers`. Music embeds the incumbent Mediocre Multi Media Player Card. No external map or football browser request receives household information.
 
-## Code and configuration
+## Cameras and garage
 
-Generic code and releases are public and contain no household facts. The private repository contains the production JSON configuration and release references. The compiler rejects common secret-bearing keys before generating YAML. HACS installs the selected frontend cards; Home Assistant's app-store repository mechanism installs the manager.
+Doorbell/security camera surfaces are intentionally absent. Schema-v4 retains typed placeholders for a later migration, but v0.4 validation rejects `features.entry=true`. The only camera-domain exception is a map-named vacuum camera used as a read-only floorplan image; no security stream is mounted and no garage or vacuum action is sent.
 
-## Deployment
+## Deployment and rollback
 
-Family Dashboard Manager is a small Home Assistant app. It validates a proposed configuration, compiles it into the dedicated Family Dashboard path, retains rollback snapshots, asks Home Assistant to reload its Lovelace resources, and reports health. It does not pull the private repository and therefore requires no GitHub credential.
+The manager writes canonical configuration and generated YAML below `/config/family-dashboard`. It publishes only a fixed allow-list of first-party frontend files below `/config/www/family-dashboard`; unknown private floorplan files are preserved. Snapshots contain raw configuration, YAML and managed frontend files with SHA-256 hashes. Rollback verifies and restores the raw files, allowing a schema-v3 release to be restored by a schema-v4 manager.
 
-The manager's MCP endpoint binds only to the app container's loopback interface. OpenAI's official `tunnel-client` can run as an optional second service in the same container; it is disabled by default and makes outbound HTTPS connections only after a tunnel ID and runtime key are configured in Home Assistant.
-
-One static entry in `configuration.yaml` points Home Assistant to the generated dashboard. After that bootstrap, normal releases update only the dedicated Family Dashboard directory.
-
-## Compatibility
-
-The target is an older iPad in landscape. Until exact-device qualification is complete, the dashboard uses static CSS gradients, established Home Assistant cards, no live blur, no required WebGL and no bleeding-edge browser API. Schema v3 carries a `legacy_ios` switch; when enabled, card animation and transitions are disabled. The tracked 1024 by 768 previews are deterministic composition references, while real-device qualification remains the authority for rendering and interaction.
+Home Assistant remains in storage mode for resources. The first-party JavaScript module therefore has one explicit administrator registration step. The manager does not attempt an unsupported general Lovelace resource service call.

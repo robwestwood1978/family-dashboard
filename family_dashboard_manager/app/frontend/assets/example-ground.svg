@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" role="img" aria-labelledby="title desc">
+  <title id="title">Example ground-floor plan</title>
+  <desc id="desc">A schematic example used only for automated dashboard previews.</desc>
+  <rect width="1000" height="600" fill="#d9dde5"/>
+  <g fill="#f5f6f8" stroke="#697080" stroke-width="8">
+    <path d="M35 30h440v315H35z"/>
+    <path d="M525 30h440v315H525z"/>
+    <path d="M285 375h430v195H285z"/>
+  </g>
+  <g fill="none" stroke="#9aa3b2" stroke-width="5">
+    <path d="M250 30v315M750 30v315M500 375v195"/>
+    <path d="M443 345v35M557 345v35"/>
+  </g>
+  <g fill="#c8ced8">
+    <rect x="95" y="95" width="250" height="130" rx="24"/>
+    <rect x="610" y="82" width="260" height="155" rx="18"/>
+    <rect x="380" y="420" width="240" height="80" rx="16"/>
+  </g>
+</svg>

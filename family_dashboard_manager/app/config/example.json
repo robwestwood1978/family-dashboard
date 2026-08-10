@@ -1,6 +1,6 @@
 {
   "$schema": "./family-dashboard.schema.json",
-  "schema_version": 3,
+  "schema_version": 4,
   "product": {
     "title": "Family Dashboard",
     "locale": "en-GB",
@@ -11,7 +11,9 @@
     "kiosk": true,
     "legacy_ios": true,
     "default_view": "today",
-    "panel_path": "family-dashboard"
+    "panel_path": "family-dashboard",
+    "target_width": 1112,
+    "target_height": 834
   },
   "theme": {
     "accent": "#5B5BD6",
@@ -30,35 +32,39 @@
       "id": "parent",
       "name": "Parent",
       "role": "parent",
-      "colour": "#5B5BD6"
+      "colour": "#5B5BD6",
+      "location_entity": "person.example_parent"
     },
     {
       "id": "child_one",
       "name": "Child one",
       "role": "child",
-      "colour": "#E76F51"
+      "colour": "#E76F51",
+      "location_entity": "person.example_child_one"
     },
     {
       "id": "child_two",
       "name": "Child two",
       "role": "child",
-      "colour": "#2A9D8F"
+      "colour": "#2A9D8F",
+      "location_entity": "person.example_child_two"
     }
   ],
   "features": {
     "calendar": true,
-    "home": true,
+    "rooms": true,
+    "family": true,
     "music": true,
     "chores": true,
     "football": true,
     "lists": true,
     "weather": true,
-    "school": false,
-    "entry": true
+    "school": true,
+    "location_map": true,
+    "entry": false
   },
   "calendar": {
-    "card_type": "custom:daylight-calendar-card",
-    "default_view": "week-standard",
+    "initial_view": "listWeek",
     "rolling_days": 7,
     "entities": [
       {
@@ -66,11 +72,16 @@
         "entity_id": "calendar.family",
         "label": "Family",
         "colour": "#5B5BD6",
-        "person_ids": [
-          "parent",
-          "child_one",
-          "child_two"
-        ]
+        "person_ids": ["parent", "child_one", "child_two"],
+        "category": "family"
+      },
+      {
+        "id": "school",
+        "entity_id": "calendar.school",
+        "label": "School",
+        "colour": "#E76F51",
+        "person_ids": ["child_one", "child_two"],
+        "category": "school"
       }
     ]
   },
@@ -81,19 +92,105 @@
     "reminders_entity": "todo.reminders",
     "shopping_entity": "todo.shopping_list"
   },
+  "floorplan": {
+    "default_floor": "ground",
+    "floors": [
+      {
+        "id": "ground",
+        "name": "Ground floor",
+        "base_image": "/local/family-dashboard/assets/example-ground.svg",
+        "vacuum_map_entity": "camera.example_vacuum_map",
+        "aspect_ratio": 1.666667,
+        "room_hotspots": [
+          { "room_id": "living_room", "points": [[3, 5], [48, 5], [48, 56], [3, 56]] },
+          { "room_id": "kitchen", "points": [[52, 5], [97, 5], [97, 56], [52, 56]] },
+          { "room_id": "hallway", "points": [[29, 60], [71, 60], [71, 95], [29, 95]] }
+        ],
+        "light_overlays": [
+          {
+            "entity_id": "light.living_room",
+            "image": "/local/family-dashboard/assets/example-living-room-light.svg"
+          },
+          {
+            "entity_id": "light.kitchen",
+            "image": "/local/family-dashboard/assets/example-kitchen-light.svg"
+          }
+        ]
+      },
+      {
+        "id": "first",
+        "name": "First floor",
+        "base_image": "/local/family-dashboard/assets/example-first.svg",
+        "aspect_ratio": 1.666667,
+        "room_hotspots": [
+          { "room_id": "child_one_room", "points": [[3, 5], [48, 5], [48, 68], [3, 68]] },
+          { "room_id": "child_two_room", "points": [[52, 5], [97, 5], [97, 68], [52, 68]] }
+        ],
+        "light_overlays": []
+      }
+    ]
+  },
   "rooms": [
     {
       "id": "living_room",
       "name": "Living room",
+      "floor_id": "ground",
       "area_id": "living_room",
       "icon": "mdi:sofa-outline",
-      "lights": [
-        "light.living_room"
-      ],
-      "covers": [
-        "cover.living_room"
-      ],
-      "climate": "climate.living_room"
+      "lights": ["light.living_room"],
+      "covers": ["cover.living_room"],
+      "scenes": ["scene.living_room_relax"],
+      "media_players": ["media_player.living_room"],
+      "climate": "climate.living_room",
+      "temperature_sensor": "sensor.living_room_temperature"
+    },
+    {
+      "id": "kitchen",
+      "name": "Kitchen",
+      "floor_id": "ground",
+      "area_id": "kitchen",
+      "icon": "mdi:countertop-outline",
+      "lights": ["light.kitchen"],
+      "covers": [],
+      "scenes": ["scene.kitchen_bright"],
+      "media_players": ["media_player.kitchen"],
+      "climate": "climate.kitchen",
+      "temperature_sensor": "sensor.kitchen_temperature"
+    },
+    {
+      "id": "hallway",
+      "name": "Hallway",
+      "floor_id": "ground",
+      "area_id": "hallway",
+      "icon": "mdi:stairs",
+      "lights": ["light.hallway"],
+      "covers": [],
+      "scenes": [],
+      "media_players": []
+    },
+    {
+      "id": "child_one_room",
+      "name": "Child one's room",
+      "floor_id": "first",
+      "area_id": "child_one_room",
+      "icon": "mdi:bed-single-outline",
+      "lights": ["light.child_one_room"],
+      "covers": ["cover.child_one_room"],
+      "scenes": ["scene.child_one_bedtime"],
+      "media_players": ["media_player.child_one_room"],
+      "climate": "climate.child_one_room"
+    },
+    {
+      "id": "child_two_room",
+      "name": "Child two's room",
+      "floor_id": "first",
+      "area_id": "child_two_room",
+      "icon": "mdi:bed-single-outline",
+      "lights": ["light.child_two_room"],
+      "covers": ["cover.child_two_room"],
+      "scenes": ["scene.child_two_bedtime"],
+      "media_players": ["media_player.child_two_room"],
+      "climate": "climate.child_two_room"
     }
   ],
   "media": {
@@ -104,6 +201,11 @@
         "entity_id": "media_player.living_room",
         "name": "Living room",
         "ma_entity_id": "media_player.living_room_music_assistant",
+        "can_be_grouped": true
+      },
+      {
+        "entity_id": "media_player.kitchen",
+        "name": "Kitchen",
         "can_be_grouped": true
       }
     ]
@@ -126,46 +228,32 @@
     ]
   },
   "football": {
-    "card_type": "custom:teamtracker-card",
-    "entities": [
-      {
-        "entity_id": "sensor.team_tracker",
-        "label": "Premier League"
-      }
-    ]
+    "provider": "fpl",
+    "spotlight_team_codes": ["TOT", "AVL"],
+    "index_entity": "sensor.family_dashboard_premier_league",
+    "gameweek_entity_prefix": "sensor.family_dashboard_premier_league_gw_",
+    "table_entity": "sensor.family_dashboard_premier_league_table"
   },
   "school": {
-    "entities": []
-  },
-  "entry": {
-    "primary_camera_id": "doorbell",
-    "cameras": [
+    "classroom_students": [
       {
-        "id": "doorbell",
-        "name": "Front doorbell",
-        "entity_id": "camera.example_doorbell",
-        "role": "doorbell",
-        "motion_entity": "binary_sensor.example_doorbell_motion",
-        "person_entity": "binary_sensor.example_doorbell_person",
-        "ringing_entity": "binary_sensor.example_doorbell_ringing",
-        "start_stream_entity": "button.example_doorbell_start_stream",
-        "stop_stream_entity": "button.example_doorbell_stop_stream"
+        "person_id": "child_one",
+        "assignments_entity": "sensor.family_dashboard_classroom_child_one"
       },
       {
-        "id": "driveway",
-        "name": "Driveway camera",
-        "entity_id": "camera.example_driveway",
-        "role": "driveway",
-        "motion_entity": "binary_sensor.example_driveway_motion",
-        "person_entity": "binary_sensor.example_driveway_person",
-        "start_stream_entity": "button.example_driveway_start_stream",
-        "stop_stream_entity": "button.example_driveway_stop_stream"
+        "person_id": "child_two",
+        "assignments_entity": "sensor.family_dashboard_classroom_child_two"
       }
     ],
-    "garage": {
-      "cover_entity": "cover.example_garage_door",
-      "camera_id": "driveway",
-      "motion_entity": "binary_sensor.example_garage_motion"
-    }
+    "calendar_entities": ["calendar.school"],
+    "scopay_calendar_entities": []
+  },
+  "location": {
+    "entities": [
+      "person.example_parent",
+      "person.example_child_one",
+      "person.example_child_two"
+    ],
+    "hours_to_show": 0
   }
 }

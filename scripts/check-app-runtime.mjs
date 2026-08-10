@@ -31,6 +31,9 @@ const requiredProfileRules = [
 for (const rule of requiredProfileRules) {
   if (!rule.test(appArmor)) failures.push(`AppArmor is missing required startup rule ${rule}`);
 }
+if (!/\/config\/www\/family-dashboard\/\*\*\s+rwk,/.test(appArmor)) {
+  failures.push("AppArmor is missing the dedicated Family Hub frontend write rule");
+}
 
 for (const runScript of [paths.managerRun, paths.tunnelRun]) {
   const [contents, metadata] = await Promise.all([readFile(runScript, "utf8"), stat(runScript)]);
@@ -55,6 +58,12 @@ for (const [source, version] of [
 
 if (!server.includes(`version: "${packageVersion}"`)) {
   failures.push(`server.mjs does not report release version ${packageVersion}`);
+}
+if (!dockerfile.includes("COPY app/frontend ./frontend")) {
+  failures.push("Dockerfile does not package the first-party Family Hub frontend");
+}
+if (!dockerfile.includes("COPY app/config ./config")) {
+  failures.push("Dockerfile does not package the schema-v4 runtime validator");
 }
 
 if (failures.length) {

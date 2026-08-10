@@ -34,4 +34,6 @@ profile family_dashboard_manager flags=(attach_disconnected,mediate_deleted) {
 
   /config/family-dashboard/ rw,
   /config/family-dashboard/** rwk,
+  /config/www/family-dashboard/ rw,
+  /config/www/family-dashboard/** rwk,
 }

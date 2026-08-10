@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" role="img" aria-labelledby="title desc">
+  <title id="title">Example first-floor plan</title>
+  <desc id="desc">A schematic example used only for automated dashboard previews.</desc>
+  <rect width="1000" height="600" fill="#d9dde5"/>
+  <g fill="#f5f6f8" stroke="#697080" stroke-width="8">
+    <path d="M35 30h440v500H35z"/>
+    <path d="M525 30h440v500H525z"/>
+  </g>
+  <g fill="#c8ced8">
+    <rect x="105" y="105" width="275" height="155" rx="22"/>
+    <rect x="620" y="105" width="275" height="155" rx="22"/>
+    <rect x="180" y="350" width="145" height="85" rx="12"/>
+    <rect x="675" y="350" width="145" height="85" rx="12"/>
+  </g>
+</svg>

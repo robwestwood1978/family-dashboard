@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { DashboardStore } from "../src/manager-store.mjs";
+import { DashboardStore, sha256 } from "../src/manager-store.mjs";
 import example from "../config/example.json" with { type: "json" };
 
 async function fixture() {
@@ -12,6 +12,7 @@ async function fixture() {
   const store = new DashboardStore({
     configDir: join(root, "config"),
     dataDir: join(root, "data"),
+    resourceDir: join(root, "www", "family-dashboard"),
     clock: () => new Date(Date.UTC(2026, 7, 7, 12, 0, tick++))
   });
   return { root, store };
@@ -22,7 +23,8 @@ test("validates without writing live files", async (context) => {
   context.after(() => rm(root, { recursive: true, force: true }));
   const prepared = store.validate(structuredClone(example));
   assert.match(prepared.config_hash, /^[a-f0-9]{64}$/);
-  assert.deepEqual(prepared.enabled_views, ["today", "calendar", "home", "music", "chores", "football"]);
+  assert.deepEqual(prepared.enabled_views, ["today", "calendar", "rooms", "family", "music", "football"]);
+  assert.equal(prepared.resource_url, "/local/family-dashboard/family-hub-card.js?v=0.4.0");
   assert.equal((await store.getStatus()).installed, false);
 });
 
@@ -40,9 +42,12 @@ test("requires explicit confirmation and the validated hash", async (context) =>
   );
 });
 
-test("deploys atomically, snapshots and rolls back", async (context) => {
+test("deploys the card atomically, preserves private assets, snapshots and rolls back", async (context) => {
   const { root, store } = await fixture();
   context.after(() => rm(root, { recursive: true, force: true }));
+  const privateAsset = join(root, "www", "family-dashboard", "assets", "private-house.svg");
+  await mkdir(join(root, "www", "family-dashboard", "assets"), { recursive: true });
+  await writeFile(privateAsset, "private floorplan", "utf8");
 
   const first = structuredClone(example);
   const firstPrepared = store.validate(first);
@@ -51,7 +56,12 @@ test("deploys atomically, snapshots and rolls back", async (context) => {
     confirm: true
   });
   assert.equal(firstDeployment.previous_config_hash, null);
-  assert.equal((await store.getStatus()).active_config_hash, firstPrepared.config_hash);
+  const firstStatus = await store.getStatus();
+  assert.equal(firstStatus.active_config_hash, firstPrepared.config_hash);
+  assert.equal(firstStatus.resource_installed, true);
+  assert.match(firstStatus.active_resource_hash, /^[a-f0-9]{64}$/);
+  assert.match(await readFile(join(root, "www", "family-dashboard", "family-hub-card.js"), "utf8"), /class FamilyHubCard/);
+  assert.equal(await readFile(privateAsset, "utf8"), "private floorplan");
 
   const second = structuredClone(example);
   second.product.title = "Updated Family Dashboard";
@@ -63,6 +73,7 @@ test("deploys atomically, snapshots and rolls back", async (context) => {
   assert.match(secondDeployment.rollback_snapshot, /^20260807T120001Z-[a-f0-9]{12}$/);
   assert.equal((await store.getStatus()).active_config_hash, secondPrepared.config_hash);
 
+  await writeFile(join(root, "www", "family-dashboard", "family-hub-card.js"), "test corruption", "utf8");
   const rollback = await store.rollback({
     snapshotId: secondDeployment.rollback_snapshot,
     expectedActiveHash: secondPrepared.config_hash,
@@ -71,6 +82,30 @@ test("deploys atomically, snapshots and rolls back", async (context) => {
   assert.equal(rollback.resulting_config_hash, firstPrepared.config_hash);
   const active = JSON.parse(await readFile(join(root, "config", "household.json"), "utf8"));
   assert.equal(active.product.title, "Family Dashboard");
+  assert.match(await readFile(join(root, "www", "family-dashboard", "family-hub-card.js"), "utf8"), /class FamilyHubCard/);
+  assert.equal(await readFile(privateAsset, "utf8"), "private floorplan");
+});
+
+test("restores a raw schema-v3 snapshot without trying to validate it as v4", async (context) => {
+  const { root, store } = await fixture();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await store.initialise();
+  const oldConfig = '{"schema_version":3,"product":{"title":"Previous release"}}\n';
+  const oldDashboard = "title: Previous release\nviews: []\n";
+  await writeFile(join(root, "config", "household.json"), oldConfig, "utf8");
+  await writeFile(join(root, "config", "dashboard.yaml"), oldDashboard, "utf8");
+
+  const prepared = store.validate(structuredClone(example));
+  const deployment = await store.deploy(example, { expectedConfigHash: prepared.config_hash, confirm: true });
+  assert.ok(deployment.rollback_snapshot);
+  const rollback = await store.rollback({
+    snapshotId: deployment.rollback_snapshot,
+    expectedActiveHash: prepared.config_hash,
+    confirm: true
+  });
+  assert.equal(rollback.resulting_config_hash, sha256(oldConfig));
+  assert.equal(await readFile(join(root, "config", "household.json"), "utf8"), oldConfig);
+  assert.equal(await readFile(join(root, "config", "dashboard.yaml"), "utf8"), oldDashboard);
 });
 
 test("rejects untrusted snapshot identifiers", async (context) => {
