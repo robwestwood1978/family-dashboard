@@ -7,6 +7,7 @@
 - Package and snapshot the first-party card through a fixed frontend allow-list while preserving household floorplan assets.
 - Restore raw hash-verified snapshots so the installed schema-v3 release remains a valid rollback target.
 - Keep Cameras & Entry disabled until separately qualified and add Chromium/WebKit tablet browser projects.
+- Upgrade the existing manager and tunnel in place; add a mandatory read-only first deployment plus hash-bound validation and transfer for exactly two inert private floorplan SVGs.
 
 ## 0.3.0
 

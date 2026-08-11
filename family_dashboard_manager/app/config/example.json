@@ -10,6 +10,7 @@
     "orientation": "landscape",
     "kiosk": true,
     "legacy_ios": true,
+    "read_only": false,
     "default_view": "today",
     "panel_path": "family-dashboard",
     "target_width": 1112,

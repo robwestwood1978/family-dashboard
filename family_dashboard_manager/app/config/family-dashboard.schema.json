@@ -42,6 +42,7 @@
         "orientation",
         "kiosk",
         "legacy_ios",
+        "read_only",
         "default_view",
         "panel_path",
         "target_width",
@@ -51,6 +52,7 @@
         "orientation": { "enum": ["landscape", "portrait"] },
         "kiosk": { "type": "boolean" },
         "legacy_ios": { "type": "boolean" },
+        "read_only": { "type": "boolean" },
         "default_view": {
           "enum": ["today", "calendar", "rooms", "family", "music", "football"]
         },

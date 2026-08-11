@@ -1,3 +1,3 @@
 # Family Dashboard Manager
 
-Experimental Home Assistant app for confirmation-bound Family Dashboard deployment and rollback. Version 0.4 packages a first-party tablet card, an interactive two-floor room-plan engine, explicit private family mapping, a cached all-matchweek Premier League provider with Tottenham and Aston Villa spotlights, and a read-only per-child Google Classroom authorization contract. Camera and garage controls remain disabled pending separate qualification. See [DOCS.md](./DOCS.md) for installation and security boundaries.
+Home Assistant app for confirmation-bound Family Dashboard deployment and hash-verified rollback. Version 0.4 upgrades the existing manager in place, accepts only two validated private floorplan SVGs and enforces a read-only first deployment. Camera, entry, location, Classroom and live device actions remain disabled during qualification. See [DOCS.md](./DOCS.md) for the upgrade and safety boundaries.

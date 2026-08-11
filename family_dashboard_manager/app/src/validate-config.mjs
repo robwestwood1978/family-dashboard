@@ -140,6 +140,7 @@ export function validateConfig(config) {
   }
   requireBoolean(display.kiosk, "config.display.kiosk");
   requireBoolean(display.legacy_ios, "config.display.legacy_ios");
+  requireBoolean(display.read_only, "config.display.read_only");
   requireString(display.panel_path, "config.display.panel_path");
   if (!PANEL_PATH.test(display.panel_path)) {
     fail("config.display.panel_path", "must be a lowercase dashboard path");

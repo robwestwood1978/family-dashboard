@@ -62,7 +62,7 @@ function fixtureStates() {
   return states;
 }
 
-async function mount(page) {
+async function mount(page, familyConfig = config) {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.route("**/local/family-dashboard/assets/**", async (route) => {
@@ -111,7 +111,7 @@ async function mount(page) {
         window.__serviceCalls.push({ domain, service, data });
       }
     };
-  }, { familyConfig: config, states: fixtureStates() });
+  }, { familyConfig, states: fixtureStates() });
   await page.waitForFunction(() => document.querySelector("family-hub-card")?.shadowRoot?.querySelector('[data-current-view="today"]'));
   return pageErrors;
 }
@@ -185,5 +185,44 @@ test("keeps the family map private and spotlights both requested clubs", async (
   await expect(card.locator(".spotlight-panel")).toContainText("Tottenham & Aston Villa");
   await expect(card.locator(".fixture.is-spotlight")).toHaveCount(2);
   await expect(card.locator(".spotlight-club")).toContainText(["Tottenham Hotspur", "Aston Villa"]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("enforces read-only mode at every interactive control boundary", async ({ page }) => {
+  const previewConfig = structuredClone(config);
+  previewConfig.display.read_only = true;
+  previewConfig.features.location_map = false;
+  previewConfig.location.entities = [];
+  for (const person of previewConfig.people) delete person.location_entity;
+  const pageErrors = await mount(page, previewConfig);
+  const card = page.locator("family-hub-card");
+
+  await expect(card.locator(".preview-pill")).toHaveText(/Read-only test/);
+  await expect(card.locator('[data-media-toggle="media_player.living_room"]')).toBeDisabled();
+
+  await card.locator('.nav-button[data-view="rooms"]').click();
+  await card.locator('[data-room="kitchen"]').click();
+  await expect(card.locator(".read-only-note")).toBeVisible();
+  await expect(card.locator('button[data-toggle="light.kitchen"]')).toBeDisabled();
+
+  await card.evaluate((element) => {
+    window.__moreInfoEvents = 0;
+    element.addEventListener("hass-more-info", () => { window.__moreInfoEvents += 1; });
+    const root = element.shadowRoot;
+    for (const control of root.querySelectorAll("[data-toggle], [data-scene], [data-media-toggle], [data-cover-action], [data-climate-adjust], [data-more-info]")) {
+      control.disabled = false;
+      control.click();
+    }
+  });
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  await expect.poll(() => page.evaluate(() => window.__moreInfoEvents)).toBe(0);
+
+  await card.locator('.nav-button[data-view="music"]').click();
+  await expect(card.locator(".read-only-music")).toContainText("full player is intentionally disabled");
+  await expect(card.locator("#music-card-slot")).toHaveCount(0);
+
+  await card.locator('.nav-button[data-view="family"]').click();
+  await expect(card.locator(".map-panel")).toContainText("Location sharing is disabled");
+  await expect(card.locator('[data-card-type="map"]')).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });

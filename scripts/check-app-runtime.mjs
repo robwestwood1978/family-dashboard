@@ -31,6 +31,9 @@ const requiredProfileRules = [
 for (const rule of requiredProfileRules) {
   if (!rule.test(appArmor)) failures.push(`AppArmor is missing required startup rule ${rule}`);
 }
+if (!/^profile family_dashboard_manager\b/m.test(appArmor)) {
+  failures.push("AppArmor profile does not match the existing manager app slug");
+}
 if (!/\/config\/www\/family-dashboard\/\*\*\s+rwk,/.test(appArmor)) {
   failures.push("AppArmor is missing the dedicated Family Hub frontend write rule");
 }
@@ -56,8 +59,23 @@ for (const [source, version] of [
   }
 }
 
-if (!server.includes(`version: "${packageVersion}"`)) {
+if (!server.includes(`const APP_VERSION = process.env.APP_VERSION || "${packageVersion}"`)) {
   failures.push(`server.mjs does not report release version ${packageVersion}`);
+}
+if (!dockerfile.includes("MANAGER_CONFIG_DIR=/config/family-dashboard")) {
+  failures.push("Dockerfile does not retain the existing manager configuration directory");
+}
+if (!dockerfile.includes("MANAGER_RESOURCE_DIR=/config/www/family-dashboard")) {
+  failures.push("Dockerfile does not retain the existing manager frontend directory");
+}
+if (!dockerfile.includes("MANAGER_REQUIRE_READ_ONLY=true")) {
+  failures.push("Dockerfile does not enforce the v0.4 read-only rollout boundary");
+}
+for (const label of ["io.hass.version", "io.hass.type", "io.hass.arch"]) {
+  if (!dockerfile.includes(label)) failures.push(`Dockerfile is missing required local-build label ${label}`);
+}
+if (!/^image:\s*ghcr\.io\/robwestwood1978\/family-dashboard-manager\s*$/m.test(config)) {
+  failures.push("config.yaml does not retain the existing published manager image identity");
 }
 if (!dockerfile.includes("COPY app/frontend ./frontend")) {
   failures.push("Dockerfile does not package the first-party Family Hub frontend");
