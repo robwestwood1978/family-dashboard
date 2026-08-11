@@ -1,3 +1,11 @@
+## 0.5.1
+
+- Replace the visible survey-plan layer with clean vector dollhouses built from the approved room geometry, including raised walls, floor finishes, furniture cues and the approved household room names.
+- Add an explicit floorplan asset revision so Home Assistant cannot reuse the prior cached SVG after a private asset update.
+- Replace the pale card-dominant treatment with dark translucent, page-specific surfaces while retaining strong calendar and chore contrast.
+- Restore the configured Mediocre Spotify/Sonos player as the Music view; the real card is visible but inert while the dashboard remains in read-only qualification.
+- Reduce the interactive room overlay to a subtle state glow so it no longer resembles a second plan drawn over the house.
+
 ## 0.5.0
 
 - Redesign the first-party tablet shell with a richer navy-to-coral backdrop, translucent surfaces and intentional Today, Music and Football states while retaining the existing dashboard, app and tunnel identities.

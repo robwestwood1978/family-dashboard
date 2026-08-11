@@ -14,7 +14,7 @@ function escapeXml(value) {
     .replaceAll("'", "&apos;");
 }
 
-function text(x, y, value, { size = 14, weight = 600, fill = "#202432", anchor = "start", opacity = 1, spacing = 0 } = {}) {
+function text(x, y, value, { size = 14, weight = 600, fill = "currentColor", anchor = "start", opacity = 1, spacing = 0 } = {}) {
   return `<text x="${x}" y="${y}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}" opacity="${opacity}" letter-spacing="${spacing}">${escapeXml(value)}</text>`;
 }
 
@@ -39,7 +39,7 @@ function frame(config, titleValue, subtitleValue, activeView) {
   const width = config.display.target_width;
   const height = config.display.target_height;
   const lines = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="title description">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" color="${config.theme.text}" role="img" aria-labelledby="title description">`,
     `<title id="title">${escapeXml(config.product.title)} — ${escapeXml(titleValue)} preview</title>`,
     `<desc id="description">First-party Family Hub layout sized for the 10.5-inch iPad Pro.</desc>`,
     '<style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}</style>',
@@ -150,29 +150,29 @@ export function renderControlsPreview(input) {
   config.floorplan.floors.forEach((entry, index) => {
     const x = 588 + index * 88;
     const active = entry.id === floor.id;
-    lines.push(rect(x, 128, 80, 34, 12, active ? config.theme.accent : "#EDF0F5"));
+    lines.push(rect(x, 128, 80, 34, 12, active ? config.theme.accent : "#151D32", { stroke: active ? config.theme.accent : "#FFFFFF", opacity: active ? 1 : 0.82 }));
     lines.push(text(x + 40, 150, entry.name.replace(" floor", ""), { size: 9, weight: 800, fill: active ? "#FFFFFF" : config.theme.muted, anchor: "middle" }));
   });
-  lines.push(rect(132, 195, 632, 548, 22, "#D8DDE6"));
-  lines.push(rect(156, 219, 584, 500, 8, "#F7F4EF", { stroke: "#B5BDC9" }));
+  lines.push(rect(132, 195, 632, 548, 22, "#11182B", { stroke: "#FFFFFF", opacity: 0.94 }));
+  lines.push(rect(156, 219, 584, 500, 8, "#1A233A", { stroke: "#75819A" }));
   lines.push(rect(254, 275, 300, 250, 100, "#F9D56E", { opacity: 0.22 }));
   floor.room_hotspots.forEach((hotspot) => {
     const room = config.rooms.find((entry) => entry.id === hotspot.room_id);
     if (!room) return;
     const selected = room.id === selectedRoom.id;
     const [cx, cy] = centroid(hotspot.points, 156, 219, 584, 500);
-    lines.push(`<polygon points="${scaledPoints(hotspot.points, 156, 219, 584, 500)}" fill="${selected ? config.theme.accent : "#FFFFFF"}" fill-opacity="${selected ? 0.22 : 0.14}" stroke="${selected ? config.theme.accent : "#6E7787"}" stroke-width="${selected ? 3 : 1.5}"/>`);
+    lines.push(`<polygon points="${scaledPoints(hotspot.points, 156, 219, 584, 500)}" fill="${selected ? config.theme.accent : "#FFFFFF"}" fill-opacity="${selected ? 0.16 : 0.035}" stroke="${selected ? config.theme.accent : "#6E7787"}" stroke-width="${selected ? 3 : 1.5}"/>`);
     lines.push(text(cx, cy - 2, room.name, { size: 13, weight: 820, anchor: "middle" }));
     lines.push(text(cx, cy + 18, room.lights.length ? `${selected ? 1 : 0}/${room.lights.length} lights · ${selected ? "20.4°" : "19.2°"}` : "Open room", { size: 8, weight: 650, fill: config.theme.muted, anchor: "middle" }));
   });
-  lines.push(rect(156, 694, 378, 28, 10, "#FFFFFF", { opacity: 0.82 }), text(345, 713, "Illustrative geometry — replace with the private house plan", { size: 8, weight: 750, fill: config.theme.muted, anchor: "middle" }));
+  lines.push(rect(156, 694, 378, 28, 10, "#11182B", { opacity: 0.9, stroke: "#FFFFFF" }), text(345, 713, "Illustrative geometry — replace with the private house plan", { size: 8, weight: 750, fill: config.theme.muted, anchor: "middle" }));
 
   panel(lines, 806, 100, 280, 690, config);
   lines.push(circle(844, 146, 24, config.theme.accent, { opacity: 0.12 }), text(844, 154, "⌂", { size: 20, weight: 800, fill: config.theme.accent, anchor: "middle" }), text(880, 135, "ROOM CONTROLS", { size: 9, weight: 800, fill: config.theme.muted, spacing: 1 }), text(880, 162, selectedRoom.name, { size: 21, weight: 820 }), text(830, 204, "1 light on · 20.4°", { size: 10, weight: 650, fill: config.theme.muted }));
-  lines.push(rect(830, 230, 232, 108, 18, "#FCEDE9"), text(850, 257, "TEMPERATURE", { size: 9, weight: 800, fill: config.theme.muted }), text(850, 304, "20.4°", { size: 32, weight: 830 }), text(962, 277, "−", { size: 20, weight: 800, fill: config.theme.accent, anchor: "middle" }), text(1030, 277, "+", { size: 20, weight: 800, fill: config.theme.accent, anchor: "middle" }));
-  lines.push(rect(830, 356, 232, 66, 17, "#FFF6DB", { stroke: "#F2B85C" }), circle(858, 389, 13, "#F2B85C"), text(887, 384, "Living room", { size: 12, weight: 800 }), text(887, 404, "72% · warm", { size: 9, weight: 650, fill: config.theme.muted }));
+  lines.push(rect(830, 230, 232, 108, 18, "#171F34", { stroke: "#FFFFFF", opacity: 0.92 }), text(850, 257, "TEMPERATURE", { size: 9, weight: 800, fill: config.theme.muted }), text(850, 304, "20.4°", { size: 32, weight: 830 }), text(962, 277, "−", { size: 20, weight: 800, fill: config.theme.accent, anchor: "middle" }), text(1030, 277, "+", { size: 20, weight: 800, fill: config.theme.accent, anchor: "middle" }));
+  lines.push(rect(830, 356, 232, 66, 17, "#2B2638", { stroke: "#F2B85C" }), circle(858, 389, 13, "#F2B85C"), text(887, 384, "Living room", { size: 12, weight: 800 }), text(887, 404, "72% · warm", { size: 9, weight: 650, fill: config.theme.muted }));
   lines.push(text(830, 461, "SCENES", { size: 9, weight: 800, fill: config.theme.muted, spacing: 1 }), rect(830, 478, 102, 42, 14, config.theme.accent, { opacity: 0.11 }), text(881, 504, "Relax", { size: 10, weight: 800, fill: config.theme.accent, anchor: "middle" }), rect(944, 478, 118, 42, 14, config.theme.accent, { opacity: 0.11 }), text(1003, 504, "Movie", { size: 10, weight: 800, fill: config.theme.accent, anchor: "middle" }));
-  lines.push(text(830, 563, "MUSIC", { size: 9, weight: 800, fill: config.theme.muted, spacing: 1 }), rect(830, 580, 232, 72, 17, "#F2F0FA"), circle(860, 616, 20, config.theme.accent), text(860, 623, "▶", { size: 13, weight: 800, fill: "#FFFFFF", anchor: "middle" }), text(892, 610, "Living room", { size: 12, weight: 800 }), text(892, 630, "Family favourites", { size: 9, weight: 650, fill: config.theme.muted }));
+  lines.push(text(830, 563, "MUSIC", { size: 9, weight: 800, fill: config.theme.muted, spacing: 1 }), rect(830, 580, 232, 72, 17, "#171F34", { stroke: "#FFFFFF", opacity: 0.92 }), circle(860, 616, 20, config.theme.accent), text(860, 623, "▶", { size: 13, weight: 800, fill: "#FFFFFF", anchor: "middle" }), text(892, 610, "Living room", { size: 12, weight: 800 }), text(892, 630, "Family favourites", { size: 9, weight: 650, fill: config.theme.muted }));
   lines.push(rect(830, 699, 232, 52, 16, config.theme.nav_background), text(946, 731, "LOW-RISK CONTROLS ONLY", { size: 9, weight: 800, fill: "#FFFFFF", anchor: "middle", spacing: 0.7 }), text(110, 818, "Synthetic preview · actual room geometry is never inferred", { size: 8, weight: 650, fill: "#FFFFFF", opacity: 0.46 }), "</svg>");
   return `${lines.join("\n")}\n`;
 }

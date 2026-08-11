@@ -43,6 +43,15 @@ test("accepts the existing manager's private asset root", () => {
   assert.equal(validateConfig(config).display.read_only, true);
 });
 
+test("accepts a cache-safe floorplan revision and rejects URL-shaped values", () => {
+  const config = structuredClone(example);
+  config.floorplan.floors[0].asset_revision = "v0.5.1";
+  assert.equal(validateConfig(config).floorplan.floors[0].asset_revision, "v0.5.1");
+
+  config.floorplan.floors[0].asset_revision = "v0.5.1?unsafe=true";
+  assert.throws(() => validateConfig(config), /asset_revision/);
+});
+
 test("rejects secret-bearing keys anywhere in config", () => {
   const config = structuredClone(example);
   config.media.api_token = "must-not-be-committed";

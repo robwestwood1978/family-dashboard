@@ -278,6 +278,12 @@ export function validateConfig(config) {
       fail(path, "must define base_image or vacuum_map_entity");
     }
     if (floor.base_image) validateLocalAsset(floor.base_image, `${path}.base_image`);
+    if (floor.asset_revision !== undefined) {
+      requireString(floor.asset_revision, `${path}.asset_revision`);
+      if (!/^[A-Za-z0-9._-]{1,32}$/.test(floor.asset_revision)) {
+        fail(`${path}.asset_revision`, "must be a short cache-safe revision");
+      }
+    }
     if (floor.vacuum_map_entity) validateVacuumMapCamera(floor.vacuum_map_entity, `${path}.vacuum_map_entity`);
     requireNumber(floor.aspect_ratio, `${path}.aspect_ratio`, 0.5, 4);
     if (floor.night_image) validateLocalAsset(floor.night_image, `${path}.night_image`);
