@@ -35,6 +35,7 @@ test("embeds the complete schema-v4 house, family, school and football contract"
     legacy_ios: true,
     orientation: "landscape",
     panel_path: "family-dashboard",
+    read_only: false,
     target_height: 834,
     target_width: 1112
   });

@@ -1,92 +1,100 @@
-# Family Dashboard Manager
+# Family Dashboard v0.4 Private Preview
 
-The manager owns the dedicated Family Dashboard configuration, generated YAML panel, first-party frontend card and bounded rollback snapshots. Version 0.4 targets a 10.5-inch iPad Pro in landscape (`1112×834` CSS pixels) and keeps `1024×768` as the fallback regression size.
+This canary app installs beside the existing Family Dashboard. It uses a distinct Home Assistant app slug, configuration directory, frontend directory, dashboard path and Lovelace resource URL. It does not replace or migrate the existing dashboard.
 
-## Before installation
+The preview is intentionally read-only. Room, scene, climate, cover, light and media controls are disabled; entity detail dialogs and the full media-player card are also withheld. Doorbell/security feeds, garage actions, location mapping, Google Classroom and vacuum controls remain disabled for this qualification phase.
 
-This release requires Home Assistant OS 2026.8.0 or newer. The v0.4 Family Hub uses:
+## Install the canary app
 
-- the bundled `custom:family-hub-card` for the shell, navigation, floorplan, room controls, family summaries and Premier League presentation;
-- native Home Assistant Calendar and Map cards;
-- Mediocre Multi Media Player Card when Music is enabled;
-- kiosk-mode when non-admin kiosk chrome is requested;
-- existing Home Assistant calendar, weather, person, light, climate, cover, scene, media-player and ChoreOps sensor entities selected in the private household configuration.
+This branch requires Home Assistant OS 2026.8.0 or newer.
 
-Doorbell/security camera feeds and garage actions are deliberately disabled in v0.4. A map-named vacuum camera may be used only as a read-only Rooms floorplan source; its image stays inside the authenticated Home Assistant frontend. Calendar presentation and Classroom assignment presentation are read-only. The card does not send household locations, vacuum-map imagery or Google credentials to its football source.
+1. Add this exact repository URL in **Settings → Apps → App store → Repositories**:
 
-## Install
+   ```text
+   https://github.com/robwestwood1978/family-dashboard#preview/v0.4.0-private-path
+   ```
 
-1. Add `https://github.com/robwestwood1978/family-dashboard` as a Home Assistant app repository.
-2. Install **Family Dashboard Manager**.
+2. Install **Family Dashboard v0.4 Preview Manager**. Its slug is `family_dashboard_preview`, so it is separate from the existing manager.
 3. Leave **Secure MCP Tunnel** disabled for the first start.
-4. Start the app and confirm its log reports that the manager is listening on its private loopback interface.
+4. Start the app and confirm its log says the manager is listening on `127.0.0.1:8099`.
 
-The app exposes no host port. Its MCP endpoint is reachable only inside its own container by the optional tunnel service.
+The app has no host port. If remote manager access is needed, create a separate Secure MCP Tunnel connection for this preview instance. Keep its API key only in Home Assistant app options; never copy an existing app's secret or put a key in household configuration.
 
-## One-time Home Assistant registration
+## Register the separate dashboard
 
-Keep Home Assistant in storage mode and add this one YAML dashboard entry to `configuration.yaml`:
+Keep Home Assistant in storage mode and add this second YAML dashboard entry to `configuration.yaml` without changing the existing `family-dashboard` entry:
 
 ```yaml
 lovelace:
   mode: storage
   dashboards:
-    family-dashboard:
+    family-dashboard-v040-preview:
       mode: yaml
-      title: Family Dashboard
-      icon: mdi:home-heart
+      title: Family Dashboard v0.4 Preview
+      icon: mdi:home-search-outline
       show_in_sidebar: true
-      filename: family-dashboard/dashboard.yaml
+      filename: family-dashboard-v040-preview/dashboard.yaml
 ```
 
-Because Lovelace resources are stored by Home Assistant, register this JavaScript module once in **Settings → Dashboards → Resources**:
+Restart Home Assistant after changing `configuration.yaml`. Then add this JavaScript module in **Settings → Dashboards → Resources**:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.4.0
+/local/family-dashboard-v040-preview/family-hub-card.js?v=0.4.0
 ```
 
-Select **JavaScript module** as the resource type. Administrators retain normal Home Assistant chrome as the parent escape; kiosk-mode applies only to the non-admin tablet profile.
+Select **JavaScript module** as the resource type. The existing `/local/family-dashboard/...` resource remains unchanged.
 
-## Private schema-v4 configuration
+## Deploy the private preview package
 
-The private `household.json` supplies only non-secret mappings and presentation choices. In particular:
+The manager accepts only two private SVG filenames:
 
-- each floor supplies either `base_image`, pointing to a private plan below `/config/www/family-dashboard/assets/`, or an explicitly approved `vacuum_map_entity` such as `camera.robovac_map`; when both are present, the private image is the fallback;
-- the vacuum-map image is read through Home Assistant's authenticated `entity_picture` URL and is never copied into Git, manager storage, snapshots, logs or ChatGPT;
-- each floor declares the source plan's natural `aspect_ratio`; every room has a polygon hotspot expressed as 0–100 percentage coordinates and a matching `floor_id`;
-- optional light overlays use transparent images whose opacity follows live light brightness;
-- `location.entities` accepts only explicitly opted-in `person.*` entities;
-- the football contract publishes all 38 Premier League matchweeks and marks `TOT` and `AVL` as spotlight clubs;
-- each child-owned Classroom authorization eventually publishes a read-only assignment sensor named in `school.classroom_students`.
+- `ground-floor.svg`
+- `first-floor.svg`
 
-The tracked example floorplans are synthetic. Do not deploy them as a representation of the real house. For the Eufy Clean X10 Pro Omni, use the integration's map camera as the private source and calibrate the percentage-coordinate room hotspots against that image. A separate private static plan remains supported for floors the vacuum has not mapped.
+Each file must be a complete, inert SVG no larger than 512 KiB. Active content, external references and unapproved filenames are rejected. The workflow is deliberately confirmation-bound:
 
-Run `validate_household_config` before deployment. Validation is read-only and returns the exact configuration hash required for a separately confirmed deploy.
+1. Call `validate_floorplan_assets` with both files.
+2. Check the returned filenames, sizes, individual SHA-256 hashes and `asset_set_hash`.
+3. Call `deploy_floorplan_assets` with `confirm=true` and that exact asset-set hash.
+4. Call `validate_household_config` with a schema-v4 configuration that sets:
 
-## Google Classroom authorization proof
+   ```json
+   {
+     "display": {
+       "panel_path": "family-dashboard-v040-preview",
+       "read_only": true
+     }
+   }
+   ```
 
-Call `get_classroom_authorization_plan` to inspect the proof contract. Each child signs in through Google's own consent screen using their own Classroom login. The design requests only these read-only scopes:
+5. Confirm its exact configuration hash with `deploy_household_config`.
+6. Call `reload_dashboard` to verify the generated files and return the bounded resource-refresh instruction.
 
-- `classroom.courses.readonly`
-- `classroom.coursework.me.readonly`
-- `classroom.student-submissions.me.readonly`
+The private plans are written only below `/config/www/family-dashboard-v040-preview/private/`. The configuration and generated dashboard are written only below `/config/family-dashboard-v040-preview/`.
 
-No child password is collected. OAuth codes and tokens must never be written to `household.json`, generated YAML, snapshots or logs. The live adapter stays disabled until this per-child authorization flow has been proven separately.
+## Qualification checks
 
-## Football provider
+Before approving live controls, verify all of the following on the target tablet:
 
-The browser does not call Fantasy Premier League directly. The manager fetches the public FPL bootstrap and fixtures feeds server-side, normalises fixtures/results/scorers and a calculated table, then publishes bounded Home Assistant sensor attributes. A last-good cache is stored in the app's private `/data` directory. If the source is temporarily unavailable, the dashboard retains cached data instead of failing the card.
+- both the existing dashboard and the v0.4 preview remain available;
+- the stock Home Assistant Overview remains available to administrators;
+- the preview shows a **Read-only preview** badge;
+- Today, Calendar, Rooms, Family, Music and Football render without horizontal overflow at `1112×834` and `1024×768` landscape sizes;
+- both private floors and all approved room hotspots align correctly;
+- forced taps on light, scene, climate, cover and media controls produce no Home Assistant service calls;
+- Music shows the static preview summary rather than mounting the full player;
+- no camera, entry, location or Classroom surface is enabled.
 
-## Secure MCP Tunnel
-
-The tunnel is optional and disabled by default. Its runtime key is stored only in Home Assistant app options and passed to `tunnel-client` through its process environment. It is never accepted in household configuration, written to Git, returned by a manager tool or printed by the start script.
+Live device actions require a separate approval and release change. Do not clear `display.read_only` during this private preview.
 
 ## Safety boundary
 
 - Validation never writes live files.
-- Deployment requires `confirm=true` plus the exact validated hash.
-- The manager writes only `/config/family-dashboard`, its fixed frontend allow-list under `/config/www/family-dashboard`, and its private `/data` directory.
-- Unknown household floorplan assets are preserved.
-- Rollback verifies raw snapshot hashes and can restore the already-installed schema-v3 release without trying to reinterpret it as schema v4.
-- Inventory excludes cameras, people, trackers, states, history, addresses, credentials and arbitrary attributes. An explicitly configured vacuum map is rendered only by the authenticated Home Assistant frontend and is never returned by manager tools.
+- Asset and configuration deployment each require `confirm=true` plus the exact hash from the corresponding validation call.
+- The canary writes only its isolated configuration and frontend directories plus its private `/data` directory.
+- The existing v0.3 paths are absent from the canary AppArmor write policy.
+- The public branch contains no household floorplans, names, entity mappings, credentials or location data.
+- Inventory excludes cameras, people, trackers, states, history, addresses, credentials and arbitrary attributes.
 - The manager cannot run arbitrary commands, read arbitrary files or call arbitrary Home Assistant services.
+
+Rollback snapshots are local to the preview manager and cannot overwrite the existing dashboard.

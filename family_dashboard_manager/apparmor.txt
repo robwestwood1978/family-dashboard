@@ -1,6 +1,6 @@
 #include <tunables/global>
 
-profile family_dashboard_manager flags=(attach_disconnected,mediate_deleted) {
+profile family_dashboard_preview flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 
   network inet stream,
@@ -32,8 +32,8 @@ profile family_dashboard_manager flags=(attach_disconnected,mediate_deleted) {
   /tmp/{,**} rwk,
   /data/{,**} rwk,
 
-  /config/family-dashboard/ rw,
-  /config/family-dashboard/** rwk,
-  /config/www/family-dashboard/ rw,
-  /config/www/family-dashboard/** rwk,
+  /config/family-dashboard-v040-preview/ rw,
+  /config/family-dashboard-v040-preview/** rwk,
+  /config/www/family-dashboard-v040-preview/ rw,
+  /config/www/family-dashboard-v040-preview/** rwk,
 }

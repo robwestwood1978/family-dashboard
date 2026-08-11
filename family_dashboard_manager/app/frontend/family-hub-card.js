@@ -30,6 +30,16 @@ export function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => htmlEscapeMap[character]);
 }
 
+export function isControlAction(dataset = {}) {
+  return Boolean(
+    dataset.toggle
+    || dataset.scene
+    || dataset.mediaToggle
+    || dataset.coverAction
+    || dataset.climateAdjust
+  );
+}
+
 function safeNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -327,10 +337,13 @@ export class FamilyHubCard extends HTMLElementBase {
           <p class="eyebrow">${escapeHtml(date)}</p>
           <h1>${escapeHtml(currentDefinition.label)}</h1>
         </div>
-        <button class="weather-pill" type="button" data-more-info="${escapeHtml(this._config.weather.entity_id)}">
-          <ha-icon icon="mdi:weather-partly-cloudy" aria-hidden="true"></ha-icon>
-          <span>${escapeHtml(weatherText)}</span>
-        </button>
+        <div class="header-actions">
+          ${this._config.display.read_only ? '<span class="preview-pill"><ha-icon icon="mdi:eye-outline" aria-hidden="true"></ha-icon>Read-only preview</span>' : ""}
+          <button class="weather-pill" type="button" data-more-info="${escapeHtml(this._config.weather.entity_id)}" ${this._config.display.read_only ? 'aria-disabled="true"' : ""}>
+            <ha-icon icon="mdi:weather-partly-cloudy" aria-hidden="true"></ha-icon>
+            <span>${escapeHtml(weatherText)}</span>
+          </button>
+        </div>
       </header>
     `;
   }
@@ -397,7 +410,7 @@ export class FamilyHubCard extends HTMLElementBase {
             <div class="now-playing">
               <div class="artwork">${playing.state.attributes.entity_picture ? `<img src="${escapeHtml(playing.state.attributes.entity_picture)}" alt="">` : '<ha-icon icon="mdi:music-note" aria-hidden="true"></ha-icon>'}</div>
               <div><h2>${escapeHtml(playing.state.attributes.media_title || "Music")}</h2><p>${escapeHtml(playing.state.attributes.media_artist || playing.player.name)}</p></div>
-              <button type="button" class="icon-action" data-media-toggle="${escapeHtml(playing.player.entity_id)}" aria-label="Play or pause"><ha-icon icon="${playing.state.state === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon></button>
+              <button type="button" class="icon-action" data-media-toggle="${escapeHtml(playing.player.entity_id)}" aria-label="Play or pause" ${this._config.display.read_only ? 'disabled aria-disabled="true"' : ""}><ha-icon icon="${playing.state.state === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon></button>
             </div>
           ` : `
             <h2>The house is quiet</h2><p class="supporting">Choose a room and start Spotify from Music.</p>
@@ -448,7 +461,7 @@ export class FamilyHubCard extends HTMLElementBase {
       <section class="rooms-layout">
         <article class="surface floorplan-panel">
           <div class="section-heading floorplan-heading">
-            <div><p class="eyebrow">Interactive house</p><h2>Tap a room to control it</h2></div>
+            <div><p class="eyebrow">Interactive house</p><h2>${this._config.display.read_only ? "Tap a room to explore it" : "Tap a room to control it"}</h2></div>
             <div class="segments" role="group" aria-label="Choose floor">${floorButtons}</div>
           </div>
           ${this._renderFloorplan(floor, selectedRoom)}
@@ -503,15 +516,17 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!room) return '<p class="empty-state">Choose a room.</p>';
     const states = this._hass?.states || {};
     const summary = deriveRoomState(room, states, this._config.theme.accent);
+    const readOnly = this._config.display.read_only === true;
+    const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
     const lights = room.lights.map((entityId) => {
       const state = states[entityId];
       const isOn = state?.state === "on";
       return `
         <div class="control-row">
-          <button type="button" class="control-main ${isOn ? "is-on" : ""}" data-toggle="${escapeHtml(entityId)}">
+          <button type="button" class="control-main ${isOn ? "is-on" : ""}" data-toggle="${escapeHtml(entityId)}"${disabled}>
             <ha-icon icon="${ICONS.light}" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(entityName(state, entityId.split(".")[1]))}</strong><small>${isOn ? `${Math.round(safeNumber(state.attributes?.brightness, 255) / 2.55)}%` : titleCase(state?.state || "unavailable")}</small></span>
           </button>
-          <button type="button" class="icon-action" data-more-info="${escapeHtml(entityId)}" aria-label="Open light details"><ha-icon icon="mdi:tune"></ha-icon></button>
+          <button type="button" class="icon-action" data-more-info="${escapeHtml(entityId)}" aria-label="Open light details"${disabled}><ha-icon icon="mdi:tune"></ha-icon></button>
         </div>
       `;
     }).join("");
@@ -520,8 +535,8 @@ export class FamilyHubCard extends HTMLElementBase {
       <div class="climate-control">
         <div><span>Temperature</span><strong>${formatTemperature(summary.temperature)}</strong><small>Target ${formatTemperature(summary.targetTemperature)}</small></div>
         <div class="stepper">
-          <button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower target temperature">−</button>
-          <button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Raise target temperature">+</button>
+          <button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower target temperature"${disabled}>−</button>
+          <button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Raise target temperature"${disabled}>+</button>
         </div>
       </div>
     ` : "";
@@ -529,23 +544,24 @@ export class FamilyHubCard extends HTMLElementBase {
       const state = states[entityId];
       return `
         <div class="cover-control"><span><ha-icon icon="${ICONS.cover}"></ha-icon><strong>${escapeHtml(entityName(state, "Blind"))}</strong><small>${escapeHtml(titleCase(state?.state || "unavailable"))}</small></span><div>
-          <button type="button" data-cover-action="open_cover" data-entity="${escapeHtml(entityId)}" aria-label="Open"><ha-icon icon="mdi:arrow-up"></ha-icon></button>
-          <button type="button" data-cover-action="stop_cover" data-entity="${escapeHtml(entityId)}" aria-label="Stop"><ha-icon icon="mdi:stop"></ha-icon></button>
-          <button type="button" data-cover-action="close_cover" data-entity="${escapeHtml(entityId)}" aria-label="Close"><ha-icon icon="mdi:arrow-down"></ha-icon></button>
+          <button type="button" data-cover-action="open_cover" data-entity="${escapeHtml(entityId)}" aria-label="Open"${disabled}><ha-icon icon="mdi:arrow-up"></ha-icon></button>
+          <button type="button" data-cover-action="stop_cover" data-entity="${escapeHtml(entityId)}" aria-label="Stop"${disabled}><ha-icon icon="mdi:stop"></ha-icon></button>
+          <button type="button" data-cover-action="close_cover" data-entity="${escapeHtml(entityId)}" aria-label="Close"${disabled}><ha-icon icon="mdi:arrow-down"></ha-icon></button>
         </div></div>
       `;
     }).join("");
     const scenes = room.scenes.map((entityId) => `
-      <button type="button" class="scene-button" data-scene="${escapeHtml(entityId)}"><ha-icon icon="${ICONS.scene}"></ha-icon>${escapeHtml(entityName(states[entityId], titleCase(entityId.split(".")[1])))}</button>
+      <button type="button" class="scene-button" data-scene="${escapeHtml(entityId)}"${disabled}><ha-icon icon="${ICONS.scene}"></ha-icon>${escapeHtml(entityName(states[entityId], titleCase(entityId.split(".")[1])))}</button>
     `).join("");
     const media = room.media_players.map((entityId) => {
       const state = states[entityId];
       return `
-        <button type="button" class="media-room-control" data-media-toggle="${escapeHtml(entityId)}"><ha-icon icon="${state?.state === "playing" ? "mdi:pause-circle" : "mdi:play-circle"}"></ha-icon><span><strong>${escapeHtml(entityName(state, "Speaker"))}</strong><small>${escapeHtml(state?.attributes?.media_title || titleCase(state?.state || "idle"))}</small></span></button>
+        <button type="button" class="media-room-control" data-media-toggle="${escapeHtml(entityId)}"${disabled}><ha-icon icon="${state?.state === "playing" ? "mdi:pause-circle" : "mdi:play-circle"}"></ha-icon><span><strong>${escapeHtml(entityName(state, "Speaker"))}</strong><small>${escapeHtml(state?.attributes?.media_title || titleCase(state?.state || "idle"))}</small></span></button>
       `;
     }).join("");
     return `
-      <div class="room-title"><span class="room-icon"><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><p class="eyebrow">Room controls</p><h2>${escapeHtml(room.name)}</h2><p>${summary.lightsOn} light${summary.lightsOn === 1 ? "" : "s"} on${Number.isFinite(summary.temperature) ? ` · ${formatTemperature(summary.temperature)}` : ""}</p></div></div>
+      <div class="room-title"><span class="room-icon"><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><p class="eyebrow">${readOnly ? "Read-only room" : "Room controls"}</p><h2>${escapeHtml(room.name)}</h2><p>${summary.lightsOn} light${summary.lightsOn === 1 ? "" : "s"} on${Number.isFinite(summary.temperature) ? ` · ${formatTemperature(summary.temperature)}` : ""}</p></div></div>
+      ${readOnly ? '<p class="read-only-note"><ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon>Controls are disabled while this preview is being checked.</p>' : ""}
       <div class="room-control-list">${climateControl}${lights}${covers}</div>
       ${scenes ? `<div class="scene-list"><p class="eyebrow">Scenes</p>${scenes}</div>` : ""}
       ${media ? `<div class="room-media"><p class="eyebrow">Music</p>${media}</div>` : ""}
@@ -554,11 +570,12 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderFamily() {
+    const locationEnabled = this._config.features.location_map;
     return `
       <section class="family-layout">
         <article class="surface map-panel">
-          <div class="section-heading"><div><p class="eyebrow">Family map</p><h2>Presence & location</h2></div><span>Private to Home Assistant</span></div>
-          ${this._config.features.location_map ? '<div id="map-card-slot" class="child-card-slot map-slot"></div>' : '<p class="empty-state">The family location map is disabled.</p>'}
+          <div class="section-heading"><div><p class="eyebrow">${locationEnabled ? "Family map" : "Family overview"}</p><h2>${locationEnabled ? "Presence & location" : "Private family summary"}</h2></div><span>${locationEnabled ? "Private to Home Assistant" : "Location sharing off"}</span></div>
+          ${locationEnabled ? '<div id="map-card-slot" class="child-card-slot map-slot"></div>' : '<p class="empty-state">Location sharing is disabled for this preview.</p>'}
         </article>
         <aside class="family-sidebar">
           ${this._config.people.filter((person) => person.role === "child").map((person) => this._renderFamilyPerson(person)).join("")}
@@ -575,9 +592,12 @@ export class FamilyHubCard extends HTMLElementBase {
     const points = chore ? states[chore.points_entity]?.state : "0";
     const due = chore ? safeNumber(states[chore.chores_entity]?.attributes?.chore_stat_current_due_today, 0) : 0;
     const nextAssignment = [...assignments].sort((a, b) => new Date(a.due_at || 0) - new Date(b.due_at || 0))[0];
+    const presence = this._config.features.location_map && person.location_entity
+      ? titleCase(states[person.location_entity]?.state || "Location unavailable")
+      : "Family member";
     return `
       <article class="surface family-person" style="--person-colour:${escapeHtml(person.colour)}">
-        <div class="family-person-heading"><span>${escapeHtml(person.name.slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person.name)}</p><h2>${escapeHtml(titleCase(states[person.location_entity]?.state || "Location unavailable"))}</h2></div></div>
+        <div class="family-person-heading"><span>${escapeHtml(person.name.slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person.name)}</p><h2>${escapeHtml(presence)}</h2></div></div>
         <div class="family-facts"><span><strong>${escapeHtml(points || "0")}</strong> chore points</span><span><strong>${due}</strong> due today</span><span><strong>${assignments.length}</strong> assignments</span></div>
         ${nextAssignment ? `<div class="assignment"><ha-icon icon="${ICONS.school}"></ha-icon><div><strong>${escapeHtml(nextAssignment.title || "Assignment")}</strong><small>${escapeHtml(nextAssignment.course || "Google Classroom")} · ${escapeHtml(formatDay(nextAssignment.due_at, this._config.product.locale, this._config.product.timezone))}</small></div></div>` : `<p class="empty-state compact">Classroom assignments will appear after read-only authorization.</p>`}
       </article>
@@ -585,6 +605,14 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderMusic() {
+    if (this._config.display.read_only) {
+      return `
+        <section class="single-surface surface read-only-music">
+          <div><p class="eyebrow">Spotify & Sonos</p><h2>Music is connected</h2><p class="supporting">The full player is intentionally disabled in this read-only preview. ${this._config.media.players.length} mapped rooms will be available after live approval.</p></div>
+          <ha-icon icon="mdi:music-circle-outline" aria-hidden="true"></ha-icon>
+        </section>
+      `;
+    }
     return `
       <section class="single-surface surface embedded-view music-view">
         <div class="section-heading"><div><p class="eyebrow">Spotify & Sonos</p><h2>Browse, group and play</h2></div><span>${this._config.media.players.length} rooms</span></div>
@@ -723,7 +751,7 @@ export class FamilyHubCard extends HTMLElementBase {
         entities: this._config.location.entities
       }, "map-card-slot");
     }
-    if (this._view === "music") {
+    if (this._view === "music" && !this._config.display.read_only) {
       this._ensureChildCard("music", {
         type: this._config.media.card_type,
         size: "large",
@@ -801,6 +829,7 @@ export class FamilyHubCard extends HTMLElementBase {
       this._scheduleRender(true);
       return;
     }
+    if (this._config.display.read_only && (isControlAction(target.dataset) || target.dataset.moreInfo)) return;
     if (target.dataset.moreInfo) {
       this._showMoreInfo(target.dataset.moreInfo);
       return;
@@ -842,6 +871,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _showMoreInfo(entityId) {
+    if (this._config.display.read_only) return;
     const event = new CustomEvent("hass-more-info", {
       bubbles: true,
       composed: true,
@@ -870,6 +900,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .topbar h1 { margin:2px 0 0; font-size:30px; line-height:1; font-weight:700; }
       .eyebrow { margin:0; font-size:10px; line-height:1.2; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--hub-muted); }
       .topbar .eyebrow { color:rgba(255,255,255,.72); }
+      .header-actions { display:flex; align-items:center; gap:9px; }
+      .preview-pill { min-height:36px; padding:0 12px; border:1px solid rgba(255,255,255,.34); border-radius:14px; display:flex; align-items:center; gap:7px; background:rgba(255,255,255,.13); color:#fff; font-size:11px; font-weight:700; }
+      .preview-pill ha-icon { --mdc-icon-size:18px; }
       .weather-pill { min-height:48px; padding:0 16px; border:1px solid rgba(255,255,255,.28); border-radius:18px; background:rgba(255,255,255,.14); color:#fff; display:flex; align-items:center; gap:9px; cursor:pointer; }
       .view { min-height:0; min-width:0; }
       .surface { background:color-mix(in srgb,var(--hub-surface) 94%,transparent); border:1px solid rgba(255,255,255,.42); border-radius:var(--hub-radius); box-shadow:0 14px 32px rgba(18,24,43,.18); }
@@ -932,6 +965,12 @@ export class FamilyHubCard extends HTMLElementBase {
       .room-hotspot.has-light polygon { fill:color-mix(in srgb,var(--room-colour) 18%,transparent); filter:drop-shadow(0 0 5px var(--room-colour)); }
       .room-hotspot.is-selected polygon,.room-hotspot:focus polygon { fill:color-mix(in srgb,var(--hub-accent) 20%,transparent); stroke:var(--hub-accent); stroke-width:1; }
       .room-detail { padding:20px; min-height:0; overflow:auto; }
+      .read-only-note { display:flex; align-items:center; gap:7px; margin:14px 0 0; padding:10px 12px; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); color:var(--hub-muted); font-size:11px; }
+      .read-only-note ha-icon { --mdc-icon-size:17px; color:var(--hub-accent); }
+      .read-only-music { display:grid; place-items:center; grid-template-columns:minmax(0,1fr) 130px; padding:42px; }
+      .read-only-music h2 { margin:7px 0 0; font-size:30px; }
+      .read-only-music > ha-icon { --mdc-icon-size:112px; color:color-mix(in srgb,var(--hub-accent) 58%,transparent); }
+      button:disabled { cursor:not-allowed; opacity:.58; }
       .room-title { display:flex; gap:12px; align-items:center; }
       .room-icon { width:46px; height:46px; border-radius:15px; display:grid; place-items:center; background:color-mix(in srgb,var(--hub-accent) 12%,var(--hub-surface)); color:var(--hub-accent); }
       .room-title h2 { margin:3px 0 0; font-size:22px; }

@@ -1,9 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveRoomState, escapeHtml, floorplanImageSource, normaliseFixtureStatus } from "../frontend/family-hub-card.js";
+import { deriveRoomState, escapeHtml, floorplanImageSource, isControlAction, normaliseFixtureStatus } from "../frontend/family-hub-card.js";
 
 test("escapes state-derived text before rendering it into the card", () => {
   assert.equal(escapeHtml('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+});
+
+test("identifies every Home Assistant write action blocked by read-only preview mode", () => {
+  for (const dataset of [
+    { toggle: "light.example" },
+    { scene: "scene.example" },
+    { mediaToggle: "media_player.example" },
+    { coverAction: "open_cover" },
+    { climateAdjust: "0.5" }
+  ]) assert.equal(isControlAction(dataset), true);
+  assert.equal(isControlAction({ view: "rooms" }), false);
+  assert.equal(isControlAction({ floor: "first" }), false);
 });
 
 test("derives one bounded room summary from Home Assistant state", () => {

@@ -42,6 +42,7 @@
         "orientation",
         "kiosk",
         "legacy_ios",
+        "read_only",
         "default_view",
         "panel_path",
         "target_width",
@@ -51,6 +52,7 @@
         "orientation": { "enum": ["landscape", "portrait"] },
         "kiosk": { "type": "boolean" },
         "legacy_ios": { "type": "boolean" },
+        "read_only": { "type": "boolean" },
         "default_view": {
           "enum": ["today", "calendar", "rooms", "family", "music", "football"]
         },
@@ -458,7 +460,7 @@
     "colour": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
     "localAssetUrl": {
       "type": "string",
-      "pattern": "^/local/family-dashboard/[A-Za-z0-9._/-]+$"
+      "pattern": "^/local/(family-dashboard|family-dashboard-v040-preview)/[A-Za-z0-9._/-]+$"
     },
     "point": {
       "type": "array",

@@ -28,6 +28,91 @@ test("validates without writing live files", async (context) => {
   assert.equal((await store.getStatus()).installed, false);
 });
 
+test("canary mode rejects every configuration that is not read-only", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "family-dashboard-preview-manager-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const store = new DashboardStore({
+    configDir: join(root, "config"),
+    dataDir: join(root, "data"),
+    resourceDir: join(root, "www", "family-dashboard-v040-preview"),
+    publicResourceBase: "/local/family-dashboard-v040-preview",
+    requireReadOnly: true
+  });
+  assert.throws(() => store.validate(structuredClone(example)), /requires config\.display\.read_only/);
+  const candidate = structuredClone(example);
+  candidate.display.read_only = true;
+  assert.match(store.validate(candidate).config_hash, /^[a-f0-9]{64}$/);
+  assert.equal((await store.getStatus()).read_only_required, true);
+});
+
+test("validates and deploys only the two inert private floorplan SVGs", async (context) => {
+  const { root } = await fixture();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const store = new DashboardStore({
+    configDir: join(root, "config"),
+    dataDir: join(root, "data"),
+    resourceDir: join(root, "www", "family-dashboard-v040-preview"),
+    publicResourceBase: "/local/family-dashboard-v040-preview"
+  });
+  const assets = [
+    { filename: "ground-floor.svg", content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10H0z"/></svg>' },
+    { filename: "first-floor.svg", content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><image href="data:image/png;base64,aGVsbG8=" width="10" height="10"/></svg>' }
+  ];
+  const validation = store.validateFloorplanAssets(assets);
+  assert.match(validation.asset_set_hash, /^[a-f0-9]{64}$/);
+  assert.equal(validation.assets[0].url, "/local/family-dashboard-v040-preview/private/ground-floor.svg");
+  await assert.rejects(
+    store.deployFloorplanAssets(assets, { expectedAssetSetHash: validation.asset_set_hash, confirm: false }),
+    /confirm must be true/
+  );
+  const deployment = await store.deployFloorplanAssets(assets, {
+    expectedAssetSetHash: validation.asset_set_hash,
+    confirm: true
+  });
+  assert.equal(deployment.assets.length, 2);
+  assert.match(await readFile(join(root, "www", "family-dashboard-v040-preview", "private", "ground-floor.svg"), "utf8"), /^<svg/);
+  assert.equal((await store.getStatus()).private_assets["first-floor.svg"].installed, true);
+});
+
+test("rejects active, external and unapproved floorplan content", async (context) => {
+  const { root, store } = await fixture();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const safe = { filename: "first-floor.svg", content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h1v1z"/></svg>' };
+  assert.throws(() => store.validateFloorplanAssets([
+    { filename: "ground-floor.svg", content: '<svg viewBox="0 0 10 10"><script>alert(1)</script></svg>' },
+    safe
+  ]), /active or unsupported/);
+  assert.throws(() => store.validateFloorplanAssets([
+    { filename: "ground-floor.svg", content: '<svg viewBox="0 0 10 10"><image href="https://example.com/plan.png"/></svg>' },
+    safe
+  ]), /external SVG reference/);
+  assert.throws(() => store.validateFloorplanAssets([
+    { filename: "upstairs.svg", content: safe.content },
+    safe
+  ]), /filename is not allowed/);
+});
+
+test("refuses a private preview config until its referenced floorplans exist", async (context) => {
+  const { root } = await fixture();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const store = new DashboardStore({
+    configDir: join(root, "config"),
+    dataDir: join(root, "data"),
+    resourceDir: join(root, "www", "family-dashboard-v040-preview"),
+    publicResourceBase: "/local/family-dashboard-v040-preview"
+  });
+  const candidate = structuredClone(example);
+  candidate.display.read_only = true;
+  candidate.display.panel_path = "family-dashboard-v040-preview";
+  candidate.floorplan.floors[0].base_image = "/local/family-dashboard-v040-preview/private/ground-floor.svg";
+  candidate.floorplan.floors[1].base_image = "/local/family-dashboard-v040-preview/private/first-floor.svg";
+  const prepared = store.validate(candidate);
+  await assert.rejects(
+    store.deploy(candidate, { expectedConfigHash: prepared.config_hash, confirm: true }),
+    /private floorplan asset is not installed/
+  );
+});
+
 test("requires explicit confirmation and the validated hash", async (context) => {
   const { root, store } = await fixture();
   context.after(() => rm(root, { recursive: true, force: true }));

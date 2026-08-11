@@ -8,6 +8,11 @@ import { DashboardStore } from "./manager-store.mjs";
 import { getSanitisedHomeAssistantInventory } from "./ha-client.mjs";
 
 const CONFIG_SCHEMA = z.record(z.string(), z.unknown());
+const APP_VERSION = process.env.APP_VERSION || "0.4.0";
+const FLOORPLAN_ASSET_SCHEMA = z.object({
+  filename: z.enum(["ground-floor.svg", "first-floor.svg"]),
+  content: z.string().min(1).max(600_000)
+});
 
 function result(payload) {
   return {
@@ -31,11 +36,11 @@ export function createFamilyDashboardMcpServer({
   inventory = getSanitisedHomeAssistantInventory,
   reload = async () => ({
     performed: false,
-    resource_url: "/local/family-dashboard/family-hub-card.js?v=0.4.0",
+    resource_url: store.getResourceUrl(),
     reason: "Home Assistant uses storage-mode Lovelace resources. Register or refresh this JavaScript module in Settings > Dashboards > Resources, then reload the tablet once."
   })
 } = {}) {
-  const server = new McpServer({ name: "family-dashboard-manager", version: "0.4.0" });
+  const server = new McpServer({ name: "family-dashboard-manager", version: APP_VERSION });
 
   const readTool = (name, description, handler) => {
     server.registerTool(name, {
@@ -116,6 +121,36 @@ export function createFamilyDashboardMcpServer({
     }
   });
 
+  server.registerTool("validate_floorplan_assets", {
+    description: "Validate the two approved private floorplan SVGs without writing them. Returns the exact asset-set hash required for deployment.",
+    inputSchema: { assets: z.array(FLOORPLAN_ASSET_SCHEMA).length(2) },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  }, async ({ assets }) => {
+    try {
+      return result(store.validateFloorplanAssets(assets));
+    } catch (error) {
+      await store.recordError("validate_floorplan_assets", error);
+      return errorResult(error);
+    }
+  });
+
+  server.registerTool("deploy_floorplan_assets", {
+    description: "Deploy the already validated ground-floor.svg and first-floor.svg files to the manager's private preview asset directory. Requires confirm=true and the exact validated asset-set hash.",
+    inputSchema: {
+      assets: z.array(FLOORPLAN_ASSET_SCHEMA).length(2),
+      expected_asset_set_hash: z.string().regex(/^[a-f0-9]{64}$/),
+      confirm: z.boolean()
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  }, async ({ assets, expected_asset_set_hash: expectedAssetSetHash, confirm }) => {
+    try {
+      return result(await store.deployFloorplanAssets(assets, { expectedAssetSetHash, confirm }));
+    } catch (error) {
+      await store.recordError("deploy_floorplan_assets", error);
+      return errorResult(error);
+    }
+  });
+
   server.registerTool("deploy_household_config", {
     description: "Deploy one already validated household configuration. Requires confirm=true and the exact config hash returned by validation; snapshots the previous release and writes only the Family Dashboard directory.",
     inputSchema: {
@@ -170,7 +205,7 @@ export function createFamilyDashboardMcpServer({
 
 export function createManagerApp(dependencies = {}) {
   const app = createMcpExpressApp({ host: "127.0.0.1" });
-  app.get("/healthz", (_request, response) => response.json({ status: "ok", version: "0.4.0" }));
+  app.get("/healthz", (_request, response) => response.json({ status: "ok", version: APP_VERSION }));
   app.post("/mcp", async (request, response) => {
     const server = createFamilyDashboardMcpServer(dependencies);
     const transport = new StreamableHTTPServerTransport({

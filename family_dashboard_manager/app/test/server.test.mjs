@@ -42,6 +42,7 @@ test("serves health and the bounded MCP tool surface", async (context) => {
   assert.deepEqual(
     tools.tools.map((tool) => tool.name).sort(),
     [
+      "deploy_floorplan_assets",
       "deploy_household_config",
       "get_classroom_authorization_plan",
       "get_dashboard_errors",
@@ -50,6 +51,7 @@ test("serves health and the bounded MCP tool surface", async (context) => {
       "read_household_config",
       "reload_dashboard",
       "rollback_dashboard",
+      "validate_floorplan_assets",
       "validate_household_config"
     ]
   );
@@ -60,4 +62,16 @@ test("serves health and the bounded MCP tool surface", async (context) => {
   assert.equal(classroom.structuredContent.phase, "authorization_proof");
   assert.equal(classroom.structuredContent.required_scopes.length, 3);
   assert.doesNotMatch(JSON.stringify(classroom.structuredContent), /child.*password.*value|access_token|refresh_token/i);
+
+  const assets = [
+    { filename: "ground-floor.svg", content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10H0z"/></svg>' },
+    { filename: "first-floor.svg", content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M1 1h8v8H1z"/></svg>' }
+  ];
+  const validation = await client.callTool({ name: "validate_floorplan_assets", arguments: { assets } });
+  assert.match(validation.structuredContent.asset_set_hash, /^[a-f0-9]{64}$/);
+  const deployment = await client.callTool({
+    name: "deploy_floorplan_assets",
+    arguments: { assets, expected_asset_set_hash: validation.structuredContent.asset_set_hash, confirm: true }
+  });
+  assert.equal(deployment.structuredContent.assets.length, 2);
 });

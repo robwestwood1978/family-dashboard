@@ -1,3 +1,3 @@
-# Family Dashboard Manager
+# Family Dashboard v0.4 Preview Manager
 
-Experimental Home Assistant app for confirmation-bound Family Dashboard deployment and rollback. Version 0.4 packages a first-party tablet card, an interactive two-floor room-plan engine, explicit private family mapping, a cached all-matchweek Premier League provider with Tottenham and Aston Villa spotlights, and a read-only per-child Google Classroom authorization contract. Camera and garage controls remain disabled pending separate qualification. See [DOCS.md](./DOCS.md) for installation and security boundaries.
+Isolated canary Home Assistant app for confirmation-bound, read-only v0.4 private preview qualification. It uses separate configuration and frontend paths, accepts only two validated private floorplan SVGs, and cannot replace the existing Family Dashboard. Camera, entry, location, Classroom and live device actions remain disabled. See [DOCS.md](./DOCS.md) for the exact branch installation and safety boundaries.

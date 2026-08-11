@@ -28,6 +28,21 @@ test("accepts the public schema-v4 configuration", () => {
   assert.equal(validateConfig(structuredClone(example)).schema_version, 4);
 });
 
+test("requires the preview safety mode to be explicit", () => {
+  const config = structuredClone(example);
+  delete config.display.read_only;
+  assert.throws(() => validateConfig(config), /display\.read_only/);
+});
+
+test("accepts the isolated preview asset root", () => {
+  const config = structuredClone(example);
+  config.display.read_only = true;
+  config.display.panel_path = "family-dashboard-v040-preview";
+  config.floorplan.floors[0].base_image = "/local/family-dashboard-v040-preview/private/ground-floor.svg";
+  config.floorplan.floors[1].base_image = "/local/family-dashboard-v040-preview/private/first-floor.svg";
+  assert.equal(validateConfig(config).display.read_only, true);
+});
+
 test("rejects secret-bearing keys anywhere in config", () => {
   const config = structuredClone(example);
   config.media.api_token = "must-not-be-committed";

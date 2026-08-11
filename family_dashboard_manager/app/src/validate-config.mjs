@@ -7,7 +7,7 @@ const ID = /^[a-z][a-z0-9_]*$/;
 const PANEL_PATH = /^[a-z][a-z0-9_-]*$/;
 const ICON = /^mdi:[a-z0-9-]+$/;
 const COLOUR = /^#[0-9a-f]{6}$/i;
-const LOCAL_ASSET = /^\/local\/family-dashboard\/[A-Za-z0-9._/-]+$/;
+const LOCAL_ASSET = /^\/local\/(?:family-dashboard|family-dashboard-v040-preview)\/[A-Za-z0-9._/-]+$/;
 const VACUUM_MAP_CAMERA = /^camera\.[a-z0-9_]*map[a-z0-9_]*$/;
 const TEAM_CODE = /^[A-Z]{3}$/;
 const FOOTBALL_PREFIX = /^sensor\.[a-z0-9_]+_$/;
@@ -79,7 +79,7 @@ function validateEntityId(value, path, requiredDomain) {
 function validateLocalAsset(value, path) {
   requireString(value, path);
   if (!LOCAL_ASSET.test(value) || value.includes("..")) {
-    fail(path, "must be a safe /local/family-dashboard asset URL");
+    fail(path, "must be a safe Family Dashboard local asset URL");
   }
 }
 
@@ -140,6 +140,7 @@ export function validateConfig(config) {
   }
   requireBoolean(display.kiosk, "config.display.kiosk");
   requireBoolean(display.legacy_ios, "config.display.legacy_ios");
+  requireBoolean(display.read_only, "config.display.read_only");
   requireString(display.panel_path, "config.display.panel_path");
   if (!PANEL_PATH.test(display.panel_path)) {
     fail("config.display.panel_path", "must be a lowercase dashboard path");

@@ -1,8 +1,8 @@
-name: Family Dashboard Manager
+name: Family Dashboard v0.4 Preview Manager
 version: "0.4.0"
-slug: family_dashboard_manager
-description: Safely validates, deploys and rolls back a dedicated Family Dashboard.
-url: https://github.com/robwestwood1978/family-dashboard/tree/main/family_dashboard_manager
+slug: family_dashboard_preview
+description: Builds an isolated read-only v0.4 Family Dashboard preview without replacing v0.3.
+url: https://github.com/robwestwood1978/family-dashboard/tree/preview/v0.4.0-private-path/family_dashboard_manager
 arch:
   - aarch64
   - amd64
@@ -27,4 +27,3 @@ schema:
   tunnel_id: str?
   control_plane_api_key: password?
 backup: hot
-image: ghcr.io/robwestwood1978/family-dashboard-manager
