@@ -85,7 +85,7 @@ async function mount(page, familyConfig = config) {
       body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60"><rect width="100" height="60" fill="#eef0f4"/></svg>'
     });
   });
-  await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}</style></body></html>`);
+  await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px;font:20px system-ui}</style><div class="ha-header">Family Hub</div></body></html>`);
   await page.evaluate(() => {
     class HaCard extends HTMLElement {}
     class HaIcon extends HTMLElement {}
@@ -99,7 +99,14 @@ async function mount(page, familyConfig = config) {
       createCardElement(cardConfig) {
         const element = document.createElement("mock-child-card");
         element.dataset.cardType = cardConfig.type;
-        element.textContent = `${cardConfig.type} card`;
+        element.dataset.cardMode = cardConfig.mode || "";
+        element.dataset.cardHeight = cardConfig.height || "";
+        if (cardConfig.type === "custom:mediocre-multi-media-player-card") {
+          element.style.height = cardConfig.height || "754px";
+          element.innerHTML = `<div class="mock-media-player" style="height:100%;padding:18px;background:var(--mmpc-card);color:var(--mmpc-on-card)"><strong>Kitchen</strong><div style="margin-top:14px"><span class="mock-chip" style="display:inline-block;padding:8px 24px;border:1px solid var(--mmpc-chip-border);border-radius:999px;background:var(--mmpc-chip-background);color:var(--mmpc-chip-foreground)">Kitchen</span></div></div>`;
+        } else {
+          element.textContent = `${cardConfig.type} card`;
+        }
         return element;
       }
     });
@@ -141,13 +148,21 @@ async function expectNoRootOverflow(page) {
     const content = root.querySelector(".content").getBoundingClientRect();
     const topbar = root.querySelector(".topbar").getBoundingClientRect();
     const view = root.querySelector(".view").getBoundingClientRect();
+    const header = document.querySelector(".ha-header").getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
     return {
       documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
       hubOverflow: hub.scrollWidth - hub.clientWidth,
       navigationEndsBeforeContent: navigation.right <= content.left + 1,
       headerEndsBeforeView: topbar.bottom <= view.top + 1,
-      cardRight: card.getBoundingClientRect().right,
-      viewportWidth: window.innerWidth
+      cardRight: cardRect.right,
+      cardTop: cardRect.top,
+      cardBottom: cardRect.bottom,
+      headerBottom: header.bottom,
+      topbarTop: topbar.top,
+      viewBottom: view.bottom,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight
     };
   });
   expect(metrics.documentOverflow).toBeLessThanOrEqual(1);
@@ -155,6 +170,10 @@ async function expectNoRootOverflow(page) {
   expect(metrics.navigationEndsBeforeContent).toBe(true);
   expect(metrics.headerEndsBeforeView).toBe(true);
   expect(metrics.cardRight).toBeLessThanOrEqual(metrics.viewportWidth + 1);
+  expect(metrics.cardTop).toBeGreaterThanOrEqual(metrics.headerBottom - 1);
+  expect(metrics.topbarTop).toBeGreaterThanOrEqual(metrics.headerBottom - 1);
+  expect(metrics.viewBottom).toBeLessThanOrEqual(metrics.cardBottom + 1);
+  expect(metrics.cardBottom).toBeLessThanOrEqual(metrics.viewportHeight + 1);
 }
 
 test("fits the supported iPad landscapes and exposes every approved surface", async ({ page }) => {
@@ -182,7 +201,7 @@ test("renders the interactive floorplan and sends only the selected low-risk con
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="rooms"]').click();
-  await expect(card.locator(".floorplan-visual")).toHaveAttribute("viewBox", "0 0 100 60.0000");
+  await expect(card.locator(".floorplan-visual")).toHaveAttribute("viewBox", "0.0000 0.0000 100.0000 60.0000");
   await expect(card.locator(".floorplan-image")).toBeVisible();
   await expect(card.locator(".floorplan-image")).toHaveAttribute("href", /\/api\/camera_proxy\/camera\.example_vacuum_map/);
   await expect(card.locator('[data-room="living_room"]')).toBeVisible();
@@ -246,6 +265,27 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect(card.locator(".media-preview-badge")).toContainText("controls locked for this test");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toBeVisible();
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("aria-disabled", "true");
+  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-mode", "in-card");
+  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-height", "100%");
+  const mediaMetrics = await card.locator(".media-player-stage").evaluate((stage) => {
+    const child = stage.querySelector("mock-child-card");
+    const chip = child.querySelector(".mock-chip");
+    const stageRect = stage.getBoundingClientRect();
+    const childRect = child.getBoundingClientRect();
+    const chipStyle = getComputedStyle(chip);
+    return {
+      childTop: childRect.top,
+      childBottom: childRect.bottom,
+      stageTop: stageRect.top,
+      stageBottom: stageRect.bottom,
+      chipColour: chipStyle.color,
+      chipBackground: chipStyle.backgroundColor
+    };
+  });
+  expect(mediaMetrics.childTop).toBeGreaterThanOrEqual(mediaMetrics.stageTop - 1);
+  expect(mediaMetrics.childBottom).toBeLessThanOrEqual(mediaMetrics.stageBottom + 1);
+  expect(mediaMetrics.chipColour).toBe("rgb(247, 248, 252)");
+  expect(mediaMetrics.chipBackground).toBe("rgba(38, 47, 76, 0.96)");
 
   await card.locator('.nav-button[data-view="family"]').click();
   await expect(card.locator(".family-rhythm")).toContainText("Actual ChoreOps tasks are shown below");

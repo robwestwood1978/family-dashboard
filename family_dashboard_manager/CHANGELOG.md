@@ -1,3 +1,12 @@
+## 0.5.2
+
+- Enlarge both private floorplans by cropping unused plan margin while keeping every hotspot aligned to its room.
+- Replace furniture-like room symbols with architectural floor finishes, walls, windows and plain labels; remove the unexplained selected-room pin.
+- Reserve the fixed Home Assistant tablet header so page titles, status pills and the navigation rail no longer sit underneath it.
+- Constrain the embedded Mediocre player to the available Music surface and provide explicit dark chip colours so grouping labels remain visible.
+- Treat absent temperature entities as unavailable instead of coercing them to a false `0°` average.
+- Add Home Assistant chrome, realistic media height and chip-contrast assertions to the supported Chromium and WebKit tablet checks.
+
 ## 0.5.1
 
 - Replace the visible survey-plan layer with clean vector dollhouses built from the approved room geometry, including raised walls, floor finishes, furniture cues and the approved household room names.

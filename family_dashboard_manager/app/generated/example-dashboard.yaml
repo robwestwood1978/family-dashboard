@@ -99,7 +99,7 @@ views:
               "floors": [
                 {
                   "aspect_ratio": 1.666667,
-                  "asset_revision": "v0.5.1",
+                  "asset_revision": "v0.5.2",
                   "base_image": "/local/family-dashboard/assets/example-ground.svg",
                   "id": "ground",
                   "light_overlays": [
@@ -182,7 +182,7 @@ views:
                 },
                 {
                   "aspect_ratio": 1.666667,
-                  "asset_revision": "v0.5.1",
+                  "asset_revision": "v0.5.2",
                   "base_image": "/local/family-dashboard/assets/example-first.svg",
                   "id": "first",
                   "light_overlays": [],

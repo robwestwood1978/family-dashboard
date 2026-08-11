@@ -2,7 +2,7 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.5.1 provides:
+Version 0.5.2 provides:
 
 - a secret-rejecting schema-v5 household contract;
 - one generated Home Assistant panel containing the bundled `custom:family-hub-card`;

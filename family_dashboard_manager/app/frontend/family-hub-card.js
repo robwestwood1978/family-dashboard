@@ -41,6 +41,7 @@ export function isControlAction(dataset = {}) {
 }
 
 function safeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) return fallback;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
@@ -154,11 +155,6 @@ function firstPlayingPlayer(config, states) {
     .find(({ state }) => state && ["playing", "paused"].includes(state.state));
 }
 
-function pointsCentroid(points) {
-  const sum = points.reduce((current, [x, y]) => ({ x: current.x + x, y: current.y + y }), { x: 0, y: 0 });
-  return { x: sum.x / points.length, y: sum.y / points.length };
-}
-
 function lightColour(state, fallback) {
   const rgb = state?.attributes?.rgb_color;
   if (Array.isArray(rgb) && rgb.length >= 3 && rgb.every((value) => Number.isFinite(Number(value)))) {
@@ -209,6 +205,24 @@ export function floorplanImageSource(floor, states = {}) {
     return `${entityPicture}${entityPicture.includes("?") ? "&" : "?"}v=${encodeURIComponent(updated)}`;
   }
   return staticSource() || `/api/camera_proxy/${encodeURIComponent(floor.vacuum_map_entity)}`;
+}
+
+export function floorplanViewBox(floor, padding = 4) {
+  const viewHeight = 100 / safeNumber(floor?.aspect_ratio, 1.666667);
+  const points = (floor?.room_hotspots || [])
+    .flatMap((hotspot) => hotspot?.points || [])
+    .filter((point) => Array.isArray(point) && point.length === 2)
+    .map(([x, y]) => [safeNumber(x, NaN), safeNumber(y, NaN) * viewHeight / 100])
+    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+  if (!points.length) return `0 0 100 ${viewHeight.toFixed(4)}`;
+
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  const x1 = Math.max(0, Math.min(...xs) - padding);
+  const y1 = Math.max(0, Math.min(...ys) - padding);
+  const x2 = Math.min(100, Math.max(...xs) + padding);
+  const y2 = Math.min(viewHeight, Math.max(...ys) + padding);
+  return `${x1.toFixed(4)} ${y1.toFixed(4)} ${(x2 - x1).toFixed(4)} ${(y2 - y1).toFixed(4)}`;
 }
 
 function relevantEntityIds(config) {
@@ -658,6 +672,7 @@ export class FamilyHubCard extends HTMLElementBase {
   _renderFloorplan(floor, selectedRoom) {
     const states = this._hass?.states || {};
     const viewHeight = 100 / safeNumber(floor.aspect_ratio, 1.666667);
+    const viewBox = floorplanViewBox(floor);
     const imageSource = floorplanImageSource(floor, states);
     const overlays = floor.light_overlays.map((overlay) => {
       const state = states[overlay.entity_id];
@@ -670,8 +685,6 @@ export class FamilyHubCard extends HTMLElementBase {
       if (!room) return "";
       const summary = deriveRoomState(room, states, this._config.theme.accent);
       const points = hotspot.points.map(([x, y]) => `${x},${(y * viewHeight / 100).toFixed(4)}`).join(" ");
-      const centroid = pointsCentroid(hotspot.points);
-      const centroidY = centroid.y * viewHeight / 100;
       const status = [
         summary.totalLights ? `${summary.lightsOn}/${summary.totalLights} lights` : null,
         Number.isFinite(summary.temperature) ? formatTemperature(summary.temperature) : null
@@ -680,14 +693,13 @@ export class FamilyHubCard extends HTMLElementBase {
         <g class="room-hotspot ${selectedRoom?.id === room.id ? "is-selected" : ""} ${summary.lightsOn ? "has-light" : ""}" role="button" tabindex="0" data-room="${room.id}" aria-label="${escapeHtml(`${room.name}, ${status}`)}" style="--room-colour:${escapeHtml(summary.colour)}">
           <title>${escapeHtml(`${room.name}, ${status}`)}</title>
           <polygon points="${points}"></polygon>
-          <circle class="room-pin" cx="${centroid.x.toFixed(2)}" cy="${centroidY.toFixed(2)}" r="0.7"></circle>
         </g>
       `;
     }).join("");
     return `
       <div class="floorplan-canvas">
         <div class="floorplan-backdrop" aria-hidden="true"></div>
-        <svg class="floorplan-visual" viewBox="0 0 100 ${viewHeight.toFixed(4)}" preserveAspectRatio="xMidYMid meet" role="group" aria-label="Rooms on ${escapeHtml(floor.name)}">
+        <svg class="floorplan-visual" viewBox="${viewBox}" preserveAspectRatio="xMidYMid meet" role="group" aria-label="Rooms on ${escapeHtml(floor.name)}">
           <image class="floorplan-image" href="${escapeHtml(imageSource)}" x="0" y="0" width="100" height="${viewHeight.toFixed(4)}" preserveAspectRatio="none" aria-hidden="true"></image>
           ${overlays}
           ${hotspots}
@@ -964,13 +976,15 @@ export class FamilyHubCard extends HTMLElementBase {
       this._ensureChildCard("music", {
         type: this._config.media.card_type,
         size: "large",
-        mode: "panel",
+        mode: "in-card",
+        height: "100%",
         entity_id: this._config.media.initial_player,
         media_players: this._config.media.players,
         options: {
           player_is_active_when: "playing_or_paused",
           show_volume_step_buttons: true,
-          default_tab: "massive"
+          default_tab: "massive",
+          transparent_background_on_home: true
         }
       }, "music-card-slot");
     }
@@ -1096,12 +1110,12 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _styles() {
     return `
-      :host { display:block; width:100%; min-width:0; min-height:720px; height:calc(100vh - 8px); color:var(--primary-text-color); }
+      :host { --family-ha-header-offset:var(--header-height,56px); display:block; width:100%; min-width:0; min-height:664px; height:calc(100vh - var(--family-ha-header-offset)); margin-top:var(--family-ha-header-offset); color:var(--primary-text-color); }
       *, *::before, *::after { box-sizing:border-box; }
       button, select { font:inherit; }
       button { -webkit-tap-highlight-color:transparent; }
-      .hub-card { overflow:hidden; border:0; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); color:var(--hub-text); min-height:720px; height:100%; }
-      .shell { display:grid; grid-template-columns:86px minmax(0,1fr); min-height:720px; height:100%; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); }
+      .hub-card { overflow:hidden; border:0; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); color:var(--hub-text); min-height:100%; height:100%; }
+      .shell { display:grid; grid-template-columns:86px minmax(0,1fr); min-height:100%; height:100%; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); }
       .navigation { padding:14px 9px; background:linear-gradient(180deg,color-mix(in srgb,var(--hub-nav) 96%,transparent),color-mix(in srgb,var(--hub-nav) 86%,var(--hub-accent))); border-right:1px solid rgba(255,255,255,.1); display:flex; flex-direction:column; gap:14px; min-height:0; }
       .brand { width:54px; height:54px; margin:0 auto; border-radius:50%; border:1px solid rgba(255,255,255,.45); background:rgba(255,255,255,.12); color:#fff; font-size:24px; font-weight:700; cursor:pointer; }
       .nav-items { display:flex; min-height:0; flex:1; flex-direction:column; justify-content:center; gap:8px; }
@@ -1109,7 +1123,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .nav-button ha-icon { --mdc-icon-size:22px; }
       .nav-button span { font-size:10px; font-weight:600; }
       .nav-button.is-active { color:#fff; background:linear-gradient(145deg,var(--hub-backdrop-end),var(--hub-accent)); border-color:rgba(255,255,255,.35); box-shadow:0 10px 24px rgba(13,18,34,.28); }
-      .content { min-width:0; min-height:0; padding:14px 18px 18px; display:grid; grid-template-rows:64px minmax(0,1fr); gap:12px; background:linear-gradient(135deg,rgba(17,28,51,.18),rgba(183,101,98,.12)); }
+      .content { min-width:0; min-height:0; padding:12px 18px 16px; display:grid; grid-template-rows:56px minmax(0,1fr); gap:10px; background:linear-gradient(135deg,rgba(17,28,51,.18),rgba(183,101,98,.12)); }
       .topbar { min-width:0; display:flex; justify-content:space-between; align-items:center; color:#fff; padding:0 4px; }
       .topbar h1 { margin:2px 0 0; font-size:30px; line-height:1; font-weight:700; }
       .eyebrow { margin:0; font-size:10px; line-height:1.2; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--hub-muted); }
@@ -1174,10 +1188,8 @@ export class FamilyHubCard extends HTMLElementBase {
       .light-overlay { mix-blend-mode:screen; }
       .room-hotspot { cursor:pointer; outline:none; }
       .room-hotspot polygon { fill:transparent; stroke:transparent; stroke-width:.45; vector-effect:non-scaling-stroke; transition:fill .18s ease,stroke .18s ease,filter .18s ease; }
-      .room-hotspot .room-pin { opacity:0; fill:#fff; stroke:var(--hub-accent); stroke-width:.55; vector-effect:non-scaling-stroke; filter:drop-shadow(0 0 3px var(--hub-accent)); pointer-events:none; }
       .room-hotspot.has-light polygon { fill:color-mix(in srgb,var(--room-colour) 12%,transparent); filter:drop-shadow(0 0 4px var(--room-colour)); }
       .room-hotspot.is-selected polygon,.room-hotspot:focus polygon { fill:color-mix(in srgb,var(--hub-accent) 8%,transparent); stroke:#b9aaff; stroke-width:.72; filter:drop-shadow(0 0 4px var(--hub-accent)); }
-      .room-hotspot.is-selected .room-pin,.room-hotspot:focus .room-pin { opacity:1; }
       .room-detail { padding:20px; min-height:0; overflow:auto; }
       .read-only-note { display:flex; align-items:center; gap:7px; margin:14px 0 0; padding:10px 12px; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); color:var(--hub-muted); font-size:11px; }
       .read-only-note ha-icon { --mdc-icon-size:17px; color:var(--hub-accent); }
@@ -1361,9 +1373,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .music-heading { align-items:center; }
       .music-heading h2 { font-size:24px; }
       .media-player-stage { position:relative; min-height:0; overflow:hidden; border:1px solid rgba(255,255,255,.12); border-radius:18px; background:rgba(6,12,27,.62); }
-      .media-player-stage .child-card-slot { height:100%; border-radius:0; --ha-card-background:transparent; --card-background-color:transparent; --primary-background-color:transparent; --secondary-background-color:rgba(255,255,255,.06); --primary-text-color:#f7f8fc; --secondary-text-color:#b6bdce; }
+      .media-player-stage .child-card-slot { height:100%; border-radius:0; --ha-card-background:transparent; --card-background-color:transparent; --primary-background-color:transparent; --secondary-background-color:rgba(255,255,255,.06); --primary-text-color:#f7f8fc; --secondary-text-color:#b6bdce; --mmpc-card:transparent; --mmpc-on-card:#f7f8fc; --mmpc-on-card-muted:#b6bdce; --mmpc-on-card-divider:rgba(255,255,255,.12); --mmpc-chip-background:rgba(38,47,76,.96); --mmpc-chip-foreground:#f7f8fc; --mmpc-chip-border:rgba(255,255,255,.18); }
       .media-player-stage.is-read-only .child-card-slot { pointer-events:none; user-select:none; }
-      .media-player-stage .embedded-card { min-height:100%; --ha-card-border-width:0; --ha-card-box-shadow:none; }
+      .media-player-stage .embedded-card { height:100%; min-height:0; overflow:hidden; --ha-card-border-width:0; --ha-card-box-shadow:none; }
       .media-preview-badge { position:absolute; right:14px; bottom:14px; z-index:4; display:flex; align-items:center; gap:7px; max-width:420px; padding:9px 12px; border:1px solid rgba(255,255,255,.18); border-radius:12px; background:rgba(9,16,33,.9); color:#dfe3ef; box-shadow:0 12px 30px rgba(0,0,0,.28); font-size:10px; font-weight:700; pointer-events:none; }
       .media-preview-badge ha-icon { --mdc-icon-size:16px; color:#b7a8ff; }
       @keyframes pulse { 0%,100% { opacity:.45; transform:scale(.8); } 50% { opacity:1; transform:scale(1); } }
@@ -1381,8 +1393,8 @@ export class FamilyHubCard extends HTMLElementBase {
         .football-layout { grid-template-columns:minmax(0,1.6fr) 250px; }
       }
       @media (max-width:760px) {
-        :host { height:auto; min-height:100vh; }
-        .hub-card { height:auto; min-height:100vh; }
+        :host { height:auto; min-height:calc(100vh - var(--family-ha-header-offset)); }
+        .hub-card { height:auto; min-height:calc(100vh - var(--family-ha-header-offset)); }
         .shell { display:block; }
         .navigation { position:sticky; top:0; z-index:20; flex-direction:row; padding:7px; overflow-x:auto; }
         .brand { flex:0 0 44px; width:44px; height:44px; }
