@@ -1,4 +1,5 @@
 import Ajv2020 from "ajv/dist/2020.js";
+import { statSync } from "node:fs";
 import schema from "../config/family-dashboard.schema.json" with { type: "json" };
 
 const validateSchema = new Ajv2020({ strict: true, allErrors: true }).compile(schema);
@@ -12,6 +13,7 @@ const VACUUM_MAP_CAMERA = /^camera\.[a-z0-9_]*map[a-z0-9_]*$/;
 const TEAM_CODE = /^[A-Z]{3}$/;
 const FOOTBALL_PREFIX = /^sensor\.[a-z0-9_]+_$/;
 const FORBIDDEN_KEY = /(?:^|_)(?:api_?key|authorization|credential|password|secret|token)(?:$|_)/i;
+const IANA_TIMEZONE = /^(?:UTC|[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)+)$/;
 
 function fail(path, message) {
   throw new Error(`${path}: ${message}`);
@@ -83,6 +85,18 @@ function validateLocalAsset(value, path) {
   }
 }
 
+function validateTimezone(value, path) {
+  requireString(value, path);
+  if (!IANA_TIMEZONE.test(value)) fail(path, "must be a valid IANA timezone");
+  try {
+    if (!statSync(`/usr/share/zoneinfo/${value}`).isFile()) {
+      fail(path, "must be a valid IANA timezone");
+    }
+  } catch {
+    fail(path, "must be a valid IANA timezone");
+  }
+}
+
 function validateVacuumMapCamera(value, path) {
   validateEntityId(value, path, "camera");
   if (!VACUUM_MAP_CAMERA.test(value)) {
@@ -127,12 +141,7 @@ export function validateConfig(config) {
   if (!/^[a-z]{2}-[A-Z]{2}$/.test(requireString(config.product.locale, "config.product.locale"))) {
     fail("config.product.locale", "must use a language-region locale such as en-GB");
   }
-  requireString(config.product.timezone, "config.product.timezone");
-  try {
-    new Intl.DateTimeFormat("en-GB", { timeZone: config.product.timezone }).format(new Date(0));
-  } catch {
-    fail("config.product.timezone", "must be a valid IANA timezone");
-  }
+  validateTimezone(config.product.timezone, "config.product.timezone");
 
   const display = requireObject(config.display, "config.display");
   if (!["landscape", "portrait"].includes(display.orientation)) {
