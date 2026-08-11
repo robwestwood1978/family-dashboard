@@ -1,3 +1,9 @@
+## 0.4.1
+
+- Raise the loopback MCP JSON request ceiling to a bounded 1.5 MB so the existing manager can receive the two already-limited private floorplan SVGs.
+- Retain the 512 KiB per-file validation, inert-SVG checks, exact asset-set hash confirmation and existing tunnel identity.
+- Add regression coverage for a floorplan validation request larger than the SDK's former 100 KiB default.
+
 ## 0.4.0
 
 - Replace the multi-view third-party YAML tree with one bundled first-party Family Hub panel sized for the 10.5-inch iPad Pro (`1112×834`) and a `1024×768` fallback.

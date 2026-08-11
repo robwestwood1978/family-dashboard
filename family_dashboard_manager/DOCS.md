@@ -10,9 +10,9 @@ This release requires Home Assistant OS 2026.8.0 or newer.
 
 1. Create a Home Assistant backup.
 2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
-3. Update the installed **Family Dashboard Manager** to v0.4.0. Do not uninstall it.
+3. Update the installed **Family Dashboard Manager** to v0.4.1. Do not uninstall it.
 4. Keep its existing Secure MCP Tunnel options unchanged and restart the app.
-5. Confirm the manager reconnects through the existing tunnel and reports v0.4.0.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.4.1.
 
 The app exposes no host port. Its manager endpoint remains on the private loopback interface inside the same app container.
 
@@ -35,7 +35,7 @@ lovelace:
 Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.4.0
+/local/family-dashboard/family-hub-card.js?v=0.4.1
 ```
 
 The stock Home Assistant Overview remains available to administrators.
@@ -95,7 +95,7 @@ Verify on the target iPad that:
 - Music shows its non-interactive status surface;
 - no camera, entry, location, Classroom or vacuum control is enabled.
 
-Live device actions require a later qualified release. Do not clear `display.read_only` in v0.4.0.
+Live device actions require a later qualified release. Do not clear `display.read_only` in v0.4.x.
 
 ## Safety boundary
 
