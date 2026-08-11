@@ -1,3 +1,8 @@
+## 0.4.2
+
+- Make schema-v4 timezone validation independent of ICU locale data in the minimal Home Assistant app image.
+- Add a regression covering the exact `Internal error. Icu error.` failure seen through the live manager tunnel.
+
 ## 0.4.1
 
 - Raise the loopback MCP JSON request ceiling to a bounded 1.5 MB so the existing manager can receive the two already-limited private floorplan SVGs.

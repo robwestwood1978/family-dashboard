@@ -107,6 +107,20 @@ test("requires an IANA timezone for tablet date and fixture formatting", () => {
   assert.throws(() => validateConfig(config), /must be a valid IANA timezone/);
 });
 
+test("validates the dashboard timezone without ICU locale data", () => {
+  const originalDateTimeFormat = Intl.DateTimeFormat;
+  Intl.DateTimeFormat = class {
+    constructor() {
+      throw new Error("Internal error. Icu error.");
+    }
+  };
+  try {
+    assert.equal(validateConfig(structuredClone(example)).product.timezone, "Europe/London");
+  } finally {
+    Intl.DateTimeFormat = originalDateTimeFormat;
+  }
+});
+
 test("requires every room and light overlay to match its configured floor", () => {
   const room = structuredClone(example);
   room.rooms[0].floor_id = "first";
