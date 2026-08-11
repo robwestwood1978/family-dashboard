@@ -31,7 +31,7 @@ test("serves health and the bounded MCP tool surface", async (context) => {
 
   const health = await fetch(`http://127.0.0.1:${port}/healthz`);
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: "ok", version: "0.4.0" });
+  assert.deepEqual(await health.json(), { status: "ok", version: "0.4.1" });
 
   const client = new Client({ name: "family-dashboard-test", version: "1.0.0" });
   const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
@@ -74,4 +74,18 @@ test("serves health and the bounded MCP tool surface", async (context) => {
     arguments: { assets, expected_asset_set_hash: validation.structuredContent.asset_set_hash, confirm: true }
   });
   assert.equal(deployment.structuredContent.assets.length, 2);
+
+  const approvedSizeAssets = [
+    {
+      filename: "ground-floor.svg",
+      content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><desc>${"x".repeat(210_000)}</desc></svg>`
+    },
+    assets[1]
+  ];
+  assert.ok(JSON.stringify({ assets: approvedSizeAssets }).length > 100 * 1024);
+  const approvedSizeValidation = await client.callTool({
+    name: "validate_floorplan_assets",
+    arguments: { assets: approvedSizeAssets }
+  });
+  assert.match(approvedSizeValidation.structuredContent.asset_set_hash, /^[a-f0-9]{64}$/);
 });

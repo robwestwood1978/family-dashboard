@@ -1,14 +1,16 @@
 import { pathToFileURL } from "node:url";
+import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
+import { localhostHostValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import * as z from "zod/v4";
 import { startFootballPolling } from "./football-provider.mjs";
 import { DashboardStore } from "./manager-store.mjs";
 import { getSanitisedHomeAssistantInventory } from "./ha-client.mjs";
 
 const CONFIG_SCHEMA = z.record(z.string(), z.unknown());
-const APP_VERSION = process.env.APP_VERSION || "0.4.0";
+const APP_VERSION = process.env.APP_VERSION || "0.4.1";
+const MCP_JSON_BODY_LIMIT_BYTES = 1_500_000;
 const FLOORPLAN_ASSET_SCHEMA = z.object({
   filename: z.enum(["ground-floor.svg", "first-floor.svg"]),
   content: z.string().min(1).max(600_000)
@@ -204,7 +206,9 @@ export function createFamilyDashboardMcpServer({
 }
 
 export function createManagerApp(dependencies = {}) {
-  const app = createMcpExpressApp({ host: "127.0.0.1" });
+  const app = express();
+  app.use(express.json({ limit: MCP_JSON_BODY_LIMIT_BYTES }));
+  app.use(localhostHostValidation());
   app.get("/healthz", (_request, response) => response.json({ status: "ok", version: APP_VERSION }));
   app.post("/mcp", async (request, response) => {
     const server = createFamilyDashboardMcpServer(dependencies);
