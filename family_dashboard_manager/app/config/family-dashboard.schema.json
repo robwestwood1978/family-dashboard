@@ -24,7 +24,7 @@
   ],
   "properties": {
     "$schema": { "type": "string" },
-    "schema_version": { "const": 4 },
+    "schema_version": { "const": 5 },
     "product": {
       "type": "object",
       "additionalProperties": false,
@@ -315,18 +315,24 @@
       "additionalProperties": false,
       "required": ["profile", "users"],
       "properties": {
-        "profile": { "const": "legacy-lite" },
+        "profile": { "const": "choreops-status" },
         "users": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["person_id", "dashboard_helper_entity", "points_entity", "chores_entity"],
+            "required": ["person_id", "dashboard_helper_entity", "points_entity", "chores_entity", "status_entities"],
             "properties": {
               "person_id": { "$ref": "#/$defs/id" },
               "dashboard_helper_entity": { "$ref": "#/$defs/sensorEntityId" },
               "points_entity": { "$ref": "#/$defs/sensorEntityId" },
-              "chores_entity": { "$ref": "#/$defs/sensorEntityId" }
+              "chores_entity": { "$ref": "#/$defs/sensorEntityId" },
+              "status_entities": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/sensorEntityId" }
+              }
             }
           }
         }

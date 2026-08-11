@@ -1,8 +1,8 @@
 # Family Dashboard Manager
 
-Version 0.4 upgrades the existing Family Dashboard Manager in place. It keeps the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app, add a branch repository or create another tunnel.
+Version 0.5 upgrades the existing Family Dashboard Manager in place. It keeps the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app, add a branch repository or create another tunnel.
 
-The first v0.4 household deployment is intentionally read-only. Room, scene, climate, cover, light and media controls are disabled; entity detail dialogs and the full media-player card are withheld. Doorbell/security feeds, garage actions, location mapping, Google Classroom and vacuum controls remain disabled during qualification.
+The v0.5 household deployment remains intentionally read-only. Room, scene, climate, cover, light and media controls are disabled; entity detail dialogs and the full media-player card are withheld. Doorbell/security feeds, garage actions, location mapping, Google Classroom and vacuum controls remain disabled during qualification.
 
 ## Upgrade the existing manager
 
@@ -10,9 +10,9 @@ This release requires Home Assistant OS 2026.8.0 or newer.
 
 1. Create a Home Assistant backup.
 2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
-3. Update the installed **Family Dashboard Manager** to v0.4.2. Do not uninstall it.
+3. Update the installed **Family Dashboard Manager** to v0.5.0. Do not uninstall it.
 4. Keep its existing Secure MCP Tunnel options unchanged and restart the app.
-5. Confirm the manager reconnects through the existing tunnel and reports v0.4.2.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.5.0.
 
 The app exposes no host port. Its manager endpoint remains on the private loopback interface inside the same app container.
 
@@ -35,7 +35,7 @@ lovelace:
 Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.4.2
+/local/family-dashboard/family-hub-card.js?v=0.5.0
 ```
 
 The stock Home Assistant Overview remains available to administrators.
@@ -63,9 +63,9 @@ The confirmation-bound transfer is:
 
 The files are written only below `/config/www/family-dashboard/private/`.
 
-## Read-only v0.4 deployment
+## Read-only v0.5 deployment
 
-The schema-v4 household configuration must retain the existing dashboard path and explicitly enable read-only mode:
+The schema-v5 household configuration must retain the existing dashboard path, map each child's individual ChoreOps status sensors, and explicitly enable read-only mode:
 
 ```json
 {
@@ -78,7 +78,7 @@ The schema-v4 household configuration must retain the existing dashboard path an
 
 Run `validate_household_config` first. Validation is read-only and returns the exact configuration hash required by `deploy_household_config` with `confirm=true`.
 
-Deployment writes only the existing Family Dashboard configuration and fixed frontend allow-list. Before replacing those files, the manager creates a raw, hash-verified snapshot of the installed v0.3 configuration, dashboard and managed frontend. Private floorplans remain outside snapshots and are preserved.
+Deployment writes only the existing Family Dashboard configuration and fixed frontend allow-list. Before replacing those files, the manager creates a raw, hash-verified snapshot of the installed v0.4 configuration, dashboard and managed frontend. Private floorplans remain outside snapshots and are preserved.
 
 Call `reload_dashboard` after deployment, then refresh the existing Lovelace resource and tablet.
 
@@ -90,12 +90,15 @@ Verify on the target iPad that:
 - the stock Home Assistant Overview remains available;
 - the dashboard shows a **Read-only test** badge;
 - Today, Calendar, Rooms, Family, Music and Football render without horizontal overflow;
-- both private floors and all approved room hotspots align correctly;
+- Calendar shows the next seven days with legible event titles, times and locations;
+- both private isometric floors retain the approved walls, doors, porch, WC and room layout, and every room hotspot aligns correctly;
+- Family shows each child's four named ChoreOps routines with status and points;
 - taps on light, scene, climate, cover and media controls produce no Home Assistant service calls;
-- Music shows its non-interactive status surface;
+- Music shows the mapped speakers and its non-interactive now-playing surface;
+- Football shows either the provider feed or an intentional waiting state;
 - no camera, entry, location, Classroom or vacuum control is enabled.
 
-Live device actions require a later qualified release. Do not clear `display.read_only` in v0.4.x.
+Live device actions require a later qualified release. Do not clear `display.read_only` in v0.5.x.
 
 ## Safety boundary
 
@@ -103,7 +106,7 @@ Live device actions require a later qualified release. Do not clear `display.rea
 - The manager retains the existing `family_dashboard_manager` slug, `/config/family-dashboard` configuration directory, `/config/www/family-dashboard` frontend directory and published image identity.
 - Inventory excludes cameras, people, trackers, states, history, addresses, credentials and arbitrary attributes.
 - The manager cannot run arbitrary commands, read arbitrary files or call arbitrary Home Assistant services.
-- Rollback verifies raw snapshot hashes and can restore the already-installed schema-v3 release without reinterpreting it as schema v4.
+- Rollback verifies raw snapshot hashes and can restore the already-installed schema-v4 release without reinterpreting it as schema v5.
 
 ## Google Classroom and football
 

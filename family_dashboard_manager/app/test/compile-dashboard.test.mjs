@@ -26,9 +26,9 @@ test("compiles one first-party panel card with internal product navigation", () 
   assert.deepEqual(getEnabledViewPaths(example), ["today", "calendar", "rooms", "family", "music", "football"]);
 });
 
-test("embeds the complete schema-v4 house, family, school and football contract", () => {
+test("embeds the complete schema-v5 house, family, school and football contract", () => {
   const config = embeddedConfig(compileDashboard(example));
-  assert.equal(config.schema_version, 4);
+  assert.equal(config.schema_version, 5);
   assert.deepEqual(config.display, {
     default_view: "today",
     kiosk: true,

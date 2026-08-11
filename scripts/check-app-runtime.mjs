@@ -69,7 +69,7 @@ if (!dockerfile.includes("MANAGER_RESOURCE_DIR=/config/www/family-dashboard")) {
   failures.push("Dockerfile does not retain the existing manager frontend directory");
 }
 if (!dockerfile.includes("MANAGER_REQUIRE_READ_ONLY=true")) {
-  failures.push("Dockerfile does not enforce the v0.4 read-only rollout boundary");
+  failures.push("Dockerfile does not enforce the v0.5 read-only rollout boundary");
 }
 for (const label of ["io.hass.version", "io.hass.type", "io.hass.arch"]) {
   if (!dockerfile.includes(label)) failures.push(`Dockerfile is missing required local-build label ${label}`);
@@ -81,7 +81,7 @@ if (!dockerfile.includes("COPY app/frontend ./frontend")) {
   failures.push("Dockerfile does not package the first-party Family Hub frontend");
 }
 if (!dockerfile.includes("COPY app/config ./config")) {
-  failures.push("Dockerfile does not package the schema-v4 runtime validator");
+  failures.push("Dockerfile does not package the schema-v5 runtime validator");
 }
 
 if (failures.length) {

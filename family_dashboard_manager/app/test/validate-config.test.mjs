@@ -24,8 +24,8 @@ function withDeferredEntry() {
   return config;
 }
 
-test("accepts the public schema-v4 configuration", () => {
-  assert.equal(validateConfig(structuredClone(example)).schema_version, 4);
+test("accepts the public schema-v5 configuration", () => {
+  assert.equal(validateConfig(structuredClone(example)).schema_version, 5);
 });
 
 test("requires read-only mode to be explicit", () => {
@@ -89,6 +89,16 @@ test("requires ChoreOps and Classroom users to reference children", () => {
   const classroom = structuredClone(example);
   classroom.school.classroom_students[0].person_id = "parent";
   assert.throws(() => validateConfig(classroom), /must reference a child/);
+});
+
+test("requires individual ChoreOps status sensors for every configured child", () => {
+  const config = structuredClone(example);
+  config.chores.users[0].status_entities = [];
+  assert.throws(() => validateConfig(config), /status_entities/);
+
+  const wrongDomain = structuredClone(example);
+  wrongDomain.chores.users[0].status_entities[0] = "binary_sensor.not_a_chore_status";
+  assert.throws(() => validateConfig(wrongDomain), /must use the sensor domain/);
 });
 
 test("rejects unsafe panel and floorplan asset paths", () => {
@@ -181,7 +191,7 @@ test("requires configured Classroom children while School is enabled", () => {
   assert.throws(() => validateConfig(config), /must not be empty when School is enabled/);
 });
 
-test("keeps Cameras & Entry disabled for the v0.4 qualification phase", () => {
+test("keeps Cameras & Entry disabled for the v0.5 qualification phase", () => {
   const config = structuredClone(example);
   config.features.entry = true;
   assert.throws(() => validateConfig(config), /remain disabled until a separately qualified release/);

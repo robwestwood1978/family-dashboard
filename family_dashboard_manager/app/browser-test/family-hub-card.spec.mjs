@@ -40,6 +40,12 @@ function fixtureStates() {
     "sensor.child_two_choreops_points": state("sensor.child_two_choreops_points", "37"),
     "sensor.child_one_choreops_chores": state("sensor.child_one_choreops_chores", "2", { chore_stat_current_due_today: 2 }),
     "sensor.child_two_choreops_chores": state("sensor.child_two_choreops_chores", "1", { chore_stat_current_due_today: 1 }),
+    "sensor.child_one_choreops_chore_status_brush_teeth": state("sensor.child_one_choreops_chore_status_brush_teeth", "pending", { chore_name: "Brush teeth", default_points: 3 }),
+    "sensor.child_one_choreops_chore_status_get_dressed": state("sensor.child_one_choreops_chore_status_get_dressed", "claimed", { chore_name: "Get dressed", default_points: 4 }),
+    "sensor.child_one_choreops_chore_status_go_to_bed_at_bedtime": state("sensor.child_one_choreops_chore_status_go_to_bed_at_bedtime", "approved", { chore_name: "Bedtime", default_points: 5 }),
+    "sensor.child_two_choreops_chore_status_brush_teeth": state("sensor.child_two_choreops_chore_status_brush_teeth", "overdue", { chore_name: "Brush teeth", default_points: 3 }),
+    "sensor.child_two_choreops_chore_status_get_dressed": state("sensor.child_two_choreops_chore_status_get_dressed", "pending", { chore_name: "Get dressed", default_points: 4 }),
+    "sensor.child_two_choreops_chore_status_go_to_bed_at_bedtime": state("sensor.child_two_choreops_chore_status_go_to_bed_at_bedtime", "completed", { chore_name: "Bedtime", default_points: 5 }),
     "sensor.family_dashboard_classroom_child_one": state("sensor.family_dashboard_classroom_child_one", "1", { assignments: [{ title: "Science revision", course: "Science", due_at: "2026-08-12T15:00:00Z" }] }),
     "sensor.family_dashboard_classroom_child_two": state("sensor.family_dashboard_classroom_child_two", "1", { assignments: [{ title: "Read chapter four", course: "English", due_at: "2026-08-13T15:00:00Z" }] }),
     "sensor.family_dashboard_premier_league": state("sensor.family_dashboard_premier_league", "1", { current_gameweek: 1, available_gameweeks: Array.from({ length: 38 }, (_, index) => index + 1), last_updated: "2026-08-10T08:00:00Z" })
@@ -98,6 +104,7 @@ async function mount(page, familyConfig = config) {
       }
     });
     window.__serviceCalls = [];
+    window.__apiCalls = [];
   });
   await page.addScriptTag({ type: "module", content: cardSource });
   await page.evaluate(async ({ familyConfig, states }) => {
@@ -109,6 +116,16 @@ async function mount(page, familyConfig = config) {
       states,
       callService(domain, service, data) {
         window.__serviceCalls.push({ domain, service, data });
+      },
+      async callApi(method, path) {
+        window.__apiCalls.push({ method, path });
+        const school = path.includes("calendar.school");
+        return [{
+          summary: school ? "School assembly" : "Family dinner",
+          start: { dateTime: new Date(Date.now() + (school ? 7_200_000 : 3_600_000)).toISOString() },
+          end: { dateTime: new Date(Date.now() + (school ? 10_800_000 : 7_200_000)).toISOString() },
+          location: school ? "School hall" : "Kitchen"
+        }];
       }
     };
   }, { familyConfig, states: fixtureStates() });
@@ -153,6 +170,11 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
     await expectNoRootOverflow(page);
   }
 
+  await card.locator('[data-view="calendar"]').first().click();
+  await expect(card.locator(".agenda-event")).toHaveCount(2);
+  await expect(card.locator(".agenda-board")).toContainText("Family dinner");
+  await expect(card.locator(".agenda-board")).toContainText("School assembly");
+
   expect(pageErrors).toEqual([]);
 });
 
@@ -180,6 +202,8 @@ test("keeps the family map private and spotlights both requested clubs", async (
   await expect(card.locator('[data-card-type="map"]')).toBeVisible();
   await expect(card.locator(".family-person")).toHaveCount(2);
   await expect(card.locator(".family-person")).toContainText(["Science revision", "Read chapter four"]);
+  await expect(card.locator(".chore-row")).toHaveCount(6);
+  await expect(card.locator(".family-person")).toContainText(["Brush teeth", "Get dressed"]);
 
   await card.locator('.nav-button[data-view="football"]').click();
   await expect(card.locator(".spotlight-panel")).toContainText("Tottenham & Aston Villa");
@@ -218,11 +242,13 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect.poll(() => page.evaluate(() => window.__moreInfoEvents)).toBe(0);
 
   await card.locator('.nav-button[data-view="music"]').click();
-  await expect(card.locator(".read-only-music")).toContainText("full player is intentionally disabled");
+  await expect(card.locator(".read-only-music")).toContainText("Playback controls stay disabled");
+  await expect(card.locator(".speaker-card")).toHaveCount(2);
   await expect(card.locator("#music-card-slot")).toHaveCount(0);
 
   await card.locator('.nav-button[data-view="family"]').click();
-  await expect(card.locator(".map-panel")).toContainText("Location sharing is disabled");
+  await expect(card.locator(".family-rhythm")).toContainText("Actual ChoreOps tasks are shown below");
+  await expect(card.locator(".chore-row")).toHaveCount(6);
   await expect(card.locator('[data-card-type="map"]')).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });
