@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1112" height="834" viewBox="0 0 1112 834" role="img" aria-labelledby="title description">
+<title id="title">Family Dashboard — Rooms preview</title>
+<desc id="description">First-party Family Hub layout sized for the 10.5-inch iPad Pro.</desc>
+<style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}</style>
+<defs>
+    <linearGradient id="backdrop" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14233A"/><stop offset="0.48" stop-color="#5D3E5C"/><stop offset="1" stop-color="#D98B6E"/></linearGradient>
+    <linearGradient id="hero" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5B5BD6"/><stop offset="1" stop-color="#D98B6E"/></linearGradient>
+  </defs>
+<rect x="0" y="0" width="1112" height="834" rx="0" fill="url(#backdrop)" stroke="none" opacity="1"/>
+<rect x="0" y="0" width="86" height="834" rx="0" fill="#17233A" stroke="none" opacity="0.96"/>
+<circle cx="43" cy="48" r="26" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="1" opacity="0.14"/>
+<text x="43" y="55" fill="#FFFFFF" font-size="24" font-weight="800" text-anchor="middle" opacity="1" letter-spacing="0">⌂</text>
+<circle cx="43" cy="101" r="9" fill="#697080" stroke="none" stroke-width="1" opacity="0.65"/>
+<text x="43" y="132" fill="#D8DCE6" font-size="10" font-weight="700" text-anchor="middle" opacity="1" letter-spacing="0">Today</text>
+<circle cx="43" cy="195" r="9" fill="#697080" stroke="none" stroke-width="1" opacity="0.65"/>
+<text x="43" y="226" fill="#D8DCE6" font-size="10" font-weight="700" text-anchor="middle" opacity="1" letter-spacing="0">Calendar</text>
+<rect x="9" y="273" width="68" height="72" rx="21" fill="#12182B" opacity="0.16"/><rect x="9" y="265" width="68" height="72" rx="21" fill="url(#hero)" stroke="#FFFFFF" opacity="1"/>
+<circle cx="43" cy="289" r="9" fill="#FFFFFF" stroke="none" stroke-width="1" opacity="1"/>
+<text x="43" y="320" fill="#FFFFFF" font-size="10" font-weight="700" text-anchor="middle" opacity="1" letter-spacing="0">Rooms</text>
+<circle cx="43" cy="383" r="9" fill="#697080" stroke="none" stroke-width="1" opacity="0.65"/>
+<text x="43" y="414" fill="#D8DCE6" font-size="10" font-weight="700" text-anchor="middle" opacity="1" letter-spacing="0">Family</text>
+<circle cx="43" cy="477" r="9" fill="#697080" stroke="none" stroke-width="1" opacity="0.65"/>
+<text x="43" y="508" fill="#D8DCE6" font-size="10" font-weight="700" text-anchor="middle" opacity="1" letter-spacing="0">Music</text>
+<circle cx="43" cy="571" r="9" fill="#697080" stroke="none" stroke-width="1" opacity="0.65"/>
+<text x="43" y="602" fill="#D8DCE6" font-size="10" font-weight="700" text-anchor="middle" opacity="1" letter-spacing="0">Football</text>
+<text x="112" y="47" fill="#FFFFFF" font-size="30" font-weight="800" text-anchor="start" opacity="1" letter-spacing="0">Rooms</text>
+<text x="113" y="72" fill="#FFFFFF" font-size="12" font-weight="650" text-anchor="start" opacity="0.72" letter-spacing="0">Interactive house · tap a room to control it</text>
+<rect x="866" y="22" width="220" height="54" rx="18" fill="#FFFFFF" stroke="#FFFFFF" opacity="0.14"/>
+<text x="892" y="54" fill="#FFD36A" font-size="21" font-weight="800" text-anchor="start" opacity="1" letter-spacing="0">☀</text>
+<text x="924" y="54" fill="#FFFFFF" font-size="12" font-weight="700" text-anchor="start" opacity="1" letter-spacing="0">19° · Partly cloudy</text>
+<rect x="108" y="108" width="680" height="690" rx="20" fill="#12182B" opacity="0.16"/><rect x="108" y="100" width="680" height="690" rx="20" fill="#FFFFFF" stroke="#FFFFFF" opacity="0.95"/>
+<text x="136" y="137" fill="#697080" font-size="10" font-weight="800" text-anchor="start" opacity="1" letter-spacing="1.2">INTERACTIVE HOUSE</text>
+<text x="136" y="168" fill="#202432" font-size="22" font-weight="820" text-anchor="start" opacity="1" letter-spacing="0">Tap a room to control it</text>
+<rect x="588" y="128" width="80" height="34" rx="12" fill="#5B5BD6" stroke="none" opacity="1"/>
+<text x="628" y="150" fill="#FFFFFF" font-size="9" font-weight="800" text-anchor="middle" opacity="1" letter-spacing="0">Ground</text>
+<rect x="676" y="128" width="80" height="34" rx="12" fill="#EDF0F5" stroke="none" opacity="1"/>
+<text x="716" y="150" fill="#697080" font-size="9" font-weight="800" text-anchor="middle" opacity="1" letter-spacing="0">First</text>
+<rect x="132" y="195" width="632" height="548" rx="22" fill="#D8DDE6" stroke="none" opacity="1"/>
+<rect x="156" y="219" width="584" height="500" rx="8" fill="#F7F4EF" stroke="#B5BDC9" opacity="1"/>
+<rect x="254" y="275" width="300" height="250" rx="100" fill="#F9D56E" stroke="none" opacity="0.22"/>
+<polygon points="173.5,244.0 436.3,244.0 436.3,499.0 173.5,499.0" fill="#5B5BD6" fill-opacity="0.22" stroke="#5B5BD6" stroke-width="3"/>
+<text x="304.92" y="369.5" fill="#202432" font-size="13" font-weight="820" text-anchor="middle" opacity="1" letter-spacing="0">Living room</text>
+<text x="304.92" y="389.5" fill="#697080" font-size="8" font-weight="650" text-anchor="middle" opacity="1" letter-spacing="0">1/1 lights · 20.4°</text>
+<polygon points="459.7,244.0 722.5,244.0 722.5,499.0 459.7,499.0" fill="#FFFFFF" fill-opacity="0.14" stroke="#6E7787" stroke-width="1.5"/>
+<text x="591.0799999999999" y="369.5" fill="#202432" font-size="13" font-weight="820" text-anchor="middle" opacity="1" letter-spacing="0">Kitchen</text>
+<text x="591.0799999999999" y="389.5" fill="#697080" font-size="8" font-weight="650" text-anchor="middle" opacity="1" letter-spacing="0">0/1 lights · 19.2°</text>
+<polygon points="325.4,519.0 570.6,519.0 570.6,694.0 325.4,694.0" fill="#FFFFFF" fill-opacity="0.14" stroke="#6E7787" stroke-width="1.5"/>
+<text x="448" y="604.5" fill="#202432" font-size="13" font-weight="820" text-anchor="middle" opacity="1" letter-spacing="0">Hallway</text>
+<text x="448" y="624.5" fill="#697080" font-size="8" font-weight="650" text-anchor="middle" opacity="1" letter-spacing="0">0/1 lights · 19.2°</text>
+<rect x="156" y="694" width="378" height="28" rx="10" fill="#FFFFFF" stroke="none" opacity="0.82"/>
+<text x="345" y="713" fill="#697080" font-size="8" font-weight="750" text-anchor="middle" opacity="1" letter-spacing="0">Illustrative geometry — replace with the private house plan</text>
+<rect x="806" y="108" width="280" height="690" rx="20" fill="#12182B" opacity="0.16"/><rect x="806" y="100" width="280" height="690" rx="20" fill="#FFFFFF" stroke="#FFFFFF" opacity="0.95"/>
+<circle cx="844" cy="146" r="24" fill="#5B5BD6" stroke="none" stroke-width="1" opacity="0.12"/>
+<text x="844" y="154" fill="#5B5BD6" font-size="20" font-weight="800" text-anchor="middle" opacity="1" letter-spacing="0">⌂</text>
+<text x="880" y="135" fill="#697080" font-size="9" font-weight="800" text-anchor="start" opacity="1" letter-spacing="1">ROOM CONTROLS</text>
+<text x="880" y="162" fill="#202432" font-size="21" font-weight="820" text-anchor="start" opacity="1" letter-spacing="0">Living room</text>
+<text x="830" y="204" fill="#697080" font-size="10" font-weight="650" text-anchor="start" opacity="1" letter-spacing="0">1 light on · 20.4°</text>
+<rect x="830" y="230" width="232" height="108" rx="18" fill="#FCEDE9" stroke="none" opacity="1"/>
+<text x="850" y="257" fill="#697080" font-size="9" font-weight="800" text-anchor="start" opacity="1" letter-spacing="0">TEMPERATURE</text>
+<text x="850" y="304" fill="#202432" font-size="32" font-weight="830" text-anchor="start" opacity="1" letter-spacing="0">20.4°</text>
+<text x="962" y="277" fill="#5B5BD6" font-size="20" font-weight="800" text-anchor="middle" opacity="1" letter-spacing="0">−</text>
+<text x="1030" y="277" fill="#5B5BD6" font-size="20" font-weight="800" text-anchor="middle" opacity="1" letter-spacing="0">+</text>
+<rect x="830" y="356" width="232" height="66" rx="17" fill="#FFF6DB" stroke="#F2B85C" opacity="1"/>
+<circle cx="858" cy="389" r="13" fill="#F2B85C" stroke="none" stroke-width="1" opacity="1"/>
+<text x="887" y="384" fill="#202432" font-size="12" font-weight="800" text-anchor="start" opacity="1" letter-spacing="0">Living room</text>
+<text x="887" y="404" fill="#697080" font-size="9" font-weight="650" text-anchor="start" opacity="1" letter-spacing="0">72% · warm</text>
+<text x="830" y="461" fill="#697080" font-size="9" font-weight="800" text-anchor="start" opacity="1" letter-spacing="1">SCENES</text>
+<rect x="830" y="478" width="102" height="42" rx="14" fill="#5B5BD6" stroke="none" opacity="0.11"/>
+<text x="881" y="504" fill="#5B5BD6" font-size="10" font-weight="800" text-anchor="middle" opacity="1" letter-spacing="0">Relax</text>
+<rect x="944" y="478" width="118" height="42" rx="14" fill="#5B5BD6" stroke="none" opacity="0.11"/>
+<text x="1003" y="504" fill="#5B5BD6" font-size="10" font-weight="800" text-anchor="middle" opacity="1" letter-spacing="0">Movie</text>
+<text x="830" y="563" fill="#697080" font-size="9" font-weight="800" text-anchor="start" opacity="1" letter-spacing="1">MUSIC</text>
+<rect x="830" y="580" width="232" height="72" rx="17" fill="#F2F0FA" stroke="none" opacity="1"/>
+<circle cx="860" cy="616" r="20" fill="#5B5BD6" stroke="none" stroke-width="1" opacity="1"/>
+<text x="860" y="623" fill="#FFFFFF" font-size="13" font-weight="800" text-anchor="middle" opacity="1" letter-spacing="0">▶</text>
+<text x="892" y="610" fill="#202432" font-size="12" font-weight="800" text-anchor="start" opacity="1" letter-spacing="0">Living room</text>
+<text x="892" y="630" fill="#697080" font-size="9" font-weight="650" text-anchor="start" opacity="1" letter-spacing="0">Family favourites</text>
+<rect x="830" y="699" width="232" height="52" rx="16" fill="#17233A" stroke="none" opacity="1"/>
+<text x="946" y="731" fill="#FFFFFF" font-size="9" font-weight="800" text-anchor="middle" opacity="1" letter-spacing="0.7">LOW-RISK CONTROLS ONLY</text>
+<text x="110" y="818" fill="#FFFFFF" font-size="8" font-weight="650" text-anchor="start" opacity="0.46" letter-spacing="0">Synthetic preview · actual room geometry is never inferred</text>
+</svg>

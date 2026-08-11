@@ -1,3 +1,14 @@
+## 0.4.0
+
+- Replace the multi-view third-party YAML tree with one bundled first-party Family Hub panel sized for the 10.5-inch iPad Pro (`1112×834`) and a `1024×768` fallback.
+- Add a two-floor interactive room-plan engine with explicit polygon hotspots, light overlays and selected-room low-risk controls; never infer private house geometry.
+- Separate the Home Assistant-native private family map from the house floorplan and add per-child ChoreOps/Classroom read-only summaries.
+- Add a server-side, last-good-cache Premier League provider covering all 38 matchweeks, results, scorers and a calculated table, with Tottenham and Aston Villa spotlights.
+- Package and snapshot the first-party card through a fixed frontend allow-list while preserving household floorplan assets.
+- Restore raw hash-verified snapshots so the installed schema-v3 release remains a valid rollback target.
+- Keep Cameras & Entry disabled until separately qualified and add Chromium/WebKit tablet browser projects.
+- Upgrade the existing manager and tunnel in place; add a mandatory read-only first deployment plus hash-bound validation and transfer for exactly two inert private floorplan SVGs.
+
 ## 0.3.0
 
 - Replace the flat v0.2 card grid with the approved warm-glass family command centre using static gradients, opacity and bounded shadows suitable for the older iPad.

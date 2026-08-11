@@ -1,6 +1,6 @@
 {
   "name": "@family-dashboard/manager",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -10,17 +10,19 @@
     "check": "npm test && npm run generate:example",
     "compile": "node src/cli.mjs",
     "compile:example": "node src/cli.mjs config/example.json generated/example-dashboard.yaml",
-    "preview:example": "node preview/render-preview.mjs config/example.json preview/family-dashboard-preview.svg preview/family-dashboard-controls-preview.svg",
+    "preview:example": "node preview/render-preview.mjs config/example.json preview/family-dashboard-preview.svg preview/family-dashboard-rooms-preview.svg",
     "generate:example": "npm run compile:example && npm run preview:example",
+    "test:browser": "playwright test",
     "start": "node src/server.mjs",
     "test": "node --test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
+    "ajv": "8.20.0",
     "ws": "8.21.2",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "ajv": "8.20.0"
+    "@playwright/test": "1.62.1"
   }
 }

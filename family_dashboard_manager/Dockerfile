@@ -3,6 +3,7 @@ ARG BUILD_FROM=ghcr.io/home-assistant/base:3.23
 FROM ${BUILD_FROM}
 
 ARG BUILD_ARCH
+ARG BUILD_VERSION
 ARG TUNNEL_CLIENT_VERSION=0.0.11
 ARG TUNNEL_CLIENT_SHA256_AMD64=29adfe5c1399dfb9fda9383f230c324355912f50dc36e2e416b1f1322317b3c4
 ARG TUNNEL_CLIENT_SHA256_AARCH64=d8bba47b2a723799a372b0b87d7e4d69304093d3a28837237315fe5406d97e77
@@ -34,20 +35,28 @@ COPY app/package.json app/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts \
     && npm cache clean --force
 COPY app/src ./src
+COPY app/config ./config
+COPY app/frontend ./frontend
 
 COPY rootfs /
 RUN chmod a+x \
     /etc/services.d/family-dashboard-manager/run \
     /etc/services.d/family-dashboard-tunnel/run
 
-ENV APP_VERSION=0.3.0 \
+ENV APP_VERSION=0.4.0 \
     MANAGER_HOST=127.0.0.1 \
     MANAGER_PORT=8099 \
     MANAGER_CONFIG_DIR=/config/family-dashboard \
-    MANAGER_DATA_DIR=/data
+    MANAGER_DATA_DIR=/data \
+    MANAGER_RESOURCE_DIR=/config/www/family-dashboard \
+    MANAGER_PUBLIC_RESOURCE_BASE=/local/family-dashboard \
+    MANAGER_REQUIRE_READ_ONLY=true
 
 LABEL \
+    io.hass.version="${BUILD_VERSION}" \
+    io.hass.type="app" \
+    io.hass.arch="${BUILD_ARCH}" \
     org.opencontainers.image.title="Home Assistant App: Family Dashboard Manager" \
-    org.opencontainers.image.description="Safely validates, deploys and rolls back a dedicated Family Dashboard." \
+    org.opencontainers.image.description="Safely validates, deploys and rolls back the Family Dashboard." \
     org.opencontainers.image.source="https://github.com/robwestwood1978/family-dashboard" \
     org.opencontainers.image.licenses="MIT"

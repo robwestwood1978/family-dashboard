@@ -11,7 +11,11 @@ import { createManagerApp } from "../src/server.mjs";
 
 test("serves health and the bounded MCP tool surface", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "family-dashboard-server-"));
-  const store = new DashboardStore({ configDir: join(root, "config"), dataDir: join(root, "data") });
+  const store = new DashboardStore({
+    configDir: join(root, "config"),
+    dataDir: join(root, "data"),
+    resourceDir: join(root, "www", "family-dashboard")
+  });
   const app = createManagerApp({
     store,
     inventory: async () => ({ schema_version: 1, generated_at: "2026-08-07T12:00:00.000Z", areas: [], entities: [] }),
@@ -27,7 +31,7 @@ test("serves health and the bounded MCP tool surface", async (context) => {
 
   const health = await fetch(`http://127.0.0.1:${port}/healthz`);
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: "ok", version: "0.3.0" });
+  assert.deepEqual(await health.json(), { status: "ok", version: "0.4.0" });
 
   const client = new Client({ name: "family-dashboard-test", version: "1.0.0" });
   const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
@@ -38,16 +42,36 @@ test("serves health and the bounded MCP tool surface", async (context) => {
   assert.deepEqual(
     tools.tools.map((tool) => tool.name).sort(),
     [
+      "deploy_floorplan_assets",
       "deploy_household_config",
+      "get_classroom_authorization_plan",
       "get_dashboard_errors",
       "get_dashboard_status",
       "get_sanitised_inventory",
       "read_household_config",
       "reload_dashboard",
       "rollback_dashboard",
+      "validate_floorplan_assets",
       "validate_household_config"
     ]
   );
   const status = await client.callTool({ name: "get_dashboard_status", arguments: {} });
   assert.equal(status.structuredContent.installed, false);
+
+  const classroom = await client.callTool({ name: "get_classroom_authorization_plan", arguments: {} });
+  assert.equal(classroom.structuredContent.phase, "authorization_proof");
+  assert.equal(classroom.structuredContent.required_scopes.length, 3);
+  assert.doesNotMatch(JSON.stringify(classroom.structuredContent), /child.*password.*value|access_token|refresh_token/i);
+
+  const assets = [
+    { filename: "ground-floor.svg", content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10H0z"/></svg>' },
+    { filename: "first-floor.svg", content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M1 1h8v8H1z"/></svg>' }
+  ];
+  const validation = await client.callTool({ name: "validate_floorplan_assets", arguments: { assets } });
+  assert.match(validation.structuredContent.asset_set_hash, /^[a-f0-9]{64}$/);
+  const deployment = await client.callTool({
+    name: "deploy_floorplan_assets",
+    arguments: { assets, expected_asset_set_hash: validation.structuredContent.asset_set_hash, confirm: true }
+  });
+  assert.equal(deployment.structuredContent.assets.length, 2);
 });

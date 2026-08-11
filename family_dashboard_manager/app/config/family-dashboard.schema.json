@@ -14,16 +14,17 @@
     "calendar",
     "weather",
     "lists",
+    "floorplan",
     "rooms",
     "media",
     "chores",
     "football",
     "school",
-    "entry"
+    "location"
   ],
   "properties": {
     "$schema": { "type": "string" },
-    "schema_version": { "const": 3 },
+    "schema_version": { "const": 4 },
     "product": {
       "type": "object",
       "additionalProperties": false,
@@ -37,15 +38,27 @@
     "display": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["orientation", "kiosk", "legacy_ios", "default_view", "panel_path"],
+      "required": [
+        "orientation",
+        "kiosk",
+        "legacy_ios",
+        "read_only",
+        "default_view",
+        "panel_path",
+        "target_width",
+        "target_height"
+      ],
       "properties": {
         "orientation": { "enum": ["landscape", "portrait"] },
         "kiosk": { "type": "boolean" },
         "legacy_ios": { "type": "boolean" },
+        "read_only": { "type": "boolean" },
         "default_view": {
-          "enum": ["today", "calendar", "home", "music", "chores", "football", "school"]
+          "enum": ["today", "calendar", "rooms", "family", "music", "football"]
         },
-        "panel_path": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" }
+        "panel_path": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+        "target_width": { "type": "integer", "minimum": 768, "maximum": 2560 },
+        "target_height": { "type": "integer", "minimum": 600, "maximum": 1600 }
       }
     },
     "theme": {
@@ -87,35 +100,47 @@
           "id": { "$ref": "#/$defs/id" },
           "name": { "type": "string", "minLength": 1, "maxLength": 40 },
           "role": { "enum": ["parent", "child", "household"] },
-          "colour": { "$ref": "#/$defs/colour" }
+          "colour": { "$ref": "#/$defs/colour" },
+          "location_entity": { "$ref": "#/$defs/personEntityId" }
         }
       }
     },
     "features": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["calendar", "home", "music", "chores", "football", "lists", "weather", "school", "entry"],
+      "required": [
+        "calendar",
+        "rooms",
+        "family",
+        "music",
+        "chores",
+        "football",
+        "lists",
+        "weather",
+        "school",
+        "location_map",
+        "entry"
+      ],
       "properties": {
         "calendar": { "type": "boolean" },
-        "home": { "type": "boolean" },
+        "rooms": { "type": "boolean" },
+        "family": { "type": "boolean" },
         "music": { "type": "boolean" },
         "chores": { "type": "boolean" },
         "football": { "type": "boolean" },
         "lists": { "type": "boolean" },
         "weather": { "type": "boolean" },
         "school": { "type": "boolean" },
-        "entry": { "type": "boolean" }
+        "location_map": { "type": "boolean" },
+        "entry": { "const": false }
       }
     },
     "calendar": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["card_type", "default_view", "rolling_days", "entities"],
+      "required": ["initial_view", "rolling_days", "entities"],
       "properties": {
-        "card_type": {
-          "enum": ["custom:daylight-calendar-card", "custom:skylight-calendar-card"]
-        },
-        "default_view": { "enum": ["month", "week-compact", "week-standard", "agenda"] },
+        "initial_view": { "enum": ["listWeek", "dayGridMonth", "dayGridDay"] },
         "rolling_days": { "type": "integer", "minimum": 1, "maximum": 31 },
         "entities": {
           "type": "array",
@@ -131,7 +156,8 @@
               "person_ids": {
                 "type": "array",
                 "items": { "$ref": "#/$defs/id" }
-              }
+              },
+              "category": { "enum": ["family", "personal", "school", "trip", "other"] }
             }
           }
         }
@@ -154,15 +180,89 @@
         "shopping_entity": { "$ref": "#/$defs/todoEntityId" }
       }
     },
+    "floorplan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default_floor", "floors"],
+      "properties": {
+        "default_floor": { "$ref": "#/$defs/id" },
+        "floors": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name", "aspect_ratio", "room_hotspots", "light_overlays"],
+            "anyOf": [
+              {
+                "properties": { "base_image": {} },
+                "required": ["base_image"]
+              },
+              {
+                "properties": { "vacuum_map_entity": {} },
+                "required": ["vacuum_map_entity"]
+              }
+            ],
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "name": { "type": "string", "minLength": 1, "maxLength": 30 },
+              "base_image": { "$ref": "#/$defs/localAssetUrl" },
+              "vacuum_map_entity": { "$ref": "#/$defs/vacuumMapCameraEntityId" },
+              "aspect_ratio": { "type": "number", "minimum": 0.5, "maximum": 4 },
+              "night_image": { "$ref": "#/$defs/localAssetUrl" },
+              "room_hotspots": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["room_id", "points"],
+                  "properties": {
+                    "room_id": { "$ref": "#/$defs/id" },
+                    "points": {
+                      "type": "array",
+                      "minItems": 3,
+                      "items": { "$ref": "#/$defs/point" }
+                    }
+                  }
+                }
+              },
+              "light_overlays": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["entity_id", "image"],
+                  "properties": {
+                    "entity_id": { "$ref": "#/$defs/lightEntityId" },
+                    "image": { "$ref": "#/$defs/localAssetUrl" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "rooms": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "name", "area_id", "icon", "lights", "covers"],
+        "required": [
+          "id",
+          "name",
+          "floor_id",
+          "area_id",
+          "icon",
+          "lights",
+          "covers",
+          "scenes",
+          "media_players"
+        ],
         "properties": {
           "id": { "$ref": "#/$defs/id" },
           "name": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "floor_id": { "$ref": "#/$defs/id" },
           "area_id": { "$ref": "#/$defs/id" },
           "icon": { "$ref": "#/$defs/icon" },
           "lights": {
@@ -173,8 +273,16 @@
             "type": "array",
             "items": { "$ref": "#/$defs/coverEntityId" }
           },
+          "scenes": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/sceneEntityId" }
+          },
+          "media_players": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/mediaPlayerEntityId" }
+          },
           "climate": { "$ref": "#/$defs/climateEntityId" },
-          "scene": { "$ref": "#/$defs/sceneEntityId" }
+          "temperature_sensor": { "$ref": "#/$defs/sensorEntityId" }
         }
       }
     },
@@ -227,24 +335,72 @@
     "football": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["card_type", "entities"],
+      "required": [
+        "provider",
+        "spotlight_team_codes",
+        "index_entity",
+        "gameweek_entity_prefix",
+        "table_entity"
+      ],
       "properties": {
-        "card_type": { "const": "custom:teamtracker-card" },
-        "entities": {
+        "provider": { "const": "fpl" },
+        "spotlight_team_codes": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z]{3}$" },
+          "allOf": [
+            { "contains": { "const": "TOT" } },
+            { "contains": { "const": "AVL" } }
+          ]
+        },
+        "index_entity": { "$ref": "#/$defs/sensorEntityId" },
+        "gameweek_entity_prefix": {
+          "type": "string",
+          "pattern": "^sensor\\.[a-z0-9_]+_$"
+        },
+        "table_entity": { "$ref": "#/$defs/sensorEntityId" }
+      }
+    },
+    "school": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classroom_students", "calendar_entities", "scopay_calendar_entities"],
+      "properties": {
+        "classroom_students": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["entity_id", "label"],
+            "required": ["person_id", "assignments_entity"],
             "properties": {
-              "entity_id": { "$ref": "#/$defs/sensorEntityId" },
-              "label": { "type": "string", "minLength": 1, "maxLength": 60 }
+              "person_id": { "$ref": "#/$defs/id" },
+              "assignments_entity": { "$ref": "#/$defs/sensorEntityId" }
             }
           }
+        },
+        "calendar_entities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/calendarEntityId" }
+        },
+        "scopay_calendar_entities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/calendarEntityId" }
         }
       }
     },
-    "school": { "$ref": "#/$defs/entityCollection" },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entities", "hours_to_show"],
+      "properties": {
+        "entities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/personEntityId" }
+        },
+        "hours_to_show": { "type": "integer", "minimum": 0, "maximum": 24 }
+      }
+    },
     "entry": {
       "type": "object",
       "additionalProperties": false,
@@ -297,19 +453,23 @@
     "mediaPlayerEntityId": { "type": "string", "pattern": "^media_player\\.[a-z0-9_]+$" },
     "sensorEntityId": { "type": "string", "pattern": "^sensor\\.[a-z0-9_]+$" },
     "cameraEntityId": { "type": "string", "pattern": "^camera\\.[a-z0-9_]+$" },
+    "vacuumMapCameraEntityId": { "type": "string", "pattern": "^camera\\.[a-z0-9_]*map[a-z0-9_]*$" },
+    "personEntityId": { "type": "string", "pattern": "^person\\.[a-z0-9_]+$" },
     "binarySensorEntityId": { "type": "string", "pattern": "^binary_sensor\\.[a-z0-9_]+$" },
     "buttonEntityId": { "type": "string", "pattern": "^button\\.[a-z0-9_]+$" },
     "colour": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
-    "entityCollection": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["entities"],
-      "properties": {
-        "entities": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/entityId" }
-        }
-      }
+    "localAssetUrl": {
+      "type": "string",
+      "pattern": "^/local/family-dashboard/[A-Za-z0-9._/-]+$"
+    },
+    "point": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number", "minimum": 0, "maximum": 100 },
+        { "type": "number", "minimum": 0, "maximum": 100 }
+      ],
+      "minItems": 2,
+      "maxItems": 2
     }
   }
 }

@@ -26,4 +26,20 @@ jobs:
       - run: npm run check
         working-directory: family_dashboard_manager/app
       - name: Ensure generated examples are current
-        run: git diff --exit-code -- family_dashboard_manager/app/generated/example-dashboard.yaml family_dashboard_manager/app/preview/family-dashboard-preview.svg family_dashboard_manager/app/preview/family-dashboard-controls-preview.svg
+        run: git diff --exit-code -- family_dashboard_manager/app/generated/example-dashboard.yaml family_dashboard_manager/app/preview/family-dashboard-preview.svg family_dashboard_manager/app/preview/family-dashboard-rooms-preview.svg
+
+  tablet-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: family_dashboard_manager/app/package-lock.json
+      - run: npm ci
+        working-directory: family_dashboard_manager/app
+      - run: npx playwright install --with-deps chromium webkit
+        working-directory: family_dashboard_manager/app
+      - run: npm run test:browser
+        working-directory: family_dashboard_manager/app

@@ -3,13 +3,16 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import * as z from "zod/v4";
+import { startFootballPolling } from "./football-provider.mjs";
 import { DashboardStore } from "./manager-store.mjs";
-import {
-  getSanitisedHomeAssistantInventory,
-  reloadLovelaceResources
-} from "./ha-client.mjs";
+import { getSanitisedHomeAssistantInventory } from "./ha-client.mjs";
 
 const CONFIG_SCHEMA = z.record(z.string(), z.unknown());
+const APP_VERSION = process.env.APP_VERSION || "0.4.0";
+const FLOORPLAN_ASSET_SCHEMA = z.object({
+  filename: z.enum(["ground-floor.svg", "first-floor.svg"]),
+  content: z.string().min(1).max(600_000)
+});
 
 function result(payload) {
   return {
@@ -31,9 +34,13 @@ function errorResult(error) {
 export function createFamilyDashboardMcpServer({
   store = new DashboardStore(),
   inventory = getSanitisedHomeAssistantInventory,
-  reload = reloadLovelaceResources
+  reload = async () => ({
+    performed: false,
+    resource_url: store.getResourceUrl(),
+    reason: "Home Assistant uses storage-mode Lovelace resources. Register or refresh this JavaScript module in Settings > Dashboards > Resources, then reload the tablet once."
+  })
 } = {}) {
-  const server = new McpServer({ name: "family-dashboard-manager", version: "0.3.0" });
+  const server = new McpServer({ name: "family-dashboard-manager", version: APP_VERSION });
 
   const readTool = (name, description, handler) => {
     server.registerTool(name, {
@@ -69,6 +76,31 @@ export function createFamilyDashboardMcpServer({
     "Return the most recent bounded Family Dashboard manager error without stack traces or unrelated logs.",
     () => store.getErrors()
   );
+  readTool(
+    "get_classroom_authorization_plan",
+    "Return the read-only Google Classroom authorization proof contract. No password, OAuth code, access token or refresh token is requested or exposed.",
+    async () => ({
+      phase: "authorization_proof",
+      account_model: "one child-owned Google authorization per configured Classroom student",
+      required_scopes: [
+        "https://www.googleapis.com/auth/classroom.courses.readonly",
+        "https://www.googleapis.com/auth/classroom.coursework.me.readonly",
+        "https://www.googleapis.com/auth/classroom.student-submissions.me.readonly"
+      ],
+      dashboard_access: "read_only",
+      credential_rules: [
+        "Never collect or store a child's Google password.",
+        "Never write OAuth tokens into household.json, dashboard.yaml, snapshots or logs.",
+        "Do not enable Classroom data until each child completes Google's own consent screen."
+      ],
+      output_contract: {
+        state: "number of open assignments",
+        attributes: {
+          assignments: [{ title: "string", course: "string", due_at: "ISO-8601 timestamp or null", alternate_link: "Google-hosted URL" }]
+        }
+      }
+    })
+  );
 
   server.registerTool("validate_household_config", {
     description: "Validate and compile a proposed non-secret household configuration without changing live files. The resulting config hash is required for deployment confirmation.",
@@ -85,6 +117,36 @@ export function createFamilyDashboardMcpServer({
       });
     } catch (error) {
       await store.recordError("validate_household_config", error);
+      return errorResult(error);
+    }
+  });
+
+  server.registerTool("validate_floorplan_assets", {
+    description: "Validate the two approved private floorplan SVGs without writing them. Returns the exact asset-set hash required for deployment.",
+    inputSchema: { assets: z.array(FLOORPLAN_ASSET_SCHEMA).length(2) },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  }, async ({ assets }) => {
+    try {
+      return result(store.validateFloorplanAssets(assets));
+    } catch (error) {
+      await store.recordError("validate_floorplan_assets", error);
+      return errorResult(error);
+    }
+  });
+
+  server.registerTool("deploy_floorplan_assets", {
+    description: "Deploy the already validated ground-floor.svg and first-floor.svg files to the manager's private asset directory. Requires confirm=true and the exact validated asset-set hash.",
+    inputSchema: {
+      assets: z.array(FLOORPLAN_ASSET_SCHEMA).length(2),
+      expected_asset_set_hash: z.string().regex(/^[a-f0-9]{64}$/),
+      confirm: z.boolean()
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  }, async ({ assets, expected_asset_set_hash: expectedAssetSetHash, confirm }) => {
+    try {
+      return result(await store.deployFloorplanAssets(assets, { expectedAssetSetHash, confirm }));
+    } catch (error) {
+      await store.recordError("deploy_floorplan_assets", error);
       return errorResult(error);
     }
   });
@@ -124,7 +186,7 @@ export function createFamilyDashboardMcpServer({
   });
 
   server.registerTool("reload_dashboard", {
-    description: "Verify the generated Family Dashboard files and ask Home Assistant to reload Lovelace resources. Requires explicit confirmation and cannot call arbitrary Home Assistant services.",
+    description: "Verify the generated Family Dashboard files and return the bounded one-time Lovelace resource registration or refresh step. Requires explicit confirmation and does not call arbitrary Home Assistant services.",
     inputSchema: { confirm: z.boolean() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ confirm }) => {
@@ -143,7 +205,7 @@ export function createFamilyDashboardMcpServer({
 
 export function createManagerApp(dependencies = {}) {
   const app = createMcpExpressApp({ host: "127.0.0.1" });
-  app.get("/healthz", (_request, response) => response.json({ status: "ok", version: "0.3.0" }));
+  app.get("/healthz", (_request, response) => response.json({ status: "ok", version: APP_VERSION }));
   app.post("/mcp", async (request, response) => {
     const server = createFamilyDashboardMcpServer(dependencies);
     const transport = new StreamableHTTPServerTransport({
@@ -174,16 +236,24 @@ export function createManagerApp(dependencies = {}) {
   return app;
 }
 
-export function startManagerServer({ port = Number(process.env.MANAGER_PORT || 8099) } = {}) {
-  const app = createManagerApp();
-  return app.listen(port, "127.0.0.1", (error) => {
+export function startManagerServer({
+  port = Number(process.env.MANAGER_PORT || 8099),
+  store = new DashboardStore(),
+  startPolling = startFootballPolling
+} = {}) {
+  const app = createManagerApp({ store });
+  const stopFootballPolling = startPolling({ store });
+  const listener = app.listen(port, "127.0.0.1", (error) => {
     if (error) {
+      stopFootballPolling();
       console.error("Family Dashboard Manager failed to start", error);
       process.exitCode = 1;
       return;
     }
     console.log(`Family Dashboard Manager listening on 127.0.0.1:${port}`);
   });
+  listener.once("close", stopFootballPolling);
+  return listener;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

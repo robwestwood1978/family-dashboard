@@ -1,38 +1,32 @@
 # Family Dashboard Manager core
 
-This package is the testable core used by the Family Dashboard Manager Home Assistant app. It deliberately does not inherit the old Vercel/Render application architecture.
+This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-The v0.3 core provides:
+Version 0.4 provides:
 
-- a versioned, machine-validated household configuration;
-- an explicit ban on secret-bearing keys in configuration;
-- a deterministic compiler that generates a separate Home Assistant YAML dashboard;
-- Today, Calendar, Home, Music, Chores, Football, and optional School views;
-- Daylight Calendar Card (formerly Skylight Calendar Card) for Apple/iCloud calendars exposed through CalDAV;
-- Mediocre Multi Media Player Card for Music Assistant and Sonos;
-- a warm-glass landscape presentation with non-admin kiosk mode, a slim persistent touch rail and an administrator escape route;
-- focused Lighting, Heating and Cameras & Entry subviews, including one live camera at a time and confirmed press-and-hold garage movement;
-- native weather, to-do, light, heating and cover controls plus Team Tracker football cards;
-- the ChoreOps `legacy-lite` profile, built from Auto-Entities and native tile actions for conservative tablet compatibility;
-- an explicit legacy-iOS mode that suppresses card animation and transitions;
-- deterministic 1024 by 768 Today and Controls SVG previews that are regression-tested alongside the generated YAML;
-- a sanitised Home Assistant inventory contract that excludes camera entities/images/streams, people, location trackers, states, history, addresses, tokens, credentials, and arbitrary attributes;
-- a localhost-only MCP server with eight bounded tools;
-- confirmation and hash-bound deploy/rollback operations with atomic activation and bounded snapshots.
+- a secret-rejecting schema-v4 household contract;
+- one generated Home Assistant panel containing the bundled `custom:family-hub-card`;
+- internal Today, Calendar, Rooms, Family, Music and Football navigation sized for `1112×834` and regression-tested at `1024×768`;
+- a two-floor floorplan engine that can use a private static plan or a read-only Home Assistant vacuum-map camera, with polygon room hotspots, state-coloured/brightness-aware light overlays and selected-room light, climate, cover, scene and media controls;
+- native Home Assistant Calendar and Map cards kept inside the Home Assistant frontend;
+- ChoreOps and read-only Classroom assignment summaries for configured children;
+- a server-side, last-good-cache Fantasy Premier League provider covering all 38 matchweeks, scorers and a calculated table, with Tottenham and Aston Villa spotlights;
+- a fixed allow-list deployment for the card and public example assets that preserves private household floorplan files;
+- raw, hash-verified rollback compatible with the existing schema-v3 release;
+- a sanitised inventory contract excluding cameras, people, location trackers, states, history, addresses, tokens, credentials and arbitrary attributes;
+- a localhost-only MCP server with nine bounded tools;
+- 10.5-inch iPad Today and Rooms SVG previews plus Chromium/WebKit browser projects.
+
+Doorbell/security camera and garage surfaces are rejected by v0.4 validation. A map-named vacuum camera is accepted only as a read-only floorplan image and provides no vacuum controls. Google Classroom remains at the authorization-proof boundary: no password or OAuth token belongs in the household configuration.
 
 ## Local check
 
 ```bash
 npm ci
 npm run check
+npm run test:browser
 ```
 
-The generic example configuration compiles to `generated/example-dashboard.yaml` and `preview/family-dashboard-preview.svg`. Both outputs are deterministic and contain synthetic names and events only.
-
-## Repository boundary
-
-- Generic compiler, manager app, schemas, tests, and documentation live in a public Home Assistant app repository.
-- Household configuration lives only in the private `family-calendar` repository.
-- Credentials and tokens live only in Home Assistant/OpenAI runtime secret stores and are never accepted by this schema.
+The browser suite requires Playwright Chromium and WebKit. CI installs both automatically. The generic example outputs are deterministic and contain synthetic names, entities, fixtures and house geometry only.
 
 See `docs/architecture.md` and `docs/manager-contract.md` for the deployment and access model.

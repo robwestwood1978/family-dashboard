@@ -1,3 +1,3 @@
 # Family Dashboard Manager
 
-Experimental Home Assistant app for safe Family Dashboard configuration deployment, rollback and sanitised inventory access. Version 0.3 adds the warm-glass family command centre and focused lighting, heating, camera/entry and media controls while retaining the same confirmation-bound deployment boundary. See [DOCS.md](./DOCS.md) for installation, frontend dependencies and security boundaries.
+Home Assistant app for confirmation-bound Family Dashboard deployment and hash-verified rollback. Version 0.4 upgrades the existing manager in place, accepts only two validated private floorplan SVGs and enforces a read-only first deployment. Camera, entry, location, Classroom and live device actions remain disabled during qualification. See [DOCS.md](./DOCS.md) for the upgrade and safety boundaries.

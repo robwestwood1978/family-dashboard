@@ -1,31 +1,24 @@
 # Family Dashboard Manager
 
-The manager owns only the dedicated Family Dashboard files. It validates household configuration, compiles dashboard YAML, keeps bounded rollback snapshots and can expose those operations to ChatGPT/Codex through an optional outbound-only Secure MCP Tunnel.
+Version 0.4 upgrades the existing Family Dashboard Manager in place. It keeps the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app, add a branch repository or create another tunnel.
 
-## Before installation
+The first v0.4 household deployment is intentionally read-only. Room, scene, climate, cover, light and media controls are disabled; entity detail dialogs and the full media-player card are withheld. Doorbell/security feeds, garage actions, location mapping, Google Classroom and vacuum controls remain disabled during qualification.
 
-This release requires Home Assistant OS 2026.8.0 or newer. Install the integrations and frontend cards used by your private configuration before deploying the dashboard.
+## Upgrade the existing manager
 
-The v0.3 warm-glass presentation profile expects:
+This release requires Home Assistant OS 2026.8.0 or newer.
 
-- Daylight Calendar Card, button-card, layout-card, Mushroom, Auto-Entities, Team Tracker Card, Mediocre Multi Media Player Card, card-mod and kiosk-mode from HACS;
-- ChoreOps and Team Tracker entities when their corresponding views are enabled;
-- built-in Home Assistant weather, to-do, light, climate, cover, camera, binary-sensor and scene entities for the configured surfaces.
+1. Create a Home Assistant backup.
+2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
+3. Update the installed **Family Dashboard Manager** to v0.4.0. Do not uninstall it.
+4. Keep its existing Secure MCP Tunnel options unchanged and restart the app.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.4.0.
 
-The generated dashboard deliberately avoids WebGL, live blur, required animation and event-write controls. It creates depth with static gradients, opacity and bounded shadows. With `legacy_ios` enabled, card animation and transitions are suppressed. The non-admin tablet account receives kiosk chrome while an administrator retains the normal Home Assistant header as the parent escape route. Every enabled view retains the same large-touch navigation rail.
+The app exposes no host port. Its manager endpoint remains on the private loopback interface inside the same app container.
 
-## Install
+## Existing Home Assistant registration
 
-1. Add `https://github.com/robwestwood1978/family-dashboard` as a Home Assistant app repository.
-2. Install **Family Dashboard Manager**.
-3. Leave **Secure MCP Tunnel** disabled for the first start.
-4. Start the app and confirm its log reports that the manager is listening on its private loopback interface.
-
-The app exposes no host port. Its MCP endpoint is reachable only inside its own container by the optional tunnel service.
-
-## One-time dashboard registration
-
-Add the following to Home Assistant's `configuration.yaml` once:
+Keep the existing dashboard entry and path:
 
 ```yaml
 lovelace:
@@ -39,30 +32,81 @@ lovelace:
       filename: family-dashboard/dashboard.yaml
 ```
 
-Check the configuration and restart Home Assistant. The dashboard file will be created by the first confirmed deployment.
+Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
-The private household file must use schema version 3 for manager v0.3. In addition to the existing product and entity mappings it supplies the warm-glass backdrop colours, weather and list mappings, room lights/heating/covers, the `legacy-lite` ChoreOps helper mapping, Team Tracker entries, camera IDs, safe doorbell status sensors and the garage cover. Run `validate_household_config` before any deployment; validation is read-only and returns the exact hash required for a separately confirmed deploy.
+```text
+/local/family-dashboard/family-hub-card.js?v=0.4.0
+```
 
-The Cameras & Entry view loads only the configured primary camera as a live stream; secondary cameras remain lightweight until opened. When a camera maps Home Assistant button entities for stream control, the view provides explicit Start live and Stop live actions. Camera images, streams, states and history are never fetched through the manager MCP tools. Camera entity IDs may appear only in the explicit non-secret household configuration. Garage movement is available only from a press-and-hold action followed by an on-screen confirmation instructing the user to check the relevant camera view.
+The stock Home Assistant Overview remains available to administrators.
 
-Calendar event creation, editing and deletion remain disabled. Apple/iCloud or another CalDAV-backed Home Assistant calendar remains the source of truth until live write behavior is independently proven.
+## Private floorplans
 
-## Secure MCP Tunnel
+The manager accepts exactly two private SVG filenames:
 
-The tunnel is optional and disabled by default. To enable managed deployments:
+- `ground-floor.svg`
+- `first-floor.svg`
 
-1. Create or obtain a `tunnel_id` in OpenAI Platform tunnel settings.
-2. Create a runtime API key with Tunnels Read + Use permission.
-3. Associate the tunnel with the ChatGPT workspace and Platform organisation that will use it.
-4. Stop the app, enable **Secure MCP Tunnel**, enter the tunnel ID and runtime key, then start it again.
-5. Confirm the log reports that the tunnel is healthy before adding the tunnel-backed app in ChatGPT developer mode.
+Each file must be a complete, inert SVG no larger than 512 KiB. Active content, external references and unapproved filenames are rejected. The plans are never committed to the public repository or included in rollback snapshots.
 
-The runtime key is stored only in Home Assistant app options and passed to `tunnel-client` through its process environment. It is never accepted in household configuration, written to Git, returned by a manager tool or printed by the start script.
+The confirmation-bound transfer is:
 
-## Tool safety
+1. Call `validate_floorplan_assets` with both files.
+2. Check the returned filenames, sizes, individual SHA-256 hashes and `asset_set_hash`.
+3. Call `deploy_floorplan_assets` with `confirm=true` and that exact asset-set hash.
+4. Reference only these private URLs in the household configuration:
 
-- Validation never writes live files.
-- Deployment requires `confirm=true` plus the exact hash returned by validation.
-- Rollback requires `confirm=true`, a known snapshot ID and the exact active hash.
-- Inventory excludes camera entities and all camera images/streams, people, location trackers, current states, history, IP/MAC addresses, credentials and arbitrary attributes.
+   ```text
+   /local/family-dashboard/private/ground-floor.svg
+   /local/family-dashboard/private/first-floor.svg
+   ```
+
+The files are written only below `/config/www/family-dashboard/private/`.
+
+## Read-only v0.4 deployment
+
+The schema-v4 household configuration must retain the existing dashboard path and explicitly enable read-only mode:
+
+```json
+{
+  "display": {
+    "panel_path": "family-dashboard",
+    "read_only": true
+  }
+}
+```
+
+Run `validate_household_config` first. Validation is read-only and returns the exact configuration hash required by `deploy_household_config` with `confirm=true`.
+
+Deployment writes only the existing Family Dashboard configuration and fixed frontend allow-list. Before replacing those files, the manager creates a raw, hash-verified snapshot of the installed v0.3 configuration, dashboard and managed frontend. Private floorplans remain outside snapshots and are preserved.
+
+Call `reload_dashboard` after deployment, then refresh the existing Lovelace resource and tablet.
+
+## Physical qualification
+
+Verify on the target iPad that:
+
+- the Family Dashboard opens at its existing sidebar entry;
+- the stock Home Assistant Overview remains available;
+- the dashboard shows a **Read-only test** badge;
+- Today, Calendar, Rooms, Family, Music and Football render without horizontal overflow;
+- both private floors and all approved room hotspots align correctly;
+- taps on light, scene, climate, cover and media controls produce no Home Assistant service calls;
+- Music shows its non-interactive status surface;
+- no camera, entry, location, Classroom or vacuum control is enabled.
+
+Live device actions require a later qualified release. Do not clear `display.read_only` in v0.4.0.
+
+## Safety boundary
+
+- Asset and configuration deployment each require `confirm=true` plus the exact hash returned by validation.
+- The manager retains the existing `family_dashboard_manager` slug, `/config/family-dashboard` configuration directory, `/config/www/family-dashboard` frontend directory and published image identity.
+- Inventory excludes cameras, people, trackers, states, history, addresses, credentials and arbitrary attributes.
 - The manager cannot run arbitrary commands, read arbitrary files or call arbitrary Home Assistant services.
+- Rollback verifies raw snapshot hashes and can restore the already-installed schema-v3 release without reinterpreting it as schema v4.
+
+## Google Classroom and football
+
+The Classroom adapter stays disabled until each child completes Google's own read-only authorization flow. No child password or OAuth token may be written to household configuration, generated YAML, snapshots or logs.
+
+The browser does not call Fantasy Premier League directly. The manager provides a server-side, last-good-cache feed covering all 38 Premier League matchweeks with Tottenham and Aston Villa spotlights.
