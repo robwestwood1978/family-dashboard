@@ -84,3 +84,10 @@ test("falls back to the private static plan when the map image is unavailable", 
     vacuum_map_entity: "camera.robovac_map"
   }), "/local/family-dashboard/assets/fallback.svg");
 });
+
+test("cache-busts a revised private floorplan without changing its approved file path", () => {
+  assert.equal(floorplanImageSource({
+    base_image: "/local/family-dashboard/private/ground-floor.svg",
+    asset_revision: "v0.5.1"
+  }), "/local/family-dashboard/private/ground-floor.svg?v=v0.5.1");
+});

@@ -18,14 +18,14 @@
   },
   "theme": {
     "accent": "#5B5BD6",
-    "background": "#F3F1EC",
-    "surface": "#FFFFFF",
-    "text": "#202432",
-    "muted": "#697080",
+    "background": "#11182B",
+    "surface": "#222B46",
+    "text": "#F7F8FC",
+    "muted": "#B6BDCE",
     "radius_px": 20,
-    "backdrop_start": "#14233A",
-    "backdrop_mid": "#5D3E5C",
-    "backdrop_end": "#D98B6E",
+    "backdrop_start": "#0B1429",
+    "backdrop_mid": "#342E51",
+    "backdrop_end": "#9A514F",
     "nav_background": "#17233A"
   },
   "people": [
@@ -100,6 +100,7 @@
         "id": "ground",
         "name": "Ground floor",
         "base_image": "/local/family-dashboard/assets/example-ground.svg",
+        "asset_revision": "v0.5.1",
         "vacuum_map_entity": "camera.example_vacuum_map",
         "aspect_ratio": 1.666667,
         "room_hotspots": [
@@ -122,6 +123,7 @@
         "id": "first",
         "name": "First floor",
         "base_image": "/local/family-dashboard/assets/example-first.svg",
+        "asset_revision": "v0.5.1",
         "aspect_ratio": 1.666667,
         "room_hotspots": [
           { "room_id": "child_one_room", "points": [[3, 5], [48, 5], [48, 68], [3, 68]] },

@@ -195,7 +195,12 @@ export function normaliseFixtureStatus(fixture) {
 }
 
 export function floorplanImageSource(floor, states = {}) {
-  if (!floor?.vacuum_map_entity) return floor?.base_image || "";
+  const staticSource = () => {
+    const source = floor?.base_image || "";
+    if (!source || !floor?.asset_revision) return source;
+    return `${source}${source.includes("?") ? "&" : "?"}v=${encodeURIComponent(floor.asset_revision)}`;
+  };
+  if (!floor?.vacuum_map_entity) return staticSource();
   const mapState = states[floor.vacuum_map_entity];
   const entityPicture = mapState?.attributes?.entity_picture;
   if (typeof entityPicture === "string" && entityPicture.startsWith("/api/camera_proxy/")) {
@@ -203,7 +208,7 @@ export function floorplanImageSource(floor, states = {}) {
     if (!updated) return entityPicture;
     return `${entityPicture}${entityPicture.includes("?") ? "&" : "?"}v=${encodeURIComponent(updated)}`;
   }
-  return floor.base_image || `/api/camera_proxy/${encodeURIComponent(floor.vacuum_map_entity)}`;
+  return staticSource() || `/api/camera_proxy/${encodeURIComponent(floor.vacuum_map_entity)}`;
 }
 
 function relevantEntityIds(config) {
@@ -675,7 +680,7 @@ export class FamilyHubCard extends HTMLElementBase {
         <g class="room-hotspot ${selectedRoom?.id === room.id ? "is-selected" : ""} ${summary.lightsOn ? "has-light" : ""}" role="button" tabindex="0" data-room="${room.id}" aria-label="${escapeHtml(`${room.name}, ${status}`)}" style="--room-colour:${escapeHtml(summary.colour)}">
           <title>${escapeHtml(`${room.name}, ${status}`)}</title>
           <polygon points="${points}"></polygon>
-          <circle class="room-pin" cx="${centroid.x.toFixed(2)}" cy="${centroidY.toFixed(2)}" r="1.4"></circle>
+          <circle class="room-pin" cx="${centroid.x.toFixed(2)}" cy="${centroidY.toFixed(2)}" r="0.7"></circle>
         </g>
       `;
     }).join("");
@@ -813,37 +818,16 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderMusic() {
-    if (this._config.display.read_only) {
-      const states = this._hass?.states || {};
-      const players = this._config.media.players.map((player) => {
-        const primary = states[player.entity_id];
-        const assistant = player.ma_entity_id ? states[player.ma_entity_id] : null;
-        const state = [primary, assistant].find((entry) => entry?.state === "playing") || primary || assistant;
-        return { player, state };
-      });
-      const active = players.find(({ state }) => state?.state === "playing");
-      const speakerCards = players.map(({ player, state }) => `
-        <article class="speaker-card ${state?.state === "playing" ? "is-playing" : ""}">
-          <span class="speaker-icon"><ha-icon icon="${state?.state === "playing" ? "mdi:music-note" : "mdi:speaker"}" aria-hidden="true"></ha-icon></span>
-          <span><strong>${escapeHtml(player.name)}</strong><small>${escapeHtml(state?.state === "playing" ? state.attributes?.media_title || "Playing" : titleCase(state?.state || "Ready"))}</small></span>
-          <i>${state?.state === "playing" ? "Live" : "Ready"}</i>
-        </article>
-      `).join("");
-      return `
-        <section class="music-dashboard read-only-music">
-          <article class="surface music-hero">
-            <div class="music-artwork">${active?.state?.attributes?.entity_picture ? `<img src="${escapeHtml(active.state.attributes.entity_picture)}" alt="">` : '<ha-icon icon="mdi:music-note-eighth" aria-hidden="true"></ha-icon>'}</div>
-            <div><p class="eyebrow">${active ? `Now playing · ${escapeHtml(active.player.name)}` : "Spotify & Sonos"}</p><h2>${escapeHtml(active?.state?.attributes?.media_title || "Ready when the house is")}</h2><p>${escapeHtml(active?.state?.attributes?.media_artist || `${players.length} rooms connected`)}</p><span class="music-lock"><ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon>Playback controls stay disabled in this read-only test</span></div>
-            <div class="sound-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
-          </article>
-          <article class="surface speaker-panel"><div class="section-heading"><div><p class="eyebrow">Around the house</p><h2>Connected speakers</h2></div><span>${players.filter(({ state }) => state?.state === "playing").length} active</span></div><div class="speaker-grid">${speakerCards}</div></article>
-        </section>
-      `;
-    }
+    const readOnly = this._config.display.read_only;
     return `
-      <section class="single-surface surface embedded-view music-view">
-        <div class="section-heading"><div><p class="eyebrow">Spotify & Sonos</p><h2>Browse, group and play</h2></div><span>${this._config.media.players.length} rooms</span></div>
-        <div id="music-card-slot" class="child-card-slot"></div>
+      <section class="music-experience">
+        <article class="surface media-player-panel">
+          <div class="section-heading music-heading"><div><p class="eyebrow">Spotify · Sonos</p><h2>${readOnly ? "Your full music player" : "Browse, group and play"}</h2></div><span>${this._config.media.players.length} rooms</span></div>
+          <div class="media-player-stage ${readOnly ? "is-read-only" : ""}">
+            <div id="music-card-slot" class="child-card-slot"></div>
+            ${readOnly ? '<div class="media-preview-badge"><ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon>Player shown exactly as configured · controls locked for this test</div>' : ""}
+          </div>
+        </article>
       </section>
     `;
   }
@@ -976,7 +960,7 @@ export class FamilyHubCard extends HTMLElementBase {
         entities: this._config.location.entities
       }, "map-card-slot");
     }
-    if (this._view === "music" && !this._config.display.read_only) {
+    if (this._view === "music") {
       this._ensureChildCard("music", {
         type: this._config.media.card_type,
         size: "large",
@@ -1006,6 +990,11 @@ export class FamilyHubCard extends HTMLElementBase {
         slot.innerHTML = `<p class="empty-state">This Home Assistant card could not load: ${escapeHtml(error?.message || error)}</p>`;
         return;
       }
+    }
+    if (key === "music") {
+      child.inert = this._config.display.read_only === true;
+      if (child.inert) child.setAttribute("aria-disabled", "true");
+      else child.removeAttribute("aria-disabled");
     }
     child.hass = this._hass;
     slot.replaceChildren(child);
@@ -1130,7 +1119,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .preview-pill ha-icon { --mdc-icon-size:18px; }
       .weather-pill { min-height:48px; padding:0 16px; border:1px solid rgba(255,255,255,.28); border-radius:18px; background:rgba(255,255,255,.14); color:#fff; display:flex; align-items:center; gap:9px; cursor:pointer; }
       .view { min-height:0; min-width:0; }
-      .surface { background:linear-gradient(145deg,color-mix(in srgb,var(--hub-surface) 87%,var(--hub-backdrop-end)),color-mix(in srgb,var(--hub-surface) 92%,var(--hub-accent))); border:1px solid rgba(255,255,255,.5); border-radius:var(--hub-radius); box-shadow:0 18px 42px rgba(13,20,40,.2),inset 0 1px 0 rgba(255,255,255,.52); -webkit-backdrop-filter:blur(18px) saturate(1.12); backdrop-filter:blur(18px) saturate(1.12); }
+      .surface { color:var(--hub-text); background:linear-gradient(145deg,color-mix(in srgb,var(--hub-surface) 82%,transparent),color-mix(in srgb,var(--hub-backdrop-mid) 72%,transparent)); border:1px solid rgba(255,255,255,.16); border-radius:var(--hub-radius); box-shadow:0 20px 52px rgba(3,8,24,.3),inset 0 1px 0 rgba(255,255,255,.1); -webkit-backdrop-filter:blur(22px) saturate(1.18); backdrop-filter:blur(22px) saturate(1.18); }
       .today-grid { height:100%; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(245px,.9fr) minmax(240px,.85fr); grid-template-rows:minmax(190px,.9fr) minmax(210px,1.1fr); gap:14px; }
       .today-grid article { padding:20px; min-width:0; overflow:hidden; }
       .today-grid h2 { margin:7px 0 0; font-size:22px; line-height:1.16; }
@@ -1178,16 +1167,16 @@ export class FamilyHubCard extends HTMLElementBase {
       .segments { display:flex; flex-shrink:0; align-items:center; gap:4px; padding:3px; border-radius:13px; background:color-mix(in srgb,var(--hub-muted) 10%,transparent); }
       .segment { min-height:32px; padding:0 12px; border:0; border-radius:10px; background:transparent; color:var(--hub-muted); font-size:11px; font-weight:700; white-space:nowrap; cursor:pointer; }
       .segment.is-selected { color:#fff; background:var(--hub-accent); }
-      .floorplan-canvas { position:relative; min-height:0; overflow:hidden; border-radius:18px; background:radial-gradient(circle at 52% 30%,#f9f2e8 0,#d9d5d8 54%,#aeb7c3 100%); border:1px solid rgba(255,255,255,.6); }
-      .floorplan-backdrop { position:absolute; inset:0; background:linear-gradient(145deg,rgba(255,255,255,.56),transparent 48%),radial-gradient(ellipse at 50% 78%,rgba(25,32,52,.22),transparent 54%); }
+      .floorplan-canvas { position:relative; min-height:0; overflow:hidden; border-radius:18px; background:radial-gradient(circle at 52% 34%,rgba(100,91,145,.38) 0,rgba(20,28,52,.88) 52%,rgba(7,13,29,.96) 100%); border:1px solid rgba(255,255,255,.14); }
+      .floorplan-backdrop { position:absolute; inset:0; background:linear-gradient(145deg,rgba(255,255,255,.07),transparent 48%),radial-gradient(ellipse at 50% 80%,rgba(3,8,24,.62),transparent 55%); }
       .floorplan-visual { position:absolute; inset:0; width:100%; height:100%; z-index:4; }
       .floorplan-image,.light-overlay { pointer-events:none; }
       .light-overlay { mix-blend-mode:screen; }
       .room-hotspot { cursor:pointer; outline:none; }
-      .room-hotspot polygon { fill:rgba(255,255,255,.06); stroke:rgba(32,36,50,.35); stroke-width:.45; vector-effect:non-scaling-stroke; }
-      .room-hotspot .room-pin { opacity:0; fill:var(--hub-accent); stroke:#fff; stroke-width:.45; vector-effect:non-scaling-stroke; filter:drop-shadow(0 1px 2px rgba(17,24,39,.45)); pointer-events:none; }
-      .room-hotspot.has-light polygon { fill:color-mix(in srgb,var(--room-colour) 18%,transparent); filter:drop-shadow(0 0 5px var(--room-colour)); }
-      .room-hotspot.is-selected polygon,.room-hotspot:focus polygon { fill:color-mix(in srgb,var(--hub-accent) 16%,transparent); stroke:var(--hub-accent); stroke-width:1; }
+      .room-hotspot polygon { fill:transparent; stroke:transparent; stroke-width:.45; vector-effect:non-scaling-stroke; transition:fill .18s ease,stroke .18s ease,filter .18s ease; }
+      .room-hotspot .room-pin { opacity:0; fill:#fff; stroke:var(--hub-accent); stroke-width:.55; vector-effect:non-scaling-stroke; filter:drop-shadow(0 0 3px var(--hub-accent)); pointer-events:none; }
+      .room-hotspot.has-light polygon { fill:color-mix(in srgb,var(--room-colour) 12%,transparent); filter:drop-shadow(0 0 4px var(--room-colour)); }
+      .room-hotspot.is-selected polygon,.room-hotspot:focus polygon { fill:color-mix(in srgb,var(--hub-accent) 8%,transparent); stroke:#b9aaff; stroke-width:.72; filter:drop-shadow(0 0 4px var(--hub-accent)); }
       .room-hotspot.is-selected .room-pin,.room-hotspot:focus .room-pin { opacity:1; }
       .room-detail { padding:20px; min-height:0; overflow:auto; }
       .read-only-note { display:flex; align-items:center; gap:7px; margin:14px 0 0; padding:10px 12px; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); color:var(--hub-muted); font-size:11px; }
@@ -1319,31 +1308,6 @@ export class FamilyHubCard extends HTMLElementBase {
       .chore-row.is-overdue { border-color:#e9978f; background:#fff0ef; }
       .chore-row.is-overdue .chore-check { background:#f9d5d1; color:#a9362d; }
       .chore-row.is-waiting .chore-check { background:#fff0cf; color:#8b5b00; }
-      .music-dashboard { height:100%; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(205px,.82fr) minmax(0,1.18fr); place-items:stretch; gap:14px; padding:0; }
-      .music-hero { position:relative; overflow:hidden; padding:28px 34px; display:grid; grid-template-columns:132px minmax(0,1fr) 116px; gap:24px; align-items:center; background:radial-gradient(circle at 86% 24%,rgba(255,255,255,.24),transparent 28%),linear-gradient(120deg,color-mix(in srgb,var(--hub-nav) 92%,#000),color-mix(in srgb,var(--hub-accent) 78%,var(--hub-backdrop-end))); color:#fff; }
-      .music-artwork { width:124px; height:124px; display:grid; place-items:center; overflow:hidden; border-radius:26px; background:linear-gradient(145deg,rgba(255,255,255,.24),rgba(255,255,255,.08)); box-shadow:0 18px 40px rgba(9,15,32,.3); }
-      .music-artwork img { width:100%; height:100%; object-fit:cover; }
-      .music-artwork ha-icon { --mdc-icon-size:56px; }
-      .music-hero .eyebrow { color:rgba(255,255,255,.68); }
-      .music-hero h2 { margin:6px 0 0; font-size:29px; line-height:1.08; }
-      .music-hero p { margin:6px 0 0; color:rgba(255,255,255,.72); font-size:12px; }
-      .music-lock { display:flex; align-items:center; gap:6px; width:max-content; margin-top:16px; padding:7px 10px; border:1px solid rgba(255,255,255,.18); border-radius:12px; background:rgba(255,255,255,.1); color:rgba(255,255,255,.8); font-size:9px; }
-      .music-lock ha-icon { --mdc-icon-size:14px; }
-      .sound-wave { height:86px; display:flex; align-items:center; justify-content:center; gap:7px; }
-      .sound-wave i { width:7px; border-radius:7px; background:rgba(255,255,255,.64); }
-      .sound-wave i:nth-child(1),.sound-wave i:nth-child(5) { height:28px; }
-      .sound-wave i:nth-child(2),.sound-wave i:nth-child(4) { height:54px; }
-      .sound-wave i:nth-child(3) { height:78px; }
-      .speaker-panel { padding:20px; min-height:0; overflow:auto; }
-      .speaker-grid { margin-top:15px; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
-      .speaker-card { min-width:0; min-height:72px; display:grid; grid-template-columns:40px minmax(0,1fr) auto; align-items:center; gap:9px; padding:11px; border:1px solid rgba(74,78,96,.12); border-radius:16px; background:rgba(255,255,255,.62); }
-      .speaker-card.is-playing { border-color:color-mix(in srgb,var(--hub-accent) 38%,transparent); background:color-mix(in srgb,var(--hub-accent) 8%,#fff); }
-      .speaker-icon { width:40px; height:40px; display:grid; place-items:center; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 12%,#fff); color:var(--hub-accent); }
-      .speaker-card strong,.speaker-card small { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
-      .speaker-card strong { font-size:11px; }
-      .speaker-card small { margin-top:3px; color:var(--hub-muted); font-size:9px; }
-      .speaker-card i { padding:4px 6px; border-radius:8px; background:#edf0f4; color:#6c7282; font-size:8px; font-style:normal; font-weight:750; }
-      .speaker-card.is-playing i { background:#dff3e8; color:#18794e; }
       .football-empty { min-height:0; height:100%; display:grid; grid-template-columns:90px minmax(0,1fr) auto; gap:20px; align-items:center; padding:26px; border:1px dashed color-mix(in srgb,var(--hub-accent) 32%,transparent); border-radius:18px; background:linear-gradient(145deg,color-mix(in srgb,var(--hub-accent) 7%,#fff),rgba(255,255,255,.5)); }
       .football-orbit { width:82px; height:82px; display:grid; place-items:center; border-radius:50%; background:radial-gradient(circle,#fff 34%,color-mix(in srgb,var(--hub-accent) 18%,#fff) 35% 58%,transparent 59%); color:var(--hub-accent); box-shadow:0 12px 28px rgba(31,36,57,.12); }
       .football-orbit ha-icon { --mdc-icon-size:34px; }
@@ -1355,6 +1319,53 @@ export class FamilyHubCard extends HTMLElementBase {
       .empty-state { color:var(--hub-muted); font-size:12px; line-height:1.45; }
       .empty-state.compact { margin:14px 0 0; font-size:10px; }
       .empty-state.large { display:grid; place-items:center; min-height:260px; text-align:center; }
+      .surface .eyebrow { color:rgba(223,228,241,.64); }
+      .surface h2,.surface h3,.surface strong { color:var(--hub-text); }
+      .next-panel { background:linear-gradient(155deg,rgba(24,34,62,.9),rgba(55,43,73,.76)); }
+      .children-panel { background:linear-gradient(155deg,rgba(27,39,65,.88),rgba(54,39,65,.74)); }
+      .football-panel { background:linear-gradient(155deg,rgba(25,39,55,.88),rgba(55,45,66,.74)); }
+      .now-playing-panel { background:linear-gradient(155deg,rgba(30,29,56,.9),rgba(67,43,76,.76)); }
+      .person-summary { border:1px solid color-mix(in srgb,var(--person-colour) 26%,transparent); background:color-mix(in srgb,var(--person-colour) 14%,rgba(12,20,39,.72)); }
+      .compact-fixture { border-color:rgba(255,255,255,.12); background:rgba(10,18,36,.54); }
+      .room-detail { background:linear-gradient(160deg,rgba(25,34,58,.92),rgba(48,38,64,.82)); }
+      .read-only-note,.control-main,.media-room-control,.climate-control,.cover-control { border-color:rgba(255,255,255,.1); background:rgba(10,18,36,.48); }
+      .stepper button,.cover-control button { background:rgba(255,255,255,.09); color:#bcaeff; }
+      .calendar-view { background:linear-gradient(155deg,rgba(18,27,49,.94),rgba(48,38,67,.9)); }
+      .calendar-legend { color:#dce1ef; }
+      .agenda-day { border-color:rgba(255,255,255,.11); background:rgba(8,16,33,.52); }
+      .agenda-day.is-today { border-color:color-mix(in srgb,var(--hub-accent) 72%,#fff); background:color-mix(in srgb,var(--hub-accent) 16%,rgba(8,16,33,.72)); box-shadow:inset 0 3px 0 #a999ff; }
+      .agenda-day > header { border-color:rgba(255,255,255,.09); color:#fff; }
+      .agenda-day > header span,.agenda-day > header small { color:#aeb7ca; }
+      .agenda-event { border:1px solid color-mix(in srgb,var(--calendar-colour) 32%,rgba(255,255,255,.08)); background:color-mix(in srgb,var(--calendar-colour) 19%,rgba(13,21,40,.92)); color:#fff; box-shadow:0 7px 18px rgba(1,5,16,.22); }
+      .agenda-event strong { color:#f7f8fc; }
+      .agenda-event small { color:#b7bfd0; }
+      .agenda-empty { color:#8f99ad; }
+      .family-person { background:linear-gradient(155deg,color-mix(in srgb,var(--person-colour) 13%,rgba(20,29,51,.94)),rgba(32,29,52,.88)); }
+      .family-facts span { border:1px solid color-mix(in srgb,var(--person-colour) 17%,transparent); background:color-mix(in srgb,var(--person-colour) 10%,rgba(8,15,31,.55)); }
+      .chore-row { border-color:color-mix(in srgb,var(--person-colour) 25%,transparent); background:color-mix(in srgb,var(--person-colour) 11%,rgba(8,15,31,.62)); }
+      .chore-check { background:color-mix(in srgb,var(--person-colour) 22%,rgba(8,15,31,.72)); }
+      .chore-row.is-overdue { border-color:#d56e69; background:rgba(112,38,42,.42); }
+      .chore-row.is-overdue .chore-check { background:rgba(202,74,69,.34); color:#ffaaa3; }
+      .football-main,.spotlight-panel,.provider-panel { background:linear-gradient(155deg,rgba(18,30,48,.93),rgba(47,38,61,.88)); }
+      .football-empty { border-color:rgba(255,255,255,.12); background:radial-gradient(circle at 10% 50%,rgba(123,104,211,.22),transparent 28%),linear-gradient(145deg,rgba(11,20,40,.86),rgba(39,32,57,.78)); }
+      .football-orbit { background:radial-gradient(circle,rgba(169,153,255,.95) 0 34%,rgba(123,104,211,.3) 35% 58%,transparent 59%); color:#fff; box-shadow:0 12px 28px rgba(1,5,16,.34); }
+      .football-empty p:last-child { color:#aeb7ca; }
+      .fixture { border-color:rgba(255,255,255,.09); }
+      .fixture.is-spotlight { border-color:color-mix(in srgb,var(--hub-accent) 52%,transparent); background:color-mix(in srgb,var(--hub-accent) 13%,rgba(9,17,34,.72)); }
+      .club-badge { background:linear-gradient(145deg,#111c35,#473b70); border:1px solid rgba(255,255,255,.12); }
+      .league-table th,.league-table td { border-color:rgba(255,255,255,.08); }
+      .league-table tr.is-spotlight { background:color-mix(in srgb,var(--hub-accent) 15%,rgba(8,15,31,.62)); }
+      .matchweek-controls select { border-color:rgba(255,255,255,.12); background:rgba(8,15,31,.66); }
+      .music-experience { height:100%; }
+      .media-player-panel { height:100%; min-height:0; padding:20px; display:grid; grid-template-rows:58px minmax(0,1fr); gap:12px; overflow:hidden; background:radial-gradient(circle at 85% 10%,rgba(123,104,211,.32),transparent 35%),linear-gradient(145deg,rgba(16,25,48,.96),rgba(52,38,70,.9)); }
+      .music-heading { align-items:center; }
+      .music-heading h2 { font-size:24px; }
+      .media-player-stage { position:relative; min-height:0; overflow:hidden; border:1px solid rgba(255,255,255,.12); border-radius:18px; background:rgba(6,12,27,.62); }
+      .media-player-stage .child-card-slot { height:100%; border-radius:0; --ha-card-background:transparent; --card-background-color:transparent; --primary-background-color:transparent; --secondary-background-color:rgba(255,255,255,.06); --primary-text-color:#f7f8fc; --secondary-text-color:#b6bdce; }
+      .media-player-stage.is-read-only .child-card-slot { pointer-events:none; user-select:none; }
+      .media-player-stage .embedded-card { min-height:100%; --ha-card-border-width:0; --ha-card-box-shadow:none; }
+      .media-preview-badge { position:absolute; right:14px; bottom:14px; z-index:4; display:flex; align-items:center; gap:7px; max-width:420px; padding:9px 12px; border:1px solid rgba(255,255,255,.18); border-radius:12px; background:rgba(9,16,33,.9); color:#dfe3ef; box-shadow:0 12px 30px rgba(0,0,0,.28); font-size:10px; font-weight:700; pointer-events:none; }
+      .media-preview-badge ha-icon { --mdc-icon-size:16px; color:#b7a8ff; }
       @keyframes pulse { 0%,100% { opacity:.45; transform:scale(.8); } 50% { opacity:1; transform:scale(1); } }
       .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
       button:focus-visible,select:focus-visible,.room-hotspot:focus-visible { outline:3px solid color-mix(in srgb,var(--hub-accent) 60%,#fff); outline-offset:2px; }

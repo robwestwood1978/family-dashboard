@@ -242,9 +242,10 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect.poll(() => page.evaluate(() => window.__moreInfoEvents)).toBe(0);
 
   await card.locator('.nav-button[data-view="music"]').click();
-  await expect(card.locator(".read-only-music")).toContainText("Playback controls stay disabled");
-  await expect(card.locator(".speaker-card")).toHaveCount(2);
-  await expect(card.locator("#music-card-slot")).toHaveCount(0);
+  await expect(card.locator(".media-player-panel")).toContainText("Your full music player");
+  await expect(card.locator(".media-preview-badge")).toContainText("controls locked for this test");
+  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toBeVisible();
+  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("aria-disabled", "true");
 
   await card.locator('.nav-button[data-view="family"]').click();
   await expect(card.locator(".family-rhythm")).toContainText("Actual ChoreOps tasks are shown below");

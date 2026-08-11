@@ -99,6 +99,7 @@ views:
               "floors": [
                 {
                   "aspect_ratio": 1.666667,
+                  "asset_revision": "v0.5.1",
                   "base_image": "/local/family-dashboard/assets/example-ground.svg",
                   "id": "ground",
                   "light_overlays": [
@@ -181,6 +182,7 @@ views:
                 },
                 {
                   "aspect_ratio": 1.666667,
+                  "asset_revision": "v0.5.1",
                   "base_image": "/local/family-dashboard/assets/example-first.svg",
                   "id": "first",
                   "light_overlays": [],
@@ -413,15 +415,15 @@ views:
             },
             "theme": {
               "accent": "#5B5BD6",
-              "backdrop_end": "#D98B6E",
-              "backdrop_mid": "#5D3E5C",
-              "backdrop_start": "#14233A",
-              "background": "#F3F1EC",
-              "muted": "#697080",
+              "backdrop_end": "#9A514F",
+              "backdrop_mid": "#342E51",
+              "backdrop_start": "#0B1429",
+              "background": "#11182B",
+              "muted": "#B6BDCE",
               "nav_background": "#17233A",
               "radius_px": 20,
-              "surface": "#FFFFFF",
-              "text": "#202432"
+              "surface": "#222B46",
+              "text": "#F7F8FC"
             },
             "weather": {
               "entity_id": "weather.home"

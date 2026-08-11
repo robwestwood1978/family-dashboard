@@ -207,6 +207,7 @@
               "id": { "$ref": "#/$defs/id" },
               "name": { "type": "string", "minLength": 1, "maxLength": 30 },
               "base_image": { "$ref": "#/$defs/localAssetUrl" },
+              "asset_revision": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,32}$" },
               "vacuum_map_entity": { "$ref": "#/$defs/vacuumMapCameraEntityId" },
               "aspect_ratio": { "type": "number", "minimum": 0.5, "maximum": 4 },
               "night_image": { "$ref": "#/$defs/localAssetUrl" },
