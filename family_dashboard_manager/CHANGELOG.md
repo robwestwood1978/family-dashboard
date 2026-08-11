@@ -1,3 +1,12 @@
+## 0.5.0
+
+- Redesign the first-party tablet shell with a richer navy-to-coral backdrop, translucent surfaces and intentional Today, Music and Football states while retaining the existing dashboard, app and tunnel identities.
+- Replace the embedded calendar card with a legible first-party seven-day agenda backed by Home Assistant's bounded calendar API.
+- Add schema-v5 mappings for each child's individual ChoreOps status sensors and render the actual routine name, status and points instead of aggregate counts alone.
+- Keep location sharing disabled without leaving an empty Family map by presenting two private child routine panels.
+- Support private isometric/cutaway floorplan artwork while preserving explicit percentage-coordinate hotspots and the read-only interaction boundary.
+- Retain the v0.4 deployment as a raw hash-verified rollback target and continue to reject camera, entry, location, Classroom, vacuum and device actions during qualification.
+
 ## 0.4.2
 
 - Make schema-v4 timezone validation independent of ICU locale data in the minimal Home Assistant app image.

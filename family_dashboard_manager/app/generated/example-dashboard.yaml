@@ -45,19 +45,29 @@ views:
               "rolling_days": 7
             },
             "chores": {
-              "profile": "legacy-lite",
+              "profile": "choreops-status",
               "users": [
                 {
                   "chores_entity": "sensor.child_one_choreops_chores",
                   "dashboard_helper_entity": "sensor.child_one_choreops_ui_dashboard_helper",
                   "person_id": "child_one",
-                  "points_entity": "sensor.child_one_choreops_points"
+                  "points_entity": "sensor.child_one_choreops_points",
+                  "status_entities": [
+                    "sensor.child_one_choreops_chore_status_brush_teeth",
+                    "sensor.child_one_choreops_chore_status_get_dressed",
+                    "sensor.child_one_choreops_chore_status_go_to_bed_at_bedtime"
+                  ]
                 },
                 {
                   "chores_entity": "sensor.child_two_choreops_chores",
                   "dashboard_helper_entity": "sensor.child_two_choreops_ui_dashboard_helper",
                   "person_id": "child_two",
-                  "points_entity": "sensor.child_two_choreops_points"
+                  "points_entity": "sensor.child_two_choreops_points",
+                  "status_entities": [
+                    "sensor.child_two_choreops_chore_status_brush_teeth",
+                    "sensor.child_two_choreops_chore_status_get_dressed",
+                    "sensor.child_two_choreops_chore_status_go_to_bed_at_bedtime"
+                  ]
                 }
               ]
             },
@@ -384,7 +394,7 @@ views:
                 ]
               }
             ],
-            "schema_version": 4,
+            "schema_version": 5,
             "school": {
               "calendar_entities": [
                 "calendar.school"

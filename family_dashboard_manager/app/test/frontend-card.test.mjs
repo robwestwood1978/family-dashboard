@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveRoomState, escapeHtml, floorplanImageSource, isControlAction, normaliseFixtureStatus } from "../frontend/family-hub-card.js";
+import { deriveRoomState, escapeHtml, floorplanImageSource, isControlAction, normaliseChoreStatus, normaliseFixtureStatus } from "../frontend/family-hub-card.js";
 
 test("escapes state-derived text before rendering it into the card", () => {
   assert.equal(escapeHtml('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
@@ -49,6 +49,17 @@ test("normalises upcoming, live and finished fixture states", () => {
   assert.equal(normaliseFixtureStatus({ started: false, finished: false, minutes: 0 }), "upcoming");
   assert.equal(normaliseFixtureStatus({ started: true, finished: false, minutes: 23 }), "live");
   assert.equal(normaliseFixtureStatus({ started: true, finished: true, minutes: 90 }), "finished");
+});
+
+test("normalises ChoreOps state sensors into readable routine states", () => {
+  assert.deepEqual(normaliseChoreStatus({ state: "claimed", attributes: { chore_name: "Brush teeth", default_points: 3 } }, "sensor.child_choreops_chore_status_brush_teeth"), {
+    name: "Brush teeth",
+    label: "Awaiting approval",
+    tone: "waiting",
+    points: 3,
+    due: null
+  });
+  assert.equal(normaliseChoreStatus({ state: "overdue", attributes: {} }, "sensor.child_choreops_chore_status_get_dressed").name, "Get Dressed");
 });
 
 test("uses the authenticated Home Assistant Eufy map image without persisting it", () => {

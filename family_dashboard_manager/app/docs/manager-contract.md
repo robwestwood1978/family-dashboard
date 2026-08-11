@@ -27,7 +27,7 @@ Deploy and rollback require an exact current/validated hash plus `confirm=true`.
 - arbitrary Home Assistant service calls;
 - password, OAuth code or token transport through household configuration;
 - editing unrelated dashboards or integrations;
-- camera or garage operation in v0.4.
+- camera or garage operation in v0.5.
 
 ## Files and connection
 

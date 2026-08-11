@@ -1,6 +1,6 @@
 {
   "$schema": "./family-dashboard.schema.json",
-  "schema_version": 4,
+  "schema_version": 5,
   "product": {
     "title": "Family Dashboard",
     "locale": "en-GB",
@@ -212,19 +212,29 @@
     ]
   },
   "chores": {
-    "profile": "legacy-lite",
+    "profile": "choreops-status",
     "users": [
       {
         "person_id": "child_one",
         "dashboard_helper_entity": "sensor.child_one_choreops_ui_dashboard_helper",
         "points_entity": "sensor.child_one_choreops_points",
-        "chores_entity": "sensor.child_one_choreops_chores"
+        "chores_entity": "sensor.child_one_choreops_chores",
+        "status_entities": [
+          "sensor.child_one_choreops_chore_status_brush_teeth",
+          "sensor.child_one_choreops_chore_status_get_dressed",
+          "sensor.child_one_choreops_chore_status_go_to_bed_at_bedtime"
+        ]
       },
       {
         "person_id": "child_two",
         "dashboard_helper_entity": "sensor.child_two_choreops_ui_dashboard_helper",
         "points_entity": "sensor.child_two_choreops_points",
-        "chores_entity": "sensor.child_two_choreops_chores"
+        "chores_entity": "sensor.child_two_choreops_chores",
+        "status_entities": [
+          "sensor.child_two_choreops_chore_status_brush_teeth",
+          "sensor.child_two_choreops_chore_status_get_dressed",
+          "sensor.child_two_choreops_chore_status_go_to_bed_at_bedtime"
+        ]
       }
     ]
   },

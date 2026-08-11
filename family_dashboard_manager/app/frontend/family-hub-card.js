@@ -64,6 +64,75 @@ function formatDay(value, locale = "en-GB", timeZone) {
   return new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short", timeZone }).format(date);
 }
 
+function calendarEventStart(event) {
+  if (!event) return null;
+  if (typeof event.start === "string") return event.start;
+  return event.start?.dateTime || event.start?.date || event.start_time || null;
+}
+
+function isAllDayCalendarEvent(event) {
+  return Boolean(event?.start?.date && !event?.start?.dateTime)
+    || /^\d{4}-\d{2}-\d{2}$/.test(String(calendarEventStart(event) || ""));
+}
+
+function dateKey(value, timeZone) {
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return String(value);
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone
+  }).formatToParts(date).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function calendarWindow(locale, timeZone, count = 7, now = new Date()) {
+  const today = dateKey(now, timeZone);
+  const [year, month, day] = today.split("-").map(Number);
+  const base = Date.UTC(year, month - 1, day, 12);
+  return Array.from({ length: count }, (_, offset) => {
+    const date = new Date(base + offset * 86_400_000);
+    const key = date.toISOString().slice(0, 10);
+    return {
+      key,
+      isToday: offset === 0,
+      weekday: new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: "UTC" }).format(date),
+      day: new Intl.DateTimeFormat(locale, { day: "numeric", timeZone: "UTC" }).format(date),
+      month: new Intl.DateTimeFormat(locale, { month: "short", timeZone: "UTC" }).format(date)
+    };
+  });
+}
+
+export function normaliseChoreStatus(state, entityId = "") {
+  const raw = String(state?.state || "unavailable").toLowerCase();
+  const presentations = {
+    approved: ["Done", "done"],
+    completed: ["Done", "done"],
+    completed_by_other: ["Done", "done"],
+    claimed: ["Awaiting approval", "waiting"],
+    overdue: ["Overdue", "overdue"],
+    missed: ["Missed", "missed"],
+    pending: ["To do", "todo"],
+    due: ["To do", "todo"],
+    not_my_turn: ["Not your turn", "standby"],
+    waiting: ["Later", "standby"],
+    standby: ["Later", "standby"],
+    unavailable: ["Unavailable", "unavailable"]
+  };
+  const [label, tone] = presentations[raw] || [titleCase(raw), "standby"];
+  const fallbackName = String(entityId).split("_chore_status_")[1] || String(entityId).split(".")[1] || "Chore";
+  return {
+    name: state?.attributes?.chore_name || titleCase(fallbackName),
+    label,
+    tone,
+    points: safeNumber(state?.attributes?.default_points, NaN),
+    due: state?.attributes?.due_date || state?.attributes?.due_at || null
+  };
+}
+
 function titleCase(value) {
   return String(value || "").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
@@ -173,6 +242,10 @@ function stateSignature(states, entityIds) {
       attributes.media_artist,
       attributes.message,
       attributes.start_time,
+      attributes.chore_name,
+      attributes.default_points,
+      attributes.due_date,
+      attributes.due_at,
       attributes.last_updated,
       attributes.events?.length,
       attributes.rows?.length,
@@ -199,6 +272,11 @@ export class FamilyHubCard extends HTMLElementBase {
     this._signature = "";
     this._renderPending = false;
     this._childCards = new Map();
+    this._calendarEvents = [];
+    this._calendarLoading = false;
+    this._calendarError = null;
+    this._calendarRequestKey = "";
+    this._calendarRequest = 0;
     this._boundClick = (event) => this._handleClick(event);
     this._boundChange = (event) => this._handleChange(event);
     this._boundKeydown = (event) => this._handleKeydown(event);
@@ -222,8 +300,8 @@ export class FamilyHubCard extends HTMLElementBase {
     const config = typeof cardConfig?.config_json === "string"
       ? JSON.parse(cardConfig.config_json)
       : cardConfig?.family_config;
-    if (!config || config.schema_version !== 4) {
-      throw new Error("Family Hub requires a schema-v4 family configuration");
+    if (!config || config.schema_version !== 5) {
+      throw new Error("Family Hub requires a schema-v5 family configuration");
     }
     this._config = config;
     this._view = config.display.default_view || "today";
@@ -232,6 +310,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .find((floor) => floor.id === this._floor)?.room_hotspots?.[0]?.room_id || config.rooms[0]?.id || null;
     this._entityIds = relevantEntityIds(config);
     this._signature = "";
+    this._calendarEvents = [];
+    this._calendarRequestKey = "";
+    this._calendarError = null;
     this._scheduleRender(true);
   }
 
@@ -244,6 +325,7 @@ export class FamilyHubCard extends HTMLElementBase {
       this._signature = nextSignature;
       this._scheduleRender();
     }
+    this._loadCalendarEvents();
   }
 
   getCardSize() {
@@ -268,6 +350,70 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _enabledViews() {
     return VIEW_DEFINITIONS.filter((view) => !view.feature || this._config.features[view.feature]);
+  }
+
+  _calendarWindow() {
+    return calendarWindow(
+      this._config.product.locale,
+      this._config.product.timezone,
+      this._config.calendar.rolling_days
+    );
+  }
+
+  _calendarFallbackEvents() {
+    const states = this._hass?.states || {};
+    return this._config.calendar.entities.flatMap((calendar) => {
+      const state = states[calendar.entity_id];
+      if (!state?.attributes?.start_time) return [];
+      return [{
+        summary: state.attributes.message || calendar.label,
+        start: state.attributes.start_time,
+        end: state.attributes.end_time,
+        _calendar: calendar
+      }];
+    });
+  }
+
+  async _loadCalendarEvents() {
+    if (!this._config?.features?.calendar || !this._hass) return;
+    if (typeof this._hass.callApi !== "function") {
+      if (!this._calendarEvents.length) this._calendarEvents = this._calendarFallbackEvents();
+      return;
+    }
+    const days = this._calendarWindow();
+    const stateVersion = this._config.calendar.entities.map((calendar) => {
+      const state = this._hass.states?.[calendar.entity_id];
+      return `${calendar.entity_id}:${state?.last_updated || state?.last_changed || "unknown"}`;
+    }).join("|");
+    const requestKey = `${days[0]?.key || ""}:${stateVersion}`;
+    if (requestKey === this._calendarRequestKey) return;
+    this._calendarRequestKey = requestKey;
+    this._calendarLoading = true;
+    this._calendarError = null;
+    const requestId = ++this._calendarRequest;
+    this._scheduleRender();
+    const start = new Date(Date.now() - 43_200_000).toISOString();
+    const end = new Date(Date.now() + (this._config.calendar.rolling_days + 1) * 86_400_000).toISOString();
+    try {
+      const groups = await Promise.all(this._config.calendar.entities.map(async (calendar) => {
+        const path = `calendars/${encodeURIComponent(calendar.entity_id)}?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+        const events = await this._hass.callApi("GET", path);
+        return (Array.isArray(events) ? events : []).map((event) => ({ ...event, _calendar: calendar }));
+      }));
+      if (requestId !== this._calendarRequest) return;
+      this._calendarEvents = groups.flat().sort((left, right) => {
+        return new Date(calendarEventStart(left) || 0) - new Date(calendarEventStart(right) || 0);
+      });
+    } catch (error) {
+      if (requestId !== this._calendarRequest) return;
+      this._calendarEvents = this._calendarFallbackEvents();
+      this._calendarError = error?.message || "Calendar events are temporarily unavailable";
+    } finally {
+      if (requestId === this._calendarRequest) {
+        this._calendarLoading = false;
+        this._scheduleRender();
+      }
+    }
   }
 
   _render() {
@@ -367,10 +513,9 @@ export class FamilyHubCard extends HTMLElementBase {
     const averageTemperature = temperatures.length
       ? temperatures.reduce((total, value) => total + value, 0) / temperatures.length
       : NaN;
-    const nextCalendar = this._config.calendar.entities
-      .map((calendar) => ({ calendar, state: states[calendar.entity_id] }))
-      .filter(({ state }) => state?.attributes?.start_time)
-      .sort((a, b) => new Date(a.state.attributes.start_time) - new Date(b.state.attributes.start_time))[0];
+    const nextCalendar = (this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents())
+      .filter((event) => calendarEventStart(event) && new Date(calendarEventStart(event)).getTime() >= Date.now() - 86_400_000)
+      .sort((a, b) => new Date(calendarEventStart(a)) - new Date(calendarEventStart(b)))[0];
     const playing = firstPlayingPlayer(this._config, states);
     const featuredFixtures = this._featuredFixtures();
     return `
@@ -387,8 +532,8 @@ export class FamilyHubCard extends HTMLElementBase {
         <article class="surface next-panel">
           <p class="eyebrow">Up next</p>
           ${nextCalendar ? `
-            <h2>${escapeHtml(nextCalendar.state.attributes.message || nextCalendar.calendar.label)}</h2>
-            <p class="supporting">${escapeHtml(formatDay(nextCalendar.state.attributes.start_time, this._config.product.locale, this._config.product.timezone))} · ${escapeHtml(formatTime(nextCalendar.state.attributes.start_time, this._config.product.locale, this._config.product.timezone))}</p>
+            <h2>${escapeHtml(nextCalendar.summary || nextCalendar._calendar?.label || "Family event")}</h2>
+            <p class="supporting">${escapeHtml(formatDay(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}${isAllDayCalendarEvent(nextCalendar) ? " · All day" : ` · ${escapeHtml(formatTime(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}`}</p>
             <button class="text-action" type="button" data-view="calendar">Open family calendar</button>
           ` : `
             <h2>No upcoming event is available</h2>
@@ -430,10 +575,14 @@ export class FamilyHubCard extends HTMLElementBase {
       const classroomState = classroom ? states[classroom.assignments_entity] : null;
       const due = safeNumber(choreState?.attributes?.chore_stat_current_due_today, 0);
       const assignments = classroomState?.attributes?.assignments || [];
+      const nextChore = chore?.status_entities
+        ?.map((entityId) => ({ entityId, state: states[entityId] }))
+        .find(({ state }) => !["approved", "completed", "completed_by_other"].includes(String(state?.state || "").toLowerCase()));
+      const nextChoreName = nextChore ? normaliseChoreStatus(nextChore.state, nextChore.entityId).name : "Routines complete";
       return `
         <button type="button" class="person-summary" data-view="family" style="--person-colour:${escapeHtml(person.colour)}">
           <span class="person-initial">${escapeHtml(person.name.slice(0, 1))}</span>
-          <span><strong>${escapeHtml(person.name)}</strong><small>${due} chore${due === 1 ? "" : "s"} · ${assignments.length} assignment${assignments.length === 1 ? "" : "s"}</small></span>
+          <span><strong>${escapeHtml(person.name)}</strong><small>${due} due · ${escapeHtml(nextChoreName)}</small></span>
           <span class="points">${escapeHtml(pointsState?.state || "0")} pts</span>
         </button>
       `;
@@ -441,10 +590,40 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderCalendar() {
+    const days = this._calendarWindow();
+    const events = this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents();
+    const timeZone = this._config.product.timezone;
+    const locale = this._config.product.locale;
+    const legend = this._config.calendar.entities.map((calendar) => `
+      <span class="calendar-legend" style="--calendar-colour:${escapeHtml(calendar.colour)}"><i></i>${escapeHtml(calendar.label)}</span>
+    `).join("");
+    const columns = days.map((day) => {
+      const dayEvents = events.filter((event) => dateKey(calendarEventStart(event), timeZone) === day.key);
+      return `
+        <section class="agenda-day ${day.isToday ? "is-today" : ""}">
+          <header><span>${escapeHtml(day.weekday)}</span><strong>${escapeHtml(day.day)}</strong><small>${escapeHtml(day.month)}</small></header>
+          <div class="agenda-events">
+            ${dayEvents.slice(0, 5).map((event) => {
+              const calendar = event._calendar || this._config.calendar.entities[0];
+              return `
+                <article class="agenda-event" style="--calendar-colour:${escapeHtml(calendar.colour)}">
+                  <span class="event-time">${isAllDayCalendarEvent(event) ? "All day" : escapeHtml(formatTime(calendarEventStart(event), locale, timeZone))}</span>
+                  <strong>${escapeHtml(event.summary || calendar.label)}</strong>
+                  ${event.location ? `<small><ha-icon icon="mdi:map-marker-outline" aria-hidden="true"></ha-icon>${escapeHtml(event.location)}</small>` : ""}
+                </article>
+              `;
+            }).join("") || '<p class="agenda-empty">Nothing planned</p>'}
+            ${dayEvents.length > 5 ? `<span class="agenda-more">+${dayEvents.length - 5} more</span>` : ""}
+          </div>
+        </section>
+      `;
+    }).join("");
     return `
-      <section class="single-surface surface embedded-view">
-        <div class="section-heading"><div><p class="eyebrow">Family rhythm</p><h2>The next seven days</h2></div><span>Read-only</span></div>
-        <div id="calendar-card-slot" class="child-card-slot"></div>
+      <section class="single-surface surface calendar-view">
+        <div class="section-heading calendar-heading"><div><p class="eyebrow">Family rhythm</p><h2>The next seven days</h2></div><div class="calendar-legends">${legend}</div></div>
+        ${this._calendarLoading ? '<div class="calendar-loading"><span></span>Refreshing the family week…</div>' : ""}
+        ${this._calendarError ? '<p class="calendar-warning">Showing the next events held by Home Assistant while the full agenda reconnects.</p>' : ""}
+        <div class="agenda-board">${columns}</div>
       </section>
     `;
   }
@@ -494,9 +673,9 @@ export class FamilyHubCard extends HTMLElementBase {
       ].filter(Boolean).join(" · ") || "Open room";
       return `
         <g class="room-hotspot ${selectedRoom?.id === room.id ? "is-selected" : ""} ${summary.lightsOn ? "has-light" : ""}" role="button" tabindex="0" data-room="${room.id}" aria-label="${escapeHtml(`${room.name}, ${status}`)}" style="--room-colour:${escapeHtml(summary.colour)}">
+          <title>${escapeHtml(`${room.name}, ${status}`)}</title>
           <polygon points="${points}"></polygon>
-          <text x="${centroid.x.toFixed(2)}" y="${(centroidY - 1.2).toFixed(2)}" text-anchor="middle">${escapeHtml(room.name)}</text>
-          <text class="room-status" x="${centroid.x.toFixed(2)}" y="${(centroidY + 2.7).toFixed(2)}" text-anchor="middle">${escapeHtml(status)}</text>
+          <circle class="room-pin" cx="${centroid.x.toFixed(2)}" cy="${centroidY.toFixed(2)}" r="1.4"></circle>
         </g>
       `;
     }).join("");
@@ -571,6 +750,22 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _renderFamily() {
     const locationEnabled = this._config.features.location_map;
+    const children = this._config.people.filter((person) => person.role === "child");
+    const states = this._hass?.states || {};
+    const allChoreStates = this._config.chores.users.flatMap((user) => (user.status_entities || []).map((entityId) => states[entityId]));
+    const completed = allChoreStates.filter((state) => ["approved", "completed", "completed_by_other"].includes(String(state?.state || "").toLowerCase())).length;
+    const due = this._config.chores.users.reduce((total, user) => total + safeNumber(states[user.chores_entity]?.attributes?.chore_stat_current_due_today, 0), 0);
+    if (!locationEnabled) {
+      return `
+        <section class="family-dashboard">
+          <article class="surface family-rhythm">
+            <div><p class="eyebrow">Today together</p><h2>Small routines, visible progress</h2><p>Actual ChoreOps tasks are shown below. This test stays read-only.</p></div>
+            <div class="rhythm-stats"><span><strong>${due}</strong> due today</span><span><strong>${completed}</strong> completed</span><span><strong>${allChoreStates.length}</strong> routines mapped</span></div>
+          </article>
+          <div class="family-people-grid">${children.map((person) => this._renderFamilyPerson(person)).join("")}</div>
+        </section>
+      `;
+    }
     return `
       <section class="family-layout">
         <article class="surface map-panel">
@@ -578,7 +773,7 @@ export class FamilyHubCard extends HTMLElementBase {
           ${locationEnabled ? '<div id="map-card-slot" class="child-card-slot map-slot"></div>' : '<p class="empty-state">Location sharing is disabled.</p>'}
         </article>
         <aside class="family-sidebar">
-          ${this._config.people.filter((person) => person.role === "child").map((person) => this._renderFamilyPerson(person)).join("")}
+          ${children.map((person) => this._renderFamilyPerson(person)).join("")}
         </aside>
       </section>
     `;
@@ -595,21 +790,53 @@ export class FamilyHubCard extends HTMLElementBase {
     const presence = this._config.features.location_map && person.location_entity
       ? titleCase(states[person.location_entity]?.state || "Location unavailable")
       : "Family member";
+    const choreRows = (chore?.status_entities || []).map((entityId) => {
+      const state = states[entityId];
+      const presentation = normaliseChoreStatus(state, entityId);
+      return `
+        <li class="chore-row is-${escapeHtml(presentation.tone)}">
+          <span class="chore-check"><ha-icon icon="${presentation.tone === "done" ? "mdi:check" : presentation.tone === "overdue" ? "mdi:alert" : "mdi:circle-small"}" aria-hidden="true"></ha-icon></span>
+          <span><strong>${escapeHtml(presentation.name)}</strong><small>${escapeHtml(presentation.label)}${presentation.due ? ` · ${escapeHtml(formatTime(presentation.due, this._config.product.locale, this._config.product.timezone))}` : ""}</small></span>
+          ${Number.isFinite(presentation.points) ? `<b>+${presentation.points}</b>` : ""}
+        </li>
+      `;
+    }).join("");
     return `
       <article class="surface family-person" style="--person-colour:${escapeHtml(person.colour)}">
         <div class="family-person-heading"><span>${escapeHtml(person.name.slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person.name)}</p><h2>${escapeHtml(presence)}</h2></div></div>
         <div class="family-facts"><span><strong>${escapeHtml(points || "0")}</strong> chore points</span><span><strong>${due}</strong> due today</span><span><strong>${assignments.length}</strong> assignments</span></div>
-        ${nextAssignment ? `<div class="assignment"><ha-icon icon="${ICONS.school}"></ha-icon><div><strong>${escapeHtml(nextAssignment.title || "Assignment")}</strong><small>${escapeHtml(nextAssignment.course || "Google Classroom")} · ${escapeHtml(formatDay(nextAssignment.due_at, this._config.product.locale, this._config.product.timezone))}</small></div></div>` : `<p class="empty-state compact">Classroom assignments will appear after read-only authorization.</p>`}
+        <div class="chore-heading"><p class="eyebrow">Today’s routines</p><span>${choreRows ? `${(chore?.status_entities || []).length} mapped` : "Not mapped"}</span></div>
+        ${choreRows ? `<ul class="chore-list">${choreRows}</ul>` : '<p class="empty-state compact">No individual ChoreOps status sensors are mapped.</p>'}
+        ${nextAssignment ? `<div class="assignment"><ha-icon icon="${ICONS.school}"></ha-icon><div><strong>${escapeHtml(nextAssignment.title || "Assignment")}</strong><small>${escapeHtml(nextAssignment.course || "Google Classroom")} · ${escapeHtml(formatDay(nextAssignment.due_at, this._config.product.locale, this._config.product.timezone))}</small></div></div>` : ""}
       </article>
     `;
   }
 
   _renderMusic() {
     if (this._config.display.read_only) {
+      const states = this._hass?.states || {};
+      const players = this._config.media.players.map((player) => {
+        const primary = states[player.entity_id];
+        const assistant = player.ma_entity_id ? states[player.ma_entity_id] : null;
+        const state = [primary, assistant].find((entry) => entry?.state === "playing") || primary || assistant;
+        return { player, state };
+      });
+      const active = players.find(({ state }) => state?.state === "playing");
+      const speakerCards = players.map(({ player, state }) => `
+        <article class="speaker-card ${state?.state === "playing" ? "is-playing" : ""}">
+          <span class="speaker-icon"><ha-icon icon="${state?.state === "playing" ? "mdi:music-note" : "mdi:speaker"}" aria-hidden="true"></ha-icon></span>
+          <span><strong>${escapeHtml(player.name)}</strong><small>${escapeHtml(state?.state === "playing" ? state.attributes?.media_title || "Playing" : titleCase(state?.state || "Ready"))}</small></span>
+          <i>${state?.state === "playing" ? "Live" : "Ready"}</i>
+        </article>
+      `).join("");
       return `
-        <section class="single-surface surface read-only-music">
-          <div><p class="eyebrow">Spotify & Sonos</p><h2>Music is connected</h2><p class="supporting">The full player is intentionally disabled during this read-only test. ${this._config.media.players.length} mapped rooms will be available after live approval.</p></div>
-          <ha-icon icon="mdi:music-circle-outline" aria-hidden="true"></ha-icon>
+        <section class="music-dashboard read-only-music">
+          <article class="surface music-hero">
+            <div class="music-artwork">${active?.state?.attributes?.entity_picture ? `<img src="${escapeHtml(active.state.attributes.entity_picture)}" alt="">` : '<ha-icon icon="mdi:music-note-eighth" aria-hidden="true"></ha-icon>'}</div>
+            <div><p class="eyebrow">${active ? `Now playing · ${escapeHtml(active.player.name)}` : "Spotify & Sonos"}</p><h2>${escapeHtml(active?.state?.attributes?.media_title || "Ready when the house is")}</h2><p>${escapeHtml(active?.state?.attributes?.media_artist || `${players.length} rooms connected`)}</p><span class="music-lock"><ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon>Playback controls stay disabled in this read-only test</span></div>
+            <div class="sound-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          </article>
+          <article class="surface speaker-panel"><div class="section-heading"><div><p class="eyebrow">Around the house</p><h2>Connected speakers</h2></div><span>${players.filter(({ state }) => state?.state === "playing").length} active</span></div><div class="speaker-grid">${speakerCards}</div></article>
         </section>
       `;
     }
@@ -681,7 +908,13 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderFixtures(events) {
-    if (!events.length) return '<p class="empty-state large">No fixtures have been published for this matchweek yet.</p>';
+    if (!events.length) return `
+      <div class="football-empty">
+        <span class="football-orbit"><ha-icon icon="mdi:soccer" aria-hidden="true"></ha-icon></span>
+        <div><p class="eyebrow">Between matchweeks</p><h3>The next fixtures are still in the tunnel</h3><p>Tottenham and Aston Villa will be highlighted here as soon as the provider publishes this matchweek.</p></div>
+        <div class="empty-clubs"><span>TOT</span><i></i><span>AVL</span></div>
+      </div>
+    `;
     const grouped = new Map();
     for (const fixture of events) {
       const key = formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone);
@@ -734,14 +967,6 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _mountChildCards() {
     if (!this._hass || !globalThis.loadCardHelpers) return;
-    if (this._view === "calendar") {
-      this._ensureChildCard("calendar", {
-        type: "calendar",
-        title: "",
-        initial_view: this._config.calendar.initial_view,
-        entities: this._config.calendar.entities.map((entry) => entry.entity_id)
-      }, "calendar-card-slot");
-    }
     if (this._view === "family" && this._config.features.location_map) {
       this._ensureChildCard("map", {
         type: "map",
@@ -882,20 +1107,20 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _styles() {
     return `
-      :host { display:block; width:100%; min-width:0; color:var(--primary-text-color); }
+      :host { display:block; width:100%; min-width:0; min-height:720px; height:calc(100vh - 8px); color:var(--primary-text-color); }
       *, *::before, *::after { box-sizing:border-box; }
       button, select { font:inherit; }
       button { -webkit-tap-highlight-color:transparent; }
-      .hub-card { overflow:hidden; border:0; background:linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 48%,var(--hub-backdrop-end)); color:var(--hub-text); min-height:720px; height:calc(100vh - 8px); }
-      .shell { display:grid; grid-template-columns:86px minmax(0,1fr); min-height:720px; height:100%; }
-      .navigation { padding:14px 9px; background:color-mix(in srgb,var(--hub-nav) 94%,transparent); display:flex; flex-direction:column; gap:14px; min-height:0; }
+      .hub-card { overflow:hidden; border:0; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); color:var(--hub-text); min-height:720px; height:100%; }
+      .shell { display:grid; grid-template-columns:86px minmax(0,1fr); min-height:720px; height:100%; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); }
+      .navigation { padding:14px 9px; background:linear-gradient(180deg,color-mix(in srgb,var(--hub-nav) 96%,transparent),color-mix(in srgb,var(--hub-nav) 86%,var(--hub-accent))); border-right:1px solid rgba(255,255,255,.1); display:flex; flex-direction:column; gap:14px; min-height:0; }
       .brand { width:54px; height:54px; margin:0 auto; border-radius:50%; border:1px solid rgba(255,255,255,.45); background:rgba(255,255,255,.12); color:#fff; font-size:24px; font-weight:700; cursor:pointer; }
       .nav-items { display:flex; min-height:0; flex:1; flex-direction:column; justify-content:center; gap:8px; }
       .nav-button { min-height:64px; border:1px solid transparent; border-radius:20px; background:transparent; color:rgba(255,255,255,.72); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; cursor:pointer; }
       .nav-button ha-icon { --mdc-icon-size:22px; }
       .nav-button span { font-size:10px; font-weight:600; }
       .nav-button.is-active { color:#fff; background:linear-gradient(145deg,var(--hub-backdrop-end),var(--hub-accent)); border-color:rgba(255,255,255,.35); box-shadow:0 10px 24px rgba(13,18,34,.28); }
-      .content { min-width:0; min-height:0; padding:16px 18px 18px; display:grid; grid-template-rows:70px minmax(0,1fr); gap:12px; }
+      .content { min-width:0; min-height:0; padding:14px 18px 18px; display:grid; grid-template-rows:64px minmax(0,1fr); gap:12px; background:linear-gradient(135deg,rgba(17,28,51,.18),rgba(183,101,98,.12)); }
       .topbar { min-width:0; display:flex; justify-content:space-between; align-items:center; color:#fff; padding:0 4px; }
       .topbar h1 { margin:2px 0 0; font-size:30px; line-height:1; font-weight:700; }
       .eyebrow { margin:0; font-size:10px; line-height:1.2; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--hub-muted); }
@@ -905,7 +1130,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .preview-pill ha-icon { --mdc-icon-size:18px; }
       .weather-pill { min-height:48px; padding:0 16px; border:1px solid rgba(255,255,255,.28); border-radius:18px; background:rgba(255,255,255,.14); color:#fff; display:flex; align-items:center; gap:9px; cursor:pointer; }
       .view { min-height:0; min-width:0; }
-      .surface { background:color-mix(in srgb,var(--hub-surface) 94%,transparent); border:1px solid rgba(255,255,255,.42); border-radius:var(--hub-radius); box-shadow:0 14px 32px rgba(18,24,43,.18); }
+      .surface { background:linear-gradient(145deg,color-mix(in srgb,var(--hub-surface) 87%,var(--hub-backdrop-end)),color-mix(in srgb,var(--hub-surface) 92%,var(--hub-accent))); border:1px solid rgba(255,255,255,.5); border-radius:var(--hub-radius); box-shadow:0 18px 42px rgba(13,20,40,.2),inset 0 1px 0 rgba(255,255,255,.52); -webkit-backdrop-filter:blur(18px) saturate(1.12); backdrop-filter:blur(18px) saturate(1.12); }
       .today-grid { height:100%; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(245px,.9fr) minmax(240px,.85fr); grid-template-rows:minmax(190px,.9fr) minmax(210px,1.1fr); gap:14px; }
       .today-grid article { padding:20px; min-width:0; overflow:hidden; }
       .today-grid h2 { margin:7px 0 0; font-size:22px; line-height:1.16; }
@@ -950,20 +1175,20 @@ export class FamilyHubCard extends HTMLElementBase {
       .rooms-layout { height:100%; display:grid; grid-template-columns:minmax(0,1.7fr) minmax(285px,.72fr); gap:14px; }
       .floorplan-panel { min-width:0; min-height:0; padding:18px; display:grid; grid-template-rows:52px minmax(0,1fr); gap:8px; }
       .floorplan-heading { align-items:center; }
-      .segments { display:flex; align-items:center; gap:4px; padding:3px; border-radius:13px; background:color-mix(in srgb,var(--hub-muted) 10%,transparent); }
-      .segment { min-height:32px; padding:0 12px; border:0; border-radius:10px; background:transparent; color:var(--hub-muted); font-size:11px; font-weight:700; cursor:pointer; }
+      .segments { display:flex; flex-shrink:0; align-items:center; gap:4px; padding:3px; border-radius:13px; background:color-mix(in srgb,var(--hub-muted) 10%,transparent); }
+      .segment { min-height:32px; padding:0 12px; border:0; border-radius:10px; background:transparent; color:var(--hub-muted); font-size:11px; font-weight:700; white-space:nowrap; cursor:pointer; }
       .segment.is-selected { color:#fff; background:var(--hub-accent); }
-      .floorplan-canvas { position:relative; min-height:0; overflow:hidden; border-radius:18px; background:linear-gradient(145deg,#d9dde5,#b8c0cd); }
-      .floorplan-backdrop { position:absolute; inset:0; background:radial-gradient(circle at 50% 45%,rgba(255,255,255,.8),rgba(255,255,255,.18) 70%); }
+      .floorplan-canvas { position:relative; min-height:0; overflow:hidden; border-radius:18px; background:radial-gradient(circle at 52% 30%,#f9f2e8 0,#d9d5d8 54%,#aeb7c3 100%); border:1px solid rgba(255,255,255,.6); }
+      .floorplan-backdrop { position:absolute; inset:0; background:linear-gradient(145deg,rgba(255,255,255,.56),transparent 48%),radial-gradient(ellipse at 50% 78%,rgba(25,32,52,.22),transparent 54%); }
       .floorplan-visual { position:absolute; inset:0; width:100%; height:100%; z-index:4; }
       .floorplan-image,.light-overlay { pointer-events:none; }
       .light-overlay { mix-blend-mode:screen; }
       .room-hotspot { cursor:pointer; outline:none; }
       .room-hotspot polygon { fill:rgba(255,255,255,.06); stroke:rgba(32,36,50,.35); stroke-width:.45; vector-effect:non-scaling-stroke; }
-      .room-hotspot text { fill:var(--hub-text); font-size:2.5px; font-weight:700; paint-order:stroke; stroke:rgba(255,255,255,.84); stroke-width:.7px; stroke-linejoin:round; pointer-events:none; }
-      .room-hotspot .room-status { font-size:1.55px; font-weight:500; fill:var(--hub-muted); }
+      .room-hotspot .room-pin { opacity:0; fill:var(--hub-accent); stroke:#fff; stroke-width:.45; vector-effect:non-scaling-stroke; filter:drop-shadow(0 1px 2px rgba(17,24,39,.45)); pointer-events:none; }
       .room-hotspot.has-light polygon { fill:color-mix(in srgb,var(--room-colour) 18%,transparent); filter:drop-shadow(0 0 5px var(--room-colour)); }
-      .room-hotspot.is-selected polygon,.room-hotspot:focus polygon { fill:color-mix(in srgb,var(--hub-accent) 20%,transparent); stroke:var(--hub-accent); stroke-width:1; }
+      .room-hotspot.is-selected polygon,.room-hotspot:focus polygon { fill:color-mix(in srgb,var(--hub-accent) 16%,transparent); stroke:var(--hub-accent); stroke-width:1; }
+      .room-hotspot.is-selected .room-pin,.room-hotspot:focus .room-pin { opacity:1; }
       .room-detail { padding:20px; min-height:0; overflow:auto; }
       .read-only-note { display:flex; align-items:center; gap:7px; margin:14px 0 0; padding:10px 12px; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); color:var(--hub-muted); font-size:11px; }
       .read-only-note ha-icon { --mdc-icon-size:17px; color:var(--hub-accent); }
@@ -1045,9 +1270,92 @@ export class FamilyHubCard extends HTMLElementBase {
       .league-table th,.league-table td { padding:7px 8px; text-align:right; border-bottom:1px solid color-mix(in srgb,var(--hub-muted) 12%,transparent); }
       .league-table th:nth-child(2),.league-table td:nth-child(2) { text-align:left; }
       .league-table tr.is-spotlight { background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); }
+      .calendar-view { position:relative; display:grid; grid-template-rows:52px minmax(0,1fr); gap:10px; background:linear-gradient(155deg,rgba(250,246,245,.94),rgba(235,230,242,.91)); }
+      .calendar-heading { align-items:center; }
+      .calendar-legends { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:7px 13px; }
+      .calendar-legend { display:flex; align-items:center; gap:5px; color:#42495b; font-size:10px; font-weight:700; }
+      .calendar-legend i { width:8px; height:8px; border-radius:50%; background:var(--calendar-colour); box-shadow:0 0 0 3px color-mix(in srgb,var(--calendar-colour) 16%,transparent); }
+      .calendar-loading { position:absolute; top:14px; right:18px; z-index:2; display:flex; align-items:center; gap:7px; padding:7px 10px; border-radius:999px; background:#fff; color:#4d5568; font-size:9px; box-shadow:0 7px 20px rgba(27,34,53,.12); }
+      .calendar-loading span { width:8px; height:8px; border-radius:50%; background:var(--hub-accent); animation:pulse 1.2s ease-in-out infinite; }
+      .calendar-warning { position:absolute; z-index:2; bottom:12px; left:50%; transform:translateX(-50%); margin:0; padding:8px 12px; border-radius:12px; background:#fff3d9; color:#704b0d; font-size:9px; box-shadow:0 7px 18px rgba(45,35,14,.14); }
+      .agenda-board { min-width:0; min-height:0; display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:7px; overflow:hidden; }
+      .agenda-day { min-width:0; min-height:0; display:grid; grid-template-rows:58px minmax(0,1fr); border:1px solid rgba(81,78,99,.12); border-radius:17px; background:rgba(255,255,255,.62); overflow:hidden; }
+      .agenda-day.is-today { border-color:color-mix(in srgb,var(--hub-accent) 45%,transparent); background:color-mix(in srgb,var(--hub-accent) 8%,#fff); box-shadow:inset 0 3px 0 var(--hub-accent); }
+      .agenda-day > header { padding:9px 8px 7px; display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; align-items:end; border-bottom:1px solid rgba(81,78,99,.1); color:#242a3a; }
+      .agenda-day > header span { align-self:start; color:#656c7f; font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+      .agenda-day > header strong { grid-row:1/3; font-size:25px; line-height:1; }
+      .agenda-day > header small { color:#7a8090; font-size:9px; }
+      .agenda-events { min-height:0; padding:7px; display:flex; flex-direction:column; gap:6px; overflow:auto; }
+      .agenda-event { position:relative; min-width:0; padding:8px 7px 8px 10px; border-radius:11px; background:color-mix(in srgb,var(--calendar-colour) 10%,#fff); color:#222838; box-shadow:0 4px 12px rgba(30,35,54,.07); }
+      .agenda-event::before { content:""; position:absolute; inset:5px auto 5px 0; width:3px; border-radius:3px; background:var(--calendar-colour); }
+      .agenda-event .event-time { display:block; color:var(--calendar-colour); font-size:8px; font-weight:850; letter-spacing:.04em; }
+      .agenda-event strong { display:-webkit-box; margin-top:3px; overflow:hidden; color:#1d2333; font-size:10px; line-height:1.25; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
+      .agenda-event small { display:flex; align-items:center; gap:2px; margin-top:5px; overflow:hidden; color:#656c7f; font-size:8px; white-space:nowrap; text-overflow:ellipsis; }
+      .agenda-event small ha-icon { --mdc-icon-size:11px; }
+      .agenda-empty { margin:12px 4px; color:#8a8f9d; font-size:9px; line-height:1.4; }
+      .agenda-more { margin:auto 4px 2px; color:var(--hub-accent); font-size:9px; font-weight:750; }
+      .family-dashboard { height:100%; display:grid; grid-template-rows:116px minmax(0,1fr); gap:14px; }
+      .family-rhythm { padding:20px 22px; display:flex; align-items:center; justify-content:space-between; gap:18px; background:linear-gradient(125deg,color-mix(in srgb,var(--hub-accent) 86%,#1b2342),color-mix(in srgb,var(--hub-backdrop-end) 82%,#db8e72)); color:#fff; }
+      .family-rhythm .eyebrow { color:rgba(255,255,255,.7); }
+      .family-rhythm h2 { margin:5px 0 0; font-size:22px; }
+      .family-rhythm p:last-child { margin:5px 0 0; color:rgba(255,255,255,.72); font-size:11px; }
+      .rhythm-stats { display:grid; grid-template-columns:repeat(3,88px); gap:8px; }
+      .rhythm-stats span { min-height:70px; padding:10px; border:1px solid rgba(255,255,255,.2); border-radius:15px; background:rgba(255,255,255,.12); color:rgba(255,255,255,.72); font-size:9px; }
+      .rhythm-stats strong { display:block; margin-bottom:3px; color:#fff; font-size:22px; }
+      .family-people-grid { min-height:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+      .family-people-grid .family-person { padding:18px 20px; }
+      .chore-heading { display:flex; align-items:center; justify-content:space-between; margin-top:14px; }
+      .chore-heading span { color:var(--hub-muted); font-size:9px; }
+      .chore-list { margin:8px 0 0; padding:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; list-style:none; }
+      .chore-row { min-width:0; min-height:54px; display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:7px; align-items:center; padding:7px 9px; border:1px solid color-mix(in srgb,var(--person-colour) 16%,transparent); border-radius:13px; background:color-mix(in srgb,var(--person-colour) 7%,rgba(255,255,255,.72)); }
+      .chore-check { width:26px; height:26px; display:grid; place-items:center; border-radius:9px; background:color-mix(in srgb,var(--person-colour) 14%,#fff); color:var(--person-colour); }
+      .chore-check ha-icon { --mdc-icon-size:16px; }
+      .chore-row strong,.chore-row small { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+      .chore-row strong { color:var(--hub-text); font-size:10px; }
+      .chore-row small { margin-top:2px; color:var(--hub-muted); font-size:8px; }
+      .chore-row b { color:var(--person-colour); font-size:9px; }
+      .chore-row.is-done { opacity:.7; }
+      .chore-row.is-done .chore-check { background:#dff3e8; color:#18794e; }
+      .chore-row.is-overdue { border-color:#e9978f; background:#fff0ef; }
+      .chore-row.is-overdue .chore-check { background:#f9d5d1; color:#a9362d; }
+      .chore-row.is-waiting .chore-check { background:#fff0cf; color:#8b5b00; }
+      .music-dashboard { height:100%; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(205px,.82fr) minmax(0,1.18fr); place-items:stretch; gap:14px; padding:0; }
+      .music-hero { position:relative; overflow:hidden; padding:28px 34px; display:grid; grid-template-columns:132px minmax(0,1fr) 116px; gap:24px; align-items:center; background:radial-gradient(circle at 86% 24%,rgba(255,255,255,.24),transparent 28%),linear-gradient(120deg,color-mix(in srgb,var(--hub-nav) 92%,#000),color-mix(in srgb,var(--hub-accent) 78%,var(--hub-backdrop-end))); color:#fff; }
+      .music-artwork { width:124px; height:124px; display:grid; place-items:center; overflow:hidden; border-radius:26px; background:linear-gradient(145deg,rgba(255,255,255,.24),rgba(255,255,255,.08)); box-shadow:0 18px 40px rgba(9,15,32,.3); }
+      .music-artwork img { width:100%; height:100%; object-fit:cover; }
+      .music-artwork ha-icon { --mdc-icon-size:56px; }
+      .music-hero .eyebrow { color:rgba(255,255,255,.68); }
+      .music-hero h2 { margin:6px 0 0; font-size:29px; line-height:1.08; }
+      .music-hero p { margin:6px 0 0; color:rgba(255,255,255,.72); font-size:12px; }
+      .music-lock { display:flex; align-items:center; gap:6px; width:max-content; margin-top:16px; padding:7px 10px; border:1px solid rgba(255,255,255,.18); border-radius:12px; background:rgba(255,255,255,.1); color:rgba(255,255,255,.8); font-size:9px; }
+      .music-lock ha-icon { --mdc-icon-size:14px; }
+      .sound-wave { height:86px; display:flex; align-items:center; justify-content:center; gap:7px; }
+      .sound-wave i { width:7px; border-radius:7px; background:rgba(255,255,255,.64); }
+      .sound-wave i:nth-child(1),.sound-wave i:nth-child(5) { height:28px; }
+      .sound-wave i:nth-child(2),.sound-wave i:nth-child(4) { height:54px; }
+      .sound-wave i:nth-child(3) { height:78px; }
+      .speaker-panel { padding:20px; min-height:0; overflow:auto; }
+      .speaker-grid { margin-top:15px; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+      .speaker-card { min-width:0; min-height:72px; display:grid; grid-template-columns:40px minmax(0,1fr) auto; align-items:center; gap:9px; padding:11px; border:1px solid rgba(74,78,96,.12); border-radius:16px; background:rgba(255,255,255,.62); }
+      .speaker-card.is-playing { border-color:color-mix(in srgb,var(--hub-accent) 38%,transparent); background:color-mix(in srgb,var(--hub-accent) 8%,#fff); }
+      .speaker-icon { width:40px; height:40px; display:grid; place-items:center; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 12%,#fff); color:var(--hub-accent); }
+      .speaker-card strong,.speaker-card small { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+      .speaker-card strong { font-size:11px; }
+      .speaker-card small { margin-top:3px; color:var(--hub-muted); font-size:9px; }
+      .speaker-card i { padding:4px 6px; border-radius:8px; background:#edf0f4; color:#6c7282; font-size:8px; font-style:normal; font-weight:750; }
+      .speaker-card.is-playing i { background:#dff3e8; color:#18794e; }
+      .football-empty { min-height:0; height:100%; display:grid; grid-template-columns:90px minmax(0,1fr) auto; gap:20px; align-items:center; padding:26px; border:1px dashed color-mix(in srgb,var(--hub-accent) 32%,transparent); border-radius:18px; background:linear-gradient(145deg,color-mix(in srgb,var(--hub-accent) 7%,#fff),rgba(255,255,255,.5)); }
+      .football-orbit { width:82px; height:82px; display:grid; place-items:center; border-radius:50%; background:radial-gradient(circle,#fff 34%,color-mix(in srgb,var(--hub-accent) 18%,#fff) 35% 58%,transparent 59%); color:var(--hub-accent); box-shadow:0 12px 28px rgba(31,36,57,.12); }
+      .football-orbit ha-icon { --mdc-icon-size:34px; }
+      .football-empty h3 { margin:5px 0 0; color:var(--hub-text); font-size:19px; }
+      .football-empty p:last-child { max-width:440px; margin:7px 0 0; color:var(--hub-muted); font-size:11px; line-height:1.45; }
+      .empty-clubs { display:flex; align-items:center; gap:8px; }
+      .empty-clubs span { width:42px; height:42px; display:grid; place-items:center; border-radius:12px; background:var(--hub-nav); color:#fff; font-size:10px; font-weight:800; }
+      .empty-clubs i { width:16px; height:1px; background:color-mix(in srgb,var(--hub-muted) 32%,transparent); }
       .empty-state { color:var(--hub-muted); font-size:12px; line-height:1.45; }
       .empty-state.compact { margin:14px 0 0; font-size:10px; }
       .empty-state.large { display:grid; place-items:center; min-height:260px; text-align:center; }
+      @keyframes pulse { 0%,100% { opacity:.45; transform:scale(.8); } 50% { opacity:1; transform:scale(1); } }
       .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
       button:focus-visible,select:focus-visible,.room-hotspot:focus-visible { outline:3px solid color-mix(in srgb,var(--hub-accent) 60%,#fff); outline-offset:2px; }
       @media (max-width:1030px) {
@@ -1062,6 +1370,7 @@ export class FamilyHubCard extends HTMLElementBase {
         .football-layout { grid-template-columns:minmax(0,1.6fr) 250px; }
       }
       @media (max-width:760px) {
+        :host { height:auto; min-height:100vh; }
         .hub-card { height:auto; min-height:100vh; }
         .shell { display:block; }
         .navigation { position:sticky; top:0; z-index:20; flex-direction:row; padding:7px; overflow-x:auto; }

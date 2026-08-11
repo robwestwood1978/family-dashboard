@@ -235,7 +235,7 @@ export async function publishHomeAssistantState(state, {
 
 async function fetchJson(url, fetchImpl, timeoutMs) {
   const response = await fetchImpl(url, {
-    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.4.0" },
+    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.5.0" },
     signal: AbortSignal.timeout(timeoutMs)
   });
   if (!response.ok) throw new Error(`football source returned HTTP ${response.status}`);
@@ -328,7 +328,7 @@ export function startFootballPolling({
     running = true;
     try {
       const config = await store.readHouseholdConfig();
-      if (config?.schema_version === 4 && config?.features?.football === true) {
+      if (config?.schema_version === 5 && config?.features?.football === true) {
         await provider.refresh(config.football);
       }
     } catch (error) {

@@ -123,7 +123,7 @@ function assertSchema(value) {
     segments.push(error.params.additionalProperty);
   }
   const path = ["config", ...segments].join(".");
-  fail(path, error?.message || "does not match schema v4");
+  fail(path, error?.message || "does not match schema v5");
 }
 
 function validateUnique(values, path, message = "must be unique") {
@@ -134,7 +134,7 @@ export function validateConfig(config) {
   requireObject(config, "config");
   rejectSecrets(config);
 
-  if (config.schema_version !== 4) fail("config.schema_version", "must equal 4");
+  if (config.schema_version !== 5) fail("config.schema_version", "must equal 5");
 
   requireObject(config.product, "config.product");
   requireString(config.product.title, "config.product.title");
@@ -156,7 +156,7 @@ export function validateConfig(config) {
   }
   const viewNames = ["today", "calendar", "rooms", "family", "music", "football"];
   if (!viewNames.includes(display.default_view)) {
-    fail("config.display.default_view", "must name a v0.4 dashboard view");
+    fail("config.display.default_view", "must name a v0.5 dashboard view");
   }
   requireInteger(display.target_width, "config.display.target_width", 768, 2560);
   requireInteger(display.target_height, "config.display.target_height", 600, 1600);
@@ -386,7 +386,7 @@ export function validateConfig(config) {
   }
 
   const chores = requireObject(config.chores, "config.chores");
-  if (chores.profile !== "legacy-lite") fail("config.chores.profile", "unsupported chore presentation profile");
+  if (chores.profile !== "choreops-status") fail("config.chores.profile", "unsupported chore presentation profile");
   const choreUsers = requireArray(chores.users, "config.chores.users");
   const chorePersonIds = [];
   choreUsers.forEach((user, index) => {
@@ -398,6 +398,12 @@ export function validateConfig(config) {
     validateEntityId(user.dashboard_helper_entity, `${path}.dashboard_helper_entity`, "sensor");
     validateEntityId(user.points_entity, `${path}.points_entity`, "sensor");
     validateEntityId(user.chores_entity, `${path}.chores_entity`, "sensor");
+    const statusEntities = requireArray(user.status_entities, `${path}.status_entities`);
+    if (statusEntities.length === 0) fail(`${path}.status_entities`, "must contain at least one ChoreOps status sensor");
+    statusEntities.forEach((entityId, entityIndex) => {
+      validateEntityId(entityId, `${path}.status_entities[${entityIndex}]`, "sensor");
+    });
+    validateUnique(statusEntities, `${path}.status_entities`);
   });
   validateUnique(chorePersonIds, "config.chores.users[].person_id");
   if (features.chores && choreUsers.length === 0) fail("config.chores.users", "must not be empty when Chores is enabled");
