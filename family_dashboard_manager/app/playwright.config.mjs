@@ -6,7 +6,10 @@ const tablet = (browserName, width, height) => ({
     browserName,
     viewport: { width, height },
     deviceScaleFactor: 2,
-    hasTouch: true
+    hasTouch: true,
+    ...(browserName === "chromium" && process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+      ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } }
+      : {})
   }
 });
 

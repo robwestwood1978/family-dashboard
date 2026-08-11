@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveRoomState, escapeHtml, floorplanImageSource, isControlAction, normaliseChoreStatus, normaliseFixtureStatus } from "../frontend/family-hub-card.js";
+import { deriveRoomState, escapeHtml, floorplanImageSource, floorplanViewBox, isControlAction, normaliseChoreStatus, normaliseFixtureStatus } from "../frontend/family-hub-card.js";
 
 test("escapes state-derived text before rendering it into the card", () => {
   assert.equal(escapeHtml('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
@@ -43,6 +43,27 @@ test("derives one bounded room summary from Home Assistant state", () => {
     openCovers: 1,
     colour: "rgb(255,120,10)"
   });
+});
+
+test("does not turn an absent room temperature into a false zero", () => {
+  const summary = deriveRoomState({
+    lights: [],
+    covers: [],
+    media_players: [],
+    climate: null,
+    temperature_sensor: null
+  }, {});
+  assert.equal(Number.isNaN(summary.temperature), true);
+  assert.equal(Number.isNaN(summary.targetTemperature), true);
+});
+
+test("crops excess floorplan margin while preserving hotspot alignment", () => {
+  assert.equal(floorplanViewBox({
+    aspect_ratio: 1.555556,
+    room_hotspots: [
+      { points: [[13, 17], [87, 17], [87, 79], [13, 79]] }
+    ]
+  }), "9.0000 6.9286 82.0000 47.8571");
 });
 
 test("normalises upcoming, live and finished fixture states", () => {
@@ -88,6 +109,6 @@ test("falls back to the private static plan when the map image is unavailable", 
 test("cache-busts a revised private floorplan without changing its approved file path", () => {
   assert.equal(floorplanImageSource({
     base_image: "/local/family-dashboard/private/ground-floor.svg",
-    asset_revision: "v0.5.1"
-  }), "/local/family-dashboard/private/ground-floor.svg?v=v0.5.1");
+    asset_revision: "v0.5.2"
+  }), "/local/family-dashboard/private/ground-floor.svg?v=v0.5.2");
 });
