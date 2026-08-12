@@ -46,10 +46,10 @@ test("accepts the existing manager's private asset root", () => {
 
 test("accepts a cache-safe floorplan revision and rejects URL-shaped values", () => {
   const config = structuredClone(example);
-  config.floorplan.floors[0].asset_revision = "v0.6.0";
-  assert.equal(validateConfig(config).floorplan.floors[0].asset_revision, "v0.6.0");
+  config.floorplan.floors[0].asset_revision = "v0.7.0";
+  assert.equal(validateConfig(config).floorplan.floors[0].asset_revision, "v0.7.0");
 
-  config.floorplan.floors[0].asset_revision = "v0.6.0?unsafe=true";
+  config.floorplan.floors[0].asset_revision = "v0.7.0?unsafe=true";
   assert.throws(() => validateConfig(config), /asset_revision/);
 });
 

@@ -43,14 +43,14 @@ RUN chmod a+x \
     /etc/services.d/family-dashboard-manager/run \
     /etc/services.d/family-dashboard-tunnel/run
 
-ENV APP_VERSION=0.6.0 \
+ENV APP_VERSION=0.7.0 \
     MANAGER_HOST=127.0.0.1 \
     MANAGER_PORT=8099 \
     MANAGER_CONFIG_DIR=/config/family-dashboard \
     MANAGER_DATA_DIR=/data \
     MANAGER_RESOURCE_DIR=/config/www/family-dashboard \
     MANAGER_PUBLIC_RESOURCE_BASE=/local/family-dashboard \
-    MANAGER_REQUIRE_READ_ONLY=true
+    MANAGER_REQUIRE_READ_ONLY=false
 
 LABEL \
     io.hass.version="${BUILD_VERSION}" \

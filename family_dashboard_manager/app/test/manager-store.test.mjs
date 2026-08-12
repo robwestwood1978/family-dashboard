@@ -24,11 +24,12 @@ test("validates without writing live files", async (context) => {
   const prepared = store.validate(structuredClone(example));
   assert.match(prepared.config_hash, /^[a-f0-9]{64}$/);
   assert.deepEqual(prepared.enabled_views, ["today", "calendar", "rooms", "family", "entry", "music", "football"]);
-  assert.equal(prepared.resource_url, "/local/family-dashboard/family-hub-card.js?v=0.6.0");
+  assert.equal(prepared.resource_url, "/local/family-dashboard/family-hub-card.js?v=0.7.0");
   assert.equal((await store.getStatus()).installed, false);
+  assert.equal((await store.getStatus()).read_only_required, false);
 });
 
-test("release safety mode rejects every configuration that is not read-only", async (context) => {
+test("optional manager safety mode rejects every configuration that is not read-only", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "family-dashboard-read-only-manager-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const store = new DashboardStore({

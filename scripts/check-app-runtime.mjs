@@ -68,8 +68,8 @@ if (!dockerfile.includes("MANAGER_CONFIG_DIR=/config/family-dashboard")) {
 if (!dockerfile.includes("MANAGER_RESOURCE_DIR=/config/www/family-dashboard")) {
   failures.push("Dockerfile does not retain the existing manager frontend directory");
 }
-if (!dockerfile.includes("MANAGER_REQUIRE_READ_ONLY=true")) {
-  failures.push("Dockerfile does not enforce the v0.6 read-only rollout boundary");
+if (!dockerfile.includes("MANAGER_REQUIRE_READ_ONLY=false")) {
+  failures.push("Dockerfile does not enable the v0.7 controlled-live rollout boundary");
 }
 for (const label of ["io.hass.version", "io.hass.type", "io.hass.arch"]) {
   if (!dockerfile.includes(label)) failures.push(`Dockerfile is missing required local-build label ${label}`);

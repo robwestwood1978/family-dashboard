@@ -235,7 +235,7 @@ export async function publishHomeAssistantState(state, {
 
 async function fetchJson(url, fetchImpl, timeoutMs) {
   const response = await fetchImpl(url, {
-    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.6.0" },
+    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.7.0" },
     signal: AbortSignal.timeout(timeoutMs)
   });
   if (!response.ok) throw new Error(`football source returned HTTP ${response.status}`);

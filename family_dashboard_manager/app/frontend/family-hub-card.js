@@ -46,6 +46,193 @@ export function isControlAction(dataset = {}) {
   );
 }
 
+const COVER_SERVICES = new Set(["open_cover", "stop_cover", "close_cover"]);
+const SECURE_COVER_SERVICES = new Set(["open_cover", "close_cover"]);
+const VACUUM_SERVICES = new Set(["start", "pause", "return_to_base"]);
+const ALARM_SERVICES = new Set(["alarm_arm_home", "alarm_arm_away", "alarm_disarm"]);
+const ALARM_ACTION_LABELS = {
+  alarm_arm_home: "Arm home",
+  alarm_arm_away: "Arm away",
+  alarm_disarm: "Disarm alarm"
+};
+const MEDIA_PLAYER_SERVICES = new Set([
+  "browse_media",
+  "clear_playlist",
+  "join",
+  "media_next_track",
+  "media_pause",
+  "media_play",
+  "media_play_pause",
+  "media_previous_track",
+  "media_stop",
+  "play_media",
+  "repeat_set",
+  "search_media",
+  "select_source",
+  "shuffle_set",
+  "toggle",
+  "turn_off",
+  "turn_on",
+  "unjoin",
+  "volume_down",
+  "volume_mute",
+  "volume_set",
+  "volume_up"
+]);
+const MUSIC_ASSISTANT_SERVICES = new Set(["play_media", "search", "transfer_queue"]);
+const MASS_QUEUE_SERVICES = new Set([
+  "get_queue_items",
+  "move_queue_item_down",
+  "move_queue_item_up",
+  "play_queue_item",
+  "remove_queue_item"
+]);
+
+function addEntity(set, value) {
+  if (typeof value === "string" && value.includes(".")) set.add(value);
+}
+
+function entityList(value) {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.filter((entry) => typeof entry === "string");
+  return [];
+}
+
+function isConfiguredEntity(value, configuredEntities) {
+  const entities = entityList(value);
+  return entities.length > 0 && entities.every((entityId) => configuredEntities.has(entityId));
+}
+
+export function buildControlPolicy(config = {}) {
+  const policy = {
+    lights: new Set(),
+    scenes: new Set(),
+    mediaPlayers: new Set(),
+    covers: new Set(),
+    climates: new Set(),
+    moreInfo: new Set(),
+    cameras: new Map(),
+    vacuum: config.cleaning?.vacuum_entity || null,
+    alarm: config.entry?.alarm_entity || null,
+    secureCover: config.entry?.garage?.cover_entity || null
+  };
+
+  for (const room of config.rooms || []) {
+    for (const entityId of room.lights || []) {
+      addEntity(policy.lights, entityId);
+      addEntity(policy.moreInfo, entityId);
+    }
+    for (const entityId of room.scenes || []) addEntity(policy.scenes, entityId);
+    for (const entityId of room.media_players || []) addEntity(policy.mediaPlayers, entityId);
+    for (const entityId of room.covers || []) addEntity(policy.covers, entityId);
+    addEntity(policy.climates, room.climate);
+  }
+
+  for (const player of config.media?.players || []) {
+    addEntity(policy.mediaPlayers, player.entity_id);
+    addEntity(policy.mediaPlayers, player.ma_entity_id);
+    addEntity(policy.mediaPlayers, player.speaker_group_entity_id);
+  }
+  addEntity(policy.moreInfo, config.weather?.entity_id);
+
+  for (const camera of config.entry?.cameras || []) {
+    policy.cameras.set(camera.id, {
+      entity: camera.entity_id || null,
+      startButton: camera.start_stream_entity || null,
+      stopButton: camera.stop_stream_entity || null
+    });
+  }
+  return policy;
+}
+
+export function isApprovedMediaServiceCall(policy, domain, service, serviceData = {}, target = {}) {
+  const data = serviceData && typeof serviceData === "object" ? serviceData : {};
+  const serviceTarget = target && typeof target === "object" ? target : {};
+  const mediaPlayers = policy?.mediaPlayers || new Set();
+  if (["area_id", "device_id", "floor_id", "label_id"].some((key) => serviceTarget[key] !== undefined)) return false;
+
+  if (domain === "media_player") {
+    if (!MEDIA_PLAYER_SERVICES.has(service)) return false;
+    const entityIds = [...entityList(data.entity_id), ...entityList(serviceTarget.entity_id)];
+    if (!isConfiguredEntity(entityIds, mediaPlayers)) return false;
+    if (data.group_members !== undefined && !isConfiguredEntity(data.group_members, mediaPlayers)) return false;
+    return true;
+  }
+
+  if (domain === "music_assistant") {
+    if (!MUSIC_ASSISTANT_SERVICES.has(service)) return false;
+    if (service === "search") return true;
+    if (service === "play_media") return isConfiguredEntity(data.entity_id ?? serviceTarget.entity_id, mediaPlayers);
+    return isConfiguredEntity(data.source_player, mediaPlayers)
+      && isConfiguredEntity(serviceTarget.entity_id ?? data.entity_id, mediaPlayers);
+  }
+
+  if (domain === "mass_queue") {
+    return MASS_QUEUE_SERVICES.has(service) && isConfiguredEntity(data.entity, mediaPlayers);
+  }
+
+  return false;
+}
+
+function isApprovedMediaMessage(policy, message) {
+  if (!message || typeof message !== "object") return false;
+  if (message.type === "call_service") {
+    return isApprovedMediaServiceCall(
+      policy,
+      message.domain,
+      message.service,
+      message.service_data,
+      message.target
+    );
+  }
+  return message.type === "media_player/browse_media"
+    && isConfiguredEntity(message.entity_id, policy?.mediaPlayers || new Set());
+}
+
+export function createControlledMediaHass(source, policy) {
+  if (!source) return source;
+  const connection = source.connection && new Proxy(source.connection, {
+    get(target, property) {
+      if (property === "sendMessagePromise") {
+        return (message, ...args) => isApprovedMediaMessage(policy, message)
+          ? target.sendMessagePromise?.(message, ...args)
+          : Promise.resolve(undefined);
+      }
+      if (property === "sendMessage") {
+        return (message, ...args) => isApprovedMediaMessage(policy, message)
+          ? target.sendMessage?.(message, ...args)
+          : undefined;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
+
+  return new Proxy(source, {
+    get(target, property) {
+      if (property === "callService") {
+        return (domain, service, data, serviceTarget, ...args) => isApprovedMediaServiceCall(policy, domain, service, data, serviceTarget)
+          ? target.callService?.(domain, service, data, serviceTarget, ...args)
+          : Promise.resolve(undefined);
+      }
+      if (property === "callWS") {
+        return (message, ...args) => isApprovedMediaMessage(policy, message)
+          ? target.callWS?.(message, ...args)
+          : Promise.resolve(undefined);
+      }
+      if (property === "callApi") {
+        return (method, path, ...args) => String(method || "GET").toUpperCase() === "GET"
+          && path === "config/config_entries/entry"
+          ? target.callApi?.(method, path, ...args)
+          : Promise.resolve(undefined);
+      }
+      if (property === "connection" && connection) return connection;
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
+}
+
 export function isActiveBinaryState(state) {
   return ["on", "open", "opening", "detected", "ringing", "triggered"].includes(String(state?.state || "").toLowerCase());
 }
@@ -345,6 +532,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._footballTab = "fixtures";
     this._gameweek = null;
     this._entityIds = new Set();
+    this._controlPolicy = buildControlPolicy();
     this._signature = "";
     this._renderPending = false;
     this._childCards = new Map();
@@ -355,6 +543,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarRequest = 0;
     this._readOnlyHassSource = null;
     this._readOnlyHass = null;
+    this._musicHassSource = null;
+    this._musicHass = null;
     this._boundClick = (event) => this._handleClick(event);
     this._boundChange = (event) => this._handleChange(event);
     this._boundKeydown = (event) => this._handleKeydown(event);
@@ -390,12 +580,15 @@ export class FamilyHubCard extends HTMLElementBase {
     this._room = config.floorplan.floors
       .find((floor) => floor.id === this._floor)?.room_hotspots?.[0]?.room_id || config.rooms[0]?.id || null;
     this._entityIds = relevantEntityIds(config);
+    this._controlPolicy = buildControlPolicy(config);
     this._signature = "";
     this._calendarEvents = [];
     this._calendarRequestKey = "";
     this._calendarError = null;
     this._activeCameraId = null;
     this._pendingConfirmation = null;
+    this._musicHassSource = null;
+    this._musicHass = null;
     this._childCards.clear();
     this._scheduleRender(true);
   }
@@ -404,6 +597,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._hass = hass;
     this._readOnlyHassSource = null;
     this._readOnlyHass = null;
+    this._musicHassSource = null;
+    this._musicHass = null;
     for (const [key, child] of this._childCards.entries()) child.hass = this._hassForChild(key);
     if (!this._config) return;
     const nextSignature = stateSignature(hass?.states || {}, this._entityIds);
@@ -570,7 +765,7 @@ export class FamilyHubCard extends HTMLElementBase {
           <h1>${escapeHtml(currentDefinition.label)}</h1>
         </div>
         <div class="header-actions">
-          ${this._config.display.read_only ? '<span class="preview-pill"><ha-icon icon="mdi:eye-outline" aria-hidden="true"></ha-icon>Read-only test</span>' : ""}
+          ${this._config.display.read_only ? '<span class="preview-pill"><ha-icon icon="mdi:eye-outline" aria-hidden="true"></ha-icon>Read-only test</span>' : '<span class="preview-pill"><ha-icon icon="mdi:shield-check-outline" aria-hidden="true"></ha-icon>Controlled live</span>'}
           <button class="weather-pill" type="button" data-more-info="${escapeHtml(this._config.weather.entity_id)}" ${this._config.display.read_only ? 'aria-disabled="true"' : ""}>
             <ha-icon icon="mdi:weather-partly-cloudy" aria-hidden="true"></ha-icon>
             <span>${escapeHtml(weatherText)}</span>
@@ -1354,9 +1549,33 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _hassForChild(key) {
     const forceReadOnly = key.startsWith("calendar:") || key.startsWith("camera:") || key === "vacuum-map";
-    if ((!forceReadOnly && (key !== "music" || !this._config?.display?.read_only)) || !this._hass) return this._hass;
+    if (!this._hass) return this._hass;
+    if (key === "music" && !this._config?.display?.read_only) {
+      if (this._musicHassSource !== this._hass || !this._musicHass) {
+        this._musicHassSource = this._hass;
+        this._musicHass = createControlledMediaHass(this._hass, this._controlPolicy);
+      }
+      return this._musicHass;
+    }
+    if (!forceReadOnly && key !== "music") return this._hass;
     if (this._readOnlyHassSource === this._hass && this._readOnlyHass) return this._readOnlyHass;
     const source = this._hass;
+    const connection = source.connection && new Proxy(source.connection, {
+      get(target, property) {
+        if (property === "sendMessagePromise") {
+          return (message, ...args) => message?.type === "call_service"
+            ? Promise.resolve(undefined)
+            : target.sendMessagePromise?.(message, ...args);
+        }
+        if (property === "sendMessage") {
+          return (message, ...args) => message?.type === "call_service"
+            ? undefined
+            : target.sendMessage?.(message, ...args);
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
     this._readOnlyHassSource = source;
     this._readOnlyHass = new Proxy(source, {
       get(target, property) {
@@ -1371,6 +1590,7 @@ export class FamilyHubCard extends HTMLElementBase {
             ? Promise.resolve(undefined)
             : target.callWS?.(message, ...args);
         }
+        if (property === "connection" && connection) return connection;
         const value = Reflect.get(target, property, target);
         return typeof value === "function" ? value.bind(target) : value;
       }
@@ -1433,11 +1653,12 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     if (target.dataset.cameraOpen) {
-      const camera = this._config.entry.cameras.find((entry) => entry.id === target.dataset.cameraOpen);
-      if (!camera?.entity_id) return;
-      if (this._activeCameraId && this._activeCameraId !== camera.id) this._closeActiveCamera();
-      if (camera.start_stream_entity && !this._config.display.read_only) this._hass?.callService?.("button", "press", { entity_id: camera.start_stream_entity });
-      this._activeCameraId = camera.id;
+      const cameraId = target.dataset.cameraOpen;
+      const camera = this._controlPolicy.cameras.get(cameraId);
+      if (!camera?.entity) return;
+      if (this._activeCameraId && this._activeCameraId !== cameraId) this._closeActiveCamera();
+      if (camera.startButton && !this._config.display.read_only) this._hass?.callService?.("button", "press", { entity_id: camera.startButton });
+      this._activeCameraId = cameraId;
       this._scheduleRender(true);
       return;
     }
@@ -1447,9 +1668,14 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     if (target.dataset.confirmAction) {
-      if (target.dataset.confirmAction === "confirm" && this._pendingConfirmation) {
+      if (target.dataset.confirmAction === "confirm" && this._pendingConfirmation && !this._config.display.read_only) {
         const action = this._pendingConfirmation;
-        this._hass?.callService?.(action.domain, action.service, { entity_id: action.entity });
+        const approved = action.domain === "alarm_control_panel"
+          ? action.entity === this._controlPolicy.alarm && ALARM_SERVICES.has(action.service)
+          : action.domain === "cover"
+            && action.entity === this._controlPolicy.secureCover
+            && SECURE_COVER_SERVICES.has(action.service);
+        if (approved) this._hass?.callService?.(action.domain, action.service, { entity_id: action.entity });
       }
       this._pendingConfirmation = null;
       this._scheduleRender(true);
@@ -1457,64 +1683,74 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     if (this._config.display.read_only && (isControlAction(target.dataset) || target.dataset.moreInfo)) return;
     if (target.dataset.alarmAction && target.dataset.entity) {
+      if (target.dataset.entity !== this._controlPolicy.alarm || !ALARM_SERVICES.has(target.dataset.alarmAction)) return;
       this._pendingConfirmation = {
         domain: "alarm_control_panel",
         service: target.dataset.alarmAction,
         entity: target.dataset.entity,
-        label: target.dataset.actionLabel || "Change alarm state"
+        label: ALARM_ACTION_LABELS[target.dataset.alarmAction]
       };
       this._scheduleRender(true);
       return;
     }
     if (target.dataset.secureCoverAction && target.dataset.entity) {
+      if (target.dataset.entity !== this._controlPolicy.secureCover || !SECURE_COVER_SERVICES.has(target.dataset.secureCoverAction)) return;
       this._pendingConfirmation = {
         domain: "cover",
         service: target.dataset.secureCoverAction,
         entity: target.dataset.entity,
-        label: target.dataset.actionLabel || "Move garage door"
+        label: target.dataset.secureCoverAction === "open_cover" ? "Open garage door" : target.dataset.secureCoverAction === "close_cover" ? "Close garage door" : "Stop garage door"
       };
       this._scheduleRender(true);
       return;
     }
     if (target.dataset.moreInfo) {
-      this._showMoreInfo(target.dataset.moreInfo);
+      if (this._controlPolicy.moreInfo.has(target.dataset.moreInfo)) this._showMoreInfo(target.dataset.moreInfo);
       return;
     }
     if (target.dataset.toggle) {
-      this._hass?.callService?.("homeassistant", "toggle", { entity_id: target.dataset.toggle });
+      if (this._controlPolicy.lights.has(target.dataset.toggle)) this._hass?.callService?.("light", "toggle", { entity_id: target.dataset.toggle });
       return;
     }
     if (target.dataset.scene) {
-      this._hass?.callService?.("scene", "turn_on", { entity_id: target.dataset.scene });
+      if (this._controlPolicy.scenes.has(target.dataset.scene)) this._hass?.callService?.("scene", "turn_on", { entity_id: target.dataset.scene });
       return;
     }
     if (target.dataset.mediaToggle) {
-      this._hass?.callService?.("media_player", "media_play_pause", { entity_id: target.dataset.mediaToggle });
+      if (this._controlPolicy.mediaPlayers.has(target.dataset.mediaToggle)) this._hass?.callService?.("media_player", "media_play_pause", { entity_id: target.dataset.mediaToggle });
       return;
     }
     if (target.dataset.coverAction && target.dataset.entity) {
-      this._hass?.callService?.("cover", target.dataset.coverAction, { entity_id: target.dataset.entity });
+      if (this._controlPolicy.covers.has(target.dataset.entity)
+        && target.dataset.entity !== this._controlPolicy.secureCover
+        && COVER_SERVICES.has(target.dataset.coverAction)) {
+        this._hass?.callService?.("cover", target.dataset.coverAction, { entity_id: target.dataset.entity });
+      }
       return;
     }
     if (target.dataset.vacuumAction && target.dataset.entity) {
-      this._hass?.callService?.("vacuum", target.dataset.vacuumAction, { entity_id: target.dataset.entity });
+      if (target.dataset.entity === this._controlPolicy.vacuum && VACUUM_SERVICES.has(target.dataset.vacuumAction)) {
+        this._hass?.callService?.("vacuum", target.dataset.vacuumAction, { entity_id: target.dataset.entity });
+      }
       return;
     }
     if (target.dataset.climateAdjust && target.dataset.entity) {
+      const adjustment = Number(target.dataset.climateAdjust);
+      if (!this._controlPolicy.climates.has(target.dataset.entity) || ![-0.5, 0.5].includes(adjustment)) return;
       const state = this._hass?.states?.[target.dataset.entity];
       const current = safeNumber(state?.attributes?.temperature, NaN);
       if (Number.isFinite(current)) {
         this._hass.callService("climate", "set_temperature", {
           entity_id: target.dataset.entity,
-          temperature: Math.round((current + safeNumber(target.dataset.climateAdjust)) * 2) / 2
+          temperature: Math.round((current + adjustment) * 2) / 2
         });
       }
     }
   }
 
   _closeActiveCamera() {
-    const camera = this._config?.entry?.cameras?.find((entry) => entry.id === this._activeCameraId);
-    if (camera?.stop_stream_entity && !this._config?.display?.read_only) this._hass?.callService?.("button", "press", { entity_id: camera.stop_stream_entity });
+    const camera = this._controlPolicy?.cameras?.get(this._activeCameraId);
+    if (camera?.stopButton && !this._config?.display?.read_only) this._hass?.callService?.("button", "press", { entity_id: camera.stopButton });
     this._activeCameraId = null;
   }
 
@@ -1527,7 +1763,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _showMoreInfo(entityId) {
-    if (this._config.display.read_only) return;
+    if (this._config.display.read_only || !this._controlPolicy.moreInfo.has(entityId)) return;
     const event = new CustomEvent("hass-more-info", {
       bubbles: true,
       composed: true,
