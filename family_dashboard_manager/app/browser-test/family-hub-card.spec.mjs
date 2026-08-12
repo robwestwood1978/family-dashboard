@@ -85,12 +85,19 @@ async function mount(page, familyConfig = config) {
       body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60"><rect width="100" height="60" fill="#eef0f4"/></svg>'
     });
   });
-  await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px;font:20px system-ui}</style><div class="ha-header">Family Hub</div></body></html>`);
+  await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px 0 76px;font:20px system-ui}.ha-sidebar{position:fixed;inset:56px auto 0 0;width:52px;background:#191b20}.ha-main{position:absolute;inset:0 0 0 52px;overflow:hidden}</style><div class="ha-header">Family Hub</div><div class="ha-sidebar"></div><div class="ha-main"></div></body></html>`);
   await page.evaluate(() => {
     class HaCard extends HTMLElement {}
     class HaIcon extends HTMLElement {}
     class MockChildCard extends HTMLElement {
       set hass(value) { this._hass = value; }
+      connectedCallback() {
+        if (this._eventsBound) return;
+        this._eventsBound = true;
+        this.querySelector("[data-mock-service]")?.addEventListener("click", () => {
+          this._hass?.callService?.("media_player", "media_play_pause", { entity_id: "media_player.kitchen" });
+        });
+      }
     }
     if (!customElements.get("ha-card")) customElements.define("ha-card", HaCard);
     if (!customElements.get("ha-icon")) customElements.define("ha-icon", HaIcon);
@@ -103,7 +110,10 @@ async function mount(page, familyConfig = config) {
         element.dataset.cardHeight = cardConfig.height || "";
         if (cardConfig.type === "custom:mediocre-multi-media-player-card") {
           element.style.height = cardConfig.height || "754px";
-          element.innerHTML = `<div class="mock-media-player" style="height:100%;padding:18px;background:var(--mmpc-card);color:var(--mmpc-on-card)"><strong>Kitchen</strong><div style="margin-top:14px"><span class="mock-chip" style="display:inline-block;padding:8px 24px;border:1px solid var(--mmpc-chip-border);border-radius:999px;background:var(--mmpc-chip-background);color:var(--mmpc-chip-foreground)">Kitchen</span></div></div>`;
+          element.innerHTML = `<div class="mock-media-player" style="height:100%;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px;background:var(--mmpc-card);color:var(--mmpc-on-card);overflow:hidden">
+            <section class="mock-massive" style="min-height:0;overflow:auto;padding:8px"><strong>Kitchen</strong><div style="height:230px;margin:14px auto;background:#131827;border-radius:16px"></div><button type="button" data-mock-service>Play</button><div style="height:150px"></div></section>
+            <section class="mock-speaker-scroll" style="min-width:0;min-height:0;overflow:auto;padding:8px"><strong>Join media players</strong><div class="mock-chip-scroll" style="max-width:100%;margin-top:14px;overflow-x:auto"><div style="display:flex;width:max-content;gap:8px"><span class="mock-chip" style="display:inline-block;padding:8px 24px;border:1px solid var(--mmpc-chip-border);border-radius:999px;background:var(--mmpc-chip-background);color:var(--mmpc-chip-foreground)">Garage</span>${["Living Room", "Master Bedroom", "Playroom", "Kitchen"].map((name) => `<span style="display:inline-block;padding:8px 24px;border:1px solid var(--mmpc-chip-border);border-radius:999px;background:var(--mmpc-chip-background);color:var(--mmpc-chip-foreground)">${name}</span>`).join("")}</div></div><h3>Player focus</h3>${["Kitchen", "Living Room", "Playroom", "Master Bedroom", "Garage"].map((name) => `<div style="height:70px;margin-top:8px;padding:16px;background:rgba(255,255,255,.06)">${name}</div>`).join("")}</section>
+          </div>`;
         } else {
           element.textContent = `${cardConfig.type} card`;
         }
@@ -117,7 +127,7 @@ async function mount(page, familyConfig = config) {
   await page.evaluate(async ({ familyConfig, states }) => {
     await customElements.whenDefined("family-hub-card");
     const card = document.createElement("family-hub-card");
-    document.body.append(card);
+    document.querySelector(".ha-main").append(card);
     card.setConfig({ family_config: familyConfig });
     card.hass = {
       states,
@@ -127,12 +137,17 @@ async function mount(page, familyConfig = config) {
       async callApi(method, path) {
         window.__apiCalls.push({ method, path });
         const school = path.includes("calendar.school");
-        return [{
+        const upcoming = {
           summary: school ? "School assembly" : "Family dinner",
           start: { dateTime: new Date(Date.now() + (school ? 7_200_000 : 3_600_000)).toISOString() },
           end: { dateTime: new Date(Date.now() + (school ? 10_800_000 : 7_200_000)).toISOString() },
           location: school ? "School hall" : "Kitchen"
-        }];
+        };
+        return school ? [upcoming] : [{
+          summary: "Finished early appointment",
+          start: { dateTime: new Date(Date.now() - 14_400_000).toISOString() },
+          end: { dateTime: new Date(Date.now() - 10_800_000).toISOString() }
+        }, upcoming];
       }
     };
   }, { familyConfig, states: fixtureStates() });
@@ -190,9 +205,13 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   }
 
   await card.locator('[data-view="calendar"]').first().click();
-  await expect(card.locator(".agenda-event")).toHaveCount(2);
+  await expect(card.locator(".agenda-event")).toHaveCount(3);
   await expect(card.locator(".agenda-board")).toContainText("Family dinner");
   await expect(card.locator(".agenda-board")).toContainText("School assembly");
+
+  await card.locator('[data-view="today"]').first().click();
+  await expect(card.locator(".next-panel")).toContainText("Family dinner");
+  await expect(card.locator(".next-panel")).not.toContainText("Finished early appointment");
 
   expect(pageErrors).toEqual([]);
 });
@@ -201,7 +220,7 @@ test("renders the interactive floorplan and sends only the selected low-risk con
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="rooms"]').click();
-  await expect(card.locator(".floorplan-visual")).toHaveAttribute("viewBox", "0.0000 0.0000 100.0000 60.0000");
+  await expect(card.locator(".floorplan-visual")).toHaveAttribute("viewBox", "1.5000 1.5000 97.0000 57.0000");
   await expect(card.locator(".floorplan-image")).toBeVisible();
   await expect(card.locator(".floorplan-image")).toHaveAttribute("href", /\/api\/camera_proxy\/camera\.example_vacuum_map/);
   await expect(card.locator('[data-room="living_room"]')).toBeVisible();
@@ -231,7 +250,7 @@ test("keeps the family map private and spotlights both requested clubs", async (
   expect(pageErrors).toEqual([]);
 });
 
-test("enforces read-only mode at every interactive control boundary", async ({ page }) => {
+test("enforces read-only mode at every interactive control boundary", async ({ page }, testInfo) => {
   const previewConfig = structuredClone(config);
   previewConfig.display.read_only = true;
   previewConfig.features.location_map = false;
@@ -262,30 +281,52 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
 
   await card.locator('.nav-button[data-view="music"]').click();
   await expect(card.locator(".media-player-panel")).toContainText("Your full music player");
-  await expect(card.locator(".media-preview-badge")).toContainText("controls locked for this test");
+  await expect(card.locator(".music-meta")).toContainText("playback locked");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toBeVisible();
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("aria-disabled", "true");
+  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-read-only-guard", "service-boundary");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-mode", "in-card");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-height", "100%");
   const mediaMetrics = await card.locator(".media-player-stage").evaluate((stage) => {
     const child = stage.querySelector("mock-child-card");
     const chip = child.querySelector(".mock-chip");
+    const chipScroll = child.querySelector(".mock-chip-scroll");
+    const speakerScroll = child.querySelector(".mock-speaker-scroll");
     const stageRect = stage.getBoundingClientRect();
     const childRect = child.getBoundingClientRect();
     const chipStyle = getComputedStyle(chip);
+    speakerScroll.scrollTop = 48;
+    chipScroll.scrollLeft = 48;
     return {
       childTop: childRect.top,
       childBottom: childRect.bottom,
       stageTop: stageRect.top,
       stageBottom: stageRect.bottom,
       chipColour: chipStyle.color,
-      chipBackground: chipStyle.backgroundColor
+      chipBackground: chipStyle.backgroundColor,
+      speakerOverflow: getComputedStyle(speakerScroll).overflowY,
+      speakerScrollHeight: speakerScroll.scrollHeight,
+      speakerClientHeight: speakerScroll.clientHeight,
+      speakerScrollTop: speakerScroll.scrollTop,
+      chipScrollWidth: chipScroll.scrollWidth,
+      chipClientWidth: chipScroll.clientWidth,
+      chipScrollLeft: chipScroll.scrollLeft,
+      childInert: child.inert
     };
   });
   expect(mediaMetrics.childTop).toBeGreaterThanOrEqual(mediaMetrics.stageTop - 1);
   expect(mediaMetrics.childBottom).toBeLessThanOrEqual(mediaMetrics.stageBottom + 1);
   expect(mediaMetrics.chipColour).toBe("rgb(247, 248, 252)");
   expect(mediaMetrics.chipBackground).toBe("rgba(38, 47, 76, 0.96)");
+  expect(mediaMetrics.speakerOverflow).toBe("auto");
+  expect(mediaMetrics.speakerScrollHeight).toBeGreaterThanOrEqual(mediaMetrics.speakerClientHeight);
+  expect(mediaMetrics.chipScrollWidth).toBeGreaterThan(mediaMetrics.chipClientWidth);
+  expect(mediaMetrics.chipScrollLeft).toBeGreaterThan(0);
+  expect(mediaMetrics.childInert).toBe(false);
+  if (testInfo.project.use.viewport?.height === 768) expect(mediaMetrics.speakerScrollTop).toBeGreaterThan(0);
+
+  await card.locator("[data-mock-service]").evaluate((button) => button.click());
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
 
   await card.locator('.nav-button[data-view="family"]').click();
   await expect(card.locator(".family-rhythm")).toContainText("Actual ChoreOps tasks are shown below");

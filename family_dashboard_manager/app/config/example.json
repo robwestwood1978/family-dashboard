@@ -100,7 +100,7 @@
         "id": "ground",
         "name": "Ground floor",
         "base_image": "/local/family-dashboard/assets/example-ground.svg",
-        "asset_revision": "v0.5.2",
+        "asset_revision": "v0.5.3",
         "vacuum_map_entity": "camera.example_vacuum_map",
         "aspect_ratio": 1.666667,
         "room_hotspots": [
@@ -123,7 +123,7 @@
         "id": "first",
         "name": "First floor",
         "base_image": "/local/family-dashboard/assets/example-first.svg",
-        "asset_revision": "v0.5.2",
+        "asset_revision": "v0.5.3",
         "aspect_ratio": 1.666667,
         "room_hotspots": [
           { "room_id": "child_one_room", "points": [[3, 5], [48, 5], [48, 68], [3, 68]] },
