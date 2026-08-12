@@ -2,7 +2,7 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.5.2 provides:
+Version 0.5.3 provides:
 
 - a secret-rejecting schema-v5 household contract;
 - one generated Home Assistant panel containing the bundled `custom:family-hub-card`;
@@ -10,7 +10,7 @@ Version 0.5.2 provides:
 - a two-floor floorplan engine that can use a private 3D vector dollhouse or a read-only Home Assistant vacuum-map camera, with cache-safe asset revisions, subtle polygon room hotspots, state-coloured/brightness-aware light overlays and selected-room read-only room status;
 - a first-party seven-day agenda backed by Home Assistant's calendar API, plus an optional native Map card kept inside the Home Assistant frontend;
 - named ChoreOps routines from explicitly mapped individual status sensors and read-only Classroom assignment summaries for configured children;
-- the configured Mediocre Spotify/Sonos card rendered accurately but made inert during read-only qualification;
+- the configured Mediocre Spotify/Sonos card rendered accurately and kept scrollable while its Home Assistant write boundary is blocked during read-only qualification;
 - a server-side, last-good-cache Fantasy Premier League provider covering all 38 matchweeks, scorers and a calculated table, with Tottenham and Aston Villa spotlights;
 - a fixed allow-list deployment for the card and public example assets that preserves private household floorplan files;
 - raw, hash-verified rollback compatible with the existing schema-v3 release;

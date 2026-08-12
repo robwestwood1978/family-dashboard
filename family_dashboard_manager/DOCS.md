@@ -2,7 +2,7 @@
 
 Version 0.5 upgrades the existing Family Dashboard Manager in place. It keeps the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app, add a branch repository or create another tunnel.
 
-The v0.5 household deployment remains intentionally read-only. Room, scene, climate, cover, light and media controls are disabled; entity detail dialogs are withheld. The configured Spotify/Sonos media-player card is rendered for an accurate visual check but is made inert until live controls are qualified. Doorbell/security feeds, garage actions, location mapping, Google Classroom and vacuum controls remain disabled during qualification.
+The v0.5 household deployment remains intentionally read-only. Room, scene, climate, cover, light and media controls are disabled; entity detail dialogs are withheld. The configured Spotify/Sonos media-player card remains visually navigable and scrollable for an accurate check, while its Home Assistant write boundary is blocked until live controls are qualified. Doorbell/security feeds, garage actions, location mapping, Google Classroom and vacuum controls remain disabled during qualification.
 
 ## Upgrade the existing manager
 
@@ -10,9 +10,9 @@ This release requires Home Assistant OS 2026.8.0 or newer.
 
 1. Create a Home Assistant backup.
 2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
-3. Update the installed **Family Dashboard Manager** to v0.5.2. Do not uninstall it.
+3. Update the installed **Family Dashboard Manager** to v0.5.3. Do not uninstall it.
 4. Keep its existing Secure MCP Tunnel options unchanged and restart the app.
-5. Confirm the manager reconnects through the existing tunnel and reports v0.5.2.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.5.3.
 
 The app exposes no host port. Its manager endpoint remains on the private loopback interface inside the same app container.
 
@@ -35,7 +35,7 @@ lovelace:
 Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.5.2
+/local/family-dashboard/family-hub-card.js?v=0.5.3
 ```
 
 The stock Home Assistant Overview remains available to administrators.

@@ -24,7 +24,7 @@ test("validates without writing live files", async (context) => {
   const prepared = store.validate(structuredClone(example));
   assert.match(prepared.config_hash, /^[a-f0-9]{64}$/);
   assert.deepEqual(prepared.enabled_views, ["today", "calendar", "rooms", "family", "music", "football"]);
-  assert.equal(prepared.resource_url, "/local/family-dashboard/family-hub-card.js?v=0.5.2");
+  assert.equal(prepared.resource_url, "/local/family-dashboard/family-hub-card.js?v=0.5.3");
   assert.equal((await store.getStatus()).installed, false);
 });
 

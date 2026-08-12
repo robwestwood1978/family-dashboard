@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveRoomState, escapeHtml, floorplanImageSource, floorplanViewBox, isControlAction, normaliseChoreStatus, normaliseFixtureStatus } from "../frontend/family-hub-card.js";
+import { deriveRoomState, escapeHtml, floorplanImageSource, floorplanViewBox, formatPoints, isControlAction, isCurrentOrFutureCalendarEvent, normaliseChoreStatus, normaliseFixtureStatus } from "../frontend/family-hub-card.js";
 
 test("escapes state-derived text before rendering it into the card", () => {
   assert.equal(escapeHtml('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
@@ -57,13 +57,39 @@ test("does not turn an absent room temperature into a false zero", () => {
   assert.equal(Number.isNaN(summary.targetTemperature), true);
 });
 
+test("keeps Up next on a current or future event instead of yesterday or earlier today", () => {
+  const now = new Date("2026-08-12T09:13:00Z");
+  assert.equal(isCurrentOrFutureCalendarEvent({
+    summary: "Past appointment",
+    start: { dateTime: "2026-08-12T05:00:00Z" },
+    end: { dateTime: "2026-08-12T06:00:00Z" }
+  }, now), false);
+  assert.equal(isCurrentOrFutureCalendarEvent({
+    summary: "In progress",
+    start: { dateTime: "2026-08-12T08:30:00Z" },
+    end: { dateTime: "2026-08-12T10:00:00Z" }
+  }, now), true);
+  assert.equal(isCurrentOrFutureCalendarEvent({
+    summary: "Later today",
+    start: { dateTime: "2026-08-12T18:15:00+01:00" }
+  }, now), true);
+  assert.equal(isCurrentOrFutureCalendarEvent({ start: { date: "2026-08-11" } }, now, "Europe/London"), false);
+  assert.equal(isCurrentOrFutureCalendarEvent({ start: { date: "2026-08-12" } }, now, "Europe/London"), true);
+});
+
+test("removes meaningless trailing zeroes from ChoreOps points", () => {
+  assert.equal(formatPoints("35.0"), "35");
+  assert.equal(formatPoints("55.5"), "55.5");
+  assert.equal(formatPoints("unavailable"), "0");
+});
+
 test("crops excess floorplan margin while preserving hotspot alignment", () => {
   assert.equal(floorplanViewBox({
     aspect_ratio: 1.555556,
     room_hotspots: [
       { points: [[13, 17], [87, 17], [87, 79], [13, 79]] }
     ]
-  }), "9.0000 6.9286 82.0000 47.8571");
+  }), "11.5000 9.4286 77.0000 42.8571");
 });
 
 test("normalises upcoming, live and finished fixture states", () => {
@@ -109,6 +135,6 @@ test("falls back to the private static plan when the map image is unavailable", 
 test("cache-busts a revised private floorplan without changing its approved file path", () => {
   assert.equal(floorplanImageSource({
     base_image: "/local/family-dashboard/private/ground-floor.svg",
-    asset_revision: "v0.5.2"
-  }), "/local/family-dashboard/private/ground-floor.svg?v=v0.5.2");
+    asset_revision: "v0.5.3"
+  }), "/local/family-dashboard/private/ground-floor.svg?v=v0.5.3");
 });

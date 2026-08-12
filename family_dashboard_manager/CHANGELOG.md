@@ -1,3 +1,13 @@
+## 0.5.3
+
+- Select **Up Next** from current or future calendar events so a finished stale event can no longer displace the genuine next appointment.
+- Expand the private floorplans into furnished raised-wall dollhouses while preserving the approved geometry and all 18 room hotspots.
+- Give the Rooms plan more of the tablet canvas, tighten its crop and reduce the inactive room-detail column.
+- Keep the genuine Mediocre Spotify/Sonos card scrollable in read-only mode while blocking its Home Assistant service-call boundary.
+- Remove the Music lock overlay that obscured player rows and contain long speaker lists and grouping chips within the card.
+- Format ChoreOps points without spurious trailing zeroes, use recognisable featured-club names, and centre sparse Today content.
+- Add exact `1024×768` physical-iPad chrome coverage, stale-calendar regression tests and read-only media-scroll checks.
+
 ## 0.5.2
 
 - Enlarge both private floorplans by cropping unused plan margin while keeping every hotspot aligned to its room.

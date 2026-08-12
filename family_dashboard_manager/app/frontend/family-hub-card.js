@@ -71,6 +71,12 @@ function calendarEventStart(event) {
   return event.start?.dateTime || event.start?.date || event.start_time || null;
 }
 
+function calendarEventEnd(event) {
+  if (!event) return null;
+  if (typeof event.end === "string") return event.end;
+  return event.end?.dateTime || event.end?.date || event.end_time || null;
+}
+
 function isAllDayCalendarEvent(event) {
   return Boolean(event?.start?.date && !event?.start?.dateTime)
     || /^\d{4}-\d{2}-\d{2}$/.test(String(calendarEventStart(event) || ""));
@@ -88,6 +94,41 @@ function dateKey(value, timeZone) {
     timeZone
   }).formatToParts(date).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
   return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+export function isCurrentOrFutureCalendarEvent(event, now = new Date(), timeZone = "Europe/London") {
+  const start = calendarEventStart(event);
+  if (!start) return false;
+  const nowDate = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(nowDate.getTime())) return false;
+
+  const end = calendarEventEnd(event);
+  if (end) {
+    const endDate = new Date(end);
+    if (!Number.isNaN(endDate.getTime())) return endDate.getTime() > nowDate.getTime();
+  }
+
+  if (isAllDayCalendarEvent(event)) {
+    return String(start).slice(0, 10) >= dateKey(nowDate, timeZone);
+  }
+
+  const startDate = new Date(start);
+  return !Number.isNaN(startDate.getTime()) && startDate.getTime() >= nowDate.getTime();
+}
+
+export function formatPoints(value, locale = "en-GB") {
+  const points = safeNumber(value, NaN);
+  if (!Number.isFinite(points)) return "0";
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(points);
+}
+
+function compactClubName(team = {}) {
+  const name = String(team.name || team.short_name || "Team");
+  return name
+    .replace(/^Brighton (?:&|and) Hove Albion$/i, "Brighton")
+    .replace(/^Tottenham Hotspur$/i, "Tottenham")
+    .replace(/^Wolverhampton Wanderers$/i, "Wolves")
+    .replace(/ United$/i, "");
 }
 
 function calendarWindow(locale, timeZone, count = 7, now = new Date()) {
@@ -207,7 +248,7 @@ export function floorplanImageSource(floor, states = {}) {
   return staticSource() || `/api/camera_proxy/${encodeURIComponent(floor.vacuum_map_entity)}`;
 }
 
-export function floorplanViewBox(floor, padding = 4) {
+export function floorplanViewBox(floor, padding = 1.5) {
   const viewHeight = 100 / safeNumber(floor?.aspect_ratio, 1.666667);
   const points = (floor?.room_hotspots || [])
     .flatMap((hotspot) => hotspot?.points || [])
@@ -296,6 +337,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarError = null;
     this._calendarRequestKey = "";
     this._calendarRequest = 0;
+    this._readOnlyHassSource = null;
+    this._readOnlyHass = null;
     this._boundClick = (event) => this._handleClick(event);
     this._boundChange = (event) => this._handleChange(event);
     this._boundKeydown = (event) => this._handleKeydown(event);
@@ -337,7 +380,9 @@ export class FamilyHubCard extends HTMLElementBase {
 
   set hass(hass) {
     this._hass = hass;
-    for (const child of this._childCards.values()) child.hass = hass;
+    this._readOnlyHassSource = null;
+    this._readOnlyHass = null;
+    for (const [key, child] of this._childCards.entries()) child.hass = this._hassForChild(key);
     if (!this._config) return;
     const nextSignature = stateSignature(hass?.states || {}, this._entityIds);
     if (nextSignature !== this._signature) {
@@ -533,7 +578,7 @@ export class FamilyHubCard extends HTMLElementBase {
       ? temperatures.reduce((total, value) => total + value, 0) / temperatures.length
       : NaN;
     const nextCalendar = (this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents())
-      .filter((event) => calendarEventStart(event) && new Date(calendarEventStart(event)).getTime() >= Date.now() - 86_400_000)
+      .filter((event) => isCurrentOrFutureCalendarEvent(event, new Date(), this._config.product.timezone))
       .sort((a, b) => new Date(calendarEventStart(a)) - new Date(calendarEventStart(b)))[0];
     const playing = firstPlayingPlayer(this._config, states);
     const featuredFixtures = this._featuredFixtures();
@@ -544,7 +589,7 @@ export class FamilyHubCard extends HTMLElementBase {
           <h2>${lightsOn ? `${lightsOn} light${lightsOn === 1 ? "" : "s"} on` : "Everything looks settled"}</h2>
           <div class="hero-metrics">
             <button type="button" data-view="rooms"><strong>${formatTemperature(averageTemperature)}</strong><span>Average temperature</span></button>
-            <button type="button" data-view="rooms"><strong>${rooms.length}</strong><span>Connected rooms</span></button>
+            <button type="button" data-view="rooms"><strong>${rooms.length}</strong><span>Mapped rooms</span></button>
             <button type="button" data-view="music"><strong>${playing ? "Playing" : "Quiet"}</strong><span>${escapeHtml(playing?.player?.name || "Music")}</span></button>
           </div>
         </article>
@@ -602,7 +647,7 @@ export class FamilyHubCard extends HTMLElementBase {
         <button type="button" class="person-summary" data-view="family" style="--person-colour:${escapeHtml(person.colour)}">
           <span class="person-initial">${escapeHtml(person.name.slice(0, 1))}</span>
           <span><strong>${escapeHtml(person.name)}</strong><small>${due} due · ${escapeHtml(nextChoreName)}</small></span>
-          <span class="points">${escapeHtml(pointsState?.state || "0")} pts</span>
+          <span class="points">${escapeHtml(formatPoints(pointsState?.state, this._config.product.locale))} pts</span>
         </button>
       `;
     }).join("");
@@ -834,10 +879,9 @@ export class FamilyHubCard extends HTMLElementBase {
     return `
       <section class="music-experience">
         <article class="surface media-player-panel">
-          <div class="section-heading music-heading"><div><p class="eyebrow">Spotify · Sonos</p><h2>${readOnly ? "Your full music player" : "Browse, group and play"}</h2></div><span>${this._config.media.players.length} rooms</span></div>
+          <div class="section-heading music-heading"><div><p class="eyebrow">Spotify · Sonos</p><h2>${readOnly ? "Your full music player" : "Browse, group and play"}</h2></div><span class="music-meta">${this._config.media.players.length} rooms${readOnly ? ' · <ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon> playback locked' : ""}</span></div>
           <div class="media-player-stage ${readOnly ? "is-read-only" : ""}">
             <div id="music-card-slot" class="child-card-slot"></div>
-            ${readOnly ? '<div class="media-preview-badge"><ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon>Player shown exactly as configured · controls locked for this test</div>' : ""}
           </div>
         </article>
       </section>
@@ -867,7 +911,7 @@ export class FamilyHubCard extends HTMLElementBase {
       : `${fixture.home_score ?? "–"}–${fixture.away_score ?? "–"}`;
     return `
       <button type="button" class="compact-fixture" data-view="football">
-        <span>${escapeHtml(fixture.home?.short_name || fixture.home?.name || "Home")}</span><strong>${escapeHtml(score)}</strong><span>${escapeHtml(fixture.away?.short_name || fixture.away?.name || "Away")}</span>
+        <span title="${escapeHtml(fixture.home?.name || "Home")}">${escapeHtml(compactClubName(fixture.home))}</span><strong>${escapeHtml(score)}</strong><span title="${escapeHtml(fixture.away?.name || "Away")}">${escapeHtml(compactClubName(fixture.away))}</span>
         <small>${escapeHtml(status === "live" ? `LIVE · ${fixture.minutes || 0}'` : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone))}</small>
       </button>
     `;
@@ -1006,12 +1050,43 @@ export class FamilyHubCard extends HTMLElementBase {
       }
     }
     if (key === "music") {
-      child.inert = this._config.display.read_only === true;
-      if (child.inert) child.setAttribute("aria-disabled", "true");
-      else child.removeAttribute("aria-disabled");
+      const readOnly = this._config.display.read_only === true;
+      child.inert = false;
+      if (readOnly) {
+        child.setAttribute("aria-disabled", "true");
+        child.dataset.readOnlyGuard = "service-boundary";
+      } else {
+        child.removeAttribute("aria-disabled");
+        delete child.dataset.readOnlyGuard;
+      }
     }
-    child.hass = this._hass;
+    child.hass = this._hassForChild(key);
     slot.replaceChildren(child);
+  }
+
+  _hassForChild(key) {
+    if (key !== "music" || !this._config?.display?.read_only || !this._hass) return this._hass;
+    if (this._readOnlyHassSource === this._hass && this._readOnlyHass) return this._readOnlyHass;
+    const source = this._hass;
+    this._readOnlyHassSource = source;
+    this._readOnlyHass = new Proxy(source, {
+      get(target, property) {
+        if (property === "callService") return () => undefined;
+        if (property === "callApi") {
+          return (method, ...args) => String(method || "GET").toUpperCase() === "GET"
+            ? target.callApi?.(method, ...args)
+            : Promise.resolve(undefined);
+        }
+        if (property === "callWS") {
+          return (message, ...args) => message?.type === "call_service"
+            ? Promise.resolve(undefined)
+            : target.callWS?.(message, ...args);
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+    return this._readOnlyHass;
   }
 
   _handleKeydown(event) {
@@ -1134,7 +1209,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .weather-pill { min-height:48px; padding:0 16px; border:1px solid rgba(255,255,255,.28); border-radius:18px; background:rgba(255,255,255,.14); color:#fff; display:flex; align-items:center; gap:9px; cursor:pointer; }
       .view { min-height:0; min-width:0; }
       .surface { color:var(--hub-text); background:linear-gradient(145deg,color-mix(in srgb,var(--hub-surface) 82%,transparent),color-mix(in srgb,var(--hub-backdrop-mid) 72%,transparent)); border:1px solid rgba(255,255,255,.16); border-radius:var(--hub-radius); box-shadow:0 20px 52px rgba(3,8,24,.3),inset 0 1px 0 rgba(255,255,255,.1); -webkit-backdrop-filter:blur(22px) saturate(1.18); backdrop-filter:blur(22px) saturate(1.18); }
-      .today-grid { height:100%; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(245px,.9fr) minmax(240px,.85fr); grid-template-rows:minmax(190px,.9fr) minmax(210px,1.1fr); gap:14px; }
+      .today-grid { height:100%; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(245px,.9fr) minmax(240px,.85fr); grid-template-rows:minmax(190px,.82fr) minmax(210px,1.18fr); gap:14px; }
       .today-grid article { padding:20px; min-width:0; overflow:hidden; }
       .today-grid h2 { margin:7px 0 0; font-size:22px; line-height:1.16; }
       .supporting { margin:8px 0 0; color:var(--hub-muted); font-size:13px; }
@@ -1149,9 +1224,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .next-panel { display:flex; flex-direction:column; }
       .next-panel .text-action { margin-top:auto; }
       .text-action,.section-heading button { width:max-content; border:0; padding:5px 0; background:transparent; color:var(--hub-accent); font-size:12px; font-weight:700; cursor:pointer; }
-      .children-panel { grid-row:2; }
-      .football-panel { grid-row:2; }
-      .now-playing-panel { grid-row:2; }
+      .children-panel { grid-row:2; display:flex; flex-direction:column; justify-content:center; }
+      .football-panel { grid-row:2; display:flex; flex-direction:column; justify-content:center; }
+      .now-playing-panel { grid-row:2; display:flex; flex-direction:column; justify-content:center; }
       .section-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
       .section-heading h2 { margin:4px 0 0; font-size:19px; }
       .section-heading > span { color:var(--hub-muted); font-size:11px; }
@@ -1163,6 +1238,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .points { font-size:11px; font-weight:700; color:var(--person-colour); }
       .featured-fixtures { display:grid; gap:8px; margin-top:12px; }
       .compact-fixture { border:1px solid color-mix(in srgb,var(--hub-accent) 18%,transparent); border-radius:15px; background:var(--hub-surface); min-height:60px; padding:9px 10px; color:var(--hub-text); display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:7px; align-items:center; cursor:pointer; }
+      .compact-fixture > span { min-width:0; overflow:hidden; font-size:10px; font-weight:650; white-space:nowrap; text-overflow:ellipsis; }
       .compact-fixture span:last-of-type { text-align:right; }
       .compact-fixture small { grid-column:1/-1; color:var(--hub-muted); font-size:9px; text-align:center; }
       .now-playing { display:grid; grid-template-columns:58px minmax(0,1fr) 38px; gap:12px; align-items:center; margin-top:14px; }
@@ -1175,8 +1251,8 @@ export class FamilyHubCard extends HTMLElementBase {
       .embedded-view { display:grid; grid-template-rows:48px minmax(0,1fr); gap:10px; }
       .child-card-slot { min-height:0; overflow:auto; border-radius:16px; }
       .child-card-slot > * { display:block; min-height:100%; }
-      .rooms-layout { height:100%; display:grid; grid-template-columns:minmax(0,1.7fr) minmax(285px,.72fr); gap:14px; }
-      .floorplan-panel { min-width:0; min-height:0; padding:18px; display:grid; grid-template-rows:52px minmax(0,1fr); gap:8px; }
+      .rooms-layout { height:100%; display:grid; grid-template-columns:minmax(0,3.2fr) minmax(232px,1fr); gap:12px; }
+      .floorplan-panel { min-width:0; min-height:0; padding:14px; display:grid; grid-template-rows:48px minmax(0,1fr); gap:7px; }
       .floorplan-heading { align-items:center; }
       .segments { display:flex; flex-shrink:0; align-items:center; gap:4px; padding:3px; border-radius:13px; background:color-mix(in srgb,var(--hub-muted) 10%,transparent); }
       .segment { min-height:32px; padding:0 12px; border:0; border-radius:10px; background:transparent; color:var(--hub-muted); font-size:11px; font-weight:700; white-space:nowrap; cursor:pointer; }
@@ -1190,7 +1266,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .room-hotspot polygon { fill:transparent; stroke:transparent; stroke-width:.45; vector-effect:non-scaling-stroke; transition:fill .18s ease,stroke .18s ease,filter .18s ease; }
       .room-hotspot.has-light polygon { fill:color-mix(in srgb,var(--room-colour) 12%,transparent); filter:drop-shadow(0 0 4px var(--room-colour)); }
       .room-hotspot.is-selected polygon,.room-hotspot:focus polygon { fill:color-mix(in srgb,var(--hub-accent) 8%,transparent); stroke:#b9aaff; stroke-width:.72; filter:drop-shadow(0 0 4px var(--hub-accent)); }
-      .room-detail { padding:20px; min-height:0; overflow:auto; }
+      .room-detail { padding:16px; min-height:0; overflow:auto; }
       .read-only-note { display:flex; align-items:center; gap:7px; margin:14px 0 0; padding:10px 12px; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); color:var(--hub-muted); font-size:11px; }
       .read-only-note ha-icon { --mdc-icon-size:17px; color:var(--hub-accent); }
       .read-only-music { display:grid; place-items:center; grid-template-columns:minmax(0,1fr) 130px; padding:42px; }
@@ -1372,12 +1448,11 @@ export class FamilyHubCard extends HTMLElementBase {
       .media-player-panel { height:100%; min-height:0; padding:20px; display:grid; grid-template-rows:58px minmax(0,1fr); gap:12px; overflow:hidden; background:radial-gradient(circle at 85% 10%,rgba(123,104,211,.32),transparent 35%),linear-gradient(145deg,rgba(16,25,48,.96),rgba(52,38,70,.9)); }
       .music-heading { align-items:center; }
       .music-heading h2 { font-size:24px; }
-      .media-player-stage { position:relative; min-height:0; overflow:hidden; border:1px solid rgba(255,255,255,.12); border-radius:18px; background:rgba(6,12,27,.62); }
-      .media-player-stage .child-card-slot { height:100%; border-radius:0; --ha-card-background:transparent; --card-background-color:transparent; --primary-background-color:transparent; --secondary-background-color:rgba(255,255,255,.06); --primary-text-color:#f7f8fc; --secondary-text-color:#b6bdce; --mmpc-card:transparent; --mmpc-on-card:#f7f8fc; --mmpc-on-card-muted:#b6bdce; --mmpc-on-card-divider:rgba(255,255,255,.12); --mmpc-chip-background:rgba(38,47,76,.96); --mmpc-chip-foreground:#f7f8fc; --mmpc-chip-border:rgba(255,255,255,.18); }
-      .media-player-stage.is-read-only .child-card-slot { pointer-events:none; user-select:none; }
+      .music-meta { display:flex; align-items:center; gap:4px; white-space:nowrap; }
+      .music-meta ha-icon { --mdc-icon-size:14px; color:#b7a8ff; }
+      .media-player-stage { position:relative; min-height:0; overflow:hidden; overscroll-behavior:contain; border:1px solid rgba(255,255,255,.12); border-radius:18px; background:rgba(6,12,27,.62); }
+      .media-player-stage .child-card-slot { height:100%; overflow:hidden; touch-action:pan-x pan-y; border-radius:0; --ha-card-background:transparent; --card-background-color:transparent; --primary-background-color:transparent; --secondary-background-color:rgba(255,255,255,.06); --primary-text-color:#f7f8fc; --secondary-text-color:#b6bdce; --mmpc-card:transparent; --mmpc-on-card:#f7f8fc; --mmpc-on-card-muted:#b6bdce; --mmpc-on-card-divider:rgba(255,255,255,.12); --mmpc-chip-background:rgba(38,47,76,.96); --mmpc-chip-foreground:#f7f8fc; --mmpc-chip-border:rgba(255,255,255,.18); }
       .media-player-stage .embedded-card { height:100%; min-height:0; overflow:hidden; --ha-card-border-width:0; --ha-card-box-shadow:none; }
-      .media-preview-badge { position:absolute; right:14px; bottom:14px; z-index:4; display:flex; align-items:center; gap:7px; max-width:420px; padding:9px 12px; border:1px solid rgba(255,255,255,.18); border-radius:12px; background:rgba(9,16,33,.9); color:#dfe3ef; box-shadow:0 12px 30px rgba(0,0,0,.28); font-size:10px; font-weight:700; pointer-events:none; }
-      .media-preview-badge ha-icon { --mdc-icon-size:16px; color:#b7a8ff; }
       @keyframes pulse { 0%,100% { opacity:.45; transform:scale(.8); } 50% { opacity:1; transform:scale(1); } }
       .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
       button:focus-visible,select:focus-visible,.room-hotspot:focus-visible { outline:3px solid color-mix(in srgb,var(--hub-accent) 60%,#fff); outline-offset:2px; }
@@ -1389,7 +1464,7 @@ export class FamilyHubCard extends HTMLElementBase {
         .content { padding-inline:14px; }
         .today-grid { grid-template-columns:minmax(0,1.25fr) minmax(225px,.88fr) minmax(220px,.82fr); }
         .today-grid article { padding:17px; }
-        .rooms-layout { grid-template-columns:minmax(0,1.55fr) minmax(270px,.72fr); }
+        .rooms-layout { grid-template-columns:minmax(0,2.9fr) minmax(224px,1fr); }
         .football-layout { grid-template-columns:minmax(0,1.6fr) 250px; }
       }
       @media (max-width:760px) {
