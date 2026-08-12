@@ -6,7 +6,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 const schema = JSON.parse(await readFile(new URL("../config/family-dashboard.schema.json", import.meta.url), "utf8"));
 const example = JSON.parse(await readFile(new URL("../config/example.json", import.meta.url), "utf8"));
 
-test("the draft 2020-12 schema accepts the public v5 example", () => {
+test("the draft 2020-12 schema accepts the public v6 example", () => {
   const validate = new Ajv2020({ strict: true }).compile(schema);
   assert.equal(validate(example), true, JSON.stringify(validate.errors));
 });
@@ -26,6 +26,9 @@ test("the schema rejects older contracts and unknown fields", () => {
   old.schema_version = 4;
   assert.equal(validate(old), false);
 
+  old.schema_version = 5;
+  assert.equal(validate(old), false);
+
   const unknown = structuredClone(example);
   unknown.display.unrecognised = true;
   assert.equal(validate(unknown), false);
@@ -34,7 +37,7 @@ test("the schema rejects older contracts and unknown fields", () => {
   missingSpotlight.football.spotlight_team_codes = ["TOT", "ARS"];
   assert.equal(validate(missingSpotlight), false);
 
-  const unsafeEntry = structuredClone(example);
-  unsafeEntry.features.entry = true;
-  assert.equal(validate(unsafeEntry), false);
+  const unsafeCameraRole = structuredClone(example);
+  unsafeCameraRole.entry.cameras[0].role = "other";
+  assert.equal(validate(unsafeCameraRole), false);
 });

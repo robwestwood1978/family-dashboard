@@ -179,7 +179,7 @@ export class DashboardStore {
   validate(candidate) {
     const config = sortValue(validateConfig(structuredClone(candidate)));
     if (this.requireReadOnly && config.display.read_only !== true) {
-      throw new Error("this v0.5 release requires config.display.read_only to be true");
+      throw new Error("this qualification release requires config.display.read_only to be true");
     }
     const configText = canonicalJson(config);
     const dashboard = compileDashboard(config);
@@ -195,7 +195,7 @@ export class DashboardStore {
   }
 
   getResourceUrl() {
-    return `${this.publicResourceBase}/family-hub-card.js?v=${process.env.APP_VERSION || "0.5.3"}`;
+    return `${this.publicResourceBase}/family-hub-card.js?v=${process.env.APP_VERSION || "0.6.0"}`;
   }
 
   getPrivateAssetUrl(filename) {
@@ -219,7 +219,7 @@ export class DashboardStore {
       this.readPrivateAssetStatus()
     ]);
     return {
-      app_version: process.env.APP_VERSION || "0.5.3",
+      app_version: process.env.APP_VERSION || "0.6.0",
       read_only_required: this.requireReadOnly,
       installed: configText !== null && dashboard !== null,
       resource_installed: resource !== null,

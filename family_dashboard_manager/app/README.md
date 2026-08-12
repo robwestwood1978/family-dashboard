@@ -2,23 +2,23 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.5.3 provides:
+Version 0.6.0 provides:
 
-- a secret-rejecting schema-v5 household contract;
+- a secret-rejecting schema-v6 household contract;
 - one generated Home Assistant panel containing the bundled `custom:family-hub-card`;
-- internal Today, Calendar, Rooms, Family, Music and Football navigation sized for `1112×834` and regression-tested at `1024×768`;
-- a two-floor floorplan engine that can use a private 3D vector dollhouse or a read-only Home Assistant vacuum-map camera, with cache-safe asset revisions, subtle polygon room hotspots, state-coloured/brightness-aware light overlays and selected-room read-only room status;
-- a first-party seven-day agenda backed by Home Assistant's calendar API, plus an optional native Map card kept inside the Home Assistant frontend;
-- named ChoreOps routines from explicitly mapped individual status sensors and read-only Classroom assignment summaries for configured children;
-- the configured Mediocre Spotify/Sonos card rendered accurately and kept scrollable while its Home Assistant write boundary is blocked during read-only qualification;
-- a server-side, last-good-cache Fantasy Premier League provider covering all 38 matchweeks, scorers and a calculated table, with Tottenham and Aston Villa spotlights;
-- a fixed allow-list deployment for the card and public example assets that preserves private household floorplan files;
-- raw, hash-verified rollback compatible with the existing schema-v3 release;
-- a sanitised inventory contract excluding cameras, people, location trackers, states, history, addresses, tokens, credentials and arbitrary attributes;
-- a localhost-only MCP server with nine bounded tools;
-- 10.5-inch iPad Today and Rooms SVG previews plus Chromium/WebKit browser projects.
+- seven internal tablet surfaces: Today, Calendar, Home, Family, Security, Music and Football;
+- Home sections for Rooms, Lights, Heating, Blinds & doors and Cleaning, backed only by explicitly configured entities;
+- a two-floor 3D floorplan engine with private inert SVG assets, percentage-coordinate hotspots, cache-safe revisions and selected-room controls;
+- an installed Daylight or legacy Skylight calendar child card with Day, Week, Month and Agenda modes, persistent calendar visibility preferences and event management disabled;
+- deliberate doorbell, driveway and garden camera presentation, signals-only camera support, child/bedroom camera rejection, and confirmation-gated alarm and garage actions;
+- Eufy vacuum status and bounded controls, while authenticated map images remain inside Home Assistant;
+- named ChoreOps routines and a separate per-child, read-only Google Classroom consent boundary;
+- the configured Mediocre Spotify/Sonos card and a server-side, last-good-cache Fantasy Premier League provider with Tottenham and Aston Villa spotlights;
+- fixed allow-list deployment, inert private floorplan validation and raw hash-verified rollback compatible with older installed schemas;
+- sanitised inventory that excludes camera entities, people, trackers, states, history, addresses, credentials and arbitrary attributes;
+- deterministic `1112×834` and `1024×768` tablet checks.
 
-Doorbell/security camera and garage surfaces are rejected by v0.5 validation. A map-named vacuum camera is accepted only as a read-only floorplan image and provides no vacuum controls. Google Classroom remains at the authorization-proof boundary: no password or OAuth token belongs in the household configuration.
+The packaged qualification release still enforces `display.read_only: true`. All controls render for layout and state qualification, but the first-party Home Assistant write boundary remains blocked until the target iPad and household actions are approved. Camera streams require a deliberate tap and a separately supplied safe exterior camera entity; signals-only cameras remain useful without one.
 
 ## Local check
 
@@ -28,6 +28,6 @@ npm run check
 npm run test:browser
 ```
 
-The browser suite requires Playwright Chromium and WebKit. CI installs both automatically. The generic example outputs are deterministic and contain synthetic names, entities, fixtures and house geometry only.
+The browser suite requires Playwright Chromium and WebKit. CI installs both automatically. The generic example outputs contain synthetic names, entities, fixtures and house geometry only.
 
 See `docs/architecture.md` and `docs/manager-contract.md` for the deployment and access model.

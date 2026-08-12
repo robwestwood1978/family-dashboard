@@ -26,9 +26,9 @@ See [the app documentation](./family_dashboard_manager/DOCS.md) for installation
 
 This public repository contains generic source, schemas, tests and release packaging only. Names, calendar IDs, room mappings, entity IDs and feature choices belong in a separate private configuration repository. Passwords, tokens and API keys belong only in Home Assistant app options or integration storage and are rejected by the household configuration validator.
 
-HACS remains the installer for the optional Mediocre Multi Media Player Card and kiosk-mode dependencies. The Family Hub shell, house floorplan, room controls, family summaries and football presentation are bundled with the manager itself.
+HACS remains the installer for the Daylight/legacy Skylight calendar, Mediocre Multi Media Player Card and kiosk-mode dependencies. The Family Hub shell, floorplan engine, Home controls, family summaries, Security boundary and football presentation are bundled with the manager itself; private household artwork stays outside this repository.
 
-Version 0.4 adds an explicit two-floor interactive house plan, including a read-only Home Assistant vacuum-map source, keeps the geographic family map as a separate Home Assistant-native surface, covers all 38 Premier League matchweeks with Tottenham and Aston Villa spotlights, and defines a read-only per-child Google Classroom authorization proof. Doorbell/security feeds, garage actions and vacuum controls remain disabled until separately qualified.
+Version 0.6 groups Rooms, Lights, Heating, Blinds & doors and Cleaning inside Home; wraps the installed calendar with Day, Week, Month and Agenda modes; and adds an exterior-only Security surface with deliberate streams and confirmation-gated alarm and garage actions. The packaged release still enforces read-only mode, so these controls can be qualified with real states without sending Home Assistant write calls. Google Classroom remains behind separate read-only consent for each child.
 
 ## Development
 

@@ -135,6 +135,6 @@ test("falls back to the private static plan when the map image is unavailable", 
 test("cache-busts a revised private floorplan without changing its approved file path", () => {
   assert.equal(floorplanImageSource({
     base_image: "/local/family-dashboard/private/ground-floor.svg",
-    asset_revision: "v0.5.3"
-  }), "/local/family-dashboard/private/ground-floor.svg?v=v0.5.3");
+    asset_revision: "v0.6.0"
+  }), "/local/family-dashboard/private/ground-floor.svg?v=v0.6.0");
 });

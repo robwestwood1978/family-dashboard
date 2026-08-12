@@ -1,6 +1,6 @@
 {
   "$schema": "./family-dashboard.schema.json",
-  "schema_version": 5,
+  "schema_version": 6,
   "product": {
     "title": "Family Dashboard",
     "locale": "en-GB",
@@ -62,11 +62,14 @@
     "weather": true,
     "school": true,
     "location_map": true,
-    "entry": false
+    "cleaning": true,
+    "entry": true
   },
   "calendar": {
-    "initial_view": "listWeek",
+    "card_type": "custom:daylight-calendar-card",
+    "initial_view": "week",
     "rolling_days": 7,
+    "preference_storage_key": "family_dashboard_example_calendar",
     "entities": [
       {
         "id": "family",
@@ -93,6 +96,9 @@
     "reminders_entity": "todo.reminders",
     "shopping_entity": "todo.shopping_list"
   },
+  "home": {
+    "default_section": "rooms"
+  },
   "floorplan": {
     "default_floor": "ground",
     "floors": [
@@ -100,7 +106,7 @@
         "id": "ground",
         "name": "Ground floor",
         "base_image": "/local/family-dashboard/assets/example-ground.svg",
-        "asset_revision": "v0.5.3",
+        "asset_revision": "v0.6.0",
         "vacuum_map_entity": "camera.example_vacuum_map",
         "aspect_ratio": 1.666667,
         "room_hotspots": [
@@ -123,7 +129,7 @@
         "id": "first",
         "name": "First floor",
         "base_image": "/local/family-dashboard/assets/example-first.svg",
-        "asset_revision": "v0.5.3",
+        "asset_revision": "v0.6.0",
         "aspect_ratio": 1.666667,
         "room_hotspots": [
           { "room_id": "child_one_room", "points": [[3, 5], [48, 5], [48, 68], [3, 68]] },
@@ -213,6 +219,13 @@
       }
     ]
   },
+  "cleaning": {
+    "vacuum_entity": "vacuum.example_robovac",
+    "map_entity": "camera.example_vacuum_map",
+    "battery_entity": "sensor.example_robovac_battery",
+    "task_entity": "sensor.example_robovac_task",
+    "dock_entity": "sensor.example_robovac_dock"
+  },
   "chores": {
     "profile": "choreops-status",
     "users": [
@@ -268,5 +281,37 @@
       "person.example_child_two"
     ],
     "hours_to_show": 0
+  },
+  "entry": {
+    "alarm_entity": "alarm_control_panel.example_home",
+    "primary_camera_id": "doorbell",
+    "cameras": [
+      {
+        "id": "doorbell",
+        "name": "Front door",
+        "entity_id": "camera.example_doorbell",
+        "role": "doorbell",
+        "motion_entity": "binary_sensor.example_doorbell_motion",
+        "person_entity": "binary_sensor.example_doorbell_person",
+        "ringing_entity": "binary_sensor.example_doorbell_ringing",
+        "start_stream_entity": "button.example_doorbell_start_stream",
+        "stop_stream_entity": "button.example_doorbell_stop_stream"
+      },
+      {
+        "id": "garage",
+        "name": "Garage",
+        "entity_id": "camera.example_garage",
+        "role": "driveway",
+        "motion_entity": "binary_sensor.example_garage_motion",
+        "person_entity": "binary_sensor.example_garage_person",
+        "start_stream_entity": "button.example_garage_start_stream",
+        "stop_stream_entity": "button.example_garage_stop_stream"
+      }
+    ],
+    "garage": {
+      "cover_entity": "cover.example_garage",
+      "camera_id": "garage",
+      "motion_entity": "binary_sensor.example_garage_motion"
+    }
   }
 }
