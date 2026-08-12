@@ -2,7 +2,7 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.6.0 provides:
+Version 0.7.0 provides:
 
 - a secret-rejecting schema-v6 household contract;
 - one generated Home Assistant panel containing the bundled `custom:family-hub-card`;
@@ -18,7 +18,7 @@ Version 0.6.0 provides:
 - sanitised inventory that excludes camera entities, people, trackers, states, history, addresses, credentials and arbitrary attributes;
 - deterministic `1112×834` and `1024×768` tablet checks.
 
-The packaged qualification release still enforces `display.read_only: true`. All controls render for layout and state qualification, but the first-party Home Assistant write boundary remains blocked until the target iPad and household actions are approved. Camera streams require a deliberate tap and a separately supplied safe exterior camera entity; signals-only cameras remain useful without one.
+The packaged release permits `display.read_only: false` and derives every first-party write from the validated household mapping. The embedded music card is limited to documented media, Music Assistant and queue operations on configured players. Calendar and Classroom stay read-only, camera/map child cards cannot write, and garage/alarm changes remain confirmation-gated. Setting `display.read_only: true` still locks the entire tablet for rollback or diagnostics.
 
 ## Local check
 

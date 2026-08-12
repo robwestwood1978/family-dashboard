@@ -1,8 +1,8 @@
 # Family Dashboard Manager
 
-Version 0.6 upgrades the existing Family Dashboard Manager in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
+Version 0.7 upgrades the existing Family Dashboard Manager in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
 
-The v0.6 package remains a read-only qualification build. It renders the richer Home, Calendar, Security and Cleaning surfaces with real states, while Home Assistant write calls stay blocked until physical-iPad and household-action approval.
+The accepted schema-v6 dashboard can now run in controlled live mode. First-party actions are restricted to exact validated household entities and fixed services. The configured Sonos/Music Assistant card receives a separate bounded media proxy. Calendar, Classroom, camera presentation cards and the vacuum map remain read-only, while every alarm and garage change still asks for a second confirmation.
 
 ## Upgrade the existing manager
 
@@ -10,9 +10,9 @@ This release requires Home Assistant OS 2026.8.0 or newer.
 
 1. Create a Home Assistant backup.
 2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
-3. Update the installed **Family Dashboard Manager** to v0.6.0; do not uninstall it.
+3. Update the installed **Family Dashboard Manager** to v0.7.0; do not uninstall it.
 4. Keep the existing Secure MCP Tunnel options unchanged and restart the app.
-5. Confirm the manager reconnects through the existing tunnel and reports v0.6.0.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.7.0.
 
 The app exposes no host port. Its manager endpoint remains on the private loopback interface inside the same app container.
 
@@ -35,7 +35,7 @@ lovelace:
 Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.6.0
+/local/family-dashboard/family-hub-card.js?v=0.7.0
 ```
 
 The stock Home Assistant Overview remains available to administrators.
@@ -53,50 +53,56 @@ The confirmation-bound transfer is:
 
 The files are written only below `/config/www/family-dashboard/private/`.
 
-## Read-only v0.6 deployment
+## Controlled live deployment
 
-The schema-v6 household configuration must retain the existing panel path and explicitly enable read-only mode:
+The schema-v6 household configuration retains the existing panel path and explicitly opts into live mode:
 
 ```json
 {
   "schema_version": 6,
   "display": {
     "panel_path": "family-dashboard",
-    "read_only": true
+    "read_only": false
   }
 }
 ```
 
 Run `validate_household_config` first. Validation is read-only and returns the exact configuration hash required by `deploy_household_config` with `confirm=true`. Deployment writes only the existing Family Dashboard configuration and fixed frontend allow-list after creating a raw, hash-verified snapshot. Private floorplans are preserved separately.
 
-Call `reload_dashboard` after deployment, then refresh the existing Lovelace resource and tablet.
+Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.7.0, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
 
-## Physical qualification
+## Live action boundary
 
-Verify on the target iPad that:
+- Lights, scenes, heating, blinds and vacuum actions accept only entities listed in validated room/cleaning mappings and fixed service names.
+- Music permits playback, volume, grouping, browsing, search and queue operations only for configured primary and Music Assistant player entities.
+- Alarm actions accept only the configured alarm entity and the three presented arm-home, arm-away and disarm services.
+- Garage actions accept only the configured garage cover and still require confirmation.
+- Camera start/stop accepts only the exact buttons belonging to an explicitly configured exterior camera. A signals-only camera causes no camera write.
+- Calendar event management and Classroom remain read-only. Embedded camera views and the vacuum map receive a read-only Home Assistant proxy.
+- Exterior-camera validation continues to reject child, nursery and bedroom hints. Sanitised inventory still omits all camera entities.
+
+## Physical acceptance
+
+On the target iPad, confirm:
 
 - the existing Family Dashboard and stock Home Assistant Overview both remain available;
-- the dashboard shows a **Read-only test** badge;
-- Today, Calendar, Home, Family, Security, Music and Football have no horizontal overflow;
-- Calendar switches among Day, Week, Month and Agenda, persists hidden calendars, and offers no event creation or editing;
-- Home switches among Rooms, Lights, Heating, Blinds & doors and Cleaning;
-- both private 3D floors retain the approved geometry, including a U-return stair from Hall to Hall and no stair in Bedroom 4;
-- every room hotspot aligns with its visible room;
-- Family shows each child's configured ChoreOps routines and no location map unless separately opted in;
-- Security shows only exterior signals, opens no stream without **View live**, and exposes no child or bedroom camera;
-- alarm and garage actions require confirmation, while read-only mode prevents the service call;
-- Music remains contained and scrollable, Football shows provider data or an intentional waiting state, and Classroom remains at the per-child consent boundary;
-- light, climate, cover, scene, media, vacuum, camera-button, alarm and garage actions produce no Home Assistant write service calls.
+- the dashboard shows **Controlled live** and has no horizontal overflow at the supported landscape size;
+- Calendar switches among Day, Week, Month and Agenda and offers no event creation or editing;
+- both private floors retain the accepted Hall-to-Hall U-return stair and no stair enters Bedroom 4;
+- each mapped light, scene, heating zone, blind and vacuum action controls only its labelled device;
+- Sonos playback, volume and grouping operate only across the five configured zones;
+- Security exposes no child or bedroom camera, opens no stream automatically, and asks for confirmation before every alarm or garage change;
+- Classroom stays at the per-child read-only consent boundary and location remains disabled unless separately opted in.
 
-Do not clear `display.read_only` until the target iPad, the exact exterior camera entities and each household action have been separately approved.
+Test alarm and garage actions deliberately with an adult present. Home Assistant permissions and any configured alarm PIN remain authoritative; no PIN belongs in dashboard configuration.
 
-## Safety boundary
+## Safety and rollback
 
 - Asset and configuration deployment each require `confirm=true` plus the exact hash returned by validation.
 - The manager retains the existing app slug, paths, published image identity and tunnel.
-- Sanitised inventory excludes camera entities, people, trackers, states, history, addresses, credentials and arbitrary attributes.
 - The manager cannot run arbitrary commands, read arbitrary files or call arbitrary Home Assistant services.
-- Rollback verifies raw snapshot hashes and can restore an older installed schema without reinterpreting it as schema v6.
+- Rollback verifies raw snapshot hashes and can restore the accepted v0.6 configuration without reinterpreting it as a newer schema.
+- Sanitised inventory excludes camera entities, people, trackers, states, history, addresses, credentials and arbitrary attributes.
 
 ## Google Classroom and football
 

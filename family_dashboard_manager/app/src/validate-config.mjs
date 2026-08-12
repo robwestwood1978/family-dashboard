@@ -158,7 +158,7 @@ export function validateConfig(config) {
   }
   const viewNames = ["today", "calendar", "rooms", "family", "entry", "music", "football"];
   if (!viewNames.includes(display.default_view)) {
-    fail("config.display.default_view", "must name a v0.6 dashboard view");
+    fail("config.display.default_view", "must name a schema-v6 dashboard view");
   }
   requireInteger(display.target_width, "config.display.target_width", 768, 2560);
   requireInteger(display.target_height, "config.display.target_height", 600, 1600);
@@ -269,7 +269,7 @@ export function validateConfig(config) {
 
   const home = requireObject(config.home, "config.home");
   if (!["rooms", "lights", "heating", "covers", "cleaning"].includes(home.default_section)) {
-    fail("config.home.default_section", "must name a v0.6 Home section");
+    fail("config.home.default_section", "must name a schema-v6 Home section");
   }
   if (home.default_section === "cleaning" && !features.cleaning) {
     fail("config.home.default_section", "requires Cleaning to be enabled");

@@ -28,7 +28,7 @@ This public repository contains generic source, schemas, tests and release packa
 
 HACS remains the installer for the Daylight/legacy Skylight calendar, Mediocre Multi Media Player Card and kiosk-mode dependencies. The Family Hub shell, floorplan engine, Home controls, family summaries, Security boundary and football presentation are bundled with the manager itself; private household artwork stays outside this repository.
 
-Version 0.6 groups Rooms, Lights, Heating, Blinds & doors and Cleaning inside Home; wraps the installed calendar with Day, Week, Month and Agenda modes; and adds an exterior-only Security surface with deliberate streams and confirmation-gated alarm and garage actions. The packaged release still enforces read-only mode, so these controls can be qualified with real states without sending Home Assistant write calls. Google Classroom remains behind separate read-only consent for each child.
+Version 0.7 turns the accepted schema-v6 tablet into a controlled live dashboard. Lights, scenes, heating, blinds, cleaning and configured Sonos/Music Assistant players can act only on their validated entity allow-lists; alarm and garage changes still require a second confirmation. Calendar event management, Google Classroom, camera presentation cards and the vacuum map remain read-only, and no child or bedroom camera can enter the Security surface.
 
 ## Development
 

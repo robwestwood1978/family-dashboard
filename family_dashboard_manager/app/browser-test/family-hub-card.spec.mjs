@@ -222,6 +222,7 @@ async function expectNoRootOverflow(page) {
 test("fits the supported iPad landscapes and exposes every approved surface", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
+  await expect(card.locator(".preview-pill")).toHaveText(/Controlled live/);
   await expect(card.locator(".nav-button")).toHaveCount(7);
   await expect(card.locator(".nav-button")).toContainText(["Today", "Calendar", "Home", "Family", "Security", "Music", "Football"]);
   await expectNoRootOverflow(page);
@@ -249,7 +250,7 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   expect(pageErrors).toEqual([]);
 });
 
-test("renders the interactive floorplan and sends only the selected low-risk control", async ({ page }) => {
+test("renders the interactive floorplan and sends only configured room controls", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="rooms"]').click();
@@ -260,9 +261,27 @@ test("renders the interactive floorplan and sends only the selected low-risk con
   await card.locator('[data-room="kitchen"]').click();
   await expect(card.locator(".room-detail h2")).toHaveText("Kitchen");
   await card.locator('button[data-toggle="light.kitchen"]').click();
+  await card.locator('button[data-scene="scene.kitchen_bright"]').click();
+  await card.locator('button[data-media-toggle="media_player.kitchen"]').click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
-    { domain: "homeassistant", service: "toggle", data: { entity_id: "light.kitchen" } }
+    { domain: "light", service: "toggle", data: { entity_id: "light.kitchen" } },
+    { domain: "scene", service: "turn_on", data: { entity_id: "scene.kitchen_bright" } },
+    { domain: "media_player", service: "media_play_pause", data: { entity_id: "media_player.kitchen" } }
   ]);
+
+  await card.evaluate((element) => {
+    const root = element.shadowRoot;
+    const light = root.querySelector('button[data-toggle="light.kitchen"]');
+    const scene = root.querySelector('button[data-scene="scene.kitchen_bright"]');
+    const media = root.querySelector('button[data-media-toggle="media_player.kitchen"]');
+    light.dataset.toggle = "light.unmapped";
+    scene.dataset.scene = "scene.unmapped";
+    media.dataset.mediaToggle = "media_player.unmapped";
+    light.click();
+    scene.click();
+    media.click();
+  });
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toHaveLength(3);
   expect(pageErrors).toEqual([]);
 });
 
@@ -291,12 +310,30 @@ test("curates lights, heating, blinds and cleaning inside Home", async ({ page }
   await card.locator('button[data-vacuum-action="start"]').click();
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
-    { domain: "homeassistant", service: "toggle", data: { entity_id: "light.kitchen" } },
+    { domain: "light", service: "toggle", data: { entity_id: "light.kitchen" } },
     { domain: "climate", service: "set_temperature", data: { entity_id: "climate.living_room", temperature: 21.5 } },
     { domain: "cover", service: "close_cover", data: { entity_id: "cover.living_room" } },
     { domain: "vacuum", service: "start", data: { entity_id: "vacuum.example_robovac" } }
   ]);
   await expectNoRootOverflow(page);
+  expect(pageErrors).toEqual([]);
+});
+
+test("keeps the live music card working inside its configured media boundary", async ({ page }) => {
+  const pageErrors = await mount(page);
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="music"]').click();
+  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toBeVisible();
+  await card.locator("[data-mock-service]").click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "media_player", service: "media_play_pause", data: { entity_id: "media_player.kitchen" } }
+  ]);
+
+  await card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]').evaluate(async (child) => {
+    await child._hass.callService("media_player", "media_play_pause", { entity_id: "media_player.unmapped" });
+    await child._hass.callService("light", "toggle", { entity_id: "light.kitchen" });
+  });
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toHaveLength(1);
   expect(pageErrors).toEqual([]);
 });
 

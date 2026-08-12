@@ -1,3 +1,12 @@
+## 0.7.0
+
+- Promote the accepted schema-v6 dashboard from read-only qualification to controlled live operation without changing the existing app, tunnel, panel or storage identities.
+- Restrict first-party light, scene, heating, blind, vacuum, media, camera-button, alarm and garage writes to the exact entities and service names present in validated household configuration.
+- Give the configured Mediocre Sonos/Music Assistant card a bounded live Home Assistant proxy for playback, volume, grouping, browsing, search and queue operations on configured players only.
+- Keep Calendar event management, Classroom, camera presentation cards and the vacuum map read-only; retain exterior-only camera validation and the child/bedroom camera ban.
+- Preserve mandatory second confirmation for every garage and alarm change and keep the optional manager-wide read-only safety flag available for rollback or diagnostics.
+- Add controlled-live, DOM-tampering, media-boundary and supported-iPad regression coverage.
+
 ## 0.6.0
 
 - Reorganise the tablet into Today, Calendar, Home, Family, Security, Music and Football, with Rooms, Lights, Heating, Blinds & doors and Cleaning grouped inside Home.

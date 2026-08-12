@@ -32,7 +32,7 @@ function yamlBlock(value, indent) {
 }
 
 /**
- * Compile the one-card Home Assistant panel used by the v0.6 Family Hub.
+ * Compile the one-card Home Assistant panel used by the v0.7 Family Hub.
  * Navigation and presentation live inside the first-party card so the tablet
  * does not have to construct a large tree of third-party Lovelace cards.
  */

@@ -1,6 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveRoomState, escapeHtml, floorplanImageSource, floorplanViewBox, formatPoints, isControlAction, isCurrentOrFutureCalendarEvent, normaliseChoreStatus, normaliseFixtureStatus } from "../frontend/family-hub-card.js";
+import {
+  buildControlPolicy,
+  createControlledMediaHass,
+  deriveRoomState,
+  escapeHtml,
+  floorplanImageSource,
+  floorplanViewBox,
+  formatPoints,
+  isApprovedMediaServiceCall,
+  isControlAction,
+  isCurrentOrFutureCalendarEvent,
+  normaliseChoreStatus,
+  normaliseFixtureStatus
+} from "../frontend/family-hub-card.js";
 
 test("escapes state-derived text before rendering it into the card", () => {
   assert.equal(escapeHtml('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
@@ -16,6 +29,125 @@ test("identifies every Home Assistant write action blocked by read-only mode", (
   ]) assert.equal(isControlAction(dataset), true);
   assert.equal(isControlAction({ view: "rooms" }), false);
   assert.equal(isControlAction({ floor: "first" }), false);
+});
+
+test("derives the live-control boundary only from configured household entities", () => {
+  const policy = buildControlPolicy({
+    weather: { entity_id: "weather.home" },
+    rooms: [{
+      lights: ["light.kitchen"],
+      scenes: ["scene.kitchen_bright"],
+      media_players: ["media_player.kitchen"],
+      covers: ["cover.kitchen_blind"],
+      climate: "climate.kitchen"
+    }],
+    media: {
+      players: [{
+        entity_id: "media_player.kitchen",
+        ma_entity_id: "media_player.kitchen_music_assistant"
+      }]
+    },
+    cleaning: { vacuum_entity: "vacuum.robovac" },
+    entry: {
+      alarm_entity: "alarm_control_panel.home",
+      garage: { cover_entity: "cover.garage" },
+      cameras: [{
+        id: "doorbell",
+        entity_id: "camera.doorbell",
+        start_stream_entity: "button.doorbell_start_stream",
+        stop_stream_entity: "button.doorbell_stop_stream"
+      }]
+    }
+  });
+
+  assert.deepEqual([...policy.lights], ["light.kitchen"]);
+  assert.deepEqual([...policy.scenes], ["scene.kitchen_bright"]);
+  assert.deepEqual([...policy.mediaPlayers], ["media_player.kitchen", "media_player.kitchen_music_assistant"]);
+  assert.deepEqual([...policy.moreInfo], ["light.kitchen", "weather.home"]);
+  assert.equal(policy.vacuum, "vacuum.robovac");
+  assert.equal(policy.alarm, "alarm_control_panel.home");
+  assert.equal(policy.secureCover, "cover.garage");
+  assert.deepEqual(policy.cameras.get("doorbell"), {
+    entity: "camera.doorbell",
+    startButton: "button.doorbell_start_stream",
+    stopButton: "button.doorbell_stop_stream"
+  });
+});
+
+test("allows the configured Sonos and Music Assistant services without exposing a generic write bridge", async () => {
+  const policy = buildControlPolicy({
+    rooms: [],
+    media: {
+      players: [
+        { entity_id: "media_player.kitchen", ma_entity_id: "media_player.kitchen_music_assistant" },
+        { entity_id: "media_player.living_room" }
+      ]
+    }
+  });
+  assert.equal(isApprovedMediaServiceCall(policy, "media_player", "join", {
+    entity_id: "media_player.kitchen",
+    group_members: ["media_player.living_room"]
+  }), true);
+  assert.equal(isApprovedMediaServiceCall(policy, "media_player", "join", {
+    entity_id: "media_player.kitchen",
+    group_members: ["media_player.unmapped"]
+  }), false);
+  assert.equal(isApprovedMediaServiceCall(
+    policy,
+    "media_player",
+    "media_play",
+    { entity_id: "media_player.kitchen" },
+    { area_id: "whole_house" }
+  ), false);
+  assert.equal(isApprovedMediaServiceCall(policy, "light", "toggle", { entity_id: "light.kitchen" }), false);
+
+  const calls = [];
+  const messages = [];
+  const apiCalls = [];
+  const source = {
+    states: {},
+    callService(...args) { calls.push(args); },
+    callWS(message) { messages.push(message); return Promise.resolve({}); },
+    callApi(method, path) { apiCalls.push([method, path]); return Promise.resolve([]); },
+    connection: {
+      sendMessagePromise(message) { messages.push(message); return Promise.resolve({ response: {} }); }
+    }
+  };
+  const hass = createControlledMediaHass(source, policy);
+
+  await hass.callService("media_player", "media_play_pause", { entity_id: "media_player.kitchen" });
+  await hass.callService("media_player", "media_play_pause", { entity_id: "media_player.unmapped" });
+  await hass.callService("alarm_control_panel", "alarm_disarm", { entity_id: "alarm_control_panel.home" });
+  await hass.callWS({ type: "media_player/browse_media", entity_id: "media_player.kitchen" });
+  await hass.callWS({ type: "media_player/browse_media", entity_id: "media_player.unmapped" });
+  await hass.connection.sendMessagePromise({
+    type: "call_service",
+    domain: "mass_queue",
+    service: "get_queue_items",
+    service_data: { entity: "media_player.kitchen_music_assistant" },
+    return_response: true
+  });
+  await hass.connection.sendMessagePromise({
+    type: "call_service",
+    domain: "cover",
+    service: "open_cover",
+    service_data: { entity_id: "cover.garage" }
+  });
+  await hass.callApi("GET", "config/config_entries/entry");
+  await hass.callApi("POST", "services/light/toggle");
+
+  assert.deepEqual(calls, [["media_player", "media_play_pause", { entity_id: "media_player.kitchen" }, undefined]]);
+  assert.deepEqual(messages, [
+    { type: "media_player/browse_media", entity_id: "media_player.kitchen" },
+    {
+      type: "call_service",
+      domain: "mass_queue",
+      service: "get_queue_items",
+      service_data: { entity: "media_player.kitchen_music_assistant" },
+      return_response: true
+    }
+  ]);
+  assert.deepEqual(apiCalls, [["GET", "config/config_entries/entry"]]);
 });
 
 test("derives one bounded room summary from Home Assistant state", () => {
@@ -135,6 +267,6 @@ test("falls back to the private static plan when the map image is unavailable", 
 test("cache-busts a revised private floorplan without changing its approved file path", () => {
   assert.equal(floorplanImageSource({
     base_image: "/local/family-dashboard/private/ground-floor.svg",
-    asset_revision: "v0.6.0"
-  }), "/local/family-dashboard/private/ground-floor.svg?v=v0.6.0");
+    asset_revision: "v0.7.0"
+  }), "/local/family-dashboard/private/ground-floor.svg?v=v0.7.0");
 });

@@ -1,6 +1,6 @@
 # Architecture decision: first-party Family Hub card
 
-Status: accepted for v0.6 read-only qualification
+Status: accepted for v0.7 controlled live operation
 
 ## Product shell
 
@@ -12,7 +12,7 @@ The primary CSS viewport is `1112×834`, matching the 10.5-inch iPad Pro in land
 
 Rooms is a private house floorplan, not the geographic family map. Each floor uses an explicitly configured isometric/cutaway image or approved map-named vacuum camera, percentage-coordinate room polygons and optional transparent light overlays. The two deployment assets remain fixed as `ground-floor.svg` and `first-floor.svg`; an inert SVG may embed a base64 PNG while active or external content remains forbidden.
 
-Room, whole-home light, climate, cover and cleaning controls are derived only from explicit household mappings. Geometry and device ownership are never inferred from entity names. An authenticated vacuum map, when configured, renders directly inside Home Assistant and is never returned through the manager or committed to Git.
+Room, whole-home light, climate, cover and cleaning controls are derived only from explicit household mappings. Before a service call, the card checks the exact entity and a fixed service-name allow-list; light controls use the narrower `light.toggle` service. Geometry and device ownership are never inferred from entity names. An authenticated vacuum map, when configured, renders through a read-only child-card proxy inside Home Assistant and is never returned through the manager or committed to Git.
 
 ## Calendar, family and school
 
@@ -24,11 +24,11 @@ When explicitly enabled, Family embeds Home Assistant's native Map card using an
 
 Security admits only `doorbell`, `driveway` and `garden` camera roles. Camera IDs, names and entities containing child, nursery or bedroom hints are rejected. A camera may expose motion, person and ringing signals while its private stream entity is deferred. When an exterior stream entity is explicitly supplied, the picture appears only after **View live**; leaving Security closes the presentation boundary. Alarm and garage changes require a second confirmation dialog.
 
-The v0.6 app image still sets `MANAGER_REQUIRE_READ_ONLY=true`. The UI and confirmation flow can therefore be qualified with real states while every Home Assistant write service remains blocked.
+The v0.7 image sets `MANAGER_REQUIRE_READ_ONLY=false`, allowing a validated household configuration to opt into controlled live mode. Camera start/stop buttons remain exact configured entities, while alarm and garage services are fixed, entity-bound and executed only after the second confirmation. The optional manager flag and `display.read_only` mode remain available as full write locks.
 
 ## Music and football
 
-Music hosts the configured Mediocre multi-player card inside a bounded tablet surface. The read-only service proxy permits state rendering and safe detail/map reads but rejects writes. Fantasy Premier League is fetched server-side, publishes one index sensor, one sensor per matchweek and a calculated table, and uses a private last-good cache. Tottenham (`TOT`) and Aston Villa (`AVL`) receive spotlight styling.
+Music hosts the configured Mediocre multi-player card inside a bounded tablet surface. In live mode, its Home Assistant proxy permits only the documented `media_player`, `music_assistant` and `mass_queue` operations needed for playback, volume, grouping, browsing, search and queue management, and only for configured primary/Music Assistant player entities. In read-only mode, service calls remain blocked. Fantasy Premier League is fetched server-side, publishes one index sensor, one sensor per matchweek and a calculated table, and uses a private last-good cache. Tottenham (`TOT`) and Aston Villa (`AVL`) receive spotlight styling.
 
 ## Deployment and rollback
 

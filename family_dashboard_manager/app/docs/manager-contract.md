@@ -31,7 +31,7 @@ Deployment and rollback require `confirm=true` plus the exact validation or acti
 - password, OAuth code or token transport through household configuration;
 - editing unrelated dashboards or integrations.
 
-Schema v6 may reference an explicitly supplied safe exterior camera entity and bounded signal/button entities, but the manager never reads a stream. The packaged read-only qualification mode blocks all frontend writes, including camera start/stop, vacuum, garage and alarm services.
+Schema v6 may reference an explicitly supplied safe exterior camera entity and bounded signal/button entities, but the manager never reads a stream. In controlled live mode, the frontend accepts writes only for mapped entities and fixed service sets; setting `display.read_only: true` or the manager safety flag blocks all frontend writes.
 
 ## Files and connection
 
