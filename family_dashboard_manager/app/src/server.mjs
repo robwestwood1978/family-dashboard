@@ -9,7 +9,7 @@ import { DashboardStore } from "./manager-store.mjs";
 import { getSanitisedHomeAssistantInventory } from "./ha-client.mjs";
 
 const CONFIG_SCHEMA = z.record(z.string(), z.unknown());
-const APP_VERSION = process.env.APP_VERSION || "0.5.3";
+const APP_VERSION = process.env.APP_VERSION || "0.6.0";
 const MCP_JSON_BODY_LIMIT_BYTES = 1_500_000;
 const FLOORPLAN_ASSET_SCHEMA = z.object({
   filename: z.enum(["ground-floor.svg", "first-floor.svg"]),

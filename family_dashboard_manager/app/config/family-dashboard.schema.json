@@ -14,17 +14,20 @@
     "calendar",
     "weather",
     "lists",
+    "home",
     "floorplan",
     "rooms",
     "media",
+    "cleaning",
     "chores",
     "football",
     "school",
-    "location"
+    "location",
+    "entry"
   ],
   "properties": {
     "$schema": { "type": "string" },
-    "schema_version": { "const": 5 },
+    "schema_version": { "const": 6 },
     "product": {
       "type": "object",
       "additionalProperties": false,
@@ -54,7 +57,7 @@
         "legacy_ios": { "type": "boolean" },
         "read_only": { "type": "boolean" },
         "default_view": {
-          "enum": ["today", "calendar", "rooms", "family", "music", "football"]
+          "enum": ["today", "calendar", "rooms", "family", "entry", "music", "football"]
         },
         "panel_path": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
         "target_width": { "type": "integer", "minimum": 768, "maximum": 2560 },
@@ -119,6 +122,7 @@
         "weather",
         "school",
         "location_map",
+        "cleaning",
         "entry"
       ],
       "properties": {
@@ -132,16 +136,24 @@
         "weather": { "type": "boolean" },
         "school": { "type": "boolean" },
         "location_map": { "type": "boolean" },
-        "entry": { "const": false }
+        "cleaning": { "type": "boolean" },
+        "entry": { "type": "boolean" }
       }
     },
     "calendar": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["initial_view", "rolling_days", "entities"],
+      "required": ["card_type", "initial_view", "rolling_days", "preference_storage_key", "entities"],
       "properties": {
-        "initial_view": { "enum": ["listWeek", "dayGridMonth", "dayGridDay"] },
+        "card_type": {
+          "enum": ["custom:daylight-calendar-card", "custom:skylight-calendar-card"]
+        },
+        "initial_view": { "enum": ["day", "week", "month", "agenda"] },
         "rolling_days": { "type": "integer", "minimum": 1, "maximum": 31 },
+        "preference_storage_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,64}$"
+        },
         "entities": {
           "type": "array",
           "items": {
@@ -178,6 +190,16 @@
       "properties": {
         "reminders_entity": { "$ref": "#/$defs/todoEntityId" },
         "shopping_entity": { "$ref": "#/$defs/todoEntityId" }
+      }
+    },
+    "home": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default_section"],
+      "properties": {
+        "default_section": {
+          "enum": ["rooms", "lights", "heating", "covers", "cleaning"]
+        }
       }
     },
     "floorplan": {
@@ -311,6 +333,18 @@
         }
       }
     },
+    "cleaning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vacuum_entity"],
+      "properties": {
+        "vacuum_entity": { "$ref": "#/$defs/vacuumEntityId" },
+        "map_entity": { "$ref": "#/$defs/vacuumMapCameraEntityId" },
+        "battery_entity": { "$ref": "#/$defs/sensorEntityId" },
+        "task_entity": { "$ref": "#/$defs/sensorEntityId" },
+        "dock_entity": { "$ref": "#/$defs/sensorEntityId" }
+      }
+    },
     "chores": {
       "type": "object",
       "additionalProperties": false,
@@ -411,20 +445,21 @@
     "entry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["primary_camera_id", "cameras", "garage"],
+      "required": ["alarm_entity", "cameras", "garage"],
       "properties": {
+        "alarm_entity": { "$ref": "#/$defs/alarmControlPanelEntityId" },
         "primary_camera_id": { "$ref": "#/$defs/id" },
         "cameras": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "name", "entity_id", "role"],
+            "required": ["id", "name", "role"],
             "properties": {
               "id": { "$ref": "#/$defs/id" },
               "name": { "type": "string", "minLength": 1, "maxLength": 40 },
               "entity_id": { "$ref": "#/$defs/cameraEntityId" },
-              "role": { "enum": ["doorbell", "driveway", "garden", "other"] },
+              "role": { "enum": ["doorbell", "driveway", "garden"] },
               "motion_entity": { "$ref": "#/$defs/binarySensorEntityId" },
               "person_entity": { "$ref": "#/$defs/binarySensorEntityId" },
               "ringing_entity": { "$ref": "#/$defs/binarySensorEntityId" },
@@ -436,7 +471,7 @@
         "garage": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["cover_entity", "camera_id"],
+          "required": ["cover_entity"],
           "properties": {
             "cover_entity": { "$ref": "#/$defs/coverEntityId" },
             "camera_id": { "$ref": "#/$defs/id" },
@@ -458,6 +493,8 @@
     "climateEntityId": { "type": "string", "pattern": "^climate\\.[a-z0-9_]+$" },
     "sceneEntityId": { "type": "string", "pattern": "^scene\\.[a-z0-9_]+$" },
     "mediaPlayerEntityId": { "type": "string", "pattern": "^media_player\\.[a-z0-9_]+$" },
+    "vacuumEntityId": { "type": "string", "pattern": "^vacuum\\.[a-z0-9_]+$" },
+    "alarmControlPanelEntityId": { "type": "string", "pattern": "^alarm_control_panel\\.[a-z0-9_]+$" },
     "sensorEntityId": { "type": "string", "pattern": "^sensor\\.[a-z0-9_]+$" },
     "cameraEntityId": { "type": "string", "pattern": "^camera\\.[a-z0-9_]+$" },
     "vacuumMapCameraEntityId": { "type": "string", "pattern": "^camera\\.[a-z0-9_]*map[a-z0-9_]*$" },

@@ -1,3 +1,13 @@
+## 0.6.0
+
+- Reorganise the tablet into Today, Calendar, Home, Family, Security, Music and Football, with Rooms, Lights, Heating, Blinds & doors and Cleaning grouped inside Home.
+- Wrap the installed Daylight/legacy Skylight calendar with Day, Week, Month and Agenda modes, persistent calendar preferences and an explicit read-only event boundary.
+- Add schema-v6 cleaning, whole-home and Security contracts, including signals-only exterior cameras, deliberate live viewing, child/bedroom camera rejection and confirmation-gated alarm and garage actions.
+- Package the accepted two-floor Sweet Home 3D renders as inert private SVG assets, preserving the Hall-to-Hall U-return stair and keeping Bedroom 4 stair-free.
+- Map the current household inventory across 19 lights, six heating zones, four blind channels, the garage, five primary media zones and the Eufy vacuum without inventing private stream IDs.
+- Keep Google Classroom behind separate read-only consent for each child and retain the release-wide Home Assistant write block during qualification.
+- Expand unit and `1112×834`/`1024×768` browser coverage for all seven surfaces, Home controls, deliberate Security streams, confirmations and read-only enforcement.
+
 ## 0.5.3
 
 - Select **Up Next** from current or future calendar events so a finished stale event can no longer displace the genuine next appointment.

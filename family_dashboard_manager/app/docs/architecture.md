@@ -1,35 +1,37 @@
 # Architecture decision: first-party Family Hub card
 
-Status: accepted for v0.5 isolated qualification
+Status: accepted for v0.6 read-only qualification
 
 ## Product shell
 
-The dedicated YAML dashboard has one Home Assistant panel view and one bundled `custom:family-hub-card`. The card owns Today, Calendar, Rooms, Family, Music and Football navigation. This avoids constructing a large third-party Lovelace tree on the older tablet while retaining Home Assistant state and service APIs.
+The dedicated YAML dashboard has one Home Assistant panel view and one bundled `custom:family-hub-card`. The card owns Today, Calendar, Home, Family, Security, Music and Football navigation. Home then exposes Rooms, Lights, Heating, Blinds & doors and Cleaning without multiplying top-level destinations.
 
-The primary CSS viewport is `1112×834`, matching the 10.5-inch iPad Pro in landscape at device-pixel ratio 2. `1024×768` remains a regression profile. The modern shell uses static layered gradients, translucent surfaces and bounded shadows, avoids WebGL and required motion, and honours reduced-motion settings.
+The primary CSS viewport is `1112×834`, matching the 10.5-inch iPad Pro in landscape at device-pixel ratio 2. `1024×768` remains a regression profile. The shell uses static layered gradients, translucent surfaces and bounded shadows, avoids required motion and honours reduced-motion settings.
 
-## Rooms and floorplan
+## Home and floorplans
 
-Rooms is a house floorplan, not the geographic family map. Each floor has either a private static isometric/cutaway base image or an explicitly configured map-named vacuum camera, percentage-coordinate room polygons and optional transparent light overlays. For an Eufy Clean X10 Pro Omni, `camera.robovac_map` is the expected ground-floor source. The authenticated image is rendered directly inside Home Assistant and is never returned through the manager or committed to Git. A room selection reveals only its mapped low-risk controls. Geometry remains explicit private configuration rather than being inferred from entity names or invented from household facts.
+Rooms is a private house floorplan, not the geographic family map. Each floor uses an explicitly configured isometric/cutaway image or approved map-named vacuum camera, percentage-coordinate room polygons and optional transparent light overlays. The two deployment assets remain fixed as `ground-floor.svg` and `first-floor.svg`; an inert SVG may embed a base64 PNG while active or external content remains forbidden.
 
-## Family and school
+Room, whole-home light, climate, cover and cleaning controls are derived only from explicit household mappings. Geometry and device ownership are never inferred from entity names. An authenticated vacuum map, when configured, renders directly inside Home Assistant and is never returned through the manager or committed to Git.
 
-When explicitly enabled, Family embeds Home Assistant's native Map card using an allow-list of `person.*` entities, so coordinates remain inside Home Assistant. With household location sharing disabled, v0.5 instead renders a purposeful private family overview. Each child panel reads the explicitly mapped ChoreOps total, points and individual status sensors so named routines and their actual status are visible. Each child has a separate Google authorization proof; the live adapter remains gated until Google's own consent flow succeeds with read-only scopes.
+## Calendar, family and school
 
-## Football
+Calendar wraps the already-installed Daylight card or its legacy Skylight identity. The outer shell offers Day, Week, Month and Agenda. Event management, add buttons and write services remain disabled; the card's browser storage key preserves hidden-calendar and colour preferences.
 
-Fantasy Premier League blocks direct cross-origin browser reads, so the manager fetches its public feeds server-side. The provider publishes one index sensor, one sensor per matchweek and one table sensor. Only changed payloads are republished, and a private last-good cache keeps the UI useful during source failures. Every fixture is retained; Tottenham (`TOT`) and Aston Villa (`AVL`) receive spotlight styling.
+When explicitly enabled, Family embeds Home Assistant's native Map card using an allow-list of `person.*` entities, so coordinates stay inside Home Assistant. With location sharing disabled, Family presents the configured household routines instead. Each child has a separate Google authorization proof, and the Classroom adapter remains gated until that child completes Google's consent flow with read-only scopes. Passwords and OAuth tokens never enter dashboard configuration.
 
-## Calendar, media and native cards
+## Security
 
-The card requests a bounded seven-day window from Home Assistant's calendar API and renders a first-party, tablet-legible agenda without sending calendar data outside Home Assistant. The Map child card is created only when location sharing is enabled. Read-only Music renders mapped Home Assistant media-player states in the first-party shell; an interactive third-party media card is withheld during qualification. No external map or football browser request receives household information.
+Security admits only `doorbell`, `driveway` and `garden` camera roles. Camera IDs, names and entities containing child, nursery or bedroom hints are rejected. A camera may expose motion, person and ringing signals while its private stream entity is deferred. When an exterior stream entity is explicitly supplied, the picture appears only after **View live**; leaving Security closes the presentation boundary. Alarm and garage changes require a second confirmation dialog.
 
-## Cameras and garage
+The v0.6 app image still sets `MANAGER_REQUIRE_READ_ONLY=true`. The UI and confirmation flow can therefore be qualified with real states while every Home Assistant write service remains blocked.
 
-Doorbell/security camera surfaces are intentionally absent. Schema-v5 retains typed placeholders for a later migration, but v0.5 validation rejects `features.entry=true`. The only camera-domain exception is a map-named vacuum camera used as a read-only floorplan image; no security stream is mounted and no garage or vacuum action is sent.
+## Music and football
+
+Music hosts the configured Mediocre multi-player card inside a bounded tablet surface. The read-only service proxy permits state rendering and safe detail/map reads but rejects writes. Fantasy Premier League is fetched server-side, publishes one index sensor, one sensor per matchweek and a calculated table, and uses a private last-good cache. Tottenham (`TOT`) and Aston Villa (`AVL`) receive spotlight styling.
 
 ## Deployment and rollback
 
-The manager writes canonical configuration and generated YAML below `/config/family-dashboard`. It publishes only a fixed allow-list of first-party frontend files below `/config/www/family-dashboard`; unknown private floorplan files are preserved. Snapshots contain raw configuration, YAML and managed frontend files with SHA-256 hashes. Rollback verifies and restores the raw files, allowing a schema-v4 release to be restored by a schema-v5 manager.
+The manager writes canonical configuration and generated YAML below `/config/family-dashboard`. It publishes only a fixed allow-list below `/config/www/family-dashboard`; unknown private assets are preserved. Floorplans have their own two-file validation and hash-confirmed deployment. Snapshots contain raw configuration, YAML and managed frontend files with SHA-256 hashes, allowing an older schema release to be restored without reinterpretation by schema v6.
 
-Home Assistant remains in storage mode for resources. The first-party JavaScript module therefore has one explicit administrator registration step. The manager does not attempt an unsupported general Lovelace resource service call.
+Home Assistant remains in storage mode for resources. The JavaScript module therefore retains one explicit administrator registration or refresh step; the manager does not call a general Lovelace resource service.

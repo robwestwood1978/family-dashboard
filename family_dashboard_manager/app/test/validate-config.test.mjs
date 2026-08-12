@@ -8,6 +8,7 @@ const example = JSON.parse(await readFile(new URL("../config/example.json", impo
 function withDeferredEntry() {
   const config = structuredClone(example);
   config.entry = {
+    alarm_entity: "alarm_control_panel.example_home",
     primary_camera_id: "doorbell",
     cameras: [{
       id: "doorbell",
@@ -24,8 +25,8 @@ function withDeferredEntry() {
   return config;
 }
 
-test("accepts the public schema-v5 configuration", () => {
-  assert.equal(validateConfig(structuredClone(example)).schema_version, 5);
+test("accepts the public schema-v6 configuration", () => {
+  assert.equal(validateConfig(structuredClone(example)).schema_version, 6);
 });
 
 test("requires read-only mode to be explicit", () => {
@@ -45,10 +46,10 @@ test("accepts the existing manager's private asset root", () => {
 
 test("accepts a cache-safe floorplan revision and rejects URL-shaped values", () => {
   const config = structuredClone(example);
-  config.floorplan.floors[0].asset_revision = "v0.5.3";
-  assert.equal(validateConfig(config).floorplan.floors[0].asset_revision, "v0.5.3");
+  config.floorplan.floors[0].asset_revision = "v0.6.0";
+  assert.equal(validateConfig(config).floorplan.floors[0].asset_revision, "v0.6.0");
 
-  config.floorplan.floors[0].asset_revision = "v0.5.3?unsafe=true";
+  config.floorplan.floors[0].asset_revision = "v0.6.0?unsafe=true";
   assert.throws(() => validateConfig(config), /asset_revision/);
 });
 
@@ -200,10 +201,17 @@ test("requires configured Classroom children while School is enabled", () => {
   assert.throws(() => validateConfig(config), /must not be empty when School is enabled/);
 });
 
-test("keeps Cameras & Entry disabled for the v0.5 qualification phase", () => {
+test("accepts a signals-only household camera while its private stream entity is deferred", () => {
   const config = structuredClone(example);
-  config.features.entry = true;
-  assert.throws(() => validateConfig(config), /remain disabled until a separately qualified release/);
+  delete config.entry.cameras[0].entity_id;
+  assert.equal(validateConfig(config).entry.cameras[0].motion_entity, "binary_sensor.example_doorbell_motion");
+});
+
+test("blocks child and bedroom cameras from the household Security surface", () => {
+  const config = structuredClone(example);
+  config.entry.cameras[0].id = "child_bedroom";
+  config.entry.primary_camera_id = "child_bedroom";
+  assert.throws(() => validateConfig(config), /private child or bedroom cameras are never allowed/);
 });
 
 test("requires camera, event and garage entities to use safe expected domains", () => {
@@ -218,6 +226,10 @@ test("requires camera, event and garage entities to use safe expected domains", 
   const garage = withDeferredEntry();
   garage.entry.garage.cover_entity = "switch.not_a_cover";
   assert.throws(() => validateConfig(garage), /must use the cover domain/);
+
+  const alarm = withDeferredEntry();
+  alarm.entry.alarm_entity = "switch.not_an_alarm";
+  assert.throws(() => validateConfig(alarm), /must use the alarm_control_panel domain/);
 });
 
 test("rejects unknown fields through the production schema gate", () => {

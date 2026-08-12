@@ -1,8 +1,9 @@
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null },
   { id: "calendar", label: "Calendar", icon: "mdi:calendar-month", feature: "calendar" },
-  { id: "rooms", label: "Rooms", icon: "mdi:floor-plan", feature: "rooms" },
+  { id: "rooms", label: "Home", icon: "mdi:floor-plan", feature: "rooms" },
   { id: "family", label: "Family", icon: "mdi:account-group", feature: "family" },
+  { id: "entry", label: "Security", icon: "mdi:shield-home", feature: "entry" },
   { id: "music", label: "Music", icon: "mdi:music-circle", feature: "music" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
@@ -15,7 +16,9 @@ const ICONS = {
   scene: "mdi:creation-outline",
   calendar: "mdi:calendar-clock",
   school: "mdi:school-outline",
-  chore: "mdi:checkbox-marked-circle-outline"
+  chore: "mdi:checkbox-marked-circle-outline",
+  vacuum: "mdi:robot-vacuum",
+  security: "mdi:shield-home-outline"
 };
 
 const htmlEscapeMap = {
@@ -37,7 +40,14 @@ export function isControlAction(dataset = {}) {
     || dataset.mediaToggle
     || dataset.coverAction
     || dataset.climateAdjust
+    || dataset.vacuumAction
+    || dataset.alarmAction
+    || dataset.secureCoverAction
   );
+}
+
+export function isActiveBinaryState(state) {
+  return ["on", "open", "opening", "detected", "ringing", "triggered"].includes(String(state?.state || "").toLowerCase());
 }
 
 function safeNumber(value, fallback = 0) {
@@ -296,8 +306,10 @@ function stateSignature(states, entityIds) {
       state.last_updated,
       attributes.brightness,
       attributes.rgb_color,
+      attributes.current_position,
       attributes.current_temperature,
       attributes.temperature,
+      attributes.battery_level,
       attributes.media_title,
       attributes.media_artist,
       attributes.message,
@@ -324,8 +336,12 @@ export class FamilyHubCard extends HTMLElementBase {
     this._config = null;
     this._hass = null;
     this._view = "today";
+    this._homeSection = "rooms";
+    this._calendarMode = "week";
     this._floor = null;
     this._room = null;
+    this._activeCameraId = null;
+    this._pendingConfirmation = null;
     this._footballTab = "fixtures";
     this._gameweek = null;
     this._entityIds = new Set();
@@ -355,6 +371,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.removeEventListener("click", this._boundClick);
     this.shadowRoot.removeEventListener("change", this._boundChange);
     this.shadowRoot.removeEventListener("keydown", this._boundKeydown);
+    this._closeActiveCamera();
     this._childCards.clear();
   }
 
@@ -362,11 +379,13 @@ export class FamilyHubCard extends HTMLElementBase {
     const config = typeof cardConfig?.config_json === "string"
       ? JSON.parse(cardConfig.config_json)
       : cardConfig?.family_config;
-    if (!config || config.schema_version !== 5) {
-      throw new Error("Family Hub requires a schema-v5 family configuration");
+    if (!config || config.schema_version !== 6) {
+      throw new Error("Family Hub requires a schema-v6 family configuration");
     }
     this._config = config;
     this._view = config.display.default_view || "today";
+    this._homeSection = config.home.default_section || "rooms";
+    this._calendarMode = config.calendar.initial_view || "week";
     this._floor = config.floorplan.default_floor;
     this._room = config.floorplan.floors
       .find((floor) => floor.id === this._floor)?.room_hotspots?.[0]?.room_id || config.rooms[0]?.id || null;
@@ -375,6 +394,9 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarEvents = [];
     this._calendarRequestKey = "";
     this._calendarError = null;
+    this._activeCameraId = null;
+    this._pendingConfirmation = null;
+    this._childCards.clear();
     this._scheduleRender(true);
   }
 
@@ -563,6 +585,7 @@ export class FamilyHubCard extends HTMLElementBase {
       case "calendar": return this._renderCalendar();
       case "rooms": return this._renderRooms();
       case "family": return this._renderFamily();
+      case "entry": return this._renderSecurity();
       case "music": return this._renderMusic();
       case "football": return this._renderFootball();
       default: return this._renderToday();
@@ -654,13 +677,29 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderCalendar() {
+    const modes = [
+      { id: "day", label: "Day", icon: "mdi:calendar-today" },
+      { id: "week", label: "Week", icon: "mdi:calendar-week" },
+      { id: "month", label: "Month", icon: "mdi:calendar-month" },
+      { id: "agenda", label: "Agenda", icon: "mdi:format-list-bulleted" }
+    ];
+    const modeButtons = modes.map((mode) => `<button type="button" class="segment ${mode.id === this._calendarMode ? "is-selected" : ""}" data-calendar-mode="${mode.id}"><ha-icon icon="${mode.icon}" aria-hidden="true"></ha-icon>${mode.label}</button>`).join("");
+    return `
+      <section class="single-surface surface calendar-view">
+        <div class="section-heading calendar-heading">
+          <div><p class="eyebrow">Read-only family calendar</p><h2>Everyone’s time, together</h2></div>
+          <div class="segments calendar-modes" role="group" aria-label="Choose calendar view">${modeButtons}</div>
+        </div>
+        <div id="calendar-card-slot" class="child-card-slot calendar-card-slot">${this._renderCalendarFallback()}</div>
+      </section>
+    `;
+  }
+
+  _renderCalendarFallback() {
     const days = this._calendarWindow();
     const events = this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents();
     const timeZone = this._config.product.timezone;
     const locale = this._config.product.locale;
-    const legend = this._config.calendar.entities.map((calendar) => `
-      <span class="calendar-legend" style="--calendar-colour:${escapeHtml(calendar.colour)}"><i></i>${escapeHtml(calendar.label)}</span>
-    `).join("");
     const columns = days.map((day) => {
       const dayEvents = events.filter((event) => dateKey(calendarEventStart(event), timeZone) === day.key);
       return `
@@ -683,16 +722,50 @@ export class FamilyHubCard extends HTMLElementBase {
       `;
     }).join("");
     return `
-      <section class="single-surface surface calendar-view">
-        <div class="section-heading calendar-heading"><div><p class="eyebrow">Family rhythm</p><h2>The next seven days</h2></div><div class="calendar-legends">${legend}</div></div>
+      <div class="calendar-fallback" aria-label="Built-in calendar fallback">
         ${this._calendarLoading ? '<div class="calendar-loading"><span></span>Refreshing the family week…</div>' : ""}
-        ${this._calendarError ? '<p class="calendar-warning">Showing the next events held by Home Assistant while the full agenda reconnects.</p>' : ""}
+        ${this._calendarError ? '<p class="calendar-warning">Daylight is unavailable, so this safe built-in agenda is being shown.</p>' : ""}
         <div class="agenda-board">${columns}</div>
-      </section>
+      </div>
     `;
   }
 
   _renderRooms() {
+    const sectionDefinitions = [
+      { id: "rooms", label: "Rooms", icon: "mdi:floor-plan" },
+      { id: "lights", label: "Lights", icon: "mdi:lightbulb-group-outline" },
+      { id: "heating", label: "Heating", icon: "mdi:radiator" },
+      { id: "covers", label: "Blinds & doors", icon: "mdi:blinds-horizontal" },
+      ...(this._config.features.cleaning ? [{ id: "cleaning", label: "Cleaning", icon: "mdi:robot-vacuum" }] : [])
+    ];
+    if (!sectionDefinitions.some((entry) => entry.id === this._homeSection)) this._homeSection = "rooms";
+    const sectionButtons = sectionDefinitions.map((entry) => `
+      <button type="button" class="segment ${entry.id === this._homeSection ? "is-selected" : ""}" data-home-section="${entry.id}">
+        <ha-icon icon="${entry.icon}" aria-hidden="true"></ha-icon>${escapeHtml(entry.label)}
+      </button>
+    `).join("");
+    return `
+      <section class="home-surface">
+        <div class="home-toolbar">
+          <div><p class="eyebrow">Whole home</p><h2>One calm place for every room</h2></div>
+          <div class="segments home-segments" role="group" aria-label="Choose Home section">${sectionButtons}</div>
+        </div>
+        <div class="home-section" data-home-section-current="${escapeHtml(this._homeSection)}">${this._renderHomeSection()}</div>
+      </section>
+    `;
+  }
+
+  _renderHomeSection() {
+    switch (this._homeSection) {
+      case "lights": return this._renderAllLights();
+      case "heating": return this._renderAllHeating();
+      case "covers": return this._renderAllCovers();
+      case "cleaning": return this._renderCleaning();
+      default: return this._renderRoomExplorer();
+    }
+  }
+
+  _renderRoomExplorer() {
     const floor = this._config.floorplan.floors.find((entry) => entry.id === this._floor) || this._config.floorplan.floors[0];
     const selectedRoom = this._config.rooms.find((room) => room.id === this._room)
       || this._config.rooms.find((room) => room.floor_id === floor.id)
@@ -711,6 +784,91 @@ export class FamilyHubCard extends HTMLElementBase {
         </article>
         <aside class="surface room-detail">${this._renderRoomDetail(selectedRoom)}</aside>
       </section>
+    `;
+  }
+
+  _renderAllLights() {
+    const states = this._hass?.states || {};
+    const readOnly = this._config.display.read_only === true;
+    const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
+    const rooms = this._config.rooms.filter((room) => room.lights.length).map((room) => {
+      const lightStates = room.lights.map((entityId) => states[entityId]);
+      const onCount = lightStates.filter((state) => state?.state === "on").length;
+      const controls = room.lights.map((entityId) => {
+        const state = states[entityId];
+        const isOn = state?.state === "on";
+        const brightness = isOn ? `${Math.round(safeNumber(state?.attributes?.brightness, 255) / 2.55)}%` : titleCase(state?.state || "off");
+        return `<button type="button" class="whole-home-control ${isOn ? "is-on" : ""}" data-toggle="${escapeHtml(entityId)}"${disabled}><ha-icon icon="${ICONS.light}"></ha-icon><span><strong>${escapeHtml(entityName(state, titleCase(entityId.split(".")[1])))}</strong><small>${escapeHtml(brightness)}</small></span></button>`;
+      }).join("");
+      return `<article class="surface whole-home-card"><div class="whole-home-heading"><span><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><h3>${escapeHtml(room.name)}</h3><p>${onCount} of ${room.lights.length} on</p></div></div><div class="whole-home-controls">${controls}</div></article>`;
+    }).join("");
+    return `<div class="whole-home-grid">${rooms || '<p class="empty-state">No room lights are mapped.</p>'}</div>`;
+  }
+
+  _renderAllHeating() {
+    const states = this._hass?.states || {};
+    const readOnly = this._config.display.read_only === true;
+    const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
+    const zones = this._config.rooms.filter((room) => room.climate).map((room) => {
+      const state = states[room.climate];
+      const current = roomTemperature(room, states);
+      const target = safeNumber(state?.attributes?.temperature, NaN);
+      return `
+        <article class="surface heating-card">
+          <div class="heating-card-heading"><span><ha-icon icon="${ICONS.climate}"></ha-icon></span><div><h3>${escapeHtml(room.name)}</h3><p>${escapeHtml(titleCase(state?.state || "unavailable"))}</p></div><strong>${formatTemperature(current)}</strong></div>
+          <div class="heating-target"><span>Target <strong>${formatTemperature(target)}</strong></span><div class="stepper"><button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower ${escapeHtml(room.name)} target"${disabled}>−</button><button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Raise ${escapeHtml(room.name)} target"${disabled}>+</button></div></div>
+        </article>
+      `;
+    }).join("");
+    return `<div class="heating-grid">${zones || '<p class="empty-state">No heating zones are mapped.</p>'}</div>`;
+  }
+
+  _renderAllCovers() {
+    const states = this._hass?.states || {};
+    const readOnly = this._config.display.read_only === true;
+    const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
+    const covers = this._config.rooms.flatMap((room) => room.covers.map((entityId) => ({ room, entityId })));
+    const cards = covers.map(({ room, entityId }) => {
+      const state = states[entityId];
+      const position = safeNumber(state?.attributes?.current_position, NaN);
+      return `
+        <article class="surface cover-card">
+          <div class="cover-card-heading"><span><ha-icon icon="${ICONS.cover}"></ha-icon></span><div><h3>${escapeHtml(entityName(state, "Blind"))}</h3><p>${escapeHtml(room.name)} · ${escapeHtml(titleCase(state?.state || "unavailable"))}${Number.isFinite(position) ? ` · ${position}%` : ""}</p></div></div>
+          <div class="cover-actions"><button type="button" data-cover-action="open_cover" data-entity="${escapeHtml(entityId)}" aria-label="Open"${disabled}><ha-icon icon="mdi:arrow-up"></ha-icon>Open</button><button type="button" data-cover-action="stop_cover" data-entity="${escapeHtml(entityId)}" aria-label="Stop"${disabled}><ha-icon icon="mdi:stop"></ha-icon>Stop</button><button type="button" data-cover-action="close_cover" data-entity="${escapeHtml(entityId)}" aria-label="Close"${disabled}><ha-icon icon="mdi:arrow-down"></ha-icon>Close</button></div>
+        </article>
+      `;
+    }).join("");
+    const garage = this._config.features.entry ? this._hass?.states?.[this._config.entry.garage.cover_entity] : null;
+    const garageCard = this._config.features.entry ? `
+      <article class="surface cover-card">
+        <div class="cover-card-heading"><span><ha-icon icon="mdi:garage-variant"></ha-icon></span><div><h3>Garage door</h3><p>${escapeHtml(titleCase(garage?.state || "unavailable"))} · protected action</p></div></div>
+        <div class="cover-actions is-single"><button type="button" data-view="entry"><ha-icon icon="mdi:shield-home-outline"></ha-icon>Open Security</button></div>
+      </article>
+    ` : "";
+    return `<div class="cover-grid">${cards}${garageCard || (!cards ? '<p class="empty-state">No household blinds or doors are mapped.</p>' : "")}</div>`;
+  }
+
+  _renderCleaning() {
+    const states = this._hass?.states || {};
+    const config = this._config.cleaning;
+    const vacuum = states[config.vacuum_entity];
+    const readOnly = this._config.display.read_only === true;
+    const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
+    const battery = config.battery_entity ? states[config.battery_entity]?.state : vacuum?.attributes?.battery_level;
+    const task = config.task_entity ? states[config.task_entity]?.state : vacuum?.state;
+    const dock = config.dock_entity ? states[config.dock_entity]?.state : null;
+    const facts = [
+      [Number.isFinite(Number(battery)) ? `${Number(battery)}%` : "—", "Battery"],
+      [titleCase(task || "unavailable"), "Current task"],
+      [titleCase(dock || vacuum?.state || "unavailable"), "Dock"]
+    ].map(([value, label]) => `<span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(label)}</small></span>`).join("");
+    return `
+      <article class="surface cleaning-panel">
+        <div class="cleaning-hero"><span><ha-icon icon="${ICONS.vacuum}"></ha-icon></span><div><p class="eyebrow">Whole-home cleaning</p><h2>${escapeHtml(entityName(vacuum, "Robot vacuum"))}</h2><p>${escapeHtml(titleCase(vacuum?.state || "unavailable"))}</p></div></div>
+        <div class="cleaning-facts">${facts}</div>
+        <div class="cleaning-actions"><button type="button" data-vacuum-action="start" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:play"></ha-icon>Start</button><button type="button" data-vacuum-action="pause" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:pause"></ha-icon>Pause</button><button type="button" data-vacuum-action="return_to_base" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:home-map-marker"></ha-icon>Return home</button></div>
+        ${config.map_entity ? '<div id="vacuum-map-card-slot" class="child-card-slot vacuum-map-slot"></div>' : '<div class="vacuum-map-placeholder"><ha-icon icon="mdi:map-outline"></ha-icon><span>The cleaning map can be added when its private camera entity is mapped.</span></div>'}
+      </article>
     `;
   }
 
@@ -810,6 +968,66 @@ export class FamilyHubCard extends HTMLElementBase {
     `;
   }
 
+  _renderSecurity() {
+    const states = this._hass?.states || {};
+    const entry = this._config.entry;
+    const alarm = states[entry.alarm_entity];
+    const garage = states[entry.garage.cover_entity];
+    const readOnly = this._config.display.read_only === true;
+    const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
+    const garageOpen = !["closed", "closing"].includes(String(garage?.state || "").toLowerCase());
+    const cameraCards = entry.cameras.map((camera) => {
+      const signalDefinitions = [
+        [camera.ringing_entity, "Ringing", "mdi:bell-ring-outline"],
+        [camera.person_entity, "Person", "mdi:account-alert-outline"],
+        [camera.motion_entity, "Motion", "mdi:motion-sensor"]
+      ].filter(([entityId]) => entityId);
+      const signals = signalDefinitions.map(([entityId, label, icon]) => {
+        const active = isActiveBinaryState(states[entityId]);
+        return `<span class="security-signal ${active ? "is-active" : ""}"><ha-icon icon="${icon}"></ha-icon><strong>${escapeHtml(label)}</strong><small>${active ? "Detected" : "Clear"}</small></span>`;
+      }).join("");
+      const isActive = camera.id === this._activeCameraId;
+      const stream = isActive && camera.entity_id
+        ? `<div class="camera-stream"><div id="camera-card-slot-${escapeHtml(camera.id)}" class="child-card-slot camera-card-slot"></div><button type="button" class="camera-close" data-camera-close="${escapeHtml(camera.id)}"><ha-icon icon="mdi:close"></ha-icon>Close live view</button></div>`
+        : `<div class="camera-idle"><ha-icon icon="${camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon><div><strong>No automatic stream</strong><small>${camera.entity_id ? "Live video starts only when you ask for it." : "Safe signals are mapped; the private camera entity still needs confirming."}</small></div><button type="button" data-camera-open="${escapeHtml(camera.id)}" ${camera.entity_id ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="mdi:play-circle-outline"></ha-icon>View live</button></div>`;
+      return `<article class="surface security-camera"><div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(camera.role))}</p><h2>${escapeHtml(camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${camera.entity_id ? "mdi:gesture-tap-button" : "mdi:shield-check-outline"}"></ha-icon>${camera.entity_id ? "Tap to stream" : "Signals only"}</span></div>${signals ? `<div class="security-signals">${signals}</div>` : ""}${stream}</article>`;
+    }).join("");
+    return `
+      <section class="security-layout">
+        <div class="security-main">${cameraCards}</div>
+        <aside class="security-sidebar">
+          <article class="surface alarm-panel">
+            <div class="security-card-heading"><div><p class="eyebrow">Home alarm</p><h2>${escapeHtml(titleCase(alarm?.state || "unavailable"))}</h2></div><span class="alarm-state ${String(alarm?.state || "").includes("triggered") ? "is-alert" : ""}"><ha-icon icon="${ICONS.security}"></ha-icon></span></div>
+            <p>Every alarm change asks for a second confirmation. A Home Assistant PIN remains authoritative where configured.</p>
+            <div class="alarm-actions"><button type="button" data-alarm-action="alarm_arm_home" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Arm home"${disabled}><ha-icon icon="mdi:shield-home-outline"></ha-icon>Home</button><button type="button" data-alarm-action="alarm_arm_away" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Arm away"${disabled}><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Away</button><button type="button" class="is-danger" data-alarm-action="alarm_disarm" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Disarm alarm"${disabled}><ha-icon icon="mdi:shield-off-outline"></ha-icon>Disarm</button></div>
+          </article>
+          <article class="surface garage-panel">
+            <div class="garage-heading"><span><ha-icon icon="mdi:garage-variant"></ha-icon></span><div><p class="eyebrow">Garage door</p><h2>${escapeHtml(titleCase(garage?.state || "unavailable"))}</h2></div></div>
+            ${entry.garage.motion_entity ? `<p class="garage-motion ${isActiveBinaryState(states[entry.garage.motion_entity]) ? "is-active" : ""}"><ha-icon icon="mdi:motion-sensor"></ha-icon>${isActiveBinaryState(states[entry.garage.motion_entity]) ? "Motion detected" : "No motion detected"}</p>` : ""}
+            <button type="button" class="garage-action" data-secure-cover-action="${garageOpen ? "close_cover" : "open_cover"}" data-entity="${escapeHtml(entry.garage.cover_entity)}" data-action-label="${garageOpen ? "Close garage door" : "Open garage door"}"${disabled}><ha-icon icon="${garageOpen ? "mdi:garage-alert-variant" : "mdi:garage-open-variant"}"></ha-icon>${garageOpen ? "Close garage" : "Open garage"}</button>
+          </article>
+          <p class="security-privacy-note"><ha-icon icon="mdi:shield-account-outline"></ha-icon>Only household entry cameras are allowed here. Child and bedroom cameras are blocked by validation.</p>
+        </aside>
+        ${this._renderConfirmation()}
+      </section>
+    `;
+  }
+
+  _renderConfirmation() {
+    if (!this._pendingConfirmation) return "";
+    return `
+      <div class="confirmation-backdrop" role="presentation">
+        <section class="confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title">
+          <span><ha-icon icon="mdi:shield-alert-outline"></ha-icon></span>
+          <p class="eyebrow">Please confirm</p>
+          <h2 id="confirmation-title">${escapeHtml(this._pendingConfirmation.label)}</h2>
+          <p>This is a protected household action. Nothing changes until you press Confirm.</p>
+          <div><button type="button" data-confirm-action="cancel">Cancel</button><button type="button" class="confirm-primary" data-confirm-action="confirm">Confirm</button></div>
+        </section>
+      </div>
+    `;
+  }
+
   _renderFamily() {
     const locationEnabled = this._config.features.location_map;
     const children = this._config.people.filter((person) => person.role === "child");
@@ -849,6 +1067,11 @@ export class FamilyHubCard extends HTMLElementBase {
     const points = chore ? states[chore.points_entity]?.state : "0";
     const due = chore ? safeNumber(states[chore.chores_entity]?.attributes?.chore_stat_current_due_today, 0) : 0;
     const nextAssignment = [...assignments].sort((a, b) => new Date(a.due_at || 0) - new Date(b.due_at || 0))[0];
+    const classroomStatus = nextAssignment
+      ? `<div class="assignment"><ha-icon icon="${ICONS.school}"></ha-icon><div><strong>${escapeHtml(nextAssignment.title || "Assignment")}</strong><small>${escapeHtml(nextAssignment.course || "Google Classroom")} · ${escapeHtml(formatDay(nextAssignment.due_at, this._config.product.locale, this._config.product.timezone))}</small></div></div>`
+      : !this._config.features.school
+        ? '<div class="assignment classroom-locked"><ha-icon icon="mdi:school-outline"></ha-icon><div><strong>Classroom ready after consent</strong><small>Read-only access will be connected separately for each child. No password belongs in this dashboard.</small></div></div>'
+        : "";
     const presence = this._config.features.location_map && person.location_entity
       ? titleCase(states[person.location_entity]?.state || "Location unavailable")
       : "Family member";
@@ -869,7 +1092,7 @@ export class FamilyHubCard extends HTMLElementBase {
         <div class="family-facts"><span><strong>${escapeHtml(points || "0")}</strong> chore points</span><span><strong>${due}</strong> due today</span><span><strong>${assignments.length}</strong> assignments</span></div>
         <div class="chore-heading"><p class="eyebrow">Today’s routines</p><span>${choreRows ? `${(chore?.status_entities || []).length} mapped` : "Not mapped"}</span></div>
         ${choreRows ? `<ul class="chore-list">${choreRows}</ul>` : '<p class="empty-state compact">No individual ChoreOps status sensors are mapped.</p>'}
-        ${nextAssignment ? `<div class="assignment"><ha-icon icon="${ICONS.school}"></ha-icon><div><strong>${escapeHtml(nextAssignment.title || "Assignment")}</strong><small>${escapeHtml(nextAssignment.course || "Google Classroom")} · ${escapeHtml(formatDay(nextAssignment.due_at, this._config.product.locale, this._config.product.timezone))}</small></div></div>` : ""}
+        ${classroomStatus}
       </article>
     `;
   }
@@ -1007,6 +1230,45 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _mountChildCards() {
     if (!this._hass || !globalThis.loadCardHelpers) return;
+    if (this._view === "calendar") {
+      const viewMap = {
+        day: "schedule",
+        week: "week-compact",
+        month: "month",
+        agenda: "agenda"
+      };
+      const calendarNames = Object.fromEntries(this._config.calendar.entities.map((entry) => [entry.entity_id, entry.label]));
+      const colours = Object.fromEntries(this._config.calendar.entities.map((entry) => [entry.entity_id, entry.colour]));
+      this._ensureChildCard(`calendar:${this._calendarMode}`, {
+        type: this._config.calendar.card_type,
+        title: "",
+        entities: this._config.calendar.entities.map((entry) => entry.entity_id),
+        calendar_names: calendarNames,
+        colors: colours,
+        default_view: viewMap[this._calendarMode] || "week-compact",
+        ...(this._calendarMode === "day" ? { rolling_days_schedule: 1 } : {}),
+        rolling_days_agenda: this._config.calendar.rolling_days,
+        first_day_of_week: 1,
+        week_days: [0, 1, 2, 3, 4, 5, 6],
+        use_24hr_schedule: true,
+        shorten_event_times: true,
+        show_event_location: true,
+        show_current_time_bar: true,
+        past_event_mode: "muted",
+        hide_view_selector: true,
+        hide_add_event_button: true,
+        hide_dark_mode_toggle: true,
+        enable_event_management: false,
+        readonly_calendars: this._config.calendar.entities.map((entry) => entry.entity_id),
+        preference_storage_key: this._config.calendar.preference_storage_key,
+        compact_header: true,
+        compact_height: true,
+        color_scheme: "dark",
+        language: this._config.product.locale.split("-")[0],
+        locale: this._config.product.locale,
+        time_zone: this._config.product.timezone
+      }, "calendar-card-slot");
+    }
     if (this._view === "family" && this._config.features.location_map) {
       this._ensureChildCard("map", {
         type: "map",
@@ -1031,6 +1293,27 @@ export class FamilyHubCard extends HTMLElementBase {
           transparent_background_on_home: true
         }
       }, "music-card-slot");
+    }
+    if (this._view === "rooms" && this._homeSection === "cleaning" && this._config.cleaning.map_entity) {
+      this._ensureChildCard("vacuum-map", {
+        type: "picture-entity",
+        entity: this._config.cleaning.map_entity,
+        camera_view: "auto",
+        show_name: false,
+        show_state: false
+      }, "vacuum-map-card-slot");
+    }
+    if (this._view === "entry" && this._activeCameraId) {
+      const camera = this._config.entry.cameras.find((entry) => entry.id === this._activeCameraId);
+      if (camera?.entity_id) {
+        this._ensureChildCard(`camera:${camera.id}`, {
+          type: "picture-entity",
+          entity: camera.entity_id,
+          camera_view: "live",
+          show_name: false,
+          show_state: false
+        }, `camera-card-slot-${camera.id}`);
+      }
     }
   }
 
@@ -1060,12 +1343,18 @@ export class FamilyHubCard extends HTMLElementBase {
         delete child.dataset.readOnlyGuard;
       }
     }
+    if (key.startsWith("calendar:") || key.startsWith("camera:") || key === "vacuum-map") {
+      child.inert = false;
+      child.setAttribute("data-read-only-guard", "service-boundary");
+      child.setAttribute("aria-label", key.startsWith("calendar:") ? "Read-only family calendar" : "Read-only camera view");
+    }
     child.hass = this._hassForChild(key);
     slot.replaceChildren(child);
   }
 
   _hassForChild(key) {
-    if (key !== "music" || !this._config?.display?.read_only || !this._hass) return this._hass;
+    const forceReadOnly = key.startsWith("calendar:") || key.startsWith("camera:") || key === "vacuum-map";
+    if ((!forceReadOnly && (key !== "music" || !this._config?.display?.read_only)) || !this._hass) return this._hass;
     if (this._readOnlyHassSource === this._hass && this._readOnlyHass) return this._readOnlyHass;
     const source = this._hass;
     this._readOnlyHassSource = source;
@@ -1108,7 +1397,18 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!target) return;
     if (target.dataset.view) {
       if (!this._enabledViews().some((view) => view.id === target.dataset.view)) return;
+      if (this._view === "entry" && target.dataset.view !== "entry") this._closeActiveCamera();
       this._view = target.dataset.view;
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.homeSection) {
+      this._homeSection = target.dataset.homeSection;
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.calendarMode) {
+      this._calendarMode = target.dataset.calendarMode;
       this._scheduleRender(true);
       return;
     }
@@ -1132,7 +1432,50 @@ export class FamilyHubCard extends HTMLElementBase {
       this._scheduleRender(true);
       return;
     }
+    if (target.dataset.cameraOpen) {
+      const camera = this._config.entry.cameras.find((entry) => entry.id === target.dataset.cameraOpen);
+      if (!camera?.entity_id) return;
+      if (this._activeCameraId && this._activeCameraId !== camera.id) this._closeActiveCamera();
+      if (camera.start_stream_entity && !this._config.display.read_only) this._hass?.callService?.("button", "press", { entity_id: camera.start_stream_entity });
+      this._activeCameraId = camera.id;
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.cameraClose) {
+      this._closeActiveCamera();
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.confirmAction) {
+      if (target.dataset.confirmAction === "confirm" && this._pendingConfirmation) {
+        const action = this._pendingConfirmation;
+        this._hass?.callService?.(action.domain, action.service, { entity_id: action.entity });
+      }
+      this._pendingConfirmation = null;
+      this._scheduleRender(true);
+      return;
+    }
     if (this._config.display.read_only && (isControlAction(target.dataset) || target.dataset.moreInfo)) return;
+    if (target.dataset.alarmAction && target.dataset.entity) {
+      this._pendingConfirmation = {
+        domain: "alarm_control_panel",
+        service: target.dataset.alarmAction,
+        entity: target.dataset.entity,
+        label: target.dataset.actionLabel || "Change alarm state"
+      };
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.secureCoverAction && target.dataset.entity) {
+      this._pendingConfirmation = {
+        domain: "cover",
+        service: target.dataset.secureCoverAction,
+        entity: target.dataset.entity,
+        label: target.dataset.actionLabel || "Move garage door"
+      };
+      this._scheduleRender(true);
+      return;
+    }
     if (target.dataset.moreInfo) {
       this._showMoreInfo(target.dataset.moreInfo);
       return;
@@ -1153,6 +1496,10 @@ export class FamilyHubCard extends HTMLElementBase {
       this._hass?.callService?.("cover", target.dataset.coverAction, { entity_id: target.dataset.entity });
       return;
     }
+    if (target.dataset.vacuumAction && target.dataset.entity) {
+      this._hass?.callService?.("vacuum", target.dataset.vacuumAction, { entity_id: target.dataset.entity });
+      return;
+    }
     if (target.dataset.climateAdjust && target.dataset.entity) {
       const state = this._hass?.states?.[target.dataset.entity];
       const current = safeNumber(state?.attributes?.temperature, NaN);
@@ -1163,6 +1510,12 @@ export class FamilyHubCard extends HTMLElementBase {
         });
       }
     }
+  }
+
+  _closeActiveCamera() {
+    const camera = this._config?.entry?.cameras?.find((entry) => entry.id === this._activeCameraId);
+    if (camera?.stop_stream_entity && !this._config?.display?.read_only) this._hass?.callService?.("button", "press", { entity_id: camera.stop_stream_entity });
+    this._activeCameraId = null;
   }
 
   _selectRoom(roomId) {
@@ -1251,6 +1604,54 @@ export class FamilyHubCard extends HTMLElementBase {
       .embedded-view { display:grid; grid-template-rows:48px minmax(0,1fr); gap:10px; }
       .child-card-slot { min-height:0; overflow:auto; border-radius:16px; }
       .child-card-slot > * { display:block; min-height:100%; }
+      .home-surface { height:100%; min-height:0; display:grid; grid-template-rows:52px minmax(0,1fr); gap:10px; }
+      .home-toolbar { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:12px; color:#fff; padding:0 4px; }
+      .home-toolbar h2 { margin:3px 0 0; font-size:19px; }
+      .home-toolbar .eyebrow { color:rgba(255,255,255,.68); }
+      .home-section { min-width:0; min-height:0; }
+      .home-segments { max-width:70%; overflow-x:auto; }
+      .home-segments .segment,.calendar-modes .segment { display:flex; align-items:center; gap:5px; }
+      .home-segments ha-icon,.calendar-modes ha-icon { --mdc-icon-size:15px; }
+      .whole-home-grid { height:100%; min-height:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; overflow:auto; align-content:start; padding:1px 3px 4px 1px; }
+      .whole-home-card { min-width:0; padding:15px; }
+      .whole-home-heading,.heating-card-heading,.cover-card-heading { min-width:0; display:flex; align-items:center; gap:10px; }
+      .whole-home-heading > span,.heating-card-heading > span,.cover-card-heading > span { flex:0 0 40px; width:40px; height:40px; display:grid; place-items:center; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 13%,rgba(8,15,31,.64)); color:#bcaeff; }
+      .whole-home-heading h3,.heating-card-heading h3,.cover-card-heading h3 { margin:0; font-size:15px; }
+      .whole-home-heading p,.heating-card-heading p,.cover-card-heading p { margin:3px 0 0; color:var(--hub-muted); font-size:9px; }
+      .whole-home-controls { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:13px; }
+      .whole-home-control { min-width:0; min-height:52px; display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid rgba(255,255,255,.1); border-radius:13px; background:rgba(8,15,31,.5); color:var(--hub-text); text-align:left; cursor:pointer; }
+      .whole-home-control.is-on { border-color:rgba(242,184,92,.44); background:rgba(128,88,29,.34); color:#ffd789; }
+      .whole-home-control ha-icon { flex:0 0 auto; --mdc-icon-size:19px; }
+      .whole-home-control span { min-width:0; }
+      .whole-home-control strong,.whole-home-control small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .whole-home-control strong { font-size:10px; }
+      .whole-home-control small { margin-top:3px; color:var(--hub-muted); font-size:8px; }
+      .heating-grid,.cover-grid { height:100%; min-height:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; align-content:start; overflow:auto; padding:1px 3px 4px 1px; }
+      .heating-card,.cover-card { min-width:0; padding:16px; }
+      .heating-card-heading > strong { margin-left:auto; font-size:25px; }
+      .heating-target { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:16px; padding-top:13px; border-top:1px solid rgba(255,255,255,.1); color:var(--hub-muted); font-size:10px; }
+      .heating-target > span strong { margin-left:4px; color:var(--hub-text); font-size:15px; }
+      .cover-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:16px; }
+      .cover-actions.is-single { grid-template-columns:1fr; }
+      .cover-actions button { min-width:0; min-height:42px; border:0; border-radius:12px; background:rgba(255,255,255,.08); color:#c8bcff; display:flex; align-items:center; justify-content:center; gap:4px; font-size:9px; font-weight:750; cursor:pointer; }
+      .cover-actions ha-icon { --mdc-icon-size:15px; }
+      .cleaning-panel { height:100%; min-height:0; padding:22px; display:grid; grid-template-columns:minmax(0,.86fr) minmax(0,1.14fr); grid-template-rows:auto auto minmax(0,1fr); gap:16px 24px; overflow:hidden; }
+      .cleaning-hero { display:flex; align-items:center; gap:15px; }
+      .cleaning-hero > span { width:72px; height:72px; display:grid; place-items:center; border-radius:24px; background:linear-gradient(145deg,var(--hub-accent),var(--hub-backdrop-end)); color:#fff; }
+      .cleaning-hero > span ha-icon { --mdc-icon-size:38px; }
+      .cleaning-hero h2 { margin:4px 0 0; font-size:23px; }
+      .cleaning-hero p:last-child { margin:5px 0 0; color:var(--hub-muted); font-size:11px; }
+      .cleaning-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; align-self:center; }
+      .cleaning-facts span { padding:12px; border:1px solid rgba(255,255,255,.1); border-radius:14px; background:rgba(8,15,31,.44); }
+      .cleaning-facts strong,.cleaning-facts small { display:block; }
+      .cleaning-facts strong { font-size:14px; }
+      .cleaning-facts small { margin-top:4px; color:var(--hub-muted); font-size:8px; }
+      .cleaning-actions { display:flex; align-items:center; gap:8px; }
+      .cleaning-actions button { min-height:46px; padding:0 16px; border:0; border-radius:14px; background:color-mix(in srgb,var(--hub-accent) 18%,rgba(8,15,31,.72)); color:#d8d0ff; display:flex; align-items:center; gap:6px; font-weight:750; cursor:pointer; }
+      .vacuum-map-slot,.vacuum-map-placeholder { grid-column:2; grid-row:2/4; min-height:0; overflow:hidden; border:1px solid rgba(255,255,255,.1); border-radius:18px; background:rgba(6,12,27,.54); }
+      .vacuum-map-slot .embedded-card { height:100%; }
+      .vacuum-map-placeholder { display:grid; place-items:center; align-content:center; gap:10px; padding:28px; color:var(--hub-muted); text-align:center; font-size:11px; }
+      .vacuum-map-placeholder ha-icon { --mdc-icon-size:44px; color:#a999ff; }
       .rooms-layout { height:100%; display:grid; grid-template-columns:minmax(0,3.2fr) minmax(232px,1fr); gap:12px; }
       .floorplan-panel { min-width:0; min-height:0; padding:14px; display:grid; grid-template-rows:48px minmax(0,1fr); gap:7px; }
       .floorplan-heading { align-items:center; }
@@ -1314,6 +1715,57 @@ export class FamilyHubCard extends HTMLElementBase {
       .assignment { display:flex; gap:8px; margin-top:13px; padding-top:12px; border-top:1px solid color-mix(in srgb,var(--hub-muted) 16%,transparent); }
       .assignment strong,.assignment small { display:block; }
       .assignment small { margin-top:3px; color:var(--hub-muted); font-size:9px; }
+      .classroom-locked { opacity:.82; }
+      .security-layout { position:relative; height:100%; min-height:0; display:grid; grid-template-columns:minmax(0,1.7fr) minmax(260px,.72fr); gap:14px; }
+      .security-main { min-height:0; display:grid; grid-template-rows:repeat(2,minmax(0,1fr)); gap:14px; }
+      .security-camera { min-height:0; padding:17px; display:grid; grid-template-rows:auto auto minmax(0,1fr); gap:11px; overflow:hidden; }
+      .security-card-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+      .security-card-heading h2 { margin:4px 0 0; font-size:19px; }
+      .privacy-badge { min-height:30px; padding:0 9px; border:1px solid rgba(255,255,255,.11); border-radius:10px; background:rgba(255,255,255,.06); color:var(--hub-muted); display:flex; align-items:center; gap:5px; font-size:8px; font-weight:750; white-space:nowrap; }
+      .privacy-badge ha-icon { --mdc-icon-size:14px; color:#bcaeff; }
+      .security-signals { display:flex; gap:7px; }
+      .security-signal { min-width:0; flex:1; display:grid; grid-template-columns:25px minmax(0,1fr); grid-template-rows:auto auto; align-items:center; column-gap:6px; padding:7px 8px; border:1px solid rgba(255,255,255,.08); border-radius:11px; background:rgba(8,15,31,.44); }
+      .security-signal ha-icon { grid-row:1/3; --mdc-icon-size:17px; color:#8893a8; }
+      .security-signal strong,.security-signal small { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+      .security-signal strong { font-size:9px; }
+      .security-signal small { color:var(--hub-muted); font-size:7px; }
+      .security-signal.is-active { border-color:rgba(239,164,71,.52); background:rgba(121,68,20,.34); }
+      .security-signal.is-active ha-icon { color:#ffc06f; }
+      .camera-idle { min-height:0; display:grid; grid-template-columns:54px minmax(0,1fr) auto; align-items:center; gap:13px; padding:14px; border:1px dashed rgba(255,255,255,.13); border-radius:15px; background:radial-gradient(circle at 10% 50%,rgba(123,104,211,.18),transparent 32%),rgba(6,12,27,.45); }
+      .camera-idle > ha-icon { --mdc-icon-size:42px; color:#a999ff; }
+      .camera-idle strong,.camera-idle small { display:block; }
+      .camera-idle small { margin-top:4px; max-width:330px; color:var(--hub-muted); font-size:9px; line-height:1.35; }
+      .camera-idle button,.camera-close { min-height:40px; padding:0 13px; border:0; border-radius:12px; background:var(--hub-accent); color:#fff; display:flex; align-items:center; gap:5px; font-size:9px; font-weight:800; cursor:pointer; }
+      .camera-stream { position:relative; min-height:0; overflow:hidden; border-radius:15px; background:#050a15; }
+      .camera-card-slot { height:100%; min-height:130px; border-radius:0; overflow:hidden; }
+      .camera-card-slot .embedded-card { height:100%; }
+      .camera-close { position:absolute; z-index:4; right:9px; bottom:9px; background:rgba(8,15,31,.86); border:1px solid rgba(255,255,255,.18); }
+      .security-sidebar { min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto auto; gap:12px; }
+      .alarm-panel,.garage-panel { padding:17px; overflow:hidden; }
+      .alarm-state { width:42px; height:42px; display:grid; place-items:center; border-radius:14px; background:rgba(70,144,111,.22); color:#7bd4a7; }
+      .alarm-state.is-alert { background:rgba(184,53,57,.32); color:#ff9999; }
+      .alarm-panel > p { margin:13px 0 0; color:var(--hub-muted); font-size:9px; line-height:1.4; }
+      .alarm-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:15px; }
+      .alarm-actions button { min-width:0; min-height:46px; border:0; border-radius:12px; background:rgba(123,104,211,.17); color:#c9beff; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; font-size:8px; font-weight:800; cursor:pointer; }
+      .alarm-actions button.is-danger { background:rgba(176,57,61,.22); color:#ffaaa7; }
+      .alarm-actions ha-icon { --mdc-icon-size:17px; }
+      .garage-heading { display:flex; align-items:center; gap:10px; }
+      .garage-heading > span { width:43px; height:43px; display:grid; place-items:center; border-radius:14px; background:rgba(123,104,211,.18); color:#c5b9ff; }
+      .garage-heading h2 { margin:3px 0 0; font-size:18px; }
+      .garage-motion { display:flex; align-items:center; gap:6px; margin:13px 0 0; color:var(--hub-muted); font-size:9px; }
+      .garage-motion.is-active { color:#ffc06f; }
+      .garage-action { width:100%; min-height:43px; margin-top:13px; border:1px solid rgba(255,255,255,.12); border-radius:12px; background:rgba(123,104,211,.18); color:#d7d0ff; display:flex; align-items:center; justify-content:center; gap:6px; font-size:10px; font-weight:800; cursor:pointer; }
+      .security-privacy-note { display:flex; align-items:flex-start; gap:7px; margin:0; padding:10px 12px; border:1px solid rgba(255,255,255,.08); border-radius:12px; background:rgba(8,15,31,.46); color:var(--hub-muted); font-size:8px; line-height:1.35; }
+      .security-privacy-note ha-icon { flex:0 0 auto; --mdc-icon-size:16px; color:#a999ff; }
+      .confirmation-backdrop { position:absolute; z-index:30; inset:0; display:grid; place-items:center; padding:20px; border-radius:var(--hub-radius); background:rgba(2,7,17,.72); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); }
+      .confirmation-dialog { width:min(390px,90%); padding:25px; border:1px solid rgba(255,255,255,.18); border-radius:22px; background:linear-gradient(155deg,#1a2440,#352c4b); color:#fff; text-align:center; box-shadow:0 24px 70px rgba(0,0,0,.5); }
+      .confirmation-dialog > span { width:58px; height:58px; margin:0 auto 13px; display:grid; place-items:center; border-radius:19px; background:rgba(239,164,71,.17); color:#ffc06f; }
+      .confirmation-dialog > span ha-icon { --mdc-icon-size:30px; }
+      .confirmation-dialog h2 { margin:6px 0 0; font-size:22px; }
+      .confirmation-dialog > p:not(.eyebrow) { margin:10px 0 0; color:#bcc4d5; font-size:11px; line-height:1.45; }
+      .confirmation-dialog > div { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:20px; }
+      .confirmation-dialog button { min-height:46px; border:1px solid rgba(255,255,255,.14); border-radius:13px; background:rgba(255,255,255,.07); color:#fff; font-weight:800; cursor:pointer; }
+      .confirmation-dialog button.confirm-primary { border-color:transparent; background:var(--hub-accent); }
       .football-layout { height:100%; display:grid; grid-template-columns:minmax(0,1.7fr) minmax(260px,.62fr); gap:14px; }
       .football-main { min-height:0; padding:18px; display:grid; grid-template-rows:54px minmax(0,1fr); overflow:hidden; }
       .football-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:12px; align-items:center; }
@@ -1349,6 +1801,10 @@ export class FamilyHubCard extends HTMLElementBase {
       .league-table tr.is-spotlight { background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); }
       .calendar-view { position:relative; display:grid; grid-template-rows:52px minmax(0,1fr); gap:10px; background:linear-gradient(155deg,rgba(250,246,245,.94),rgba(235,230,242,.91)); }
       .calendar-heading { align-items:center; }
+      .calendar-modes { flex-wrap:nowrap; }
+      .calendar-card-slot { height:100%; min-height:0; overflow:hidden; border:1px solid rgba(255,255,255,.1); background:rgba(7,14,29,.62); --ha-card-background:transparent; --card-background-color:transparent; --ha-card-border-width:0; --ha-card-box-shadow:none; --primary-text-color:#f7f8fc; --secondary-text-color:#b6bdce; }
+      .calendar-card-slot .embedded-card { height:100%; min-height:0; overflow:auto; }
+      .calendar-fallback { position:relative; height:100%; min-height:0; padding:10px; }
       .calendar-legends { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:7px 13px; }
       .calendar-legend { display:flex; align-items:center; gap:5px; color:#42495b; font-size:10px; font-weight:700; }
       .calendar-legend i { width:8px; height:8px; border-radius:50%; background:var(--calendar-colour); box-shadow:0 0 0 3px color-mix(in srgb,var(--calendar-colour) 16%,transparent); }
@@ -1465,6 +1921,8 @@ export class FamilyHubCard extends HTMLElementBase {
         .today-grid { grid-template-columns:minmax(0,1.25fr) minmax(225px,.88fr) minmax(220px,.82fr); }
         .today-grid article { padding:17px; }
         .rooms-layout { grid-template-columns:minmax(0,2.9fr) minmax(224px,1fr); }
+        .whole-home-grid,.heating-grid,.cover-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .security-layout { grid-template-columns:minmax(0,1.55fr) 246px; }
         .football-layout { grid-template-columns:minmax(0,1.6fr) 250px; }
       }
       @media (max-width:760px) {
@@ -1479,7 +1937,15 @@ export class FamilyHubCard extends HTMLElementBase {
         .content { display:block; padding:10px; }
         .topbar { min-height:64px; }
         .view { min-height:620px; }
-        .today-grid,.rooms-layout,.family-layout,.football-layout { display:flex; flex-direction:column; height:auto; }
+        .today-grid,.rooms-layout,.family-layout,.security-layout,.football-layout { display:flex; flex-direction:column; height:auto; }
+        .home-surface { height:auto; grid-template-rows:auto auto; }
+        .home-toolbar { align-items:flex-start; flex-direction:column; }
+        .home-segments { max-width:100%; }
+        .whole-home-grid,.heating-grid,.cover-grid { grid-template-columns:1fr; height:auto; }
+        .cleaning-panel { height:auto; display:flex; flex-direction:column; }
+        .vacuum-map-slot,.vacuum-map-placeholder { min-height:320px; }
+        .security-main { display:flex; flex-direction:column; }
+        .security-camera { min-height:300px; }
         .hero-panel { grid-column:auto; }
         .family-sidebar { display:flex; flex-direction:column; }
         .floorplan-canvas { min-height:420px; }

@@ -23,11 +23,27 @@ function fixtureStates() {
     "person.example_child_one": state("person.example_child_one", "school"),
     "person.example_child_two": state("person.example_child_two", "home"),
     "camera.example_vacuum_map": state("camera.example_vacuum_map", "idle", { entity_picture: "/api/camera_proxy/camera.example_vacuum_map?token=browser-fixture" }),
+    "camera.example_doorbell": state("camera.example_doorbell", "streaming"),
+    "camera.example_garage": state("camera.example_garage", "idle"),
+    "alarm_control_panel.example_home": state("alarm_control_panel.example_home", "disarmed"),
+    "binary_sensor.example_doorbell_motion": state("binary_sensor.example_doorbell_motion", "off"),
+    "binary_sensor.example_doorbell_person": state("binary_sensor.example_doorbell_person", "on"),
+    "binary_sensor.example_doorbell_ringing": state("binary_sensor.example_doorbell_ringing", "off"),
+    "binary_sensor.example_garage_motion": state("binary_sensor.example_garage_motion", "off"),
+    "binary_sensor.example_garage_person": state("binary_sensor.example_garage_person", "off"),
+    "cover.example_garage": state("cover.example_garage", "closed", { current_position: 0 }),
+    "vacuum.example_robovac": state("vacuum.example_robovac", "docked", { battery_level: 88 }),
+    "sensor.example_robovac_battery": state("sensor.example_robovac_battery", "88"),
+    "sensor.example_robovac_task": state("sensor.example_robovac_task", "idle"),
+    "sensor.example_robovac_dock": state("sensor.example_robovac_dock", "ready"),
     "light.living_room": state("light.living_room", "on", { friendly_name: "Living room", brightness: 184, rgb_color: [255, 187, 112] }),
     "light.kitchen": state("light.kitchen", "off", { friendly_name: "Kitchen" }),
     "light.hallway": state("light.hallway", "off", { friendly_name: "Hallway" }),
     "light.child_one_room": state("light.child_one_room", "off", { friendly_name: "Child one room" }),
     "light.child_two_room": state("light.child_two_room", "on", { friendly_name: "Child two room", brightness: 90 }),
+    "cover.living_room": state("cover.living_room", "open", { friendly_name: "Living room blind", current_position: 60 }),
+    "cover.child_one_room": state("cover.child_one_room", "closed", { friendly_name: "Child one blind", current_position: 0 }),
+    "cover.child_two_room": state("cover.child_two_room", "closed", { friendly_name: "Child two blind", current_position: 0 }),
     "climate.living_room": state("climate.living_room", "heat", { current_temperature: 20.4, temperature: 21 }),
     "climate.kitchen": state("climate.kitchen", "heat", { current_temperature: 19.2, temperature: 20 }),
     "climate.child_one_room": state("climate.child_one_room", "heat", { current_temperature: 18.8, temperature: 19 }),
@@ -108,12 +124,24 @@ async function mount(page, familyConfig = config) {
         element.dataset.cardType = cardConfig.type;
         element.dataset.cardMode = cardConfig.mode || "";
         element.dataset.cardHeight = cardConfig.height || "";
+        element.dataset.defaultView = cardConfig.default_view || "";
+        element.dataset.rollingDaysSchedule = String(cardConfig.rolling_days_schedule ?? "");
+        element.dataset.eventManagement = String(cardConfig.enable_event_management ?? "");
+        element.dataset.cameraView = cardConfig.camera_view || "";
+        element.dataset.entity = cardConfig.entity || cardConfig.entity_id || "";
         if (cardConfig.type === "custom:mediocre-multi-media-player-card") {
           element.style.height = cardConfig.height || "754px";
           element.innerHTML = `<div class="mock-media-player" style="height:100%;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px;background:var(--mmpc-card);color:var(--mmpc-on-card);overflow:hidden">
             <section class="mock-massive" style="min-height:0;overflow:auto;padding:8px"><strong>Kitchen</strong><div style="height:230px;margin:14px auto;background:#131827;border-radius:16px"></div><button type="button" data-mock-service>Play</button><div style="height:150px"></div></section>
             <section class="mock-speaker-scroll" style="min-width:0;min-height:0;overflow:auto;padding:8px"><strong>Join media players</strong><div class="mock-chip-scroll" style="max-width:100%;margin-top:14px;overflow-x:auto"><div style="display:flex;width:max-content;gap:8px"><span class="mock-chip" style="display:inline-block;padding:8px 24px;border:1px solid var(--mmpc-chip-border);border-radius:999px;background:var(--mmpc-chip-background);color:var(--mmpc-chip-foreground)">Garage</span>${["Living Room", "Master Bedroom", "Playroom", "Kitchen"].map((name) => `<span style="display:inline-block;padding:8px 24px;border:1px solid var(--mmpc-chip-border);border-radius:999px;background:var(--mmpc-chip-background);color:var(--mmpc-chip-foreground)">${name}</span>`).join("")}</div></div><h3>Player focus</h3>${["Kitchen", "Living Room", "Playroom", "Master Bedroom", "Garage"].map((name) => `<div style="height:70px;margin-top:8px;padding:16px;background:rgba(255,255,255,.06)">${name}</div>`).join("")}</section>
           </div>`;
+        } else if (["custom:daylight-calendar-card", "custom:skylight-calendar-card"].includes(cardConfig.type)) {
+          element.innerHTML = `<div class="mock-calendar" style="height:100%;padding:16px;background:#111a2d;color:#fff"><strong>${cardConfig.default_view}</strong><button type="button" data-mock-calendar-write>Add event</button><p>${cardConfig.entities.join(" · ")}</p></div>`;
+          element.querySelector("[data-mock-calendar-write]").addEventListener("click", () => {
+            element._hass?.callService?.("calendar", "create_event", { entity_id: "calendar.family" });
+          });
+        } else if (cardConfig.type === "picture-entity") {
+          element.innerHTML = `<div class="mock-picture" style="height:100%;min-height:140px;background:#070d1b;color:#fff;display:grid;place-items:center">${cardConfig.entity}</div>`;
         } else {
           element.textContent = `${cardConfig.type} card`;
         }
@@ -194,20 +222,25 @@ async function expectNoRootOverflow(page) {
 test("fits the supported iPad landscapes and exposes every approved surface", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
-  await expect(card.locator(".nav-button")).toHaveCount(6);
-  await expect(card.locator(".nav-button")).toContainText(["Today", "Calendar", "Rooms", "Family", "Music", "Football"]);
+  await expect(card.locator(".nav-button")).toHaveCount(7);
+  await expect(card.locator(".nav-button")).toContainText(["Today", "Calendar", "Home", "Family", "Security", "Music", "Football"]);
   await expectNoRootOverflow(page);
 
-  for (const view of ["calendar", "rooms", "family", "music", "football", "today"]) {
+  for (const view of ["calendar", "rooms", "family", "entry", "music", "football", "today"]) {
     await card.locator(`[data-view="${view}"]`).first().click();
     await expect(card.locator(`[data-current-view="${view}"]`)).toBeVisible();
     await expectNoRootOverflow(page);
   }
 
   await card.locator('[data-view="calendar"]').first().click();
-  await expect(card.locator(".agenda-event")).toHaveCount(3);
-  await expect(card.locator(".agenda-board")).toContainText("Family dinner");
-  await expect(card.locator(".agenda-board")).toContainText("School assembly");
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toBeVisible();
+  await expect(card.locator("[data-calendar-mode]")).toHaveCount(4);
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-event-management", "false");
+  await card.locator('[data-calendar-mode="day"]').click();
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-default-view", "schedule");
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-rolling-days-schedule", "1");
+  await card.locator('[data-mock-calendar-write]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
 
   await card.locator('[data-view="today"]').first().click();
   await expect(card.locator(".next-panel")).toContainText("Family dinner");
@@ -230,6 +263,79 @@ test("renders the interactive floorplan and sends only the selected low-risk con
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "homeassistant", service: "toggle", data: { entity_id: "light.kitchen" } }
   ]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("curates lights, heating, blinds and cleaning inside Home", async ({ page }) => {
+  const pageErrors = await mount(page);
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="rooms"]').click();
+  await expect(card.locator("[data-home-section]")).toHaveCount(5);
+
+  await card.locator('[data-home-section="lights"]').click();
+  await expect(card.locator('[data-home-section-current="lights"] .whole-home-card')).toHaveCount(5);
+  await card.locator('button[data-toggle="light.kitchen"]').click();
+
+  await card.locator('[data-home-section="heating"]').click();
+  await expect(card.locator(".heating-card")).toHaveCount(4);
+  await card.locator('button[data-climate-adjust="0.5"][data-entity="climate.living_room"]').click();
+
+  await card.locator('[data-home-section="covers"]').click();
+  await expect(card.locator(".cover-card")).toHaveCount(4);
+  await expect(card.locator(".cover-card")).toContainText(["Living room blind", "Garage door"]);
+  await card.locator('button[data-cover-action="close_cover"][data-entity="cover.living_room"]').click();
+
+  await card.locator('[data-home-section="cleaning"]').click();
+  await expect(card.locator(".cleaning-panel")).toContainText("Robot vacuum");
+  await expect(card.locator('[data-card-type="picture-entity"][data-entity="camera.example_vacuum_map"]')).toBeVisible();
+  await card.locator('button[data-vacuum-action="start"]').click();
+
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "homeassistant", service: "toggle", data: { entity_id: "light.kitchen" } },
+    { domain: "climate", service: "set_temperature", data: { entity_id: "climate.living_room", temperature: 21.5 } },
+    { domain: "cover", service: "close_cover", data: { entity_id: "cover.living_room" } },
+    { domain: "vacuum", service: "start", data: { entity_id: "vacuum.example_robovac" } }
+  ]);
+  await expectNoRootOverflow(page);
+  expect(pageErrors).toEqual([]);
+});
+
+test("starts cameras deliberately and confirms garage and alarm actions", async ({ page }) => {
+  const pageErrors = await mount(page);
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="entry"]').click();
+  await expect(card.locator(".security-camera")).toHaveCount(2);
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await expect(card.locator(".security-camera").filter({ hasText: /bedroom|child room/i })).toHaveCount(0);
+
+  await card.locator('button[data-camera-open="doorbell"]').click();
+  await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } }
+  ]);
+  await card.locator('button[data-camera-open="garage"]').click();
+  await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_garage"]')).toBeVisible();
+  await card.locator('button[data-camera-close="garage"]').click();
+
+  await card.locator('button[data-secure-cover-action="open_cover"]').click();
+  await expect(card.locator(".confirmation-dialog")).toContainText("Open garage door");
+  await card.locator('button[data-confirm-action="cancel"]').click();
+  await card.locator('button[data-secure-cover-action="open_cover"]').click();
+  await card.locator('button[data-confirm-action="confirm"]').click();
+
+  await card.locator('button[data-alarm-action="alarm_arm_away"]').click();
+  await expect(card.locator(".confirmation-dialog")).toContainText("Arm away");
+  await card.locator('button[data-confirm-action="confirm"]').click();
+
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } },
+    { domain: "cover", service: "open_cover", data: { entity_id: "cover.example_garage" } },
+    { domain: "alarm_control_panel", service: "alarm_arm_away", data: { entity_id: "alarm_control_panel.example_home" } }
+  ]);
+  await expectNoRootOverflow(page);
   expect(pageErrors).toEqual([]);
 });
 
@@ -271,13 +377,29 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
     window.__moreInfoEvents = 0;
     element.addEventListener("hass-more-info", () => { window.__moreInfoEvents += 1; });
     const root = element.shadowRoot;
-    for (const control of root.querySelectorAll("[data-toggle], [data-scene], [data-media-toggle], [data-cover-action], [data-climate-adjust], [data-more-info]")) {
+    for (const control of root.querySelectorAll("[data-toggle], [data-scene], [data-media-toggle], [data-cover-action], [data-climate-adjust], [data-vacuum-action], [data-alarm-action], [data-secure-cover-action], [data-more-info]")) {
       control.disabled = false;
       control.click();
     }
   });
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
   await expect.poll(() => page.evaluate(() => window.__moreInfoEvents)).toBe(0);
+
+  await card.locator('.nav-button[data-view="calendar"]').click();
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-read-only-guard", "service-boundary");
+  await card.locator('[data-mock-calendar-write]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+
+  await card.locator('.nav-button[data-view="entry"]').click();
+  await expect(card.locator('button[data-alarm-action="alarm_arm_home"]')).toBeDisabled();
+  await expect(card.locator('button[data-secure-cover-action]')).toBeDisabled();
+  await card.locator('button[data-camera-open="doorbell"]').click();
+  await expect(card.locator('[data-card-type="picture-entity"][data-entity="camera.example_doorbell"]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+
+  await card.locator('.nav-button[data-view="rooms"]').click();
+  await card.locator('[data-home-section="cleaning"]').click();
+  await expect(card.locator('button[data-vacuum-action="start"]')).toBeDisabled();
 
   await card.locator('.nav-button[data-view="music"]').click();
   await expect(card.locator(".media-player-panel")).toContainText("Your full music player");

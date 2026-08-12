@@ -23,8 +23,8 @@ test("validates without writing live files", async (context) => {
   context.after(() => rm(root, { recursive: true, force: true }));
   const prepared = store.validate(structuredClone(example));
   assert.match(prepared.config_hash, /^[a-f0-9]{64}$/);
-  assert.deepEqual(prepared.enabled_views, ["today", "calendar", "rooms", "family", "music", "football"]);
-  assert.equal(prepared.resource_url, "/local/family-dashboard/family-hub-card.js?v=0.5.3");
+  assert.deepEqual(prepared.enabled_views, ["today", "calendar", "rooms", "family", "entry", "music", "football"]);
+  assert.equal(prepared.resource_url, "/local/family-dashboard/family-hub-card.js?v=0.6.0");
   assert.equal((await store.getStatus()).installed, false);
 });
 
@@ -171,7 +171,7 @@ test("deploys the card atomically, preserves private assets, snapshots and rolls
   assert.equal(await readFile(privateAsset, "utf8"), "private floorplan");
 });
 
-test("restores a raw schema-v3 snapshot without trying to validate it as v5", async (context) => {
+test("restores a raw schema-v3 snapshot without trying to validate it as v6", async (context) => {
   const { root, store } = await fixture();
   context.after(() => rm(root, { recursive: true, force: true }));
   await store.initialise();

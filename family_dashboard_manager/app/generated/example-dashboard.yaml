@@ -16,6 +16,7 @@ views:
           {
             "$schema": "./family-dashboard.schema.json",
             "calendar": {
+              "card_type": "custom:daylight-calendar-card",
               "entities": [
                 {
                   "category": "family",
@@ -41,7 +42,8 @@ views:
                   ]
                 }
               ],
-              "initial_view": "listWeek",
+              "initial_view": "week",
+              "preference_storage_key": "family_dashboard_example_calendar",
               "rolling_days": 7
             },
             "chores": {
@@ -71,6 +73,13 @@ views:
                 }
               ]
             },
+            "cleaning": {
+              "battery_entity": "sensor.example_robovac_battery",
+              "dock_entity": "sensor.example_robovac_dock",
+              "map_entity": "camera.example_vacuum_map",
+              "task_entity": "sensor.example_robovac_task",
+              "vacuum_entity": "vacuum.example_robovac"
+            },
             "display": {
               "default_view": "today",
               "kiosk": true,
@@ -81,10 +90,43 @@ views:
               "target_height": 834,
               "target_width": 1112
             },
+            "entry": {
+              "alarm_entity": "alarm_control_panel.example_home",
+              "cameras": [
+                {
+                  "entity_id": "camera.example_doorbell",
+                  "id": "doorbell",
+                  "motion_entity": "binary_sensor.example_doorbell_motion",
+                  "name": "Front door",
+                  "person_entity": "binary_sensor.example_doorbell_person",
+                  "ringing_entity": "binary_sensor.example_doorbell_ringing",
+                  "role": "doorbell",
+                  "start_stream_entity": "button.example_doorbell_start_stream",
+                  "stop_stream_entity": "button.example_doorbell_stop_stream"
+                },
+                {
+                  "entity_id": "camera.example_garage",
+                  "id": "garage",
+                  "motion_entity": "binary_sensor.example_garage_motion",
+                  "name": "Garage",
+                  "person_entity": "binary_sensor.example_garage_person",
+                  "role": "driveway",
+                  "start_stream_entity": "button.example_garage_start_stream",
+                  "stop_stream_entity": "button.example_garage_stop_stream"
+                }
+              ],
+              "garage": {
+                "camera_id": "garage",
+                "cover_entity": "cover.example_garage",
+                "motion_entity": "binary_sensor.example_garage_motion"
+              },
+              "primary_camera_id": "doorbell"
+            },
             "features": {
               "calendar": true,
               "chores": true,
-              "entry": false,
+              "cleaning": true,
+              "entry": true,
               "family": true,
               "football": true,
               "lists": true,
@@ -99,7 +141,7 @@ views:
               "floors": [
                 {
                   "aspect_ratio": 1.666667,
-                  "asset_revision": "v0.5.3",
+                  "asset_revision": "v0.6.0",
                   "base_image": "/local/family-dashboard/assets/example-ground.svg",
                   "id": "ground",
                   "light_overlays": [
@@ -182,7 +224,7 @@ views:
                 },
                 {
                   "aspect_ratio": 1.666667,
-                  "asset_revision": "v0.5.3",
+                  "asset_revision": "v0.6.0",
                   "base_image": "/local/family-dashboard/assets/example-first.svg",
                   "id": "first",
                   "light_overlays": [],
@@ -243,6 +285,9 @@ views:
                 "AVL"
               ],
               "table_entity": "sensor.family_dashboard_premier_league_table"
+            },
+            "home": {
+              "default_section": "rooms"
             },
             "lists": {
               "reminders_entity": "todo.reminders",
@@ -396,7 +441,7 @@ views:
                 ]
               }
             ],
-            "schema_version": 5,
+            "schema_version": 6,
             "school": {
               "calendar_entities": [
                 "calendar.school"
