@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  binarySignalPresentation,
   buildControlPolicy,
   createControlledMediaHass,
   deriveRoomState,
@@ -8,15 +9,98 @@ import {
   floorplanImageSource,
   floorplanViewBox,
   formatPoints,
+  heatingPresentation,
+  isAlarmActionSupported,
   isApprovedMediaServiceCall,
+  isCameraControlAvailable,
+  isCommandEntityAvailable,
   isControlAction,
   isCurrentOrFutureCalendarEvent,
+  isEntityAvailable,
+  isSecureCoverActionAllowed,
+  isSecureCoverActionSupported,
   normaliseChoreStatus,
   normaliseFixtureStatus
 } from "../frontend/family-hub-card.js";
 
 test("escapes state-derived text before rendering it into the card", () => {
   assert.equal(escapeHtml('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+});
+
+test("presents heating state from the thermostat action without inferring demand from temperatures", () => {
+  assert.deepEqual(heatingPresentation(undefined), {
+    available: false,
+    isOn: false,
+    label: "Unavailable",
+    tone: "unavailable"
+  });
+  assert.deepEqual(heatingPresentation({ state: "off", attributes: {} }), {
+    available: true,
+    isOn: false,
+    label: "Off",
+    tone: "off"
+  });
+  assert.deepEqual(heatingPresentation({ state: "heat", attributes: { hvac_action: "heating" } }), {
+    available: true,
+    isOn: true,
+    label: "Heating",
+    tone: "heating"
+  });
+  assert.equal(heatingPresentation({ state: "heat", attributes: { hvac_action: "idle" } }).label, "Idle");
+  assert.equal(heatingPresentation({ state: "cool", attributes: { hvac_action: "cooling" } }).label, "Cooling");
+  assert.equal(heatingPresentation({ state: "heat_cool", attributes: {} }).label, "Auto");
+  assert.equal(heatingPresentation({ state: "heat", attributes: { current_temperature: 12, temperature: 25 } }).label, "On");
+});
+
+test("distinguishes unavailable security signals and rejects unavailable or unsupported actions", () => {
+  assert.equal(isEntityAvailable({ state: "off" }), true);
+  assert.equal(isEntityAvailable({ state: "unavailable" }), false);
+  assert.deepEqual(binarySignalPresentation(undefined), { active: false, available: false, label: "Unavailable" });
+  assert.deepEqual(binarySignalPresentation({ state: "off" }), { active: false, available: true, label: "Clear" });
+  assert.deepEqual(binarySignalPresentation({ state: "on" }), { active: true, available: true, label: "Detected" });
+
+  const fullAlarm = { state: "disarmed", attributes: { supported_features: 63 } };
+  assert.equal(isAlarmActionSupported(fullAlarm, "alarm_arm_home"), true);
+  assert.equal(isAlarmActionSupported(fullAlarm, "alarm_arm_away"), true);
+  assert.equal(isAlarmActionSupported(fullAlarm, "alarm_disarm"), true);
+  assert.equal(isAlarmActionSupported({ state: "disarmed", attributes: { supported_features: 1 } }, "alarm_arm_away"), false);
+  assert.equal(isAlarmActionSupported({ state: "unavailable", attributes: { supported_features: 63 } }, "alarm_disarm"), false);
+
+  const fullCover = { state: "closed", attributes: { supported_features: 3 } };
+  assert.equal(isSecureCoverActionSupported(fullCover, "open_cover"), true);
+  assert.equal(isSecureCoverActionSupported(fullCover, "close_cover"), true);
+  assert.equal(isSecureCoverActionAllowed(fullCover, "open_cover"), true);
+  assert.equal(isSecureCoverActionAllowed(fullCover, "close_cover"), false);
+  assert.equal(isSecureCoverActionAllowed({ state: "open", attributes: { supported_features: 3 } }, "close_cover"), true);
+  assert.equal(isSecureCoverActionAllowed({ state: "opening", attributes: { supported_features: 3 } }, "close_cover"), false);
+  assert.equal(isSecureCoverActionAllowed({ state: "closing", attributes: { supported_features: 3 } }, "open_cover"), false);
+  assert.equal(isSecureCoverActionSupported({ state: "unavailable", attributes: { supported_features: 3 } }, "close_cover"), false);
+
+  const camera = {
+    entity: "camera.front_door",
+    startButton: "button.front_door_start",
+    stopButton: "button.front_door_stop"
+  };
+  assert.equal(isCommandEntityAvailable({ state: "unknown" }), true);
+  assert.equal(isCommandEntityAvailable({ state: "unavailable" }), false);
+  assert.equal(isCameraControlAvailable(camera, {
+    "camera.front_door": { state: "idle" },
+    "button.front_door_start": { state: "unknown" },
+    "button.front_door_stop": { state: "unknown" }
+  }), true);
+  assert.equal(isCameraControlAvailable(camera, {
+    "camera.front_door": { state: "idle" },
+    "button.front_door_start": { state: "unavailable" },
+    "button.front_door_stop": { state: "unknown" }
+  }), false);
+  assert.equal(isCameraControlAvailable({
+    entity: "camera.front_door",
+    startButton: "button.front_door_start",
+    stopButton: null
+  }, {
+    "camera.front_door": { state: "idle" },
+    "button.front_door_start": { state: "unknown" }
+  }), false);
 });
 
 test("identifies every Home Assistant write action blocked by read-only mode", () => {

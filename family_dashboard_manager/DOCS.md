@@ -1,6 +1,6 @@
 # Family Dashboard Manager
 
-Version 0.7.1 upgrades the existing Family Dashboard Manager in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
+Version 0.7.2 upgrades the existing Family Dashboard Manager in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
 
 The accepted schema-v6 dashboard can now run in controlled live mode. First-party actions are restricted to exact validated household entities and fixed services. The configured Sonos/Music Assistant card receives a separate bounded media proxy. Calendar, Classroom, camera presentation cards and the vacuum map remain read-only, while every alarm and garage change still asks for a second confirmation.
 
@@ -10,9 +10,9 @@ This release requires Home Assistant OS 2026.8.0 or newer.
 
 1. Create a Home Assistant backup.
 2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
-3. Update the installed **Family Dashboard Manager** to v0.7.1; do not uninstall it.
+3. Update the installed **Family Dashboard Manager** to v0.7.2; do not uninstall it.
 4. Keep the existing Secure MCP Tunnel options unchanged and restart the app.
-5. Confirm the manager reconnects through the existing tunnel and reports v0.7.1.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.7.2.
 
 The app exposes no host port. Its manager endpoint remains on the private loopback interface inside the same app container.
 
@@ -35,7 +35,7 @@ lovelace:
 Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.7.1
+/local/family-dashboard/family-hub-card.js?v=0.7.2
 ```
 
 The stock Home Assistant Overview remains available to administrators.
@@ -69,15 +69,15 @@ The schema-v6 household configuration retains the existing panel path and explic
 
 Run `validate_household_config` first. Validation is read-only and returns the exact configuration hash required by `deploy_household_config` with `confirm=true`. Deployment writes only the existing Family Dashboard configuration and fixed frontend allow-list after creating a raw, hash-verified snapshot. Private floorplans are preserved separately.
 
-Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.7.1, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
+Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.7.2, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
 
 ## Live action boundary
 
 - Lights, scenes, heating, blinds and vacuum actions accept only entities listed in validated room/cleaning mappings and fixed service names.
 - Music permits playback, volume, grouping, browsing, search and queue operations only for configured primary and Music Assistant player entities.
-- Alarm actions accept only the configured alarm entity and the three presented arm-home, arm-away and disarm services.
-- Garage actions accept only the configured garage cover and still require confirmation.
-- Camera start/stop accepts only the exact buttons belonging to an explicitly configured exterior camera. A signals-only camera causes no camera write.
+- Alarm actions accept only the configured alarm entity and the three presented arm-home, arm-away and disarm services. Unavailable entities and unsupported arm modes remain disabled, and confirmation expires if the alarm state changes.
+- Garage actions accept only the configured garage cover, require its advertised open/close feature, and still require confirmation. A moving or unavailable garage never offers an enabled action, and confirmation expires if its state changes.
+- Camera start/stop accepts only the exact available buttons belonging to an explicitly configured, available exterior camera. A signals-only or unavailable camera/control causes no camera write; active streams stop on camera failure, navigation, close, disconnect or configuration reload.
 - Calendar event management and Classroom remain read-only. Embedded camera views and the vacuum map receive a read-only Home Assistant proxy.
 - Exterior-camera validation continues to reject child, nursery and bedroom hints. Sanitised inventory still omits all camera entities.
 

@@ -239,6 +239,79 @@ export function isActiveBinaryState(state) {
   return ["on", "open", "opening", "detected", "ringing", "triggered"].includes(String(state?.state || "").toLowerCase());
 }
 
+function entityStateValue(state) {
+  return String(state?.state || "").trim().toLowerCase();
+}
+
+export function isEntityAvailable(state) {
+  const value = entityStateValue(state);
+  return Boolean(state) && !["", "unknown", "unavailable"].includes(value);
+}
+
+export function isCommandEntityAvailable(state) {
+  return Boolean(state) && entityStateValue(state) !== "unavailable";
+}
+
+export function isCameraControlAvailable(camera, states = {}) {
+  if (!camera?.entity || !isEntityAvailable(states[camera.entity])) return false;
+  if (Boolean(camera.startButton) !== Boolean(camera.stopButton)) return false;
+  return [camera.startButton, camera.stopButton]
+    .filter(Boolean)
+    .every((entityId) => isCommandEntityAvailable(states[entityId]));
+}
+
+export function binarySignalPresentation(state) {
+  if (!isEntityAvailable(state)) return { active: false, available: false, label: "Unavailable" };
+  const active = isActiveBinaryState(state);
+  return { active, available: true, label: active ? "Detected" : "Clear" };
+}
+
+export function heatingPresentation(state) {
+  const climateState = String(state?.state || "").trim().toLowerCase();
+  if (!isEntityAvailable(state)) {
+    return { available: false, isOn: false, label: "Unavailable", tone: "unavailable" };
+  }
+  if (climateState === "off") return { available: true, isOn: false, label: "Off", tone: "off" };
+
+  const action = String(state?.attributes?.hvac_action || "").trim().toLowerCase();
+  const actions = {
+    heating: ["Heating", "heating"],
+    idle: ["Idle", "idle"],
+    cooling: ["Cooling", "cooling"]
+  };
+  if (actions[action]) {
+    const [label, tone] = actions[action];
+    return { available: true, isOn: true, label, tone };
+  }
+  if (["auto", "heat_cool"].includes(climateState)) {
+    return { available: true, isOn: true, label: "Auto", tone: "auto" };
+  }
+  return { available: true, isOn: true, label: "On", tone: "on" };
+}
+
+export function isAlarmActionSupported(state, service) {
+  if (!isEntityAvailable(state) || !ALARM_SERVICES.has(service)) return false;
+  if (service === "alarm_disarm") return true;
+  const supportedFeatures = safeNumber(state?.attributes?.supported_features, 0);
+  if (service === "alarm_arm_home") return Boolean(supportedFeatures & 1);
+  if (service === "alarm_arm_away") return Boolean(supportedFeatures & 2);
+  return false;
+}
+
+export function isSecureCoverActionSupported(state, service) {
+  if (!isEntityAvailable(state) || !SECURE_COVER_SERVICES.has(service)) return false;
+  const supportedFeatures = safeNumber(state?.attributes?.supported_features, 0);
+  if (service === "open_cover") return Boolean(supportedFeatures & 1);
+  if (service === "close_cover") return Boolean(supportedFeatures & 2);
+  return false;
+}
+
+export function isSecureCoverActionAllowed(state, service) {
+  if (!isSecureCoverActionSupported(state, service)) return false;
+  const coverState = entityStateValue(state);
+  return service === "open_cover" ? coverState === "closed" : coverState === "open";
+}
+
 function safeNumber(value, fallback = 0) {
   if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) return fallback;
   const parsed = Number(value);
@@ -498,6 +571,8 @@ function stateSignature(states, entityIds) {
       attributes.current_position,
       attributes.current_temperature,
       attributes.temperature,
+      attributes.hvac_action,
+      attributes.supported_features,
       attributes.battery_level,
       attributes.media_title,
       attributes.media_artist,
@@ -574,6 +649,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!config || config.schema_version !== 6) {
       throw new Error("Family Hub requires a schema-v6 family configuration");
     }
+    this._closeActiveCamera();
     this._config = config;
     this._view = config.display.default_view || "today";
     this._homeSection = config.home.default_section || "rooms";
@@ -601,6 +677,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._readOnlyHass = null;
     this._musicHassSource = null;
     this._musicHass = null;
+    const activeCamera = this._controlPolicy?.cameras?.get(this._activeCameraId);
+    if (activeCamera?.entity && !isCameraControlAvailable(activeCamera, hass?.states || {})) this._closeActiveCamera();
     for (const [key, child] of this._childCards.entries()) child.hass = this._hassForChild(key);
     if (!this._config) return;
     const nextSignature = stateSignature(hass?.states || {}, this._entityIds);
@@ -1005,26 +1083,39 @@ export class FamilyHubCard extends HTMLElementBase {
   _renderAllHeating() {
     const states = this._hass?.states || {};
     const readOnly = this._config.display.read_only === true;
-    const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
     const zones = this._config.rooms.filter((room) => room.climate).map((room) => {
       const state = states[room.climate];
       const current = roomTemperature(room, states);
       const target = safeNumber(state?.attributes?.temperature, NaN);
-      const climateState = String(state?.state || "unavailable").toLowerCase();
-      const isAvailable = !["", "unknown", "unavailable"].includes(climateState);
-      const isOn = isAvailable && climateState !== "off";
-      const powerService = isOn ? "turn_off" : "turn_on";
-      const powerDisabled = readOnly || !isAvailable ? ' disabled aria-disabled="true"' : "";
+      const presentation = heatingPresentation(state);
+      const targetLabel = formatTemperature(target);
+      const powerService = presentation.isOn ? "turn_off" : "turn_on";
+      const powerLabel = presentation.available ? presentation.isOn ? "On" : "Off" : "—";
+      const powerLabelText = presentation.available
+        ? `Turn ${room.name} heating ${presentation.isOn ? "off" : "on"}`
+        : `${room.name} heating unavailable`;
+      const powerPressed = presentation.available ? ` aria-pressed="${presentation.isOn}"` : "";
+      const powerDisabled = readOnly || !presentation.available ? ' disabled aria-disabled="true"' : "";
+      const targetDisabled = readOnly || !presentation.available || !Number.isFinite(target)
+        ? ' disabled aria-disabled="true"'
+        : "";
       return `
-        <article class="surface heating-card" data-climate-card="${escapeHtml(room.climate)}">
+        <article class="surface heating-card is-${escapeHtml(presentation.tone)} ${presentation.available ? presentation.isOn ? "is-on" : "is-off" : "is-state-unavailable"}" data-climate-card="${escapeHtml(room.climate)}">
           <div class="heating-card-heading">
-            <span><ha-icon icon="${ICONS.climate}"></ha-icon></span>
-            <div><h3>${escapeHtml(room.name)}</h3><p>${escapeHtml(titleCase(state?.state || "unavailable"))}</p></div>
-            <button type="button" class="heating-power ${isOn ? "is-on" : ""}" data-climate-power="${powerService}" data-entity="${escapeHtml(room.climate)}" aria-label="Turn ${escapeHtml(room.name)} heating ${isOn ? "off" : "on"}" aria-pressed="${isOn}"${powerDisabled}><ha-icon icon="mdi:power"></ha-icon><span>${isOn ? "On" : "Off"}</span></button>
+            <span class="heating-icon"><ha-icon icon="${ICONS.climate}"></ha-icon></span>
+            <div><h3>${escapeHtml(room.name)}</h3><p class="heating-status"><span aria-hidden="true"></span>${escapeHtml(presentation.label)}</p></div>
+            <button type="button" class="heating-power ${presentation.isOn ? "is-on" : ""}" data-climate-power="${powerService}" data-entity="${escapeHtml(room.climate)}" aria-label="${escapeHtml(powerLabelText)}"${powerPressed}${powerDisabled}><ha-icon icon="mdi:power"></ha-icon><span>${powerLabel}</span></button>
           </div>
-          <div class="heating-target">
-            <div class="heating-temperatures"><span><small>Current</small><strong>${formatTemperature(current)}</strong></span><span><small>Target</small><strong>${formatTemperature(target)}</strong></span></div>
-            <div class="stepper"><button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower ${escapeHtml(room.name)} target"${disabled}>−</button><button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Raise ${escapeHtml(room.name)} target"${disabled}>+</button></div>
+          <div class="heating-body">
+            <div class="heating-current"><small>Current</small><strong class="heating-current-value">${formatTemperature(current)}</strong></div>
+            <div class="heating-target-control" role="group" aria-label="${escapeHtml(room.name)} target temperature, currently ${targetLabel}">
+              <small>Target</small>
+              <div class="heating-stepper">
+                <button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower ${escapeHtml(room.name)} target from ${targetLabel}"${targetDisabled}>−</button>
+                <output class="heating-target-value">${targetLabel}</output>
+                <button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Raise ${escapeHtml(room.name)} target from ${targetLabel}"${targetDisabled}>+</button>
+              </div>
+            </div>
           </div>
         </article>
       `;
@@ -1183,8 +1274,37 @@ export class FamilyHubCard extends HTMLElementBase {
     const alarm = states[entry.alarm_entity];
     const garage = states[entry.garage.cover_entity];
     const readOnly = this._config.display.read_only === true;
-    const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
-    const garageOpen = !["closed", "closing"].includes(String(garage?.state || "").toLowerCase());
+    const garageState = entityStateValue(garage);
+    const garageAction = garageState === "closed"
+      ? "open_cover"
+      : garageState === "open"
+        ? "close_cover"
+        : null;
+    const garageActionAllowed = garageAction && isSecureCoverActionAllowed(garage, garageAction);
+    const garageDisabled = readOnly || !garageActionAllowed ? ' disabled aria-disabled="true"' : "";
+    const garageButtonLabel = garageAction === "open_cover"
+      ? "Open garage"
+      : garageAction === "close_cover"
+        ? "Close garage"
+        : garageState === "opening"
+          ? "Opening…"
+          : garageState === "closing"
+            ? "Closing…"
+            : "Unavailable";
+    const garageActionLabel = garageAction === "open_cover"
+      ? "Open garage door"
+      : garageAction === "close_cover"
+        ? "Close garage door"
+        : `Garage door ${garageButtonLabel.toLowerCase()}`;
+    const garageActionAttributes = garageActionAllowed
+      ? ` data-secure-cover-action="${garageAction}" data-entity="${escapeHtml(entry.garage.cover_entity)}" data-action-label="${garageActionLabel}"`
+      : "";
+    const garageMotion = entry.garage.motion_entity
+      ? binarySignalPresentation(states[entry.garage.motion_entity])
+      : null;
+    const alarmDisabled = (service) => readOnly || !isAlarmActionSupported(alarm, service)
+      ? ' disabled aria-disabled="true"'
+      : "";
     const cameraCards = entry.cameras.map((camera) => {
       const signalDefinitions = [
         [camera.ringing_entity, "Ringing", "mdi:bell-ring-outline"],
@@ -1192,28 +1312,38 @@ export class FamilyHubCard extends HTMLElementBase {
         [camera.motion_entity, "Motion", "mdi:motion-sensor"]
       ].filter(([entityId]) => entityId);
       const signals = signalDefinitions.map(([entityId, label, icon]) => {
-        const active = isActiveBinaryState(states[entityId]);
-        return `<span class="security-signal ${active ? "is-active" : ""}"><ha-icon icon="${icon}"></ha-icon><strong>${escapeHtml(label)}</strong><small>${active ? "Detected" : "Clear"}</small></span>`;
+        const signal = binarySignalPresentation(states[entityId]);
+        return `<span class="security-signal ${signal.active ? "is-active" : ""} ${signal.available ? "" : "is-unavailable"}"><ha-icon icon="${icon}"></ha-icon><strong>${escapeHtml(label)}</strong><small>${signal.label}</small></span>`;
       }).join("");
+      const cameraControl = this._controlPolicy.cameras.get(camera.id);
+      const cameraEntityAvailable = Boolean(camera.entity_id) && isEntityAvailable(states[camera.entity_id]);
+      const cameraAvailable = isCameraControlAvailable(cameraControl, states);
+      const commandEntitiesAvailable = cameraEntityAvailable
+        && Boolean(cameraControl?.startButton) === Boolean(cameraControl?.stopButton)
+        && [cameraControl?.startButton, cameraControl?.stopButton]
+          .filter(Boolean)
+          .every((entityId) => isCommandEntityAvailable(states[entityId]));
       const isActive = camera.id === this._activeCameraId;
-      const stream = isActive && camera.entity_id
+      const stream = isActive && cameraAvailable
         ? `<div class="camera-stream"><div id="camera-card-slot-${escapeHtml(camera.id)}" class="child-card-slot camera-card-slot"></div><button type="button" class="camera-close" data-camera-close="${escapeHtml(camera.id)}"><ha-icon icon="mdi:close"></ha-icon>Close live view</button></div>`
-        : `<div class="camera-idle"><ha-icon icon="${camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon><div><strong>No automatic stream</strong><small>${camera.entity_id ? "Live video starts only when you ask for it." : "Safe signals are mapped; the private camera entity still needs confirming."}</small></div><button type="button" data-camera-open="${escapeHtml(camera.id)}" ${camera.entity_id ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="mdi:play-circle-outline"></ha-icon>View live</button></div>`;
-      return `<article class="surface security-camera"><div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(camera.role))}</p><h2>${escapeHtml(camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${camera.entity_id ? "mdi:gesture-tap-button" : "mdi:shield-check-outline"}"></ha-icon>${camera.entity_id ? "Tap to stream" : "Signals only"}</span></div>${signals ? `<div class="security-signals">${signals}</div>` : ""}${stream}</article>`;
+        : `<div class="camera-idle"><ha-icon icon="${camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon><div><strong>No automatic stream</strong><small>${cameraAvailable ? "Live video starts only when you ask for it." : camera.entity_id ? cameraEntityAvailable && !commandEntitiesAvailable ? "The mapped camera start or stop control is unavailable." : "The mapped camera is currently unavailable." : "Safe signals are mapped; the private camera entity still needs confirming."}</small></div><button type="button" data-camera-open="${escapeHtml(camera.id)}" ${cameraAvailable ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="mdi:play-circle-outline"></ha-icon>View live</button></div>`;
+      const badgeLabel = cameraAvailable ? "Tap to stream" : camera.entity_id ? cameraEntityAvailable && !commandEntitiesAvailable ? "Controls unavailable" : "Camera unavailable" : "Signals only";
+      const badgeIcon = cameraAvailable ? "mdi:gesture-tap-button" : camera.entity_id ? "mdi:camera-off-outline" : "mdi:shield-check-outline";
+      return `<article class="surface security-camera"><div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(camera.role))}</p><h2>${escapeHtml(camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${badgeIcon}"></ha-icon>${badgeLabel}</span></div>${signals ? `<div class="security-signals">${signals}</div>` : ""}${stream}</article>`;
     }).join("");
     return `
       <section class="security-layout">
         <div class="security-main">${cameraCards}</div>
         <aside class="security-sidebar">
           <article class="surface alarm-panel">
-            <div class="security-card-heading"><div><p class="eyebrow">Home alarm</p><h2>${escapeHtml(titleCase(alarm?.state || "unavailable"))}</h2></div><span class="alarm-state ${String(alarm?.state || "").includes("triggered") ? "is-alert" : ""}"><ha-icon icon="${ICONS.security}"></ha-icon></span></div>
+            <div class="security-card-heading"><div><p class="eyebrow">Home alarm</p><h2>${escapeHtml(titleCase(alarm?.state || "unavailable"))}</h2></div><span class="alarm-state ${String(alarm?.state || "").includes("triggered") ? "is-alert" : ""} ${isEntityAvailable(alarm) ? "" : "is-unavailable"}"><ha-icon icon="${ICONS.security}"></ha-icon></span></div>
             <p>Every alarm change asks for a second confirmation. A Home Assistant PIN remains authoritative where configured.</p>
-            <div class="alarm-actions"><button type="button" data-alarm-action="alarm_arm_home" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Arm home"${disabled}><ha-icon icon="mdi:shield-home-outline"></ha-icon>Home</button><button type="button" data-alarm-action="alarm_arm_away" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Arm away"${disabled}><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Away</button><button type="button" class="is-danger" data-alarm-action="alarm_disarm" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Disarm alarm"${disabled}><ha-icon icon="mdi:shield-off-outline"></ha-icon>Disarm</button></div>
+            <div class="alarm-actions"><button type="button" data-alarm-action="alarm_arm_home" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Arm home"${alarmDisabled("alarm_arm_home")}><ha-icon icon="mdi:shield-home-outline"></ha-icon>Home</button><button type="button" data-alarm-action="alarm_arm_away" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Arm away"${alarmDisabled("alarm_arm_away")}><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Away</button><button type="button" class="is-danger" data-alarm-action="alarm_disarm" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Disarm alarm"${alarmDisabled("alarm_disarm")}><ha-icon icon="mdi:shield-off-outline"></ha-icon>Disarm</button></div>
           </article>
           <article class="surface garage-panel">
             <div class="garage-heading"><span><ha-icon icon="mdi:garage-variant"></ha-icon></span><div><p class="eyebrow">Garage door</p><h2>${escapeHtml(titleCase(garage?.state || "unavailable"))}</h2></div></div>
-            ${entry.garage.motion_entity ? `<p class="garage-motion ${isActiveBinaryState(states[entry.garage.motion_entity]) ? "is-active" : ""}"><ha-icon icon="mdi:motion-sensor"></ha-icon>${isActiveBinaryState(states[entry.garage.motion_entity]) ? "Motion detected" : "No motion detected"}</p>` : ""}
-            <button type="button" class="garage-action" data-secure-cover-action="${garageOpen ? "close_cover" : "open_cover"}" data-entity="${escapeHtml(entry.garage.cover_entity)}" data-action-label="${garageOpen ? "Close garage door" : "Open garage door"}"${disabled}><ha-icon icon="${garageOpen ? "mdi:garage-alert-variant" : "mdi:garage-open-variant"}"></ha-icon>${garageOpen ? "Close garage" : "Open garage"}</button>
+            ${garageMotion ? `<p class="garage-motion ${garageMotion.active ? "is-active" : ""} ${garageMotion.available ? "" : "is-unavailable"}"><ha-icon icon="mdi:motion-sensor"></ha-icon>${garageMotion.available ? garageMotion.active ? "Motion detected" : "No motion detected" : "Motion unavailable"}</p>` : ""}
+            <button type="button" class="garage-action"${garageActionAttributes}${garageDisabled}><ha-icon icon="${garageAction === "open_cover" ? "mdi:garage-open-variant" : garageAction === "close_cover" ? "mdi:garage-alert-variant" : "mdi:garage-clock"}"></ha-icon>${garageButtonLabel}</button>
           </article>
           <p class="security-privacy-note"><ha-icon icon="mdi:shield-account-outline"></ha-icon>Only household entry cameras are allowed here. Child and bedroom cameras are blocked by validation.</p>
         </aside>
@@ -1669,7 +1799,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (target.dataset.cameraOpen) {
       const cameraId = target.dataset.cameraOpen;
       const camera = this._controlPolicy.cameras.get(cameraId);
-      if (!camera?.entity) return;
+      if (!isCameraControlAvailable(camera, this._hass?.states || {})) return;
       if (this._activeCameraId && this._activeCameraId !== cameraId) this._closeActiveCamera();
       if (camera.startButton && !this._config.display.read_only) this._hass?.callService?.("button", "press", { entity_id: camera.startButton });
       this._activeCameraId = cameraId;
@@ -1684,11 +1814,16 @@ export class FamilyHubCard extends HTMLElementBase {
     if (target.dataset.confirmAction) {
       if (target.dataset.confirmAction === "confirm" && this._pendingConfirmation && !this._config.display.read_only) {
         const action = this._pendingConfirmation;
+        const currentState = this._hass?.states?.[action.entity];
+        const stateUnchanged = entityStateValue(currentState) === action.expectedState;
         const approved = action.domain === "alarm_control_panel"
-          ? action.entity === this._controlPolicy.alarm && ALARM_SERVICES.has(action.service)
+          ? action.entity === this._controlPolicy.alarm
+            && stateUnchanged
+            && isAlarmActionSupported(currentState, action.service)
           : action.domain === "cover"
             && action.entity === this._controlPolicy.secureCover
-            && SECURE_COVER_SERVICES.has(action.service);
+            && stateUnchanged
+            && isSecureCoverActionAllowed(currentState, action.service);
         if (approved) this._hass?.callService?.(action.domain, action.service, { entity_id: action.entity });
       }
       this._pendingConfirmation = null;
@@ -1697,22 +1832,26 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     if (this._config.display.read_only && (isControlAction(target.dataset) || target.dataset.moreInfo)) return;
     if (target.dataset.alarmAction && target.dataset.entity) {
-      if (target.dataset.entity !== this._controlPolicy.alarm || !ALARM_SERVICES.has(target.dataset.alarmAction)) return;
+      if (target.dataset.entity !== this._controlPolicy.alarm
+        || !isAlarmActionSupported(this._hass?.states?.[target.dataset.entity], target.dataset.alarmAction)) return;
       this._pendingConfirmation = {
         domain: "alarm_control_panel",
         service: target.dataset.alarmAction,
         entity: target.dataset.entity,
+        expectedState: entityStateValue(this._hass?.states?.[target.dataset.entity]),
         label: ALARM_ACTION_LABELS[target.dataset.alarmAction]
       };
       this._scheduleRender(true);
       return;
     }
     if (target.dataset.secureCoverAction && target.dataset.entity) {
-      if (target.dataset.entity !== this._controlPolicy.secureCover || !SECURE_COVER_SERVICES.has(target.dataset.secureCoverAction)) return;
+      if (target.dataset.entity !== this._controlPolicy.secureCover
+        || !isSecureCoverActionAllowed(this._hass?.states?.[target.dataset.entity], target.dataset.secureCoverAction)) return;
       this._pendingConfirmation = {
         domain: "cover",
         service: target.dataset.secureCoverAction,
         entity: target.dataset.entity,
+        expectedState: entityStateValue(this._hass?.states?.[target.dataset.entity]),
         label: target.dataset.secureCoverAction === "open_cover" ? "Open garage door" : target.dataset.secureCoverAction === "close_cover" ? "Close garage door" : "Stop garage door"
       };
       this._scheduleRender(true);
@@ -1750,7 +1889,8 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     if (target.dataset.climatePower && target.dataset.entity) {
       if (this._controlPolicy.climates.has(target.dataset.entity)
-        && CLIMATE_POWER_SERVICES.has(target.dataset.climatePower)) {
+        && CLIMATE_POWER_SERVICES.has(target.dataset.climatePower)
+        && isEntityAvailable(this._hass?.states?.[target.dataset.entity])) {
         this._hass?.callService?.("climate", target.dataset.climatePower, { entity_id: target.dataset.entity });
       }
       return;
@@ -1759,6 +1899,7 @@ export class FamilyHubCard extends HTMLElementBase {
       const adjustment = Number(target.dataset.climateAdjust);
       if (!this._controlPolicy.climates.has(target.dataset.entity) || ![-0.5, 0.5].includes(adjustment)) return;
       const state = this._hass?.states?.[target.dataset.entity];
+      if (!isEntityAvailable(state)) return;
       const current = safeNumber(state?.attributes?.temperature, NaN);
       if (Number.isFinite(current)) {
         this._hass.callService("climate", "set_temperature", {
@@ -1884,18 +2025,41 @@ export class FamilyHubCard extends HTMLElementBase {
       .whole-home-control strong { font-size:10px; }
       .whole-home-control small { margin-top:3px; color:var(--hub-muted); font-size:8px; }
       .heating-grid,.cover-grid { height:100%; min-height:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; align-content:start; overflow:auto; padding:1px 3px 4px 1px; }
-      .heating-card,.cover-card { min-width:0; padding:16px; }
+      .heating-card { min-width:0; min-height:174px; padding:16px; display:grid; grid-template-rows:auto minmax(0,1fr); gap:13px; transition:border-color .18s ease,background .18s ease; }
+      .cover-card { min-width:0; padding:16px; }
+      .heating-card-heading { min-height:44px; }
       .heating-card-heading > div { min-width:0; }
-      .heating-power { flex:0 0 auto; min-width:58px; min-height:38px; margin-left:auto; padding:7px 9px; border:1px solid rgba(255,255,255,.12); border-radius:12px; background:rgba(8,15,31,.48); color:var(--hub-muted); display:flex; align-items:center; justify-content:center; gap:5px; font-size:9px; font-weight:800; cursor:pointer; }
+      .heating-card-heading > .heating-icon { flex-basis:44px; width:44px; height:44px; }
+      .heating-card-heading h3 { font-size:16px; }
+      .heating-card-heading .heating-status { display:flex; align-items:center; gap:5px; font-size:11px; }
+      .heating-status > span { width:6px; height:6px; border-radius:50%; background:#8d96aa; box-shadow:0 0 0 3px rgba(141,150,170,.1); }
+      .heating-power { flex:0 0 auto; min-width:58px; min-height:44px; margin-left:auto; padding:0 10px; border:1px solid rgba(255,255,255,.12); border-radius:13px; background:rgba(8,15,31,.48); color:var(--hub-muted); display:flex; align-items:center; justify-content:center; gap:5px; font-size:10px; font-weight:800; cursor:pointer; }
       .heating-power ha-icon { --mdc-icon-size:16px; }
-      .heating-power.is-on { border-color:rgba(242,184,92,.42); background:rgba(128,88,29,.32); color:#ffd789; }
+      .heating-power.is-on { border-color:rgba(242,184,92,.36); background:rgba(128,88,29,.25); color:#f5d493; }
       .heating-power:disabled { opacity:.5; cursor:not-allowed; }
-      .heating-target { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:16px; padding-top:13px; border-top:1px solid rgba(255,255,255,.1); color:var(--hub-muted); font-size:10px; }
-      .heating-temperatures { min-width:0; display:flex; align-items:center; gap:18px; }
-      .heating-temperatures > span { min-width:44px; }
-      .heating-temperatures small,.heating-temperatures strong { display:block; }
-      .heating-temperatures small { color:var(--hub-muted); font-size:8px; }
-      .heating-temperatures strong { margin-top:2px; color:var(--hub-text); font-size:15px; }
+      .heating-body { min-width:0; display:grid; grid-template-columns:minmax(72px,.72fr) minmax(150px,1.28fr); align-items:end; gap:14px; padding-top:13px; border-top:1px solid rgba(255,255,255,.1); }
+      .heating-current,.heating-target-control { min-width:0; }
+      .heating-current small,.heating-target-control > small { display:block; color:var(--hub-muted); font-size:10px; font-weight:700; letter-spacing:.02em; }
+      .heating-current-value { display:block; margin-top:5px; color:var(--hub-text); font-size:30px; line-height:.95; letter-spacing:-.04em; }
+      .heating-target-control { width:100%; justify-self:end; }
+      .heating-stepper { min-width:0; margin-top:5px; display:grid; grid-template-columns:44px minmax(48px,1fr) 44px; align-items:center; overflow:hidden; border:1px solid rgba(255,255,255,.09); border-radius:12px; background:rgba(255,255,255,.075); }
+      .heating-stepper button,.heating-target-value { min-height:44px; border:0; background:transparent; color:#c8bcff; }
+      .heating-stepper button { width:44px; height:44px; padding:0; display:grid; place-items:center; border-radius:0; font-size:18px; font-weight:800; cursor:pointer; }
+      .heating-stepper button:first-child { border-radius:11px 0 0 11px; }
+      .heating-stepper button:last-child { border-radius:0 11px 11px 0; }
+      .heating-stepper button:disabled { cursor:not-allowed; opacity:.48; }
+      .heating-target-value { display:grid; place-items:center; border-width:0 1px; border-style:solid; border-color:rgba(255,255,255,.09); color:var(--hub-text); font-size:19px; font-weight:800; }
+      .heating-card.is-heating { border-color:rgba(242,184,92,.42); background:linear-gradient(145deg,color-mix(in srgb,var(--hub-surface) 78%,rgba(128,88,29,.3)),color-mix(in srgb,var(--hub-backdrop-mid) 70%,transparent)); }
+      .heating-card.is-heating .heating-icon,.heating-card.is-heating .heating-status { color:#ffd789; }
+      .heating-card.is-heating .heating-status > span { background:#f2b85c; box-shadow:0 0 0 3px rgba(242,184,92,.14); }
+      .heating-card.is-idle .heating-status > span { background:#8dc9b0; box-shadow:0 0 0 3px rgba(141,201,176,.12); }
+      .heating-card.is-cooling .heating-icon,.heating-card.is-cooling .heating-status { color:#8ecff1; }
+      .heating-card.is-cooling .heating-status > span { background:#72bde6; box-shadow:0 0 0 3px rgba(114,189,230,.13); }
+      .heating-card.is-auto .heating-status > span { background:#aa99ff; box-shadow:0 0 0 3px rgba(170,153,255,.13); }
+      .heating-card.is-off { background:linear-gradient(145deg,color-mix(in srgb,var(--hub-surface) 72%,transparent),color-mix(in srgb,var(--hub-backdrop-mid) 64%,transparent)); }
+      .heating-card.is-off .heating-icon,.heating-card.is-off .heating-status,.heating-card.is-off .heating-target-control { opacity:.7; }
+      .heating-card.is-unavailable { border-style:dashed; }
+      .heating-card.is-unavailable .heating-icon,.heating-card.is-unavailable .heating-status,.heating-card.is-unavailable .heating-target-control { opacity:.5; }
       .cover-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:16px; }
       .cover-actions.is-single { grid-template-columns:1fr; }
       .cover-actions button { min-width:0; min-height:42px; border:0; border-radius:12px; background:rgba(255,255,255,.08); color:#c8bcff; display:flex; align-items:center; justify-content:center; gap:4px; font-size:9px; font-weight:750; cursor:pointer; }
@@ -1996,6 +2160,8 @@ export class FamilyHubCard extends HTMLElementBase {
       .security-signal small { color:var(--hub-muted); font-size:7px; }
       .security-signal.is-active { border-color:rgba(239,164,71,.52); background:rgba(121,68,20,.34); }
       .security-signal.is-active ha-icon { color:#ffc06f; }
+      .security-signal.is-unavailable { border-style:dashed; background:rgba(8,15,31,.3); }
+      .security-signal.is-unavailable ha-icon,.security-signal.is-unavailable small { color:#7f899d; }
       .camera-idle { min-height:0; display:grid; grid-template-columns:54px minmax(0,1fr) auto; align-items:center; gap:13px; padding:14px; border:1px dashed rgba(255,255,255,.13); border-radius:15px; background:radial-gradient(circle at 10% 50%,rgba(123,104,211,.18),transparent 32%),rgba(6,12,27,.45); }
       .camera-idle > ha-icon { --mdc-icon-size:42px; color:#a999ff; }
       .camera-idle strong,.camera-idle small { display:block; }
@@ -2009,6 +2175,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .alarm-panel,.garage-panel { padding:17px; overflow:hidden; }
       .alarm-state { width:42px; height:42px; display:grid; place-items:center; border-radius:14px; background:rgba(70,144,111,.22); color:#7bd4a7; }
       .alarm-state.is-alert { background:rgba(184,53,57,.32); color:#ff9999; }
+      .alarm-state.is-unavailable { background:rgba(255,255,255,.06); color:#7f899d; }
       .alarm-panel > p { margin:13px 0 0; color:var(--hub-muted); font-size:9px; line-height:1.4; }
       .alarm-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:15px; }
       .alarm-actions button { min-width:0; min-height:46px; border:0; border-radius:12px; background:rgba(123,104,211,.17); color:#c9beff; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; font-size:8px; font-weight:800; cursor:pointer; }
@@ -2019,6 +2186,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .garage-heading h2 { margin:3px 0 0; font-size:18px; }
       .garage-motion { display:flex; align-items:center; gap:6px; margin:13px 0 0; color:var(--hub-muted); font-size:9px; }
       .garage-motion.is-active { color:#ffc06f; }
+      .garage-motion.is-unavailable { color:#7f899d; }
       .garage-action { width:100%; min-height:43px; margin-top:13px; border:1px solid rgba(255,255,255,.12); border-radius:12px; background:rgba(123,104,211,.18); color:#d7d0ff; display:flex; align-items:center; justify-content:center; gap:6px; font-size:10px; font-weight:800; cursor:pointer; }
       .security-privacy-note { display:flex; align-items:flex-start; gap:7px; margin:0; padding:10px 12px; border:1px solid rgba(255,255,255,.08); border-radius:12px; background:rgba(8,15,31,.46); color:var(--hub-muted); font-size:8px; line-height:1.35; }
       .security-privacy-note ha-icon { flex:0 0 auto; --mdc-icon-size:16px; color:#a999ff; }

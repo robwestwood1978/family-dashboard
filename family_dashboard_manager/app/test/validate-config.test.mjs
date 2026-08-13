@@ -207,6 +207,16 @@ test("accepts a signals-only household camera while its private stream entity is
   assert.equal(validateConfig(config).entry.cameras[0].motion_entity, "binary_sensor.example_doorbell_motion");
 });
 
+test("requires camera start and stop stream controls to be configured as a pair", () => {
+  const startOnly = structuredClone(example);
+  delete startOnly.entry.cameras[0].stop_stream_entity;
+  assert.throws(() => validateConfig(startOnly), /start_stream_entity and stop_stream_entity must be configured together/);
+
+  const stopOnly = structuredClone(example);
+  delete stopOnly.entry.cameras[0].start_stream_entity;
+  assert.throws(() => validateConfig(stopOnly), /start_stream_entity and stop_stream_entity must be configured together/);
+});
+
 test("blocks child and bedroom cameras from the household Security surface", () => {
   const config = structuredClone(example);
   config.entry.cameras[0].id = "child_bedroom";

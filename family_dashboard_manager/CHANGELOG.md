@@ -1,3 +1,13 @@
+## 0.7.2
+
+- Refines every heating card around a larger measured current temperature and a compact, connected target-temperature stepper.
+- Presents Heating, Idle, Cooling, Auto, On, Off and Unavailable from Home Assistant thermostat state without inferring demand from measured versus target temperature.
+- Keeps heating power and target controls at least 44 pixels high while preserving the supported three-column and two-column iPad layouts.
+- Shows missing or unavailable Security signals as Unavailable instead of the falsely reassuring Clear state.
+- Disables and revalidates alarm, garage and camera actions when their mapped entity or camera stream control is unavailable or does not advertise the required Home Assistant feature.
+- Prevents reversing a moving garage door, expires stale alarm/garage confirmations after a state change, and stops an active exterior stream if the camera fails or dashboard configuration reloads.
+- Retains deliberate one-at-a-time exterior camera viewing, exact entity allow-lists, second confirmation for alarm and garage changes, and the global read-only boundary.
+
 ## 0.7.1
 
 - Labels each heating zone's measured current temperature separately from its target temperature.

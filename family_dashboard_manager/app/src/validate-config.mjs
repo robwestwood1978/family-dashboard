@@ -515,6 +515,9 @@ export function validateConfig(config) {
     if (camera.ringing_entity) validateEntityId(camera.ringing_entity, `${path}.ringing_entity`, "binary_sensor");
     if (camera.start_stream_entity) validateEntityId(camera.start_stream_entity, `${path}.start_stream_entity`, "button");
     if (camera.stop_stream_entity) validateEntityId(camera.stop_stream_entity, `${path}.stop_stream_entity`, "button");
+    if (Boolean(camera.start_stream_entity) !== Boolean(camera.stop_stream_entity)) {
+      fail(path, "start_stream_entity and stop_stream_entity must be configured together");
+    }
     if (!camera.entity_id && !camera.motion_entity && !camera.person_entity && !camera.ringing_entity) {
       fail(path, "must define a camera entity or at least one safe status signal");
     }
