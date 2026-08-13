@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   binarySignalPresentation,
   buildControlPolicy,
+  cameraControlRoute,
+  cameraStreamPhase,
   createControlledMediaHass,
   deriveRoomState,
   escapeHtml,
@@ -92,7 +94,7 @@ test("distinguishes unavailable security signals and rejects unavailable or unsu
     "camera.front_door": { state: "idle" },
     "button.front_door_start": { state: "unavailable" },
     "button.front_door_stop": { state: "unknown" }
-  }), false);
+  }), true);
   assert.equal(isCameraControlAvailable({
     entity: "camera.front_door",
     startButton: "button.front_door_start",
@@ -101,6 +103,28 @@ test("distinguishes unavailable security signals and rejects unavailable or unsu
     "camera.front_door": { state: "idle" },
     "button.front_door_start": { state: "unknown" }
   }), false);
+  assert.equal(cameraStreamPhase(undefined), "unavailable");
+  assert.equal(cameraStreamPhase({ state: "idle" }), "idle");
+  assert.equal(cameraStreamPhase({ state: "preparing" }), "preparing");
+  assert.equal(cameraStreamPhase({ state: "streaming" }), "streaming");
+  assert.equal(cameraStreamPhase({ state: "unknown" }), "unavailable");
+  assert.equal(cameraStreamPhase({ state: "recording" }), "unexpected");
+  assert.deepEqual(cameraControlRoute(camera, {
+    "camera.front_door": { state: "idle" },
+    "button.front_door_start": { state: "unavailable" },
+    "button.front_door_stop": { state: "unknown" }
+  }), {
+    start: { domain: "camera", service: "turn_on", entity: "camera.front_door" },
+    stop: { domain: "camera", service: "turn_off", entity: "camera.front_door" }
+  });
+  assert.equal(cameraControlRoute({
+    entity: "camera.front_door",
+    startButton: "button.front_door_start",
+    stopButton: null
+  }, {
+    "camera.front_door": { state: "idle" },
+    "button.front_door_start": { state: "unknown" }
+  }), null);
 });
 
 test("identifies every Home Assistant write action blocked by read-only mode", () => {

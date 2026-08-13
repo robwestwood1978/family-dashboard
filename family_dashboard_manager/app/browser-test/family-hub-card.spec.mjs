@@ -88,7 +88,7 @@ function fixtureStates() {
   return states;
 }
 
-async function mount(page, familyConfig = config, stateOverrides = {}) {
+async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOptions = {}) {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.route("**/local/family-dashboard/assets/**", async (route) => {
@@ -125,6 +125,8 @@ async function mount(page, familyConfig = config, stateOverrides = {}) {
     window.loadCardHelpers = async () => ({
       createCardElement(cardConfig) {
         const element = document.createElement("mock-child-card");
+        window.__childCardCount += 1;
+        element.dataset.instanceId = String(window.__childCardCount);
         element.dataset.cardType = cardConfig.type;
         element.dataset.cardMode = cardConfig.mode || "";
         element.dataset.cardHeight = cardConfig.height || "";
@@ -132,6 +134,10 @@ async function mount(page, familyConfig = config, stateOverrides = {}) {
         element.dataset.rollingDaysSchedule = String(cardConfig.rolling_days_schedule ?? "");
         element.dataset.eventManagement = String(cardConfig.enable_event_management ?? "");
         element.dataset.cameraView = cardConfig.camera_view || "";
+        element.dataset.aspectRatio = cardConfig.aspect_ratio || "";
+        element.dataset.fitMode = cardConfig.fit_mode || "";
+        element.dataset.tapAction = cardConfig.tap_action?.action || "";
+        element.dataset.holdAction = cardConfig.hold_action?.action || "";
         element.dataset.entity = cardConfig.entity || cardConfig.entity_id || "";
         if (cardConfig.type === "custom:mediocre-multi-media-player-card") {
           element.style.height = cardConfig.height || "754px";
@@ -153,18 +159,33 @@ async function mount(page, familyConfig = config, stateOverrides = {}) {
       }
     });
     window.__serviceCalls = [];
+    window.__serviceBehaviors = {};
+    window.__pendingServiceCalls = [];
+    window.__childCardCount = 0;
     window.__apiCalls = [];
   });
   await page.addScriptTag({ type: "module", content: cardSource });
-  await page.evaluate(async ({ familyConfig, states }) => {
+  await page.evaluate(async ({ familyConfig, states, runtimeOptions }) => {
     await customElements.whenDefined("family-hub-card");
     const card = document.createElement("family-hub-card");
     document.querySelector(".ha-main").append(card);
     card.setConfig({ family_config: familyConfig });
+    card._cameraStartTimeoutMs = runtimeOptions.cameraStartTimeoutMs ?? card._cameraStartTimeoutMs;
+    card._cameraStopTimeoutMs = runtimeOptions.cameraStopTimeoutMs ?? card._cameraStopTimeoutMs;
+    window.__serviceBehaviors = runtimeOptions.serviceBehaviors || {};
     card.hass = {
       states,
       callService(domain, service, data) {
         window.__serviceCalls.push({ domain, service, data });
+        const key = `${domain}.${service}:${data?.entity_id || ""}`;
+        const behavior = window.__serviceBehaviors[key];
+        if (behavior === "reject") return Promise.reject(new Error("simulated camera service failure"));
+        if (behavior === "pending") {
+          return new Promise((resolve, reject) => {
+            window.__pendingServiceCalls.push({ key, resolve, reject });
+          });
+        }
+        return Promise.resolve();
       },
       async callApi(method, path) {
         window.__apiCalls.push({ method, path });
@@ -182,9 +203,19 @@ async function mount(page, familyConfig = config, stateOverrides = {}) {
         }, upcoming];
       }
     };
-  }, { familyConfig, states: { ...fixtureStates(), ...stateOverrides } });
+  }, { familyConfig, states: { ...fixtureStates(), ...stateOverrides }, runtimeOptions });
   await page.waitForFunction(() => document.querySelector("family-hub-card")?.shadowRoot?.querySelector('[data-current-view="today"]'));
   return pageErrors;
+}
+
+async function settlePendingService(page, key, outcome = "resolve") {
+  await page.evaluate(({ key, outcome }) => {
+    const index = window.__pendingServiceCalls.findIndex((entry) => entry.key === key);
+    if (index < 0) throw new Error(`No pending service call for ${key}`);
+    const [pending] = window.__pendingServiceCalls.splice(index, 1);
+    if (outcome === "reject") pending.reject(new Error("simulated pending camera failure"));
+    else pending.resolve();
+  }, { key, outcome });
 }
 
 async function updateEntityState(card, nextState) {
@@ -447,12 +478,21 @@ test("starts cameras deliberately and confirms garage and alarm actions", async 
 
   await card.locator('button[data-camera-open="doorbell"]').click();
   await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]')).toBeVisible();
-  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
-    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } }
-  ]);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
   await card.locator('button[data-camera-open="garage"]').click();
+  await updateEntityState(card, state("camera.example_doorbell", "idle"));
+  await expect(card.locator(".camera-is-starting")).toContainText("Waiting for the camera");
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } }
+  ]);
+  await updateEntityState(card, state("camera.example_garage", "preparing"));
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await updateEntityState(card, state("camera.example_garage", "streaming"));
   await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_garage"]')).toBeVisible();
   await card.locator('button[data-camera-close="garage"]').click();
+  await updateEntityState(card, state("camera.example_garage", "idle"));
 
   await card.locator('button[data-secure-cover-action="open_cover"]').click();
   await expect(card.locator(".confirmation-dialog")).toContainText("Open garage door");
@@ -465,7 +505,6 @@ test("starts cameras deliberately and confirms garage and alarm actions", async 
   await card.locator('button[data-confirm-action="confirm"]').click();
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
-    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } },
@@ -522,12 +561,143 @@ test("stops an active exterior stream when the camera fails or configuration rel
 
   await card.evaluate((element, familyConfig) => element.setConfig({ family_config: familyConfig }), config);
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await updateEntityState(card, state("camera.example_doorbell", "idle"));
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
-    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
-    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } }
   ]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("serializes repeated camera taps and preserves the live player across card rerenders", async ({ page }) => {
+  const startKey = "button.press:button.example_doorbell_start_stream";
+  const pageErrors = await mount(page, config, {
+    "camera.example_doorbell": state("camera.example_doorbell", "idle")
+  }, { serviceBehaviors: { [startKey]: "pending" } });
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('button[data-camera-open="doorbell"]').evaluate((button) => {
+    button.click();
+    button.click();
+  });
+
+  await expect(card.locator('.camera-is-starting[role="status"][aria-busy="true"]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } }
+  ]);
+  await updateEntityState(card, state("camera.example_doorbell", "streaming"));
+  const player = card.locator('[data-card-type="picture-entity"][data-entity="camera.example_doorbell"]');
+  await expect(player).toHaveAttribute("data-aspect-ratio", "16:9");
+  await expect(player).toHaveAttribute("data-fit-mode", "cover");
+  await expect(player).toHaveAttribute("data-tap-action", "none");
+  await expect(player).toHaveAttribute("data-hold-action", "none");
+  const firstInstance = await player.getAttribute("data-instance-id");
+
+  await updateEntityState(card, state("binary_sensor.example_doorbell_motion", "on"));
+  await card.locator('button[data-alarm-action="alarm_arm_home"]').click();
+  await expect(player).toHaveAttribute("data-instance-id", firstInstance);
+  await card.locator('button[data-confirm-action="cancel"]').click();
+  await expect(player).toHaveAttribute("data-instance-id", firstInstance);
+
+  await settlePendingService(page, startKey);
+  await updateEntityState(card, state("camera.example_doorbell", "idle"));
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await expect(card.locator('[role="alert"]')).toContainText("stream ended");
+  await updateEntityState(card, state("camera.example_doorbell", "streaming"));
+  await card.locator('button[data-camera-open="doorbell"]').click();
+  await expect(player).toBeVisible();
+  expect(await player.getAttribute("data-instance-id")).not.toBe(firstInstance);
+  expect(pageErrors).toEqual([]);
+});
+
+test("keeps switching gated behind Stop and recovers camera failures without raw errors", async ({ page }) => {
+  const stopKey = "button.press:button.example_doorbell_stop_stream";
+  const pageErrors = await mount(page, config, {}, { serviceBehaviors: { [stopKey]: "pending" } });
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('button[data-camera-open="doorbell"]').click();
+  await card.locator('button[data-camera-open="garage"]').click();
+  await expect(card.locator('.camera-is-stopping[role="status"][aria-busy="true"]')).toContainText("Stopping live view");
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } }
+  ]);
+
+  await settlePendingService(page, stopKey);
+  await updateEntityState(card, state("camera.example_doorbell", "idle"));
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } }
+  ]);
+  await updateEntityState(card, state("camera.example_garage", "streaming"));
+  await expect(card.locator('[data-entity="camera.example_garage"][data-camera-view="live"]')).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
+
+test("falls back to paired native camera services for the exact configured exterior entity", async ({ page }) => {
+  const pageErrors = await mount(page, config, {
+    "button.example_garage_start_stream": state("button.example_garage_start_stream", "unavailable"),
+    "button.example_garage_stop_stream": state("button.example_garage_stop_stream", "unavailable")
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('button[data-camera-open="garage"]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "camera", service: "turn_on", data: { entity_id: "camera.example_garage" } }
+  ]);
+  await updateEntityState(card, state("camera.example_garage", "streaming"));
+  await expect(card.locator('[data-entity="camera.example_garage"]')).toBeVisible();
+  await card.locator('button[data-camera-close="garage"]').click();
+  await updateEntityState(card, state("camera.example_garage", "idle"));
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "camera", service: "turn_on", data: { entity_id: "camera.example_garage" } },
+    { domain: "camera", service: "turn_off", data: { entity_id: "camera.example_garage" } }
+  ]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("bounds a failed camera start, performs recovery Stop, and enables a friendly Retry", async ({ page }) => {
+  const startKey = "button.press:button.example_garage_start_stream";
+  const pageErrors = await mount(page, config, {}, {
+    cameraStartTimeoutMs: 50,
+    cameraStopTimeoutMs: 50,
+    serviceBehaviors: { [startKey]: "pending" }
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('button[data-camera-open="garage"]').click();
+  await expect(card.locator('[role="alert"]')).toContainText("too long to start", { timeout: 2_000 });
+  await expect(card.locator('button[aria-label="Retry live view"]')).toBeDisabled();
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } }
+  ]);
+  await updateEntityState(card, state("camera.example_garage", "idle"));
+  await expect(card.locator('button[aria-label="Retry live view"]')).toBeEnabled();
+  expect(pageErrors).toEqual([]);
+});
+
+test("configuration reload cancels a pending Start but still completes the authorized Stop", async ({ page }) => {
+  const startKey = "button.press:button.example_garage_start_stream";
+  const pageErrors = await mount(page, config, {}, {
+    serviceBehaviors: { [startKey]: "pending" }
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('button[data-camera-open="garage"]').click();
+  await expect(card.locator(".camera-is-starting")).toBeVisible();
+
+  await card.evaluate((element, familyConfig) => element.setConfig({ family_config: familyConfig }), config);
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await settlePendingService(page, startKey);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } }
+  ]);
+  await updateEntityState(card, state("camera.example_garage", "streaming"));
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await updateEntityState(card, state("camera.example_garage", "idle"));
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });
 
@@ -550,6 +720,27 @@ test("never starts a stream when its configured stop control is missing", async 
   expect(pageErrors).toEqual([]);
 });
 
+test("fails closed for unexpected camera states and tampered non-exterior camera ids", async ({ page }) => {
+  const pageErrors = await mount(page, config, {
+    "camera.example_garage": state("camera.example_garage", "recording")
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="entry"]').click();
+  const garage = card.locator(".security-camera").filter({ hasText: "Garage" });
+  await expect(garage.locator('button[data-camera-open="garage"]')).toBeDisabled();
+  await garage.locator('button[data-camera-open="garage"]').evaluate((button) => {
+    button.disabled = false;
+    button.click();
+  });
+  await card.locator('button[data-camera-open="doorbell"]').evaluate((button) => {
+    button.dataset.cameraOpen = "child-bedroom";
+    button.click();
+  });
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
+});
+
 test("fails Security unavailable states safely without presenting them as clear or actionable", async ({ page }) => {
   const pageErrors = await mount(page, config, {
     "camera.example_doorbell": state("camera.example_doorbell", "streaming"),
@@ -565,8 +756,8 @@ test("fails Security unavailable states safely without presenting them as clear 
 
   const doorbell = card.locator(".security-camera").filter({ hasText: "Front door" });
   await expect(doorbell.locator(".security-signal.is-unavailable")).toContainText("Unavailable");
-  await expect(doorbell.locator(".privacy-badge")).toHaveText(/Controls unavailable/);
-  await expect(doorbell.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
+  await expect(doorbell.locator(".privacy-badge")).toHaveText(/Tap to stream/);
+  await expect(doorbell.locator('button[data-camera-open="doorbell"]')).toBeEnabled();
   const garageCamera = card.locator(".security-camera").filter({ hasText: "Garage" });
   await expect(garageCamera.locator(".privacy-badge")).toHaveText(/Camera unavailable/);
   await expect(garageCamera.locator('button[data-camera-open="garage"]')).toBeDisabled();

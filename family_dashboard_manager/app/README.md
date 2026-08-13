@@ -2,7 +2,7 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.7.2 provides:
+Version 0.7.3 provides:
 
 - a secret-rejecting schema-v6 household contract;
 - one generated Home Assistant panel containing the bundled `custom:family-hub-card`;
@@ -10,7 +10,7 @@ Version 0.7.2 provides:
 - Home sections for Rooms, Lights, Heating, Blinds & doors and Cleaning, backed only by explicitly configured entities;
 - a two-floor 3D floorplan engine with private inert SVG assets, percentage-coordinate hotspots, cache-safe revisions and selected-room controls;
 - an installed Daylight or legacy Skylight calendar child card with Day, Week, Month and Agenda modes, persistent calendar visibility preferences and event management disabled;
-- deliberate doorbell, driveway and garden camera presentation, signals-only camera support, child/bedroom camera rejection, and confirmation-gated alarm and garage actions;
+- deliberate, state-driven doorbell, driveway and garden camera presentation with bounded Eufy startup, one-at-a-time viewing, signals-only camera support, child/bedroom camera rejection, and confirmation-gated alarm and garage actions;
 - Eufy vacuum status and bounded controls, while authenticated map images remain inside Home Assistant;
 - named ChoreOps routines and a separate per-child, read-only Google Classroom consent boundary;
 - the configured Mediocre Spotify/Sonos card and a server-side, last-good-cache Fantasy Premier League provider with Tottenham and Aston Villa spotlights;

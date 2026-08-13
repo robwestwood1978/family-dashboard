@@ -52,6 +52,8 @@ const SECURE_COVER_SERVICES = new Set(["open_cover", "close_cover"]);
 const VACUUM_SERVICES = new Set(["start", "pause", "return_to_base"]);
 const CLIMATE_POWER_SERVICES = new Set(["turn_on", "turn_off"]);
 const ALARM_SERVICES = new Set(["alarm_arm_home", "alarm_arm_away", "alarm_disarm"]);
+const CAMERA_START_TIMEOUT_MS = 15_000;
+const CAMERA_STOP_TIMEOUT_MS = 5_000;
 const ALARM_ACTION_LABELS = {
   alarm_arm_home: "Arm home",
   alarm_arm_away: "Arm away",
@@ -253,11 +255,34 @@ export function isCommandEntityAvailable(state) {
 }
 
 export function isCameraControlAvailable(camera, states = {}) {
-  if (!camera?.entity || !isEntityAvailable(states[camera.entity])) return false;
-  if (Boolean(camera.startButton) !== Boolean(camera.stopButton)) return false;
-  return [camera.startButton, camera.stopButton]
-    .filter(Boolean)
-    .every((entityId) => isCommandEntityAvailable(states[entityId]));
+  return Boolean(cameraControlRoute(camera, states));
+}
+
+export function cameraStreamPhase(state) {
+  if (!isEntityAvailable(state)) return "unavailable";
+  const value = entityStateValue(state);
+  if (value === "idle") return "idle";
+  if (value === "streaming") return "streaming";
+  if (value === "preparing") return "preparing";
+  return "unexpected";
+}
+
+export function cameraControlRoute(camera, states = {}) {
+  if (!camera?.entity || !isEntityAvailable(states[camera.entity])) return null;
+  const hasStartButton = Boolean(camera.startButton);
+  const hasStopButton = Boolean(camera.stopButton);
+  if (!hasStartButton || !hasStopButton) return null;
+  if (isCommandEntityAvailable(states[camera.startButton])
+    && isCommandEntityAvailable(states[camera.stopButton])) {
+    return {
+      start: { domain: "button", service: "press", entity: camera.startButton },
+      stop: { domain: "button", service: "press", entity: camera.stopButton }
+    };
+  }
+  return {
+    start: { domain: "camera", service: "turn_on", entity: camera.entity },
+    stop: { domain: "camera", service: "turn_off", entity: camera.entity }
+  };
 }
 
 export function binarySignalPresentation(state) {
@@ -605,6 +630,14 @@ export class FamilyHubCard extends HTMLElementBase {
     this._floor = null;
     this._room = null;
     this._activeCameraId = null;
+    this._cameraSession = null;
+    this._cameraOperationToken = 0;
+    this._cameraStartTimer = null;
+    this._cameraRecoveryPromise = null;
+    this._cameraBlockedIds = new Map();
+    this._cameraStartTimeoutMs = CAMERA_START_TIMEOUT_MS;
+    this._cameraStopTimeoutMs = CAMERA_STOP_TIMEOUT_MS;
+    this._cameraError = null;
     this._pendingConfirmation = null;
     this._footballTab = "fixtures";
     this._gameweek = null;
@@ -638,7 +671,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.removeEventListener("click", this._boundClick);
     this.shadowRoot.removeEventListener("change", this._boundChange);
     this.shadowRoot.removeEventListener("keydown", this._boundKeydown);
-    this._closeActiveCamera();
+    this._closeActiveCamera({ render: false, invalidate: true });
     this._childCards.clear();
   }
 
@@ -649,7 +682,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!config || config.schema_version !== 6) {
       throw new Error("Family Hub requires a schema-v6 family configuration");
     }
-    this._closeActiveCamera();
+    this._closeActiveCamera({ render: false, invalidate: true });
     this._config = config;
     this._view = config.display.default_view || "today";
     this._homeSection = config.home.default_section || "rooms";
@@ -664,6 +697,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarRequestKey = "";
     this._calendarError = null;
     this._activeCameraId = null;
+    this._cameraError = null;
     this._pendingConfirmation = null;
     this._musicHassSource = null;
     this._musicHass = null;
@@ -677,9 +711,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._readOnlyHass = null;
     this._musicHassSource = null;
     this._musicHass = null;
-    const activeCamera = this._controlPolicy?.cameras?.get(this._activeCameraId);
-    if (activeCamera?.entity && !isCameraControlAvailable(activeCamera, hass?.states || {})) this._closeActiveCamera();
     for (const [key, child] of this._childCards.entries()) child.hass = this._hassForChild(key);
+    this._reconcileCameraSession(hass?.states || {});
     if (!this._config) return;
     const nextSignature = stateSignature(hass?.states || {}, this._entityIds);
     if (nextSignature !== this._signature) {
@@ -1318,16 +1351,24 @@ export class FamilyHubCard extends HTMLElementBase {
       const cameraControl = this._controlPolicy.cameras.get(camera.id);
       const cameraEntityAvailable = Boolean(camera.entity_id) && isEntityAvailable(states[camera.entity_id]);
       const cameraAvailable = isCameraControlAvailable(cameraControl, states);
-      const commandEntitiesAvailable = cameraEntityAvailable
-        && Boolean(cameraControl?.startButton) === Boolean(cameraControl?.stopButton)
-        && [cameraControl?.startButton, cameraControl?.stopButton]
-          .filter(Boolean)
-          .every((entityId) => isCommandEntityAvailable(states[entityId]));
-      const isActive = camera.id === this._activeCameraId;
-      const stream = isActive && cameraAvailable
-        ? `<div class="camera-stream"><div id="camera-card-slot-${escapeHtml(camera.id)}" class="child-card-slot camera-card-slot"></div><button type="button" class="camera-close" data-camera-close="${escapeHtml(camera.id)}"><ha-icon icon="mdi:close"></ha-icon>Close live view</button></div>`
-        : `<div class="camera-idle"><ha-icon icon="${camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon><div><strong>No automatic stream</strong><small>${cameraAvailable ? "Live video starts only when you ask for it." : camera.entity_id ? cameraEntityAvailable && !commandEntitiesAvailable ? "The mapped camera start or stop control is unavailable." : "The mapped camera is currently unavailable." : "Safe signals are mapped; the private camera entity still needs confirming."}</small></div><button type="button" data-camera-open="${escapeHtml(camera.id)}" ${cameraAvailable ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="mdi:play-circle-outline"></ha-icon>View live</button></div>`;
-      const badgeLabel = cameraAvailable ? "Tap to stream" : camera.entity_id ? cameraEntityAvailable && !commandEntitiesAvailable ? "Controls unavailable" : "Camera unavailable" : "Signals only";
+      const commandPairValid = Boolean(cameraControl?.startButton && cameraControl?.stopButton);
+      const phase = cameraStreamPhase(states[camera.entity_id]);
+      const session = this._cameraSession?.id === camera.id ? this._cameraSession : null;
+      const isActive = session?.phase === "viewing" && phase === "streaming" && cameraAvailable;
+      const isStarting = session?.phase === "starting";
+      const isStopping = session?.phase === "stopping";
+      const cameraError = this._cameraError?.id === camera.id ? this._cameraError.message : "";
+      const cameraReady = ["idle", "preparing", "streaming"].includes(phase);
+      const isBlocked = this._cameraBlockedIds.size > 0;
+      const canOpen = cameraAvailable && cameraReady && !isStopping && !isBlocked && (!readOnly || phase === "streaming");
+      const stream = isActive
+        ? `<div class="camera-stream"><slot id="camera-card-slot-${escapeHtml(camera.id)}" name="camera-${escapeHtml(camera.id)}" class="child-card-slot camera-card-slot"></slot><button type="button" class="camera-close" data-camera-close="${escapeHtml(camera.id)}"><ha-icon icon="mdi:close"></ha-icon>Close live view</button></div>`
+        : isStarting
+          ? `<div class="camera-idle camera-is-starting" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Starting secure live view…</strong><small>Waiting for the camera to report that its stream is ready.</small></div><button type="button" data-camera-close="${escapeHtml(camera.id)}"><ha-icon icon="mdi:close"></ha-icon>Cancel</button></div>`
+          : isStopping
+            ? `<div class="camera-idle camera-is-stopping" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Stopping live view…</strong><small>Waiting for the previous secure stream to close.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
+            : `<div class="camera-idle" ${cameraError ? 'role="alert"' : ""}><ha-icon icon="${camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon><div><strong>${cameraError ? "Live view unavailable" : "No automatic stream"}</strong><small>${cameraError ? escapeHtml(cameraError) : cameraAvailable ? !cameraReady ? "The camera is not ready to start a live view." : readOnly && phase !== "streaming" ? "Live video is not already running in read-only mode." : "Live video starts only when you ask for it." : camera.entity_id ? cameraEntityAvailable && !commandPairValid ? "The mapped camera start and stop controls do not form a safe pair." : "The mapped camera is currently unavailable." : "Safe signals are mapped; the private camera entity still needs confirming."}</small></div><button type="button" data-camera-open="${escapeHtml(camera.id)}" aria-label="${cameraError ? "Retry live view" : "View live"}" ${canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="mdi:play-circle-outline"></ha-icon>${cameraError ? "Retry" : "View live"}</button></div>`;
+      const badgeLabel = isStarting ? "Starting…" : isStopping ? "Stopping…" : cameraAvailable && cameraReady ? "Tap to stream" : camera.entity_id ? cameraEntityAvailable && !commandPairValid ? "Controls unavailable" : "Camera unavailable" : "Signals only";
       const badgeIcon = cameraAvailable ? "mdi:gesture-tap-button" : camera.entity_id ? "mdi:camera-off-outline" : "mdi:shield-check-outline";
       return `<article class="surface security-camera"><div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(camera.role))}</p><h2>${escapeHtml(camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${badgeIcon}"></ha-icon>${badgeLabel}</span></div>${signals ? `<div class="security-signals">${signals}</div>` : ""}${stream}</article>`;
     }).join("");
@@ -1642,15 +1683,20 @@ export class FamilyHubCard extends HTMLElementBase {
         show_state: false
       }, "vacuum-map-card-slot");
     }
-    if (this._view === "entry" && this._activeCameraId) {
+    if (this._view === "entry" && this._cameraSession?.phase === "viewing" && this._activeCameraId) {
       const camera = this._config.entry.cameras.find((entry) => entry.id === this._activeCameraId);
-      if (camera?.entity_id) {
+      if (camera?.entity_id && cameraStreamPhase(this._hass.states?.[camera.entity_id]) === "streaming") {
         this._ensureChildCard(`camera:${camera.id}`, {
           type: "picture-entity",
           entity: camera.entity_id,
           camera_view: "live",
+          aspect_ratio: "16:9",
+          fit_mode: "cover",
           show_name: false,
-          show_state: false
+          show_state: false,
+          tap_action: { action: "none" },
+          hold_action: { action: "none" },
+          double_tap_action: { action: "none" }
         }, `camera-card-slot-${camera.id}`);
       }
     }
@@ -1663,14 +1709,16 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!child) {
       try {
         const helpers = await globalThis.loadCardHelpers();
+        if (!this._isCurrentCameraSlot(key, slotId, slot)) return;
         child = helpers.createCardElement(cardConfig);
         child.classList.add("embedded-card");
         this._childCards.set(key, child);
       } catch (error) {
-        slot.innerHTML = `<p class="empty-state">This Home Assistant card could not load: ${escapeHtml(error?.message || error)}</p>`;
+        slot.innerHTML = `<p class="empty-state">${key.startsWith("camera:") ? "The secure live view could not load. Please try again." : `This Home Assistant card could not load: ${escapeHtml(error?.message || error)}`}</p>`;
         return;
       }
     }
+    if (!this._isCurrentCameraSlot(key, slotId, slot)) return;
     if (key === "music") {
       const readOnly = this._config.display.read_only === true;
       child.inert = false;
@@ -1688,7 +1736,22 @@ export class FamilyHubCard extends HTMLElementBase {
       child.setAttribute("aria-label", key.startsWith("calendar:") ? "Read-only family calendar" : "Read-only camera view");
     }
     child.hass = this._hassForChild(key);
-    slot.replaceChildren(child);
+    if (key.startsWith("camera:")) {
+      child.slot = `camera-${key.slice("camera:".length)}`;
+      if (child.parentElement !== this) this.append(child);
+    } else {
+      slot.replaceChildren(child);
+    }
+  }
+
+  _isCurrentCameraSlot(key, slotId, slot) {
+    if (!key.startsWith("camera:")) return true;
+    const cameraId = key.slice("camera:".length);
+    return this._view === "entry"
+      && this._cameraSession?.id === cameraId
+      && this._cameraSession?.phase === "viewing"
+      && cameraStreamPhase(this._hass?.states?.[this._controlPolicy.cameras.get(cameraId)?.entity]) === "streaming"
+      && this.shadowRoot.getElementById(slotId) === slot;
   }
 
   _hassForChild(key) {
@@ -1761,7 +1824,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!target) return;
     if (target.dataset.view) {
       if (!this._enabledViews().some((view) => view.id === target.dataset.view)) return;
-      if (this._view === "entry" && target.dataset.view !== "entry") this._closeActiveCamera();
+      if (this._view === "entry" && target.dataset.view !== "entry") this._closeActiveCamera({ render: false, invalidate: true });
       this._view = target.dataset.view;
       this._scheduleRender(true);
       return;
@@ -1797,18 +1860,11 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     if (target.dataset.cameraOpen) {
-      const cameraId = target.dataset.cameraOpen;
-      const camera = this._controlPolicy.cameras.get(cameraId);
-      if (!isCameraControlAvailable(camera, this._hass?.states || {})) return;
-      if (this._activeCameraId && this._activeCameraId !== cameraId) this._closeActiveCamera();
-      if (camera.startButton && !this._config.display.read_only) this._hass?.callService?.("button", "press", { entity_id: camera.startButton });
-      this._activeCameraId = cameraId;
-      this._scheduleRender(true);
+      void this._openCamera(target.dataset.cameraOpen);
       return;
     }
     if (target.dataset.cameraClose) {
       this._closeActiveCamera();
-      this._scheduleRender(true);
       return;
     }
     if (target.dataset.confirmAction) {
@@ -1910,10 +1966,284 @@ export class FamilyHubCard extends HTMLElementBase {
     }
   }
 
-  _closeActiveCamera() {
-    const camera = this._controlPolicy?.cameras?.get(this._activeCameraId);
-    if (camera?.stopButton && !this._config?.display?.read_only) this._hass?.callService?.("button", "press", { entity_id: camera.stopButton });
+  async _openCamera(cameraId) {
+    if (!cameraId || this._cameraSession?.id === cameraId
+      && ["starting", "viewing", "stopping"].includes(this._cameraSession.phase)) return;
+    if (this._cameraSession?.phase === "stopping" || this._cameraRecoveryPromise) return;
+
+    let camera = this._controlPolicy?.cameras?.get(cameraId);
+    let route = cameraControlRoute(camera, this._hass?.states || {});
+    let phase = cameraStreamPhase(this._hass?.states?.[camera?.entity]);
+    if (!route || this._view !== "entry" || this._cameraBlockedIds.size > 0) return;
+    if (this._config?.display?.read_only && phase !== "streaming") return;
+    if (!["idle", "preparing", "streaming"].includes(phase)) {
+      this._cameraError = { id: cameraId, message: "The camera is not ready to start a live view." };
+      this._scheduleRender(true);
+      return;
+    }
+
+    const token = ++this._cameraOperationToken;
+    this._clearCameraStartTimer();
+    this._cameraError = null;
+
+    if (this._cameraSession) {
+      const stopped = await this._stopCameraSession(this._cameraSession, token, { render: true });
+      if (token !== this._cameraOperationToken) return;
+      if (!stopped) {
+        this._cameraError = { id: cameraId, message: "The previous live view could not be stopped safely. Please try again." };
+        this._scheduleRender(true);
+        return;
+      }
+    }
+
+    if (token !== this._cameraOperationToken) return;
+    camera = this._controlPolicy?.cameras?.get(cameraId);
+    route = cameraControlRoute(camera, this._hass?.states || {});
+    phase = cameraStreamPhase(this._hass?.states?.[camera?.entity]);
+    if (!route || this._view !== "entry" || this._cameraBlockedIds.size > 0) return;
+    if (this._config?.display?.read_only && phase !== "streaming") return;
+    if (!["idle", "preparing", "streaming"].includes(phase)) {
+      this._cameraError = { id: cameraId, message: "The camera is not ready to start a live view." };
+      this._scheduleRender(true);
+      return;
+    }
+
+    this._evictCameraChild(cameraId);
+    const session = {
+      id: cameraId,
+      phase: "starting",
+      token,
+      route,
+      camera: { ...camera },
+      writable: !this._config?.display?.read_only,
+      startIssued: false,
+      startPromise: null
+    };
+    this._cameraSession = session;
     this._activeCameraId = null;
+
+    if (phase === "streaming") {
+      this._promoteCameraSession(session);
+      return;
+    }
+
+    this._armCameraStartTimeout(session);
+    this._scheduleRender(true);
+    if (phase === "preparing") return;
+
+    session.startIssued = true;
+    session.startPromise = this._callCameraCommand(
+      cameraId,
+      "start",
+      route.start,
+      this._cameraStartTimeoutMs,
+      session.camera
+    );
+    const started = await session.startPromise;
+    if (token !== this._cameraOperationToken || this._cameraSession !== session || session.phase !== "starting") return;
+    if (cameraStreamPhase(this._hass?.states?.[camera.entity]) === "streaming") {
+      this._promoteCameraSession(session);
+      return;
+    }
+    if (!started) void this._recoverCameraSession(session, "Live view could not start. Please try again.");
+  }
+
+  _promoteCameraSession(session) {
+    if (!session || this._cameraSession !== session || session.token !== this._cameraOperationToken) return;
+    const camera = this._controlPolicy?.cameras?.get(session.id);
+    if (cameraStreamPhase(this._hass?.states?.[camera?.entity]) !== "streaming") return;
+    this._clearCameraStartTimer();
+    this._evictCameraChild(session.id);
+    session.phase = "viewing";
+    this._activeCameraId = session.id;
+    this._cameraError = null;
+    this._scheduleRender(true);
+  }
+
+  _reconcileCameraSession(states) {
+    const session = this._cameraSession;
+    for (const [cameraId, block] of this._cameraBlockedIds) {
+      const state = states[block.entity];
+      if (cameraStreamPhase(state) === "idle" && state !== block.baseline) {
+        this._cameraBlockedIds.delete(cameraId);
+        this._scheduleRender(true);
+      }
+    }
+    if (!session || session.phase === "stopping") return;
+    const camera = this._controlPolicy?.cameras?.get(session.id);
+    const phase = cameraStreamPhase(states[camera?.entity]);
+    if (session.phase === "starting") {
+      if (phase === "streaming") this._promoteCameraSession(session);
+      else if (["unavailable", "unexpected"].includes(phase)) {
+        void this._recoverCameraSession(session, "The mapped camera became unavailable. Please try again.");
+      }
+      return;
+    }
+    if (session.phase === "viewing" && phase !== "streaming") {
+      this._closeActiveCamera({ message: "The live stream ended. You can try again." });
+    }
+  }
+
+  _armCameraStartTimeout(session) {
+    this._clearCameraStartTimer();
+    this._cameraStartTimer = setTimeout(() => {
+      if (this._cameraSession !== session || session.token !== this._cameraOperationToken) return;
+      void this._recoverCameraSession(session, "The camera took too long to start. Please try again.");
+    }, this._cameraStartTimeoutMs);
+  }
+
+  _clearCameraStartTimer() {
+    if (this._cameraStartTimer !== null) clearTimeout(this._cameraStartTimer);
+    this._cameraStartTimer = null;
+  }
+
+  async _recoverCameraSession(session, message) {
+    if (!session || this._cameraSession !== session) return false;
+    const token = ++this._cameraOperationToken;
+    const recovery = this._stopCameraSession(session, token, { render: true, message });
+    this._cameraRecoveryPromise = recovery;
+    try {
+      return await recovery;
+    } finally {
+      if (this._cameraRecoveryPromise === recovery) this._cameraRecoveryPromise = null;
+    }
+  }
+
+  _closeActiveCamera({ render = true, message = null, invalidate = false } = {}) {
+    const session = this._cameraSession;
+    if (session?.phase === "stopping") {
+      if (invalidate) ++this._cameraOperationToken;
+      this._evictCameraChild(session.id);
+      this._activeCameraId = null;
+      if (render) this._scheduleRender(true);
+      return;
+    }
+    ++this._cameraOperationToken;
+    this._clearCameraStartTimer();
+    if (!session) {
+      if (this._activeCameraId) this._evictCameraChild(this._activeCameraId);
+      this._activeCameraId = null;
+      if (render) this._scheduleRender(true);
+      return;
+    }
+    const token = this._cameraOperationToken;
+    const recovery = this._stopCameraSession(session, token, { render, message });
+    this._cameraRecoveryPromise = recovery;
+    void recovery.finally(() => {
+      if (this._cameraRecoveryPromise === recovery) this._cameraRecoveryPromise = null;
+    });
+  }
+
+  async _stopCameraSession(session, token, { render = true, message = null } = {}) {
+    if (!session) return true;
+    const previousPhase = session.phase;
+    this._clearCameraStartTimer();
+    session.phase = "stopping";
+    this._activeCameraId = null;
+    this._evictCameraChild(session.id);
+    if (render) this._scheduleRender(true);
+
+    if (session.startPromise) await session.startPromise;
+    const camera = session.camera || this._controlPolicy?.cameras?.get(session.id);
+    const phase = cameraStreamPhase(this._hass?.states?.[camera?.entity]);
+    const preStopState = this._hass?.states?.[camera?.entity];
+    const shouldStop = session.writable
+      && Boolean(session.route?.stop)
+      && (session.startIssued || previousPhase === "viewing" || ["preparing", "streaming"].includes(phase));
+    const currentRoute = cameraControlRoute(camera, this._hass?.states || {});
+    const stopCommand = currentRoute?.stop || session.route.stop;
+    const stopped = !shouldStop
+      || await this._callCameraCommand(
+        session.id,
+        "stop",
+        stopCommand,
+        this._cameraStopTimeoutMs,
+        camera
+      );
+
+    if (!shouldStop) {
+      if (this._cameraSession === session) this._cameraSession = null;
+      if (token === this._cameraOperationToken && message) this._cameraError = { id: session.id, message };
+      if (render && token === this._cameraOperationToken) this._scheduleRender(true);
+      return true;
+    }
+    const requireFreshIdle = session.startIssued && previousPhase === "starting" && phase === "idle";
+    const stateStopped = stopped && await this._waitForCameraStopped(
+      camera.entity,
+      this._cameraStopTimeoutMs,
+      requireFreshIdle ? preStopState : null
+    );
+    if (token !== this._cameraOperationToken) {
+      if (this._cameraSession === session) this._cameraSession = null;
+      if (!stateStopped && (session.startIssued || cameraStreamPhase(this._hass?.states?.[camera.entity]) !== "idle")) {
+        this._cameraBlockedIds.set(session.id, {
+          entity: camera.entity,
+          baseline: this._hass?.states?.[camera.entity]
+        });
+      }
+      return stateStopped;
+    }
+    const isCurrentSession = this._cameraSession === session;
+    if (isCurrentSession) {
+      this._cameraSession = null;
+      if (message) this._cameraError = { id: session.id, message };
+      else if (!stateStopped) this._cameraError = { id: session.id, message: "The live view could not be stopped safely. Please wait for the camera to become idle." };
+      if (!stateStopped && (session.startIssued || cameraStreamPhase(this._hass?.states?.[camera.entity]) !== "idle")) {
+        this._cameraBlockedIds.set(session.id, {
+          entity: camera.entity,
+          baseline: this._hass?.states?.[camera.entity]
+        });
+      }
+    }
+    if (render && isCurrentSession) this._scheduleRender(true);
+    return stateStopped;
+  }
+
+  async _waitForCameraStopped(entityId, timeoutMs, staleIdleState = null) {
+    const deadline = Date.now() + timeoutMs;
+    while (["preparing", "streaming"].includes(cameraStreamPhase(this._hass?.states?.[entityId]))
+      || staleIdleState && this._hass?.states?.[entityId] === staleIdleState) {
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return true;
+  }
+
+  async _callCameraCommand(cameraId, direction, command, timeoutMs, authorizedCamera = null) {
+    const camera = authorizedCamera || this._controlPolicy?.cameras?.get(cameraId);
+    if (!camera || !camera.startButton || !camera.stopButton || !command) return false;
+    const expectedButton = direction === "start" ? camera.startButton : camera.stopButton;
+    const approved = command.domain === "button"
+      ? command.service === "press" && Boolean(expectedButton) && command.entity === expectedButton
+      : command.domain === "camera"
+        && command.service === (direction === "start" ? "turn_on" : "turn_off")
+        && command.entity === camera.entity
+      ;
+    if (!approved || typeof this._hass?.callService !== "function") return false;
+
+    let timeout;
+    try {
+      const call = Promise.resolve(this._hass.callService(command.domain, command.service, { entity_id: command.entity }));
+      await Promise.race([
+        call,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("camera command timeout")), timeoutMs);
+        })
+      ]);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
+  _evictCameraChild(cameraId) {
+    if (!cameraId) return;
+    const key = `camera:${cameraId}`;
+    const child = this._childCards.get(key);
+    child?.remove?.();
+    this._childCards.delete(key);
   }
 
   _selectRoom(roomId) {
@@ -2168,8 +2498,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .camera-idle small { margin-top:4px; max-width:330px; color:var(--hub-muted); font-size:9px; line-height:1.35; }
       .camera-idle button,.camera-close { min-height:40px; padding:0 13px; border:0; border-radius:12px; background:var(--hub-accent); color:#fff; display:flex; align-items:center; gap:5px; font-size:9px; font-weight:800; cursor:pointer; }
       .camera-stream { position:relative; min-height:0; overflow:hidden; border-radius:15px; background:#050a15; }
-      .camera-card-slot { height:100%; min-height:130px; border-radius:0; overflow:hidden; }
+      .camera-card-slot { display:block; width:100%; height:100%; min-height:130px; border-radius:0; overflow:hidden; }
       .camera-card-slot .embedded-card { height:100%; }
+      .camera-card-slot::slotted(.embedded-card) { display:block; height:100%; min-height:130px; }
       .camera-close { position:absolute; z-index:4; right:9px; bottom:9px; background:rgba(8,15,31,.86); border:1px solid rgba(255,255,255,.18); }
       .security-sidebar { min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto auto; gap:12px; }
       .alarm-panel,.garage-panel { padding:17px; overflow:hidden; }
