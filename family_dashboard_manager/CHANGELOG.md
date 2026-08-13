@@ -1,3 +1,12 @@
+## 0.7.3
+
+- Makes deliberate exterior-camera viewing state-driven: an idle Eufy camera starts once, an already-streaming camera is adopted without a duplicate command, and the native viewer mounts only after Home Assistant reports `streaming`.
+- Adds bounded Starting, Stopping and recovery states so repeated taps, rejected commands and slow P2P startup cannot leave a black or stale viewer behind.
+- Serialises camera switching and waits for the previous exact Stop control before starting another camera, retaining the one-camera-at-a-time privacy boundary.
+- Uses Home Assistant's paired `camera.turn_on`/`camera.turn_off` route for the same configured exterior camera when its configured Eufy diagnostic Start/Stop buttons are both missing or unavailable at runtime; an unpaired configuration still fails closed.
+- Evicts failed camera children and catches bounded start/stop failures instead of exposing raw integration errors or reusing a broken player.
+- Keeps exterior-only validation, paired exact Start/Stop mappings, read-only child cards and all alarm/garage confirmation boundaries unchanged.
+
 ## 0.7.2
 
 - Refines every heating card around a larger measured current temperature and a compact, connected target-temperature stepper.
