@@ -47,7 +47,7 @@ function fixtureStates() {
     "climate.living_room": state("climate.living_room", "heat", { current_temperature: 20.4, temperature: 21 }),
     "climate.kitchen": state("climate.kitchen", "heat", { current_temperature: 19.2, temperature: 20 }),
     "climate.child_one_room": state("climate.child_one_room", "heat", { current_temperature: 18.8, temperature: 19 }),
-    "climate.child_two_room": state("climate.child_two_room", "heat", { current_temperature: 19.1, temperature: 19.5 }),
+    "climate.child_two_room": state("climate.child_two_room", "off", { temperature: 19.5 }),
     "sensor.living_room_temperature": state("sensor.living_room_temperature", "20.4"),
     "sensor.kitchen_temperature": state("sensor.kitchen_temperature", "19.2"),
     "media_player.living_room": state("media_player.living_room", "playing", { friendly_name: "Living room", media_title: "Dashboard test song", media_artist: "Test artist" }),
@@ -297,7 +297,23 @@ test("curates lights, heating, blinds and cleaning inside Home", async ({ page }
 
   await card.locator('[data-home-section="heating"]').click();
   await expect(card.locator(".heating-card")).toHaveCount(4);
+  const livingHeating = card.locator('[data-climate-card="climate.living_room"]');
+  await expect(livingHeating.locator(".heating-temperatures > span")).toHaveText(["Current20.4°", "Target21°"]);
+  await expect(livingHeating.locator(".heating-power")).toHaveText("On");
+  const childTwoHeating = card.locator('[data-climate-card="climate.child_two_room"]');
+  await expect(childTwoHeating.locator(".heating-temperatures > span")).toHaveText(["Current—", "Target19.5°"]);
+  await expect(childTwoHeating.locator(".heating-power")).toHaveText("Off");
+  await livingHeating.locator('button[data-climate-power="turn_off"]').click();
+  await childTwoHeating.locator('button[data-climate-power="turn_on"]').click();
   await card.locator('button[data-climate-adjust="0.5"][data-entity="climate.living_room"]').click();
+  await livingHeating.locator(".heating-power").evaluate((button) => {
+    button.dataset.entity = "climate.unmapped";
+    button.click();
+    button.dataset.entity = "climate.living_room";
+    button.dataset.climatePower = "delete";
+    button.click();
+  });
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toHaveLength(4);
 
   await card.locator('[data-home-section="covers"]').click();
   await expect(card.locator(".cover-card")).toHaveCount(4);
@@ -311,6 +327,8 @@ test("curates lights, heating, blinds and cleaning inside Home", async ({ page }
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "light", service: "toggle", data: { entity_id: "light.kitchen" } },
+    { domain: "climate", service: "turn_off", data: { entity_id: "climate.living_room" } },
+    { domain: "climate", service: "turn_on", data: { entity_id: "climate.child_two_room" } },
     { domain: "climate", service: "set_temperature", data: { entity_id: "climate.living_room", temperature: 21.5 } },
     { domain: "cover", service: "close_cover", data: { entity_id: "cover.living_room" } },
     { domain: "vacuum", service: "start", data: { entity_id: "vacuum.example_robovac" } }
@@ -414,7 +432,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
     window.__moreInfoEvents = 0;
     element.addEventListener("hass-more-info", () => { window.__moreInfoEvents += 1; });
     const root = element.shadowRoot;
-    for (const control of root.querySelectorAll("[data-toggle], [data-scene], [data-media-toggle], [data-cover-action], [data-climate-adjust], [data-vacuum-action], [data-alarm-action], [data-secure-cover-action], [data-more-info]")) {
+    for (const control of root.querySelectorAll("[data-toggle], [data-scene], [data-media-toggle], [data-cover-action], [data-climate-adjust], [data-climate-power], [data-vacuum-action], [data-alarm-action], [data-secure-cover-action], [data-more-info]")) {
       control.disabled = false;
       control.click();
     }

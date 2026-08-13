@@ -195,7 +195,7 @@ export class DashboardStore {
   }
 
   getResourceUrl() {
-    return `${this.publicResourceBase}/family-hub-card.js?v=${process.env.APP_VERSION || "0.7.0"}`;
+    return `${this.publicResourceBase}/family-hub-card.js?v=${process.env.APP_VERSION || "0.7.1"}`;
   }
 
   getPrivateAssetUrl(filename) {
@@ -219,7 +219,7 @@ export class DashboardStore {
       this.readPrivateAssetStatus()
     ]);
     return {
-      app_version: process.env.APP_VERSION || "0.7.0",
+      app_version: process.env.APP_VERSION || "0.7.1",
       read_only_required: this.requireReadOnly,
       installed: configText !== null && dashboard !== null,
       resource_installed: resource !== null,

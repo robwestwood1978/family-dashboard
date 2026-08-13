@@ -1,3 +1,11 @@
+## 0.7.1
+
+- Labels each heating zone's measured current temperature separately from its target temperature.
+- Shows an explicit unavailable marker when Home Assistant supplies no current-temperature measurement.
+- Adds a stateful On/Off control using only native `climate.turn_on` and `climate.turn_off` services for configured heating zones.
+- Preserves the thermostat target across power changes and retains the global read-only safety boundary.
+- Adds tablet coverage for on, off, missing-current-temperature, read-only and tampered-action cases.
+
 ## 0.7.0
 
 - Promote the accepted schema-v6 dashboard from read-only qualification to controlled live operation without changing the existing app, tunnel, panel or storage identities.

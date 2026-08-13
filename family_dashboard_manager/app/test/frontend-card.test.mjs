@@ -25,7 +25,8 @@ test("identifies every Home Assistant write action blocked by read-only mode", (
     { scene: "scene.example" },
     { mediaToggle: "media_player.example" },
     { coverAction: "open_cover" },
-    { climateAdjust: "0.5" }
+    { climateAdjust: "0.5" },
+    { climatePower: "turn_off" }
   ]) assert.equal(isControlAction(dataset), true);
   assert.equal(isControlAction({ view: "rooms" }), false);
   assert.equal(isControlAction({ floor: "first" }), false);
