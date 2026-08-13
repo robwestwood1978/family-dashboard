@@ -40,6 +40,7 @@ export function isControlAction(dataset = {}) {
     || dataset.mediaToggle
     || dataset.coverAction
     || dataset.climateAdjust
+    || dataset.climatePower
     || dataset.vacuumAction
     || dataset.alarmAction
     || dataset.secureCoverAction
@@ -49,6 +50,7 @@ export function isControlAction(dataset = {}) {
 const COVER_SERVICES = new Set(["open_cover", "stop_cover", "close_cover"]);
 const SECURE_COVER_SERVICES = new Set(["open_cover", "close_cover"]);
 const VACUUM_SERVICES = new Set(["start", "pause", "return_to_base"]);
+const CLIMATE_POWER_SERVICES = new Set(["turn_on", "turn_off"]);
 const ALARM_SERVICES = new Set(["alarm_arm_home", "alarm_arm_away", "alarm_disarm"]);
 const ALARM_ACTION_LABELS = {
   alarm_arm_home: "Arm home",
@@ -1008,10 +1010,22 @@ export class FamilyHubCard extends HTMLElementBase {
       const state = states[room.climate];
       const current = roomTemperature(room, states);
       const target = safeNumber(state?.attributes?.temperature, NaN);
+      const climateState = String(state?.state || "unavailable").toLowerCase();
+      const isAvailable = !["", "unknown", "unavailable"].includes(climateState);
+      const isOn = isAvailable && climateState !== "off";
+      const powerService = isOn ? "turn_off" : "turn_on";
+      const powerDisabled = readOnly || !isAvailable ? ' disabled aria-disabled="true"' : "";
       return `
-        <article class="surface heating-card">
-          <div class="heating-card-heading"><span><ha-icon icon="${ICONS.climate}"></ha-icon></span><div><h3>${escapeHtml(room.name)}</h3><p>${escapeHtml(titleCase(state?.state || "unavailable"))}</p></div><strong>${formatTemperature(current)}</strong></div>
-          <div class="heating-target"><span>Target <strong>${formatTemperature(target)}</strong></span><div class="stepper"><button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower ${escapeHtml(room.name)} target"${disabled}>−</button><button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Raise ${escapeHtml(room.name)} target"${disabled}>+</button></div></div>
+        <article class="surface heating-card" data-climate-card="${escapeHtml(room.climate)}">
+          <div class="heating-card-heading">
+            <span><ha-icon icon="${ICONS.climate}"></ha-icon></span>
+            <div><h3>${escapeHtml(room.name)}</h3><p>${escapeHtml(titleCase(state?.state || "unavailable"))}</p></div>
+            <button type="button" class="heating-power ${isOn ? "is-on" : ""}" data-climate-power="${powerService}" data-entity="${escapeHtml(room.climate)}" aria-label="Turn ${escapeHtml(room.name)} heating ${isOn ? "off" : "on"}" aria-pressed="${isOn}"${powerDisabled}><ha-icon icon="mdi:power"></ha-icon><span>${isOn ? "On" : "Off"}</span></button>
+          </div>
+          <div class="heating-target">
+            <div class="heating-temperatures"><span><small>Current</small><strong>${formatTemperature(current)}</strong></span><span><small>Target</small><strong>${formatTemperature(target)}</strong></span></div>
+            <div class="stepper"><button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower ${escapeHtml(room.name)} target"${disabled}>−</button><button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Raise ${escapeHtml(room.name)} target"${disabled}>+</button></div>
+          </div>
         </article>
       `;
     }).join("");
@@ -1734,6 +1748,13 @@ export class FamilyHubCard extends HTMLElementBase {
       }
       return;
     }
+    if (target.dataset.climatePower && target.dataset.entity) {
+      if (this._controlPolicy.climates.has(target.dataset.entity)
+        && CLIMATE_POWER_SERVICES.has(target.dataset.climatePower)) {
+        this._hass?.callService?.("climate", target.dataset.climatePower, { entity_id: target.dataset.entity });
+      }
+      return;
+    }
     if (target.dataset.climateAdjust && target.dataset.entity) {
       const adjustment = Number(target.dataset.climateAdjust);
       if (!this._controlPolicy.climates.has(target.dataset.entity) || ![-0.5, 0.5].includes(adjustment)) return;
@@ -1864,9 +1885,17 @@ export class FamilyHubCard extends HTMLElementBase {
       .whole-home-control small { margin-top:3px; color:var(--hub-muted); font-size:8px; }
       .heating-grid,.cover-grid { height:100%; min-height:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; align-content:start; overflow:auto; padding:1px 3px 4px 1px; }
       .heating-card,.cover-card { min-width:0; padding:16px; }
-      .heating-card-heading > strong { margin-left:auto; font-size:25px; }
+      .heating-card-heading > div { min-width:0; }
+      .heating-power { flex:0 0 auto; min-width:58px; min-height:38px; margin-left:auto; padding:7px 9px; border:1px solid rgba(255,255,255,.12); border-radius:12px; background:rgba(8,15,31,.48); color:var(--hub-muted); display:flex; align-items:center; justify-content:center; gap:5px; font-size:9px; font-weight:800; cursor:pointer; }
+      .heating-power ha-icon { --mdc-icon-size:16px; }
+      .heating-power.is-on { border-color:rgba(242,184,92,.42); background:rgba(128,88,29,.32); color:#ffd789; }
+      .heating-power:disabled { opacity:.5; cursor:not-allowed; }
       .heating-target { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:16px; padding-top:13px; border-top:1px solid rgba(255,255,255,.1); color:var(--hub-muted); font-size:10px; }
-      .heating-target > span strong { margin-left:4px; color:var(--hub-text); font-size:15px; }
+      .heating-temperatures { min-width:0; display:flex; align-items:center; gap:18px; }
+      .heating-temperatures > span { min-width:44px; }
+      .heating-temperatures small,.heating-temperatures strong { display:block; }
+      .heating-temperatures small { color:var(--hub-muted); font-size:8px; }
+      .heating-temperatures strong { margin-top:2px; color:var(--hub-text); font-size:15px; }
       .cover-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:16px; }
       .cover-actions.is-single { grid-template-columns:1fr; }
       .cover-actions button { min-width:0; min-height:42px; border:0; border-radius:12px; background:rgba(255,255,255,.08); color:#c8bcff; display:flex; align-items:center; justify-content:center; gap:4px; font-size:9px; font-weight:750; cursor:pointer; }
