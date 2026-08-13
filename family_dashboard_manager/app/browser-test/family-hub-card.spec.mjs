@@ -25,13 +25,17 @@ function fixtureStates() {
     "camera.example_vacuum_map": state("camera.example_vacuum_map", "idle", { entity_picture: "/api/camera_proxy/camera.example_vacuum_map?token=browser-fixture" }),
     "camera.example_doorbell": state("camera.example_doorbell", "streaming"),
     "camera.example_garage": state("camera.example_garage", "idle"),
-    "alarm_control_panel.example_home": state("alarm_control_panel.example_home", "disarmed"),
+    "button.example_doorbell_start_stream": state("button.example_doorbell_start_stream", "unknown"),
+    "button.example_doorbell_stop_stream": state("button.example_doorbell_stop_stream", "unknown"),
+    "button.example_garage_start_stream": state("button.example_garage_start_stream", "unknown"),
+    "button.example_garage_stop_stream": state("button.example_garage_stop_stream", "unknown"),
+    "alarm_control_panel.example_home": state("alarm_control_panel.example_home", "disarmed", { supported_features: 63 }),
     "binary_sensor.example_doorbell_motion": state("binary_sensor.example_doorbell_motion", "off"),
     "binary_sensor.example_doorbell_person": state("binary_sensor.example_doorbell_person", "on"),
     "binary_sensor.example_doorbell_ringing": state("binary_sensor.example_doorbell_ringing", "off"),
     "binary_sensor.example_garage_motion": state("binary_sensor.example_garage_motion", "off"),
     "binary_sensor.example_garage_person": state("binary_sensor.example_garage_person", "off"),
-    "cover.example_garage": state("cover.example_garage", "closed", { current_position: 0 }),
+    "cover.example_garage": state("cover.example_garage", "closed", { current_position: 0, supported_features: 3 }),
     "vacuum.example_robovac": state("vacuum.example_robovac", "docked", { battery_level: 88 }),
     "sensor.example_robovac_battery": state("sensor.example_robovac_battery", "88"),
     "sensor.example_robovac_task": state("sensor.example_robovac_task", "idle"),
@@ -44,9 +48,9 @@ function fixtureStates() {
     "cover.living_room": state("cover.living_room", "open", { friendly_name: "Living room blind", current_position: 60 }),
     "cover.child_one_room": state("cover.child_one_room", "closed", { friendly_name: "Child one blind", current_position: 0 }),
     "cover.child_two_room": state("cover.child_two_room", "closed", { friendly_name: "Child two blind", current_position: 0 }),
-    "climate.living_room": state("climate.living_room", "heat", { current_temperature: 20.4, temperature: 21 }),
-    "climate.kitchen": state("climate.kitchen", "heat", { current_temperature: 19.2, temperature: 20 }),
-    "climate.child_one_room": state("climate.child_one_room", "heat", { current_temperature: 18.8, temperature: 19 }),
+    "climate.living_room": state("climate.living_room", "heat", { current_temperature: 20.4, temperature: 21, hvac_action: "heating" }),
+    "climate.kitchen": state("climate.kitchen", "heat", { current_temperature: 19.2, temperature: 20, hvac_action: "idle" }),
+    "climate.child_one_room": state("climate.child_one_room", "heat_cool", { current_temperature: 18.8, temperature: 19 }),
     "climate.child_two_room": state("climate.child_two_room", "off", { temperature: 19.5 }),
     "sensor.living_room_temperature": state("sensor.living_room_temperature", "20.4"),
     "sensor.kitchen_temperature": state("sensor.kitchen_temperature", "19.2"),
@@ -84,7 +88,7 @@ function fixtureStates() {
   return states;
 }
 
-async function mount(page, familyConfig = config) {
+async function mount(page, familyConfig = config, stateOverrides = {}) {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.route("**/local/family-dashboard/assets/**", async (route) => {
@@ -178,9 +182,18 @@ async function mount(page, familyConfig = config) {
         }, upcoming];
       }
     };
-  }, { familyConfig, states: fixtureStates() });
+  }, { familyConfig, states: { ...fixtureStates(), ...stateOverrides } });
   await page.waitForFunction(() => document.querySelector("family-hub-card")?.shadowRoot?.querySelector('[data-current-view="today"]'));
   return pageErrors;
+}
+
+async function updateEntityState(card, nextState) {
+  await card.evaluate((element, value) => {
+    element.hass = {
+      ...element._hass,
+      states: { ...element._hass.states, [value.entity_id]: value }
+    };
+  }, nextState);
 }
 
 async function expectNoRootOverflow(page) {
@@ -298,11 +311,25 @@ test("curates lights, heating, blinds and cleaning inside Home", async ({ page }
   await card.locator('[data-home-section="heating"]').click();
   await expect(card.locator(".heating-card")).toHaveCount(4);
   const livingHeating = card.locator('[data-climate-card="climate.living_room"]');
-  await expect(livingHeating.locator(".heating-temperatures > span")).toHaveText(["Current20.4°", "Target21°"]);
+  await expect(livingHeating.locator(".heating-current-value")).toHaveText("20.4°");
+  await expect(livingHeating.locator(".heating-target-value")).toHaveText("21°");
+  await expect(livingHeating.locator(".heating-status")).toHaveText("Heating");
   await expect(livingHeating.locator(".heating-power")).toHaveText("On");
+  await expect(livingHeating.locator(".heating-target-control")).toHaveAttribute("aria-label", "Living room target temperature, currently 21°");
+  await expect(livingHeating.locator('button[data-climate-adjust="-0.5"]')).toHaveAttribute("aria-label", "Lower Living room target from 21°");
+  await expect(livingHeating.locator('button[data-climate-adjust="0.5"]')).toHaveAttribute("aria-label", "Raise Living room target from 21°");
+  await expect(card.locator('[data-climate-card="climate.kitchen"] .heating-status')).toHaveText("Idle");
+  await expect(card.locator('[data-climate-card="climate.child_one_room"] .heating-status')).toHaveText("Auto");
   const childTwoHeating = card.locator('[data-climate-card="climate.child_two_room"]');
-  await expect(childTwoHeating.locator(".heating-temperatures > span")).toHaveText(["Current—", "Target19.5°"]);
+  await expect(childTwoHeating.locator(".heating-current-value")).toHaveText("—");
+  await expect(childTwoHeating.locator(".heating-target-value")).toHaveText("19.5°");
+  await expect(childTwoHeating.locator(".heating-status")).toHaveText("Off");
   await expect(childTwoHeating.locator(".heating-power")).toHaveText("Off");
+  const heatingControlSizes = await livingHeating.locator(".heating-power, .heating-stepper button").evaluateAll((controls) => controls.map((control) => {
+    const bounds = control.getBoundingClientRect();
+    return { width: bounds.width, height: bounds.height };
+  }));
+  expect(heatingControlSizes.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
   await livingHeating.locator('button[data-climate-power="turn_off"]').click();
   await childTwoHeating.locator('button[data-climate-power="turn_on"]').click();
   await card.locator('button[data-climate-adjust="0.5"][data-entity="climate.living_room"]').click();
@@ -333,6 +360,61 @@ test("curates lights, heating, blinds and cleaning inside Home", async ({ page }
     { domain: "cover", service: "close_cover", data: { entity_id: "cover.living_room" } },
     { domain: "vacuum", service: "start", data: { entity_id: "vacuum.example_robovac" } }
   ]);
+  await expectNoRootOverflow(page);
+  expect(pageErrors).toEqual([]);
+});
+
+test("keeps six accessible heating zones contained at both supported iPad widths", async ({ page }, testInfo) => {
+  const sixZoneConfig = structuredClone(config);
+  const roomTemplate = structuredClone(sixZoneConfig.rooms.find((room) => room.id === "hallway"));
+  sixZoneConfig.rooms.push(
+    {
+      ...structuredClone(roomTemplate),
+      id: "utility_test",
+      name: "Utility test",
+      area_id: "utility_test",
+      climate: "climate.utility_test",
+      icon: "mdi:washing-machine"
+    },
+    {
+      ...structuredClone(roomTemplate),
+      id: "upstairs_test",
+      name: "Upstairs test",
+      area_id: "upstairs_test",
+      climate: "climate.upstairs_test",
+      icon: "mdi:stairs"
+    }
+  );
+  const pageErrors = await mount(page, sixZoneConfig, {
+    "climate.utility_test": state("climate.utility_test", "heat", { current_temperature: 20.5, temperature: 19.5, hvac_action: "idle" }),
+    "climate.upstairs_test": state("climate.upstairs_test", "unavailable", { temperature: 18 })
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="rooms"]').click();
+  await card.locator('[data-home-section="heating"]').click();
+  await expect(card.locator(".heating-card")).toHaveCount(6);
+
+  const unavailable = card.locator('[data-climate-card="climate.upstairs_test"]');
+  const unavailablePower = unavailable.locator(".heating-power");
+  await expect(unavailable.locator(".heating-status")).toHaveText("Unavailable");
+  await expect(unavailablePower).toHaveText("—");
+  await expect(unavailablePower).toHaveAttribute("aria-label", "Upstairs test heating unavailable");
+  await expect(unavailablePower).toBeDisabled();
+  expect(await unavailablePower.evaluate((button) => button.hasAttribute("aria-pressed"))).toBe(false);
+
+  await card.locator('[data-climate-card="climate.upstairs_test"]').scrollIntoViewIfNeeded();
+  const layout = await card.locator(".heating-grid").evaluate((grid) => {
+    const gridBounds = grid.getBoundingClientRect();
+    const cards = [...grid.querySelectorAll(".heating-card")].map((item) => item.getBoundingClientRect());
+    return {
+      columnCount: new Set(cards.map((bounds) => Math.round(bounds.left))).size,
+      horizontalOverflow: grid.scrollWidth - grid.clientWidth,
+      cardsInsideHorizontalBounds: cards.every((bounds) => bounds.left >= gridBounds.left - 1 && bounds.right <= gridBounds.right + 1)
+    };
+  });
+  expect(layout.columnCount).toBe(testInfo.project.use.viewport.width <= 1030 ? 2 : 3);
+  expect(layout.horizontalOverflow).toBeLessThanOrEqual(1);
+  expect(layout.cardsInsideHorizontalBounds).toBe(true);
   await expectNoRootOverflow(page);
   expect(pageErrors).toEqual([]);
 });
@@ -391,6 +473,124 @@ test("starts cameras deliberately and confirms garage and alarm actions", async 
     { domain: "alarm_control_panel", service: "alarm_arm_away", data: { entity_id: "alarm_control_panel.example_home" } }
   ]);
   await expectNoRootOverflow(page);
+  expect(pageErrors).toEqual([]);
+});
+
+test("expires stale Security confirmations and never reverses a moving garage door", async ({ page }) => {
+  const pageErrors = await mount(page);
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="entry"]').click();
+
+  await card.locator('button[data-secure-cover-action="open_cover"]').click();
+  await expect(card.locator(".confirmation-dialog")).toContainText("Open garage door");
+  await updateEntityState(card, state("cover.example_garage", "opening", { current_position: 20, supported_features: 3 }));
+  await expect(card.locator(".confirmation-dialog")).toBeVisible();
+  await card.locator('button[data-confirm-action="confirm"]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  await expect(card.locator(".garage-action")).toHaveText("Opening…");
+  await expect(card.locator(".garage-action")).toBeDisabled();
+  expect(await card.locator(".garage-action").evaluate((button) => button.hasAttribute("data-secure-cover-action"))).toBe(false);
+
+  await card.locator(".garage-action").evaluate((button) => {
+    button.disabled = false;
+    button.dataset.secureCoverAction = "close_cover";
+    button.dataset.entity = "cover.example_garage";
+    button.click();
+  });
+  await expect(card.locator(".confirmation-dialog")).toHaveCount(0);
+
+  await card.locator('button[data-alarm-action="alarm_arm_away"]').click();
+  await expect(card.locator(".confirmation-dialog")).toContainText("Arm away");
+  await updateEntityState(card, state("alarm_control_panel.example_home", "armed_home", { supported_features: 63 }));
+  await card.locator('button[data-confirm-action="confirm"]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("stops an active exterior stream when the camera fails or configuration reloads", async ({ page }) => {
+  const pageErrors = await mount(page);
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('button[data-camera-open="doorbell"]').click();
+  await expect(card.locator(".camera-card-slot")).toHaveCount(1);
+
+  await updateEntityState(card, state("camera.example_doorbell", "unavailable"));
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await updateEntityState(card, state("camera.example_doorbell", "streaming"));
+  await card.locator('button[data-camera-open="doorbell"]').click();
+  await expect(card.locator(".camera-card-slot")).toHaveCount(1);
+
+  await card.evaluate((element, familyConfig) => element.setConfig({ family_config: familyConfig }), config);
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } }
+  ]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("never starts a stream when its configured stop control is missing", async ({ page }) => {
+  const startOnlyConfig = structuredClone(config);
+  delete startOnlyConfig.entry.cameras[0].stop_stream_entity;
+  const pageErrors = await mount(page, startOnlyConfig);
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="entry"]').click();
+
+  const doorbell = card.locator(".security-camera").filter({ hasText: "Front door" });
+  await expect(doorbell.locator(".privacy-badge")).toHaveText(/Controls unavailable/);
+  await expect(doorbell.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
+  await doorbell.locator('button[data-camera-open="doorbell"]').evaluate((button) => {
+    button.disabled = false;
+    button.click();
+  });
+  await expect(doorbell.locator(".camera-card-slot")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("fails Security unavailable states safely without presenting them as clear or actionable", async ({ page }) => {
+  const pageErrors = await mount(page, config, {
+    "camera.example_doorbell": state("camera.example_doorbell", "streaming"),
+    "camera.example_garage": state("camera.example_garage", "unavailable"),
+    "button.example_doorbell_start_stream": state("button.example_doorbell_start_stream", "unavailable"),
+    "alarm_control_panel.example_home": state("alarm_control_panel.example_home", "unavailable", { supported_features: 63 }),
+    "cover.example_garage": state("cover.example_garage", "unavailable", { supported_features: 3 }),
+    "binary_sensor.example_doorbell_motion": null,
+    "binary_sensor.example_garage_motion": state("binary_sensor.example_garage_motion", "unknown")
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="entry"]').click();
+
+  const doorbell = card.locator(".security-camera").filter({ hasText: "Front door" });
+  await expect(doorbell.locator(".security-signal.is-unavailable")).toContainText("Unavailable");
+  await expect(doorbell.locator(".privacy-badge")).toHaveText(/Controls unavailable/);
+  await expect(doorbell.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
+  const garageCamera = card.locator(".security-camera").filter({ hasText: "Garage" });
+  await expect(garageCamera.locator(".privacy-badge")).toHaveText(/Camera unavailable/);
+  await expect(garageCamera.locator('button[data-camera-open="garage"]')).toBeDisabled();
+  await expect(card.locator(".alarm-actions button")).toHaveCount(3);
+  expect(await card.locator(".alarm-actions button").evaluateAll((buttons) => buttons.every((button) => button.disabled))).toBe(true);
+  await expect(card.locator(".garage-motion")).toHaveText("Motion unavailable");
+  await expect(card.locator(".garage-action")).toHaveText("Unavailable");
+  await expect(card.locator(".garage-action")).toBeDisabled();
+  expect(await card.locator(".garage-action").evaluate((button) => button.hasAttribute("data-secure-cover-action"))).toBe(false);
+
+  await card.evaluate((element) => {
+    const root = element.shadowRoot;
+    for (const control of root.querySelectorAll('[data-camera-open="doorbell"], [data-camera-open="garage"], [data-alarm-action]')) {
+      control.disabled = false;
+      control.click();
+    }
+    const garage = root.querySelector(".garage-action");
+    garage.disabled = false;
+    garage.dataset.secureCoverAction = "close_cover";
+    garage.dataset.entity = "cover.example_garage";
+    garage.click();
+  });
+  await expect(card.locator(".confirmation-dialog")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
 

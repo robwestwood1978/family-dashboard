@@ -40,4 +40,12 @@ test("the schema rejects older contracts and unknown fields", () => {
   const unsafeCameraRole = structuredClone(example);
   unsafeCameraRole.entry.cameras[0].role = "other";
   assert.equal(validate(unsafeCameraRole), false);
+
+  const startOnlyCamera = structuredClone(example);
+  delete startOnlyCamera.entry.cameras[0].stop_stream_entity;
+  assert.equal(validate(startOnlyCamera), false);
+
+  const stopOnlyCamera = structuredClone(example);
+  delete stopOnlyCamera.entry.cameras[0].start_stream_entity;
+  assert.equal(validate(stopOnlyCamera), false);
 });
