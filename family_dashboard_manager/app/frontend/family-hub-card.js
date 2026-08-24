@@ -3136,6 +3136,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .surface .eyebrow { color:#5E6B80; }
       .surface h2,.surface h3,.surface strong { color:#0B1830; }
       .section-heading h2 { font-size:20px; }
+      .section-heading > span { font-size:12px; }
       .section-heading button,.text-action { min-width:48px; min-height:48px; padding:0 4px; display:flex; align-items:center; gap:4px; color:#1463E8; font-size:14px; }
       .section-heading button { margin-top:-8px; }
       .text-action ha-icon { --mdc-icon-size:17px; }
