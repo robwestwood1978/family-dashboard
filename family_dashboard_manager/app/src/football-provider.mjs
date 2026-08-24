@@ -1,11 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { CURRENT_SCHEMA_VERSION } from "./schema-version.mjs";
 
 const BOOTSTRAP_URL = "https://fantasy.premierleague.com/api/bootstrap-static/";
 const FIXTURES_URL = "https://fantasy.premierleague.com/api/fixtures/";
+const PREMIER_LEAGUE_BADGE_BASE_URL = "https://resources.premierleague.com/premierleague/badges/70";
 const DEFAULT_REST_URL = "http://supervisor/core/api";
 const GAMEWEEKS = Object.freeze(Array.from({ length: 38 }, (_, index) => index + 1));
+export const FOOTBALL_POLLING_INTERVALS = Object.freeze({
+  live: 3 * 60 * 1000,
+  matchday: 15 * 60 * 1000,
+  quiet: 60 * 60 * 1000
+});
+const NEAR_KICKOFF_BEFORE_MS = 90 * 60 * 1000;
+const NEAR_KICKOFF_AFTER_MS = 3 * 60 * 60 * 1000;
 const CANONICAL_TEAM_NAMES = Object.freeze({
   TOT: "Tottenham Hotspur",
   AVL: "Aston Villa"
@@ -34,13 +43,60 @@ function compareStrings(left, right) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+function fixtureIsComplete(fixture) {
+  return fixture?.finished === true || fixture?.finished_provisional === true;
+}
+
+function fixtureKickoffTime(fixture) {
+  const timestamp = Date.parse(fixture?.kickoff_time || "");
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function utcDay(timestamp) {
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+export function footballRefreshInterval(data, now = new Date()) {
+  const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  if (!Number.isFinite(nowMs)) throw new Error("football polling clock is invalid");
+  const fixtures = Object.values(data?.gameweeks || {}).flatMap((entries) => Array.isArray(entries) ? entries : []);
+  const incomplete = fixtures.filter((fixture) => !fixtureIsComplete(fixture));
+  if (incomplete.some((fixture) => fixture.started === true || asInteger(fixture.minutes) > 0)) {
+    return FOOTBALL_POLLING_INTERVALS.live;
+  }
+  if (incomplete.some((fixture) => {
+    const kickoff = fixtureKickoffTime(fixture);
+    if (kickoff === null) return false;
+    const delta = kickoff - nowMs;
+    return delta >= -NEAR_KICKOFF_AFTER_MS && delta <= NEAR_KICKOFF_BEFORE_MS;
+  })) {
+    return FOOTBALL_POLLING_INTERVALS.live;
+  }
+  const today = utcDay(nowMs);
+  if (fixtures.some((fixture) => {
+    const kickoff = fixtureKickoffTime(fixture);
+    return kickoff !== null && utcDay(kickoff) === today;
+  })) {
+    return FOOTBALL_POLLING_INTERVALS.matchday;
+  }
+  return FOOTBALL_POLLING_INTERVALS.quiet;
+}
+
+function premierLeagueCrestUrl(value) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const badgeCode = Number(value);
+  if (!Number.isSafeInteger(badgeCode) || badgeCode <= 0) return null;
+  return `${PREMIER_LEAGUE_BADGE_BASE_URL}/t${badgeCode}.png`;
+}
+
 function normaliseTeam(team) {
-  const code = String(team.short_name || team.code || "").toUpperCase();
+  const code = String(team.short_name || "").trim().toUpperCase();
   return {
     id: asInteger(team.id),
     code,
     short_name: code,
-    name: CANONICAL_TEAM_NAMES[code] || String(team.name || code)
+    name: CANONICAL_TEAM_NAMES[code] || String(team.name || code),
+    crest_url: premierLeagueCrestUrl(team.code)
   };
 }
 
@@ -61,6 +117,7 @@ function calculateTable(teams, fixtures, spotlightCodes) {
     team_id: team.id,
     code: team.code,
     name: team.name,
+    crest_url: team.crest_url,
     played: 0,
     won: 0,
     drawn: 0,
@@ -72,7 +129,7 @@ function calculateTable(teams, fixtures, spotlightCodes) {
     spotlight: spotlightCodes.has(team.code)
   }]));
 
-  for (const fixture of fixtures.filter((entry) => entry.finished === true)) {
+  for (const fixture of fixtures.filter(fixtureIsComplete)) {
     const home = rows.get(asInteger(fixture.team_h));
     const away = rows.get(asInteger(fixture.team_a));
     if (!home || !away) continue;
@@ -137,6 +194,7 @@ export function normaliseFootballData({ bootstrap, fixtures, spotlightTeamCodes,
       kickoff_time: fixture.kickoff_time || null,
       started: fixture.started === true,
       finished: fixture.finished === true,
+      finished_provisional: fixture.finished_provisional === true,
       minutes: asInteger(fixture.minutes),
       home,
       away,
@@ -172,8 +230,15 @@ export function normaliseFootballData({ bootstrap, fixtures, spotlightTeamCodes,
   };
 }
 
-export function buildFootballStates(data, footballConfig, { dataStatus = "live" } = {}) {
+export function buildFootballStates(data, footballConfig, {
+  dataStatus = "live",
+  checkedAt = data.fetched_at,
+  refreshIntervalMs = null
+} = {}) {
   const suggestedGameweek = data.current_gameweek || data.next_gameweek || 1;
+  const nextRefreshAt = Number.isFinite(refreshIntervalMs) && checkedAt
+    ? new Date(new Date(checkedAt).getTime() + refreshIntervalMs).toISOString()
+    : null;
   const states = [{
     entity_id: footballConfig.index_entity,
     state: String(suggestedGameweek),
@@ -183,7 +248,11 @@ export function buildFootballStates(data, footballConfig, { dataStatus = "live" 
       provider: data.provider,
       season: data.season,
       data_status: dataStatus,
+      poller_status: dataStatus === "live" ? "healthy" : "degraded",
       last_updated: data.fetched_at,
+      last_checked: checkedAt,
+      next_refresh: nextRefreshAt,
+      refresh_interval_seconds: Number.isFinite(refreshIntervalMs) ? Math.round(refreshIntervalMs / 1000) : null,
       current_gameweek: data.current_gameweek,
       next_gameweek: data.next_gameweek,
       available_gameweeks: data.available_gameweeks
@@ -235,7 +304,7 @@ export async function publishHomeAssistantState(state, {
 
 async function fetchJson(url, fetchImpl, timeoutMs) {
   const response = await fetchImpl(url, {
-    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.7.3" },
+    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.7.4" },
     signal: AbortSignal.timeout(timeoutMs)
   });
   if (!response.ok) throw new Error(`football source returned HTTP ${response.status}`);
@@ -276,11 +345,13 @@ export class FootballProvider {
     this.clock = clock;
     this.timeoutMs = timeoutMs;
     this.publishedHashes = new Map();
+    this.lastIndexState = null;
   }
 
   async refresh(footballConfig) {
     let data;
     let dataStatus = "live";
+    const checkedAt = this.clock().toISOString();
     try {
       const [bootstrap, fixtures] = await Promise.all([
         fetchJson(BOOTSTRAP_URL, this.fetchImpl, this.timeoutMs),
@@ -290,7 +361,7 @@ export class FootballProvider {
         bootstrap,
         fixtures,
         spotlightTeamCodes: footballConfig.spotlight_team_codes,
-        fetchedAt: this.clock().toISOString()
+        fetchedAt: checkedAt
       });
       await writeCache(this.cachePath, data);
     } catch (sourceError) {
@@ -303,49 +374,166 @@ export class FootballProvider {
       dataStatus = "cached";
     }
 
+    const refreshAfterMs = footballRefreshInterval(data, new Date(checkedAt));
     let published = 0;
-    for (const state of buildFootballStates(data, footballConfig, { dataStatus })) {
+    const states = buildFootballStates(data, footballConfig, {
+      dataStatus,
+      checkedAt,
+      refreshIntervalMs: refreshAfterMs
+    });
+    this.lastIndexState = structuredClone(states[0]);
+    for (const state of states) {
       const serialised = JSON.stringify({ state: state.state, attributes: state.attributes });
       if (this.publishedHashes.get(state.entity_id) === serialised) continue;
       await this.publish(state);
       this.publishedHashes.set(state.entity_id, serialised);
       published += 1;
     }
-    return { data_status: dataStatus, fetched_at: data.fetched_at, published };
+    return {
+      data_status: dataStatus,
+      fetched_at: data.fetched_at,
+      checked_at: checkedAt,
+      refresh_after_ms: refreshAfterMs,
+      published
+    };
+  }
+
+  async reportFailure(footballConfig, {
+    checkedAt = this.clock().toISOString(),
+    retryAfterMs = FOOTBALL_POLLING_INTERVALS.live
+  } = {}) {
+    const boundedRetryMs = boundedRefreshDelay(retryAfterMs, FOOTBALL_POLLING_INTERVALS.live);
+    const previous = this.lastIndexState?.entity_id === footballConfig.index_entity
+      ? structuredClone(this.lastIndexState)
+      : null;
+    const state = previous || {
+      entity_id: footballConfig.index_entity,
+      state: "unknown",
+      attributes: {
+        friendly_name: "Premier League",
+        icon: "mdi:soccer",
+        provider: "fpl",
+        season: null,
+        last_updated: null,
+        current_gameweek: null,
+        next_gameweek: null,
+        available_gameweeks: GAMEWEEKS
+      }
+    };
+    state.attributes = {
+      ...state.attributes,
+      data_status: "stale",
+      poller_status: "error",
+      last_checked: checkedAt,
+      next_refresh: new Date(new Date(checkedAt).getTime() + boundedRetryMs).toISOString(),
+      refresh_interval_seconds: Math.round(boundedRetryMs / 1000)
+    };
+    const serialised = JSON.stringify({ state: state.state, attributes: state.attributes });
+    if (this.publishedHashes.get(state.entity_id) === serialised) return { published: 0 };
+    await this.publish(state);
+    this.publishedHashes.set(state.entity_id, serialised);
+    this.lastIndexState = structuredClone(state);
+    return { published: 1 };
   }
 }
 
-export function startFootballPolling({
+function isPollingConfigReady(config) {
+  const football = config?.football;
+  return config?.schema_version === CURRENT_SCHEMA_VERSION
+    && config?.features?.football === true
+    && football?.provider === "fpl"
+    && Array.isArray(football.spotlight_team_codes)
+    && football.spotlight_team_codes.length > 0
+    && typeof football.index_entity === "string"
+    && typeof football.gameweek_entity_prefix === "string"
+    && typeof football.table_entity === "string";
+}
+
+function boundedRefreshDelay(value, fallback) {
+  const requested = Number(value);
+  if (!Number.isFinite(requested)) return fallback;
+  return Math.max(60_000, Math.min(FOOTBALL_POLLING_INTERVALS.quiet, requested));
+}
+
+export function createFootballPoller({
   store,
   provider = new FootballProvider(),
-  intervalMs = Number(process.env.FOOTBALL_REFRESH_INTERVAL_MS || 15 * 60 * 1000),
-  logger = console
+  logger = console,
+  failureRetryMs = FOOTBALL_POLLING_INTERVALS.live,
+  disabledRefreshMs = FOOTBALL_POLLING_INTERVALS.quiet,
+  setTimer = globalThis.setTimeout,
+  clearTimer = globalThis.clearTimeout
 }) {
-  let stopped = false;
+  let active = false;
   let running = false;
+  let timer = null;
+  let lastResult = { status: "idle", next_refresh_ms: null };
+
+  const schedule = (delayMs) => {
+    if (!active) return;
+    if (timer !== null) clearTimer(timer);
+    timer = setTimer(() => {
+      timer = null;
+      void tick();
+    }, delayMs);
+    timer?.unref?.();
+  };
+
   const tick = async () => {
-    if (stopped || running) return;
+    if (!active) return { status: "stopped", next_refresh_ms: null };
+    if (running) return { status: "skipped", reason: "overlap", next_refresh_ms: null };
     running = true;
+    let nextRefreshMs = boundedRefreshDelay(disabledRefreshMs, FOOTBALL_POLLING_INTERVALS.quiet);
+    let footballConfig = null;
     try {
       const config = await store.readHouseholdConfig();
-      if (config?.schema_version === 5 && config?.features?.football === true) {
-        await provider.refresh(config.football);
+      if (!isPollingConfigReady(config)) {
+        lastResult = { status: "disabled", next_refresh_ms: nextRefreshMs };
+        return lastResult;
       }
+      footballConfig = config.football;
+      const result = await provider.refresh(footballConfig);
+      nextRefreshMs = boundedRefreshDelay(result?.refresh_after_ms, FOOTBALL_POLLING_INTERVALS.matchday);
+      lastResult = { status: result?.data_status === "cached" ? "degraded" : "healthy", next_refresh_ms: nextRefreshMs };
+      return lastResult;
     } catch (error) {
-      logger.error("Family Dashboard football update failed", error instanceof Error ? error.message : error);
+      nextRefreshMs = boundedRefreshDelay(failureRetryMs, FOOTBALL_POLLING_INTERVALS.live);
+      lastResult = { status: "error", error: "refresh_failed", next_refresh_ms: nextRefreshMs };
+      if (footballConfig && typeof provider.reportFailure === "function") {
+        try {
+          await provider.reportFailure(footballConfig, { retryAfterMs: nextRefreshMs });
+        } catch {
+          logger.error("Family Dashboard football status update failed", "status_publish_failed");
+        }
+      }
+      logger.error("Family Dashboard football update failed", "refresh_failed");
+      return lastResult;
     } finally {
       running = false;
+      if (active) schedule(nextRefreshMs);
     }
   };
-  const requestedInterval = Number(intervalMs);
-  const refreshInterval = Number.isFinite(requestedInterval)
-    ? Math.max(60_000, requestedInterval)
-    : 15 * 60 * 1000;
-  const timer = setInterval(tick, refreshInterval);
-  timer.unref?.();
-  void tick();
-  return () => {
-    stopped = true;
-    clearInterval(timer);
+
+  return {
+    start() {
+      if (active) return;
+      active = true;
+      schedule(0);
+    },
+    stop() {
+      active = false;
+      if (timer !== null) clearTimer(timer);
+      timer = null;
+    },
+    tick,
+    status() {
+      return { ...lastResult, active, running };
+    }
   };
+}
+
+export function startFootballPolling(options) {
+  const poller = createFootballPoller(options);
+  poller.start();
+  return () => poller.stop();
 }

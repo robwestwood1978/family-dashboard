@@ -1,6 +1,13 @@
 import Ajv2020 from "ajv/dist/2020.js";
 import { statSync } from "node:fs";
 import schema from "../config/family-dashboard.schema.json" with { type: "json" };
+import { CURRENT_SCHEMA_VERSION } from "./schema-version.mjs";
+
+if (schema.properties.schema_version.const !== CURRENT_SCHEMA_VERSION) {
+  throw new Error("family dashboard schema version constant is out of sync");
+}
+
+export { CURRENT_SCHEMA_VERSION };
 
 const validateSchema = new Ajv2020({ strict: true, allErrors: true }).compile(schema);
 const ENTITY_ID = /^[a-z_][a-z0-9_]*\.[a-z0-9_]+$/;
@@ -136,7 +143,9 @@ export function validateConfig(config) {
   requireObject(config, "config");
   rejectSecrets(config);
 
-  if (config.schema_version !== 6) fail("config.schema_version", "must equal 6");
+  if (config.schema_version !== CURRENT_SCHEMA_VERSION) {
+    fail("config.schema_version", `must equal ${CURRENT_SCHEMA_VERSION}`);
+  }
 
   requireObject(config.product, "config.product");
   requireString(config.product.title, "config.product.title");

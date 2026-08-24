@@ -2,7 +2,7 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.7.3 provides:
+Version 0.7.4 provides:
 
 - a secret-rejecting schema-v6 household contract;
 - one generated Home Assistant panel containing the bundled `custom:family-hub-card`;
@@ -10,10 +10,10 @@ Version 0.7.3 provides:
 - Home sections for Rooms, Lights, Heating, Blinds & doors and Cleaning, backed only by explicitly configured entities;
 - a two-floor 3D floorplan engine with private inert SVG assets, percentage-coordinate hotspots, cache-safe revisions and selected-room controls;
 - an installed Daylight or legacy Skylight calendar child card with Day, Week, Month and Agenda modes, persistent calendar visibility preferences and event management disabled;
-- deliberate, state-driven doorbell, driveway and garden camera presentation with bounded Eufy startup, one-at-a-time viewing, signals-only camera support, child/bedroom camera rejection, and confirmation-gated alarm and garage actions;
+- deliberate, state-driven doorbell, driveway and garden camera presentation with separate wake-up, buffering and first-frame-ready phases, a guarded slow-player reveal, fresh-idle Stop verification, bounded Eufy recovery, one-at-a-time viewing, signals-only camera support, child/bedroom camera rejection, and confirmation-gated alarm and garage actions;
 - Eufy vacuum status and bounded controls, while authenticated map images remain inside Home Assistant;
 - named ChoreOps routines and a separate per-child, read-only Google Classroom consent boundary;
-- the configured Mediocre Spotify/Sonos card and a server-side, last-good-cache Fantasy Premier League provider with Tottenham and Aston Villa spotlights;
+- the configured Mediocre Spotify/Sonos card and an adaptive, last-good-cache Fantasy Premier League provider with live freshness, provisional full-time handling, fixed-origin club crests, and Tottenham and Aston Villa spotlights;
 - fixed allow-list deployment, inert private floorplan validation and raw hash-verified rollback compatible with older installed schemas;
 - sanitised inventory that excludes camera entities, people, trackers, states, history, addresses, credentials and arbitrary attributes;
 - deterministic `1112×834` and `1024×768` tablet checks.
