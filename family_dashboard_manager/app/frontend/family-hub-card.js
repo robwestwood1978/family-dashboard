@@ -1542,13 +1542,31 @@ export class FamilyHubCard extends HTMLElementBase {
     const cameras = entry.cameras.map(presentCamera);
     const selectedId = this._cameraSession?.id || this._securityCameraId || entry.primary_camera_id || cameras[0]?.camera.id;
     const selected = cameras.find((item) => item.camera.id === selectedId) || cameras[0];
-    const cameraCards = cameras.map((item) => `
-      <article class="surface security-camera ${item.camera.id === selected?.camera.id ? "is-selected" : ""}">
-        <div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(item.camera.role))}</p><h2>${escapeHtml(item.camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${item.badgeIcon}"></ha-icon>${item.badgeLabel}</span></div>
-        ${item.signals ? `<div class="security-signals">${item.signals}</div>` : ""}
-        <button type="button" class="camera-select-action" data-camera-open="${escapeHtml(item.camera.id)}" aria-label="${item.cameraError ? "Retry live view" : `View ${escapeHtml(item.camera.name)} live`}" ${item.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="${item.isViewing ? "mdi:video" : item.isWaiting ? "mdi:shield-clock-outline" : "mdi:play-circle-outline"}"></ha-icon>${item.isViewing ? "Live" : item.isWaiting || item.isStopping ? "Please wait" : item.cameraError ? "Retry" : "View live"}</button>
-      </article>
-    `).join("");
+    const cameraCards = cameras.map((item) => {
+      const waitingForSafeStop = item.isWaiting || item.isStopping;
+      const retryAvailable = Boolean(item.cameraError && item.canOpen);
+      const actionLabel = retryAvailable
+        ? "Retry live view"
+        : waitingForSafeStop
+          ? "Camera controls unavailable while the secure stream closes"
+          : item.cameraError
+            ? "Live view unavailable"
+            : `View ${escapeHtml(item.camera.name)} live`;
+      const actionText = item.isViewing
+        ? "Live"
+        : waitingForSafeStop
+          ? "Please wait"
+          : retryAvailable
+            ? "Retry"
+            : item.cameraError ? "Unavailable" : "View live";
+      return `
+        <article class="surface security-camera ${item.camera.id === selected?.camera.id ? "is-selected" : ""}">
+          <div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(item.camera.role))}</p><h2>${escapeHtml(item.camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${item.badgeIcon}"></ha-icon>${item.badgeLabel}</span></div>
+          ${item.signals ? `<div class="security-signals">${item.signals}</div>` : ""}
+          <button type="button" class="camera-select-action" data-camera-open="${escapeHtml(item.camera.id)}" aria-label="${actionLabel}" ${item.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="${item.isViewing ? "mdi:video" : waitingForSafeStop ? "mdi:shield-clock-outline" : "mdi:play-circle-outline"}"></ha-icon>${actionText}</button>
+        </article>
+      `;
+    }).join("");
     const bufferingMessage = selected?.session?.slow
       ? "Still loading—this camera can take around 20 seconds."
       : "The secure stream is ready; waiting for the first picture.";
@@ -1560,7 +1578,7 @@ export class FamilyHubCard extends HTMLElementBase {
           ? `<div class="camera-idle camera-is-stopping" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:loading"></ha-icon></span><div><strong>Stopping live view…</strong><small>Closing the secure stream before another camera can open.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
           : selected?.isWaiting
             ? `<div class="camera-idle camera-is-waiting" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:shield-clock-outline"></ha-icon></span><div><strong>Waiting for camera…</strong><small>The previous secure stream must become idle before another camera can open.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
-          : `<div class="camera-idle security-stage-poster" ${selected?.cameraError || !selected?.cameraAvailable ? 'role="alert"' : ""}><span class="camera-stage-icon"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon></span><div><strong>${selected?.cameraError ? "Live view unavailable" : !selected?.cameraAvailable ? "Camera unavailable" : !selected?.cameraReady ? "Camera not ready" : `${escapeHtml(selected?.camera.name || "Camera")} is ready`}</strong><small>${selected?.cameraError ? escapeHtml(selected.cameraError) : selected?.cameraAvailable ? selected?.cameraReady ? "Video stays off until you choose View live." : "The camera is getting ready. Try again in a moment." : "This camera is currently unavailable."}</small></div><button type="button" data-camera-stage-open="${escapeHtml(selected?.camera.id || "")}" aria-label="Start selected live view" ${selected?.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="mdi:play"></ha-icon>${selected?.cameraError ? "Retry" : "View live"}</button></div>`;
+          : `<div class="camera-idle security-stage-poster" ${selected?.cameraError || !selected?.cameraAvailable ? 'role="alert"' : ""}><span class="camera-stage-icon"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon></span><div><strong>${selected?.cameraError ? "Live view unavailable" : !selected?.cameraAvailable ? "Camera unavailable" : !selected?.cameraReady ? "Camera not ready" : `${escapeHtml(selected?.camera.name || "Camera")} is ready`}</strong><small>${selected?.cameraError ? escapeHtml(selected.cameraError) : selected?.cameraAvailable ? selected?.cameraReady ? "Video stays off until you choose View live." : "The camera is getting ready. Try again in a moment." : "This camera is currently unavailable."}</small></div><button type="button" data-camera-stage-open="${escapeHtml(selected?.camera.id || "")}" aria-label="${selected?.cameraError && selected?.canOpen ? "Retry live view" : selected?.cameraError ? "Live view unavailable" : "Start selected live view"}" ${selected?.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="mdi:play"></ha-icon>${selected?.cameraError && selected?.canOpen ? "Retry" : selected?.cameraError ? "Unavailable" : "View live"}</button></div>`;
     return `
       <section class="security-layout">
         <div class="security-main"${confirmationGuard}>

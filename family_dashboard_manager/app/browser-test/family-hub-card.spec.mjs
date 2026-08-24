@@ -1118,8 +1118,8 @@ test("bounds a failed camera start, performs recovery Stop, and enables a friend
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="garage"]').click();
-  const garage = card.locator(".security-camera").filter({ hasText: "Garage" });
-  await expect(garage.locator(".camera-is-waiting")).toContainText("Waiting for camera", { timeout: 2_000 });
+  await expect(card.locator(".security-stage .camera-is-waiting")).toContainText("Waiting for camera", { timeout: 2_000 });
+  await expect(card.locator('button[aria-label="Retry live view"]')).toHaveCount(0);
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
@@ -1127,7 +1127,9 @@ test("bounds a failed camera start, performs recovery Stop, and enables a friend
   ]);
   await updateEntityState(card, state("camera.example_garage", "idle"));
   await expect(card.locator('[role="alert"]')).toContainText("too long to start", { timeout: 2_000 });
-  await expect(card.locator('button[aria-label="Retry live view"]')).toBeEnabled();
+  const retryButtons = card.locator('button[aria-label="Retry live view"]');
+  await expect(retryButtons).toHaveCount(2);
+  expect(await retryButtons.evaluateAll((buttons) => buttons.every((button) => !button.disabled))).toBe(true);
   expect(pageErrors).toEqual([]);
 });
 
@@ -1148,6 +1150,7 @@ test("disables every camera-open control while recovery Stop is pending", async 
 
   await expect(card.locator(".camera-is-stopping")).toContainText("Stopping");
   await expect(card.locator(".camera-is-waiting")).toHaveCount(0);
+  await expect(card.locator('button[aria-label="Retry live view"]')).toHaveCount(0);
   await expect(card.locator('button[data-camera-open="doorbell"]')).toContainText("Please wait");
   expect(await card.locator('button[data-camera-open]').evaluateAll((buttons) => {
     return buttons.length > 0 && buttons.every((button) => button.disabled);
@@ -1159,7 +1162,9 @@ test("disables every camera-open control while recovery Stop is pending", async 
 
   await settlePendingService(page, stopKey);
   await updateEntityState(card, state("camera.example_garage", "idle"));
-  await expect(card.locator('button[aria-label="Retry live view"]')).toBeEnabled();
+  const retryButtons = card.locator('button[aria-label="Retry live view"]');
+  await expect(retryButtons).toHaveCount(2);
+  expect(await retryButtons.evaluateAll((buttons) => buttons.every((button) => !button.disabled))).toBe(true);
   expect(pageErrors).toEqual([]);
 });
 
@@ -1178,11 +1183,19 @@ test("times out a missing first frame, stops safely, and exposes Retry only afte
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } }
   ]);
+  await expect.poll(() => card.evaluate((element) => element._cameraBlockedIds.size), { timeout: 2_000 }).toBe(1);
   await expect(card.locator('button[aria-label="Retry live view"]')).toHaveCount(0);
+  expect(await card.locator('button[data-camera-open]').evaluateAll((buttons) => {
+    return buttons.length > 0 && buttons.every((button) => button.disabled);
+  })).toBe(true);
   await updateEntityState(card, state("camera.example_garage", "idle"));
   await expect(card.locator('[role="alert"]')).toContainText("video took too long to load", { timeout: 2_000 });
-  await expect(card.locator('button[aria-label="Retry live view"]')).toBeEnabled();
-  await card.locator('button[aria-label="Retry live view"]').click();
+  const pickerRetry = card.locator('button[data-camera-open="garage"][aria-label="Retry live view"]');
+  const stageRetry = card.locator('button[data-camera-stage-open="garage"][aria-label="Retry live view"]');
+  await expect(pickerRetry).toBeEnabled();
+  await expect(stageRetry).toBeEnabled();
+  await expect(card.locator('button[data-camera-open="doorbell"][aria-label="Retry live view"]')).toHaveCount(0);
+  await stageRetry.click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } },
