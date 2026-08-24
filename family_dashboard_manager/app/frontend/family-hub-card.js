@@ -3172,6 +3172,8 @@ export class FamilyHubCard extends HTMLElementBase {
       .rhythm-stats strong { display:block; margin-bottom:3px; color:#fff; font-size:22px; }
       .family-people-grid { min-height:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
       .family-people-grid .family-person { padding:18px 20px; }
+      .family-people-grid .chore-list { grid-template-columns:1fr; }
+      .family-people-grid .chore-row { min-height:62px; }
       .chore-heading { display:flex; align-items:center; justify-content:space-between; margin-top:14px; }
       .chore-heading span { color:var(--hub-muted); font-size:9px; }
       .chore-list { margin:8px 0 0; padding:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; list-style:none; }
@@ -3551,6 +3553,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .chore-row small { color:#5E6B80; font-size:12px; }
       .family-sidebar .chore-list { grid-template-columns:1fr; }
       .family-sidebar .chore-row strong,.family-sidebar .chore-row small { overflow:visible; white-space:normal; text-overflow:clip; line-height:1.2; overflow-wrap:normal; }
+      .family-people-grid .chore-row strong,.family-people-grid .chore-row small { overflow:visible; white-space:normal; text-overflow:clip; line-height:1.25; overflow-wrap:anywhere; }
       .chore-row b { color:#33445C; font-size:12px; }
       .chore-row.is-done { opacity:1; border-color:#B7DEC9; background:#F1FAF5; }
       .chore-row.is-done .chore-check { background:#DFF3E8; color:#18794E; }
@@ -3699,6 +3702,7 @@ export class FamilyHubCard extends HTMLElementBase {
         .cleaning-panel { height:auto; display:flex; flex-direction:column; }
         .vacuum-map-slot,.vacuum-map-placeholder { min-height:320px; }
         .family-dashboard { height:auto; grid-template-rows:auto auto; }
+        .family-people-grid { grid-template-columns:1fr; }
         .family-sidebar { display:flex; flex-direction:column; overflow:visible; padding-right:0; scrollbar-gutter:auto; }
         .family-scroll-cue { position:static; }
         .family-rhythm { align-items:flex-start; flex-direction:column; }

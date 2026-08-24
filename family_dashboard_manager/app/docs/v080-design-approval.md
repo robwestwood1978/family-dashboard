@@ -2,7 +2,7 @@
 
 This release-candidate branch renders the real `family-hub-card` component with the repository's synthetic Home Assistant fixture and is packaged as Manager `0.8.0`. It upgrades the existing dashboard in place without creating a second app, tunnel or deployable preview service, and the approval workflow does not deploy anything to Home Assistant.
 
-The approval run freezes the household clock at 24 August 2026, then captures each important state in Chromium and WebKit at 1024 × 768, 1112 × 834, and 1440 × 900:
+The approval run freezes the household clock at 24 August 2026, then exercises every important state in Chromium and WebKit at the two supported physical-iPad landscapes, 1024 × 768 and 1112 × 834:
 
 - Today
 - Home: Rooms, Lights, four-zone Heating, exact six-zone Heating, Blinds & doors, and Cleaning
@@ -20,6 +20,8 @@ Run locally after installing Playwright Chromium and WebKit:
 npm run test:approval
 ```
 
-On a pull request, the `Validate` workflow uploads the images and their SHA-256 manifest as the `v080-design-approval-screens` artifact. The manifest gate requires all 144 nominal view/project combinations and ten representative 200% zoom captures across Chromium and WebKit before upload. The six-zone evidence proves a 3 × 2 tablet/wide grid with every zone visible together and a one-column 200%-zoom reflow. All entities, events, camera names, states, and club data used by the renderer are synthetic example data. The Rooms capture uses a structural public example floorplan rather than a private household plan or a cleaning-route map. The simulated card exercises the camera lifecycle but never connects to or opens a household camera.
+On a pull request, the `Validate` workflow uploads a curated evidence gallery and its SHA-256 manifest as the `v080-design-approval-screens` artifact. The manifest gate requires 15 core review states in both engines at both iPad sizes (60 nominal captures), plus five representative 200% zoom states in both engines at 1112 × 834 (ten zoom captures): 70 PNGs in total. States omitted from the gallery still run their complete functional assertions, quality audits and zoom-equivalent checks; only their duplicate PNG output is suppressed. The separate six-zone test also retains its programmatic 1440 × 900 wide-layout assertion without adding desktop images to the iPad approval artifact.
+
+The six-zone evidence proves a 3 × 2 tablet/wide grid with every zone visible together and a one-column 200%-zoom reflow. All entities, events, camera names, states, and club data used by the renderer are synthetic example data. The Rooms capture uses a structural public example floorplan rather than a private household plan or a cleaning-route map. The simulated card exercises the camera lifecycle but never connects to or opens a household camera.
 
 The design approval run also checks root overflow, Security-label clipping, meaningful text at 12px or larger, enabled controls at 48 × 48px or larger, painted MDI-format icons, floorplan hotspot size, every visible text run under a cross-browser 200% browser-zoom equivalent (half-sized CSS viewport with effective physical text-scale verification), nearest-ancestor clipping and text overlaps, visibly distinct zoom navigation icons with named controls, exact six-zone row/column and visibility geometry, every match for key WCAG contrast pairs on its composited backdrop, and the absence of operator-facing telemetry copy.

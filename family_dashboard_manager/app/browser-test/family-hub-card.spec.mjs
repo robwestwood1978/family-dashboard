@@ -7,6 +7,7 @@ import {
   normaliseFootballData
 } from "../src/football-provider.mjs";
 import {
+  APPROVAL_VIEW_NAMES,
   APPROVAL_ZOOM_PROJECTS,
   APPROVAL_ZOOM_VIEW_NAMES
 } from "./v080-approval-manifest.mjs";
@@ -16,7 +17,7 @@ const cardSource = await readFile(new URL("../frontend/family-hub-card.js", impo
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
 const APPROVAL_FOOTBALL_CHECKED_AT = Object.freeze({
   live: "2026-08-24T15:07:00.000Z",
-  cached: "2026-08-24T14:55:00.000Z",
+  cached: "2026-08-24T15:04:00.000Z",
   stale: "2026-08-24T15:00:00.000Z"
 });
 
@@ -2408,11 +2409,13 @@ async function auditApprovalTextZoom(page, testInfo, name) {
 async function captureApproval(page, testInfo, name, options = {}) {
   await expectApprovalQuality(page, options);
   await page.waitForTimeout(120);
-  const directory = resolve("test-results/v080-approval/screens", testInfo.project.name);
-  await mkdir(directory, { recursive: true });
-  const path = resolve(directory, `v080-${name}.png`);
-  await page.screenshot({ path, animations: "disabled" });
-  await testInfo.attach(`v0.8 ${name} · ${testInfo.project.name}`, { path, contentType: "image/png" });
+  if (APPROVAL_VIEW_NAMES.includes(name)) {
+    const directory = resolve("test-results/v080-approval/screens", testInfo.project.name);
+    await mkdir(directory, { recursive: true });
+    const path = resolve(directory, `v080-${name}.png`);
+    await page.screenshot({ path, animations: "disabled" });
+    await testInfo.attach(`v0.8 ${name} · ${testInfo.project.name}`, { path, contentType: "image/png" });
+  }
   await auditApprovalTextZoom(page, testInfo, name);
 }
 
@@ -2753,7 +2756,7 @@ test("v0.8 design approval captures live, cached, and stale football health", as
 
   await updateEntityStates(card, approvalFootballStates("cached"));
   await expect(card.locator(".football-freshness.is-cached strong")).toHaveText("Showing saved scores");
-  await expect(card.locator(".football-freshness.is-cached small")).toHaveText("Checked 15:55.");
+  await expect(card.locator(".football-freshness.is-cached small")).toHaveText("Checked 16:04.");
   await expect(card.locator(".football-health-note.is-cached")).toHaveText("Live updates are temporarily unavailable.");
   await captureApproval(page, testInfo, "football-cached");
 

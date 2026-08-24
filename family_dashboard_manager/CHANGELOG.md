@@ -7,6 +7,7 @@
 - Make all six heating zones visible together in a 3 × 2 tablet grid, approve the real location-sharing-off Family layout, and use a structural public floorplan fixture instead of a cleaning-map route.
 - Restore visible calendar navigation and source toggles, qualify five Sonos rooms with Spotify/Music Assistant browse and search, paint deterministic approval icons, and preserve long Today track titles without clipping.
 - Refresh the existing Lovelace module query to v0.8.0 so Home Assistant loads the corrected frontend instead of retaining the previous cached resource.
+- Curate the approval artifact to 70 decision-useful iPad images while retaining the complete cross-engine functional and quality assertion suite plus the 1440-pixel wide-layout check.
 - Preserve schema-v6 controlled-live validation, bounded household mappings, read-only Calendar and Classroom, one-at-a-time exterior cameras, and second confirmation for garage and alarm changes.
 
 ## 0.7.4

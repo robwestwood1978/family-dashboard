@@ -1,34 +1,23 @@
 export const APPROVAL_PROJECTS = Object.freeze([
   "approval-chromium-1024x768",
   "approval-chromium-1112x834",
-  "approval-chromium-1440x900",
   "approval-webkit-1024x768",
-  "approval-webkit-1112x834",
-  "approval-webkit-1440x900"
+  "approval-webkit-1112x834"
 ]);
 
 export const APPROVAL_VIEW_NAMES = Object.freeze([
   "today",
   "home-rooms",
-  "home-lights",
-  "home-heating",
   "home-heating-six",
-  "home-covers",
-  "home-cleaning",
   "calendar-controls",
   "family-location-off",
   "music-five-room",
   "security-idle",
-  "security-read-only",
-  "security-signals-only",
-  "security-not-ready",
-  "security-waking",
   "security-buffering",
   "security-live",
   "security-stopping",
   "security-retry",
   "security-garage-confirmation",
-  "security-alert-unavailable",
   "football-live",
   "football-cached",
   "football-stale"
@@ -41,9 +30,9 @@ export const APPROVAL_ZOOM_PROJECTS = Object.freeze([
 
 export const APPROVAL_ZOOM_VIEW_NAMES = Object.freeze([
   "today",
-  "home-rooms",
   "home-heating-six",
-  "security-alert-unavailable",
+  "family-location-off",
+  "security-garage-confirmation",
   "football-live"
 ]);
 
