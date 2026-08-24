@@ -3309,7 +3309,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .whole-home-heading > span,.heating-card-heading > span,.cover-card-heading > span { width:48px; height:48px; flex-basis:48px; border-radius:15px; background:#EAF2FF; color:#1463E8; }
       .whole-home-heading h3,.heating-card-heading h3,.cover-card-heading h3 { color:#0B1830; font-size:16px; }
       .whole-home-heading p,.heating-card-heading p,.cover-card-heading p { color:#5E6B80; font-size:12px; }
-      .whole-home-grid { grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); }
+      .whole-home-grid { grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); }
       .heating-grid { grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); }
       .heating-grid[data-zone-count="6"] { grid-template-columns:repeat(3,minmax(0,1fr)); }
       .cover-grid { grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); }
@@ -3430,11 +3430,11 @@ export class FamilyHubCard extends HTMLElementBase {
       .rhythm-stats span { min-height:74px; color:#D4E1F0; font-size:12px; }
       .rhythm-stats strong { color:#fff; }
       .family-person { border-color:#DCE4EE; background:#fff; color:#0B1830; }
-      .family-sidebar { grid-template-rows:auto auto auto; align-content:start; overflow-y:auto; overscroll-behavior:contain; padding-right:4px; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:#9FB0C5 transparent; }
-      .family-scroll-cue { position:sticky; top:0; z-index:3; min-height:38px; padding:0 8px; display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid #DCE4EE; background:rgba(244,247,250,.96); color:#33445C; font-size:12px; }
+      .family-sidebar { display:flex; flex-direction:column; align-items:stretch; overflow-y:auto; overscroll-behavior:contain; padding-right:4px; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:#9FB0C5 transparent; }
+      .family-scroll-cue { position:sticky; top:0; z-index:3; flex:0 0 auto; min-height:38px; padding:0 8px; display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid #DCE4EE; background:rgba(244,247,250,.96); color:#33445C; font-size:12px; }
       .family-scroll-cue span { display:flex; align-items:center; gap:4px; color:#5E6B80; font-weight:700; }
       .family-scroll-cue ha-icon { --mdc-icon-size:16px; color:#1463E8; }
-      .family-sidebar .family-person { min-height:max-content; overflow:visible; }
+      .family-sidebar .family-person { flex:0 0 auto; overflow:visible; }
       .family-sidebar::-webkit-scrollbar { width:7px; }
       .family-sidebar::-webkit-scrollbar-thumb { border:2px solid transparent; border-radius:999px; background:#9FB0C5; background-clip:padding-box; }
       .family-person-heading > span { border:3px solid color-mix(in srgb,var(--person-colour) 72%,#fff); background:#0B1830; color:#fff; }

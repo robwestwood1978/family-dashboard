@@ -2263,7 +2263,11 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
       expect(overwrappedRoutines).toEqual([]);
       const internallyScrollablePeople = await card.locator(".family-sidebar .family-person").evaluateAll((people) => people
         .filter((person) => person.scrollHeight > person.clientHeight + 1 || person.scrollWidth > person.clientWidth + 1)
-        .map((person) => person.querySelector(".eyebrow")?.textContent?.trim() || "Unknown person"));
+        .map((person) => ({
+          name: person.querySelector(".eyebrow")?.textContent?.trim() || "Unknown person",
+          horizontalDelta: person.scrollWidth - person.clientWidth,
+          verticalDelta: person.scrollHeight - person.clientHeight
+        })));
       expect(internallyScrollablePeople).toEqual([]);
       const familyScrollBoundary = await card.locator(".family-sidebar").evaluate((sidebar) => ({
         overflowY: getComputedStyle(sidebar).overflowY,
