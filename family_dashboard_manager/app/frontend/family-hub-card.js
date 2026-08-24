@@ -966,7 +966,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const coreIds = new Set(["today", "calendar", "rooms", "family", "entry"]);
     const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
     const renderButtons = (views) => views.map((view) => `
-      <button class="nav-button ${this._view === view.id ? "is-active" : ""}" type="button" data-view="${view.id}" aria-current="${this._view === view.id ? "page" : "false"}">
+      <button class="nav-button ${this._view === view.id ? "is-active" : ""}" type="button" data-view="${view.id}" aria-label="${escapeHtml(view.label)}" aria-current="${this._view === view.id ? "page" : "false"}">
         <ha-icon icon="${view.icon}" aria-hidden="true"></ha-icon>
         <span>${escapeHtml(view.label)}</span>
       </button>
@@ -3438,6 +3438,49 @@ export class FamilyHubCard extends HTMLElementBase {
         .security-layout { display:flex; flex-direction:column; height:auto; }
         .security-main { display:flex; flex-direction:column; }
         .security-camera-picker { grid-template-columns:1fr; }
+      }
+      @media (max-width:760px) {
+        :host { height:auto; min-height:calc(100vh - var(--family-ha-header-offset)); }
+        .hub-card { height:auto; min-height:calc(100vh - var(--family-ha-header-offset)); }
+        .shell { display:block; height:auto; }
+        .navigation { position:sticky; top:0; z-index:20; flex-direction:row; align-items:center; gap:6px; padding:7px; overflow-x:auto; overscroll-behavior-x:contain; box-shadow:0 6px 20px rgba(6,27,58,.16); }
+        .brand { flex:0 0 48px; width:48px; height:48px; margin:0; border-radius:15px; }
+        .brand span,.nav-button span,.nav-divider { display:none; }
+        .nav-items,.nav-core { flex:0 0 auto; flex-direction:row; justify-content:flex-start; gap:4px; }
+        .nav-utility { margin:0; }
+        .nav-button { flex:0 0 56px; min-height:48px; border-radius:14px; }
+        .content { display:block; padding:10px; }
+        .topbar { min-height:auto; padding:10px 2px 14px; gap:10px; flex-wrap:wrap; }
+        .page-title { flex:1 1 250px; flex-wrap:wrap; gap:5px 10px; }
+        .topbar-date { font-size:12px; }
+        .header-actions { flex:1 1 auto; justify-content:flex-end; flex-wrap:wrap; }
+        .weather-pill { min-height:48px; }
+        .topbar-time { min-width:70px; font-size:24px; }
+        .view { min-height:620px; }
+        .today-grid,.rooms-layout,.family-layout,.security-layout,.football-layout { display:flex; flex-direction:column; height:auto; }
+        .today-grid { gap:12px; }
+        .today-grid article { min-height:210px; }
+        .hero-panel.today-hero { min-height:360px; grid-template-columns:minmax(0,1fr) 110px; }
+        .today-hero h2 { font-size:38px; }
+        .home-surface { height:auto; grid-template-rows:auto auto; }
+        .home-toolbar { align-items:flex-start; flex-direction:column; }
+        .home-segments { width:100%; max-width:100%; overflow-x:auto; }
+        .whole-home-grid,.heating-grid,.cover-grid { grid-template-columns:1fr; height:auto; }
+        .cleaning-panel { height:auto; display:flex; flex-direction:column; }
+        .vacuum-map-slot,.vacuum-map-placeholder { min-height:320px; }
+        .family-dashboard { height:auto; grid-template-rows:auto auto; }
+        .family-sidebar { display:flex; flex-direction:column; }
+        .family-rhythm { align-items:flex-start; flex-direction:column; }
+        .security-main { display:flex; flex-direction:column; }
+        .security-stage { min-height:0; }
+        .security-stage-media { width:100%; height:auto; min-height:280px; place-self:auto; }
+        .security-camera { min-height:174px; }
+        .floorplan-canvas { min-height:420px; }
+        .music-experience,.media-player-panel { height:auto; min-height:620px; }
+        .football-experience { height:auto; grid-template-rows:auto auto; }
+        .football-hero { min-height:214px; }
+        .hero-match { grid-template-columns:minmax(0,1fr) 110px minmax(0,1fr); gap:12px; }
+        .football-main { min-height:620px; }
       }
       @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
     `;

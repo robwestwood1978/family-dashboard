@@ -1723,74 +1723,118 @@ async function expectContrast(card, checks) {
   }
 }
 
-async function approvalGlyphHeight(page) {
+async function approvalTextSize(page) {
   return page.locator("family-hub-card").evaluate((element) => {
-    const roots = [element.shadowRoot];
-    for (let index = 0; index < roots.length; index += 1) {
-      for (const node of roots[index].querySelectorAll("*")) {
-        if (node.shadowRoot) roots.push(node.shadowRoot);
-      }
-    }
-    for (const root of roots) {
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      for (let textNode = walker.nextNode(); textNode; textNode = walker.nextNode()) {
-        const match = textNode.data.match(/\S/);
-        if (!match) continue;
-        const parent = textNode.parentElement;
-        if (!parent || parent.closest(".sr-only,[hidden],[aria-hidden='true'],[inert]")) continue;
-        const style = getComputedStyle(parent);
-        if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
-        const range = document.createRange();
-        range.setStart(textNode, match.index);
-        range.setEnd(textNode, match.index + 1);
-        const height = range.getBoundingClientRect().height;
-        if (height > 0) return height;
-      }
-    }
-    return 0;
+    const heading = element.shadowRoot?.querySelector(".topbar h1");
+    if (!heading) return 0;
+    const style = getComputedStyle(heading);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return 0;
+    return Number.parseFloat(style.fontSize) || 0;
   });
 }
 
-async function setApprovalRootZoom(page, enabled) {
-  await page.evaluate((turnOn) => {
-    const html = document.documentElement;
-    const body = document.body;
-    const main = document.querySelector(".ha-main");
-    if (turnOn) {
-      if (window.__v080ApprovalZoomRestore) throw new Error("Approval root zoom is already active");
-      window.__v080ApprovalZoomRestore = {
+async function setApprovalBrowserZoom(page, enabled, restoreState = null) {
+  if (enabled) {
+    const viewport = page.viewportSize();
+    if (!viewport) throw new Error("Approval browser zoom requires a fixed viewport");
+    const zoomedViewport = {
+      width: Math.max(320, Math.floor(viewport.width / 2)),
+      height: Math.max(320, Math.floor(viewport.height / 2))
+    };
+    const restoreSnapshot = await page.evaluate(() => {
+      const html = document.documentElement;
+      const body = document.body;
+      const main = document.querySelector(".ha-main");
+      if (window.__v080ApprovalZoomRestore) throw new Error("Approval browser zoom is already active");
+      const restore = {
         html: html.getAttribute("style"),
         body: body.getAttribute("style"),
         main: main.getAttribute("style"),
+        marker: html.getAttribute("data-v080-browser-zoom"),
         x: window.scrollX,
-        y: window.scrollY
+        y: window.scrollY,
+        mainX: main.scrollLeft,
+        mainY: main.scrollTop
       };
-      html.style.zoom = "2";
+      window.__v080ApprovalZoomRestore = restore;
+      html.dataset.v080BrowserZoom = "200";
       html.style.overflow = "auto";
       body.style.overflow = "visible";
       main.style.overflow = "visible";
+      main.scrollTo(0, 0);
       window.scrollTo(0, 0);
-      return;
+      return restore;
+    });
+    try {
+      await page.setViewportSize(zoomedViewport);
+      await page.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(resolveFrame))));
+      const measuredViewport = await page.evaluate(() => ({
+        width: window.innerWidth,
+        height: window.innerHeight,
+        narrowLayout: matchMedia("(max-width:760px)").matches
+      }));
+      return { viewport, zoomedViewport, measuredViewport, restoreSnapshot };
+    } catch (error) {
+      await setApprovalBrowserZoom(page, false, { viewport, restoreSnapshot }).catch(() => {});
+      throw error;
     }
+  }
+  if (!restoreState) return null;
+  await page.setViewportSize(restoreState.viewport);
+  const restored = await page.evaluate(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const main = document.querySelector(".ha-main");
     const restore = window.__v080ApprovalZoomRestore;
     if (!restore) return;
     const restoreStyle = (node, value) => value === null ? node.removeAttribute("style") : node.setAttribute("style", value);
     restoreStyle(html, restore.html);
     restoreStyle(body, restore.body);
     restoreStyle(main, restore.main);
+    if (restore.marker === null) delete html.dataset.v080BrowserZoom;
+    else html.setAttribute("data-v080-browser-zoom", restore.marker);
+    main.scrollTo(restore.mainX, restore.mainY);
     window.scrollTo(restore.x, restore.y);
     delete window.__v080ApprovalZoomRestore;
-  }, enabled);
+    return {
+      html: html.getAttribute("style"),
+      body: body.getAttribute("style"),
+      main: main.getAttribute("style"),
+      marker: html.getAttribute("data-v080-browser-zoom"),
+      x: window.scrollX,
+      y: window.scrollY,
+      mainX: main.scrollLeft,
+      mainY: main.scrollTop
+    };
+  });
   await page.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(resolveFrame))));
+  const measuredViewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  return { ...restored, measuredViewport };
 }
 
 async function auditApprovalTextZoom(page, testInfo, name) {
-  const beforeGlyphHeight = await approvalGlyphHeight(page);
-  await setApprovalRootZoom(page, true);
+  const beforeTextSize = await approvalTextSize(page);
+  const zoomState = await setApprovalBrowserZoom(page, true);
   try {
-    const afterGlyphHeight = await approvalGlyphHeight(page);
-    expect(beforeGlyphHeight, `${name} must expose visible text before zoom`).toBeGreaterThan(0);
-    expect(afterGlyphHeight / beforeGlyphHeight, `${name} must exercise a real 200% root zoom`).toBeGreaterThanOrEqual(1.9);
+    const afterTextSize = await approvalTextSize(page);
+    const horizontalScale = zoomState.viewport.width / zoomState.measuredViewport.width;
+    const verticalScale = zoomState.viewport.height / zoomState.measuredViewport.height;
+    const physicalTextScale = (afterTextSize * horizontalScale) / beforeTextSize;
+    expect(beforeTextSize, `${name} must expose visible text before zoom`).toBeGreaterThan(0);
+    expect(afterTextSize, `${name} must expose visible text after zoom reflow`).toBeGreaterThan(0);
+    expect(Math.abs(zoomState.measuredViewport.width - zoomState.zoomedViewport.width), `${name} must use the requested 200% CSS viewport width`).toBeLessThanOrEqual(1);
+    expect(Math.abs(zoomState.measuredViewport.height - zoomState.zoomedViewport.height), `${name} must use the requested 200% CSS viewport height`).toBeLessThanOrEqual(1);
+    expect(Math.min(horizontalScale, verticalScale), `${name} must exercise a 200% browser-zoom-equivalent viewport`).toBeGreaterThanOrEqual(1.99);
+    expect(zoomState.measuredViewport.narrowLayout, `${name} must exercise the responsive layout used by browser zoom`).toBe(true);
+    expect(physicalTextScale, `${name} must preserve at least 200%-equivalent physical text scaling`).toBeGreaterThanOrEqual(1.9);
+    const navigationButtons = page.locator("family-hub-card").locator(".nav-button");
+    for (let index = 0; index < await navigationButtons.count(); index += 1) {
+      await expect(navigationButtons.nth(index), `${name} navigation button ${index + 1} must retain an explicit label when its visual label is hidden`).toHaveAttribute("aria-label", /\S/);
+    }
+    const exposedNavigationButtons = page.locator("family-hub-card").locator(".navigation:not([aria-hidden='true']):not([inert]) .nav-button");
+    for (let index = 0; index < await exposedNavigationButtons.count(); index += 1) {
+      await expect(exposedNavigationButtons.nth(index), `${name} exposed navigation button ${index + 1} must retain an accessible name`).toHaveAccessibleName(/\S/);
+    }
     const audit = await page.locator("family-hub-card").evaluate((element) => {
       const cardRoot = element.shadowRoot;
       const composedParent = (node) => node?.parentElement || node?.getRootNode?.()?.host || null;
@@ -1935,7 +1979,12 @@ async function auditApprovalTextZoom(page, testInfo, name) {
       await testInfo.attach(`v0.8 200% zoom ${name} · ${testInfo.project.name}`, { path, contentType: "image/png" });
     }
   } finally {
-    await setApprovalRootZoom(page, false);
+    const restored = await setApprovalBrowserZoom(page, false, zoomState);
+    expect.soft(restored.measuredViewport.width, `${name} must restore the original CSS viewport width`).toBe(zoomState.viewport.width);
+    expect.soft(restored.measuredViewport.height, `${name} must restore the original CSS viewport height`).toBe(zoomState.viewport.height);
+    for (const key of ["html", "body", "main", "marker", "x", "y", "mainX", "mainY"]) {
+      expect.soft(restored[key], `${name} must restore approval zoom state: ${key}`).toBe(zoomState.restoreSnapshot[key]);
+    }
   }
 }
 
