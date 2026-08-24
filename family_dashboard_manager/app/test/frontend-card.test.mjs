@@ -25,11 +25,45 @@ import {
   isSecureCoverActionAllowed,
   isSecureCoverActionSupported,
   normaliseChoreStatus,
-  normaliseFixtureStatus
+  normaliseFixtureStatus,
+  teamCrest,
+  todaySecurityPresentation,
+  weatherStateLabel
 } from "../frontend/family-hub-card.js";
 
 test("escapes state-derived text before rendering it into the card", () => {
   assert.equal(escapeHtml('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+});
+
+test("presents Home Assistant weather states as family-friendly labels", () => {
+  assert.equal(weatherStateLabel("partlycloudy"), "Partly cloudy");
+  assert.equal(weatherStateLabel("clear-night"), "Clear night");
+  assert.equal(weatherStateLabel("lightning-rainy"), "Lightning and rain");
+  assert.equal(weatherStateLabel("snowy-rainy"), "Snow and rain");
+  assert.equal(weatherStateLabel("windy-variant"), "Windy");
+  assert.equal(weatherStateLabel("custom-weather_state"), "Custom Weather State");
+});
+
+test("allows only the exact Premier League crest contract", () => {
+  const validCrest = "https://resources.premierleague.com/premierleague/badges/70/t6.png";
+  assert.equal(teamCrest({ crest_url: validCrest }), validCrest);
+
+  for (const crest_url of [
+    "http://resources.premierleague.com/premierleague/badges/70/t6.png",
+    "https://resources.premierleague.com.evil.example/premierleague/badges/70/t6.png",
+    "https://resources.premierleague.com/premierleague/badges/70/t0.png",
+    "https://resources.premierleague.com/premierleague/badges/70/t06.png",
+    "https://resources.premierleague.com/premierleague/badges/70/t6.svg",
+    "https://resources.premierleague.com/premierleague/badges/70/t6.png?redirect=https://evil.example",
+    "https://resources.premierleague.com/premierleague/badges/70/t6.png#alternate"
+  ]) {
+    assert.equal(teamCrest({ crest_url }), null);
+  }
+
+  for (const legacyField of ["crest", "badge_url", "logo_url"]) {
+    assert.equal(teamCrest({ [legacyField]: validCrest }), null);
+  }
+  assert.equal(teamCrest(null), null);
 });
 
 test("presents heating state from the thermostat action without inferring demand from temperatures", () => {
@@ -130,6 +164,35 @@ test("distinguishes unavailable security signals and rejects unavailable or unsu
   }), null);
 });
 
+test("derives truthful Today Security status with alert, availability, and armed-state precedence", () => {
+  const alarm = { state: "disarmed" };
+  const garage = { state: "closed" };
+  const clearSignals = [{ state: "off" }, { state: "off" }, { state: "off" }];
+
+  assert.equal(todaySecurityPresentation(alarm, garage, clearSignals).title, "Quiet at home");
+  assert.equal(todaySecurityPresentation({ state: "armed_home" }, garage, clearSignals).title, "Protected");
+  assert.equal(todaySecurityPresentation(alarm, garage, [clearSignals[0], { state: "on" }]).title, "Check home");
+  assert.equal(todaySecurityPresentation(alarm, { state: "open" }, clearSignals).title, "Check home");
+  assert.equal(todaySecurityPresentation(alarm, { state: "closing" }, clearSignals).title, "Check home");
+  assert.equal(todaySecurityPresentation({ state: "triggered" }, { state: "unavailable" }, [undefined]).title, "Check home");
+  for (const transition of ["arming", "pending", "disarming"]) {
+    const summary = todaySecurityPresentation({ state: transition }, garage, clearSignals);
+    assert.equal(summary.title, "Alarm changing");
+    assert.notEqual(summary.title, "Quiet at home");
+  }
+  assert.equal(todaySecurityPresentation({ state: "unexpected" }, garage, clearSignals).title, "Check home");
+
+  const unavailableGarage = todaySecurityPresentation(alarm, { state: "unavailable" }, clearSignals);
+  assert.equal(unavailableGarage.title, "Status unavailable");
+  assert.match(unavailableGarage.detail, /unavailable/i);
+  assert.notEqual(unavailableGarage.title, "Check home");
+  assert.equal(todaySecurityPresentation(alarm, undefined, clearSignals).title, "Status unavailable");
+
+  const unavailableSignal = todaySecurityPresentation(alarm, garage, [{ state: "off" }, undefined]);
+  assert.equal(unavailableSignal.title, "Status unavailable");
+  assert.match(unavailableSignal.detail, /unavailable/i);
+});
+
 test("presents wake-up, first-frame buffering, live, and stopping as distinct camera phases", () => {
   assert.deepEqual(cameraSessionPresentation("starting", "idle"), {
     label: "Waking camera…",
@@ -175,23 +238,8 @@ test("accepts only idle as a stopped camera state and requires fresh idle when r
   assert.equal(await card._waitForCameraStopped(entityId, 0, staleIdle), true);
 });
 
-test("allows slow-player reveal only for the exact current session token", () => {
-  const card = Object.create(FamilyHubCard.prototype);
-  const player = {};
-  const promotions = [];
-  card._cameraSession = { id: "doorbell", token: 7, phase: "buffering", slow: true };
-  card._childCards = new Map([["camera:doorbell", player]]);
-  card._markCameraFrameReady = (...args) => promotions.push(args);
-
-  card._revealCameraFrame("garage", 7);
-  card._revealCameraFrame("doorbell", 6);
-  assert.deepEqual(promotions, []);
-  card._childCards.clear();
-  card._revealCameraFrame("doorbell", 7);
-  assert.deepEqual(promotions, []);
-  card._childCards.set("camera:doorbell", player);
-  card._revealCameraFrame("doorbell", 7);
-  assert.deepEqual(promotions, [["doorbell", 7, player]]);
+test("does not expose a manual camera frame promotion path", () => {
+  assert.equal(typeof FamilyHubCard.prototype._revealCameraFrame, "undefined");
 });
 
 test("identifies every Home Assistant write action blocked by read-only mode", () => {
@@ -256,10 +304,22 @@ test("allows the configured Sonos and Music Assistant services without exposing 
     media: {
       players: [
         { entity_id: "media_player.kitchen", ma_entity_id: "media_player.kitchen_music_assistant" },
-        { entity_id: "media_player.living_room" }
+        { entity_id: "media_player.living_room" },
+        { entity_id: "media_player.child_one_room" },
+        { entity_id: "media_player.child_two_room" },
+        { entity_id: "media_player.family_room", ma_entity_id: "media_player.family_room_music_assistant" }
       ]
     }
   });
+  for (const entityId of [
+    "media_player.kitchen",
+    "media_player.living_room",
+    "media_player.child_one_room",
+    "media_player.child_two_room",
+    "media_player.family_room"
+  ]) {
+    assert.equal(isApprovedMediaServiceCall(policy, "media_player", "media_play_pause", { entity_id: entityId }), true);
+  }
   assert.equal(isApprovedMediaServiceCall(policy, "media_player", "join", {
     entity_id: "media_player.kitchen",
     group_members: ["media_player.living_room"]
@@ -424,6 +484,18 @@ test("presents football freshness without exposing provider internals", () => {
     title: "Scores up to date",
     detail: "Checking every 3 minutes."
   });
+  assert.equal(footballFreshness({ attributes: {
+    data_status: "live",
+    poller_status: "healthy",
+    last_checked: "2026-08-21T19:07:31Z",
+    refresh_interval_seconds: 180
+  } }, now).status, "live");
+  assert.equal(footballFreshness({ attributes: {
+    data_status: "live",
+    poller_status: "healthy",
+    last_checked: "2026-08-21T19:07:29Z",
+    refresh_interval_seconds: 180
+  } }, now).status, "stale");
   assert.equal(footballFreshness({ attributes: {
     data_status: "cached",
     last_checked: "2026-08-21T19:12:00Z"
