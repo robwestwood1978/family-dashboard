@@ -1971,6 +1971,22 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     expect(audit.textCount, `${name} must audit all visible text at 200%`).toBeGreaterThan(0);
     expect(audit.clipped, `${name} has text clipped by its nearest non-scrollable ancestor at 200%`).toEqual([]);
     expect(audit.overlaps, `${name} has overlapping visible text at 200%`).toEqual([]);
+    if (name.startsWith("football-")) {
+      const footballToolbar = page.locator("family-hub-card").locator(".football-toolbar");
+      const footballHeading = page.locator("family-hub-card").locator(".football-toolbar > div:first-child");
+      const firstFixtureDay = page.locator("family-hub-card").locator(".fixture-day h3").first();
+      await expect(footballToolbar, `${name} must render the football toolbar at 200%`).toBeVisible();
+      await expect(footballHeading, `${name} must render the football heading at 200%`).toBeVisible();
+      await expect(firstFixtureDay, `${name} must render the first fixture date at 200%`).toBeVisible();
+      if (name === "football-live") {
+        await expect(page.locator("family-hub-card").locator(".football-hero.is-live"), `${name} must retain its live hero at 200%`).toBeVisible();
+        await expect(page.locator("family-hub-card").locator(".fixture.is-live").first(), `${name} must retain its live fixture at 200%`).toBeVisible();
+      }
+      const [toolbarBox, fixtureDayBox] = await Promise.all([footballToolbar.boundingBox(), firstFixtureDay.boundingBox()]);
+      expect(toolbarBox, `${name} must measure the football toolbar at 200%`).not.toBeNull();
+      expect(fixtureDayBox, `${name} must measure the first fixture date at 200%`).not.toBeNull();
+      expect(toolbarBox.y + toolbarBox.height, `${name} football toolbar must not crowd the first fixture date at 200%`).toBeLessThanOrEqual(fixtureDayBox.y - 1);
+    }
     if (testInfo.project.name === APPROVAL_ZOOM_PROJECT && APPROVAL_ZOOM_VIEW_NAMES.includes(name)) {
       const directory = resolve("test-results/v080-approval/screens", testInfo.project.name);
       await mkdir(directory, { recursive: true });
@@ -2036,12 +2052,15 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
 
   for (const [view, name, selector] of [
     ["calendar", "calendar-smoke", ".calendar-view"],
-    ["family", "family-smoke", ".family-dashboard"],
+    ["family", "family-smoke", ".family-layout"],
     ["music", "music-smoke", ".media-player-panel"]
   ]) {
     await card.locator(`.nav-button[data-view="${view}"]`).click();
+    await expect(card.locator(`[data-current-view="${view}"]`)).toBeVisible();
     await expect(card.locator(selector)).toBeVisible();
     if (view === "family") {
+      await expect(card.locator(".map-panel")).toBeVisible();
+      await expect(card.locator(".family-sidebar")).toBeVisible();
       await expectContrast(card, [
         { foreground: ".chore-row small", background: ".chore-row", minimum: 4.5 },
         { foreground: ".family-facts span", background: ".family-facts span", minimum: 4.5 },

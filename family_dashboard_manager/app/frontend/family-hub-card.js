@@ -3480,7 +3480,9 @@ export class FamilyHubCard extends HTMLElementBase {
         .football-experience { height:auto; grid-template-rows:auto auto; }
         .football-hero { min-height:214px; }
         .hero-match { grid-template-columns:minmax(0,1fr) 110px minmax(0,1fr); gap:12px; }
-        .football-main { min-height:620px; }
+        .football-main { min-height:620px; grid-template-rows:auto minmax(0,1fr); }
+        .football-toolbar { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; gap:8px 10px; }
+        .football-tabs { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr; }
       }
       @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
     `;
