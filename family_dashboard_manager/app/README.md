@@ -13,7 +13,7 @@ Version 0.7.4 provides:
 - deliberate, state-driven doorbell, driveway and garden camera presentation with separate wake-up, buffering and first-frame-ready phases, a guarded slow-player reveal, fresh-idle Stop verification, bounded Eufy recovery, one-at-a-time viewing, signals-only camera support, child/bedroom camera rejection, and confirmation-gated alarm and garage actions;
 - Eufy vacuum status and bounded controls, while authenticated map images remain inside Home Assistant;
 - named ChoreOps routines and a separate per-child, read-only Google Classroom consent boundary;
-- the configured Mediocre Spotify/Sonos card and an adaptive, last-good-cache Fantasy Premier League provider with live freshness, provisional full-time handling, fixed-origin club crests, and Tottenham and Aston Villa spotlights;
+- the configured Mediocre Spotify/Sonos card and an adaptive, last-good-cache Fantasy Premier League provider with live freshness, provisional full-time handling, Home Assistant Core restart recovery at the next three-, 15- or 60-minute polling boundary, fixed-origin club crests, and Tottenham and Aston Villa spotlights;
 - fixed allow-list deployment, inert private floorplan validation and raw hash-verified rollback compatible with older installed schemas;
 - sanitised inventory that excludes camera entities, people, trackers, states, history, addresses, credentials and arbitrary attributes;
 - deterministic `1112×834` and `1024×768` tablet checks.

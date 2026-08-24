@@ -9,7 +9,8 @@ import {
   buildFootballStates,
   createFootballPoller,
   footballRefreshInterval,
-  normaliseFootballData
+  normaliseFootballData,
+  publishHomeAssistantState
 } from "../src/football-provider.mjs";
 import { CURRENT_SCHEMA_VERSION } from "../src/schema-version.mjs";
 
@@ -142,6 +143,28 @@ test("keeps the short team code and refuses unsafe badge codes", () => {
   assert.doesNotMatch(JSON.stringify(data), /untrusted|\.\.\//);
 });
 
+test("reports whether Home Assistant created or updated a REST state", async () => {
+  const state = {
+    entity_id: footballConfig.index_entity,
+    state: "1",
+    attributes: { friendly_name: "Premier League" }
+  };
+  for (const [status, created] of [[201, true], [200, false]]) {
+    let request;
+    const result = await publishHomeAssistantState(state, {
+      token: "test-supervisor-token",
+      baseUrl: "http://home-assistant.test/api",
+      fetchImpl: async (url, options) => {
+        request = { url, options };
+        return { ok: true, status };
+      }
+    });
+    assert.deepEqual(result, { created });
+    assert.equal(request.url, "http://home-assistant.test/api/states/sensor.family_dashboard_premier_league");
+    assert.equal(request.options.method, "POST");
+  }
+});
+
 test("publishes changed live data once and falls back to the last-good cache", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "family-dashboard-football-"));
   context.after(() => rm(root, { recursive: true, force: true }));
@@ -179,6 +202,41 @@ test("publishes changed live data once and falls back to the last-good cache", a
   assert.equal(cachedPublished[0].attributes.data_status, "cached");
   assert.equal(cachedPublished[0].attributes.poller_status, "degraded");
   assert.equal(cachedPublished[1].attributes.events[0].home.short_name, "TOT");
+});
+
+test("replays every football state when Home Assistant recreates the index after a Core restart", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "family-dashboard-football-ha-restart-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const checks = [
+    "2026-08-10T08:00:00.000Z",
+    "2026-08-10T09:00:00.000Z",
+    "2026-08-10T10:00:00.000Z"
+  ];
+  const homeAssistantStates = new Map();
+  const provider = new FootballProvider({
+    fetchImpl: async (url) => ({
+      ok: true,
+      json: async () => String(url).includes("bootstrap-static") ? bootstrap : fixtures
+    }),
+    publish: async (state) => {
+      const created = !homeAssistantStates.has(state.entity_id);
+      homeAssistantStates.set(state.entity_id, structuredClone(state));
+      return { created };
+    },
+    cachePath: join(root, "football-cache.json"),
+    clock: () => new Date(checks.shift())
+  });
+
+  assert.equal((await provider.refresh(footballConfig)).published, 40);
+  assert.equal(homeAssistantStates.size, 40);
+  assert.equal((await provider.refresh(footballConfig)).published, 1);
+
+  homeAssistantStates.clear();
+  const recovered = await provider.refresh(footballConfig);
+  assert.equal(recovered.published, 40);
+  assert.equal(homeAssistantStates.size, 40);
+  assert.equal(homeAssistantStates.has(`${footballConfig.gameweek_entity_prefix}38`), true);
+  assert.equal(homeAssistantStates.has(footballConfig.table_entity), true);
 });
 
 test("publishes a bounded error index immediately on a first refresh failure", async () => {

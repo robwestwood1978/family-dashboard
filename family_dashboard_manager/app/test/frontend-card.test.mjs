@@ -433,6 +433,26 @@ test("presents football freshness without exposing provider internals", () => {
     last_checked: "2026-08-21T18:00:00Z",
     refresh_interval_seconds: 180
   } }, now).status, "stale");
+  assert.deepEqual(footballFreshness({ attributes: {
+    data_status: "cached",
+    poller_status: "degraded",
+    last_checked: "2026-08-21T18:00:00Z",
+    refresh_interval_seconds: 180
+  } }, now), {
+    status: "stale",
+    title: "Scores may be delayed",
+    detail: "The last football check is older than expected."
+  });
+  assert.deepEqual(footballFreshness({ attributes: {
+    data_status: "cached",
+    poller_status: "error",
+    last_checked: "2026-08-21T19:12:00Z",
+    refresh_interval_seconds: 180
+  } }, now), {
+    status: "stale",
+    title: "Scores may be delayed",
+    detail: "The latest football check could not complete. Retrying automatically."
+  });
 });
 
 test("normalises ChoreOps state sensors into readable routine states", () => {

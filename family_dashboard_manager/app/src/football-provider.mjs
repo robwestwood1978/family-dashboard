@@ -300,6 +300,7 @@ export async function publishHomeAssistantState(state, {
     signal: AbortSignal.timeout(timeoutMs)
   });
   if (!response.ok) throw new Error(`Home Assistant state publish failed with HTTP ${response.status}`);
+  return { created: response.status === 201 };
 }
 
 async function fetchJson(url, fetchImpl, timeoutMs) {
@@ -385,7 +386,10 @@ export class FootballProvider {
     for (const state of states) {
       const serialised = JSON.stringify({ state: state.state, attributes: state.attributes });
       if (this.publishedHashes.get(state.entity_id) === serialised) continue;
-      await this.publish(state);
+      const publication = await this.publish(state);
+      if (state.entity_id === footballConfig.index_entity && publication?.created === true) {
+        this.publishedHashes.clear();
+      }
       this.publishedHashes.set(state.entity_id, serialised);
       published += 1;
     }
@@ -430,7 +434,8 @@ export class FootballProvider {
     };
     const serialised = JSON.stringify({ state: state.state, attributes: state.attributes });
     if (this.publishedHashes.get(state.entity_id) === serialised) return { published: 0 };
-    await this.publish(state);
+    const publication = await this.publish(state);
+    if (publication?.created === true) this.publishedHashes.clear();
     this.publishedHashes.set(state.entity_id, serialised);
     this.lastIndexState = structuredClone(state);
     return { published: 1 };

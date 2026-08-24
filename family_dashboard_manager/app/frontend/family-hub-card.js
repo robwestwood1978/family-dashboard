@@ -546,9 +546,11 @@ export function footballFreshness(index, now = new Date()) {
   const intervalMs = Math.max(60_000, safeNumber(attributes.refresh_interval_seconds, 900) * 1000);
   const ageMs = Number.isFinite(checkedAt) ? Math.max(0, new Date(now).getTime() - checkedAt) : Infinity;
   const cached = attributes.data_status === "cached" || attributes.poller_status === "degraded";
-  const stale = attributes.poller_status === "error" || ageMs > Math.max(20 * 60 * 1000, intervalMs * 2.5);
+  const failed = attributes.poller_status === "error";
+  const overdue = ageMs > Math.max(20 * 60 * 1000, intervalMs * 2.5);
+  if (failed) return { status: "stale", title: "Scores may be delayed", detail: "The latest football check could not complete. Retrying automatically." };
+  if (overdue) return { status: "stale", title: "Scores may be delayed", detail: "The last football check is older than expected." };
   if (cached) return { status: "cached", title: "Showing saved scores", detail: "Live updates are temporarily unavailable." };
-  if (stale) return { status: "stale", title: "Scores may be delayed", detail: "The last football check is older than expected." };
   const minutes = Math.max(1, Math.round(intervalMs / 60_000));
   return { status: "live", title: "Scores up to date", detail: `Checking every ${minutes} minute${minutes === 1 ? "" : "s"}.` };
 }

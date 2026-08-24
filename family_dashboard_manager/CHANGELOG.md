@@ -3,6 +3,7 @@
 - Restores the Premier League poller for the accepted schema-v6 household configuration; the stale schema-v5 gate had silently prevented every scheduled refresh.
 - Refreshes immediately and then adapts to the fixture state: every three minutes for live or near-kickoff matches, every 15 minutes on matchdays and hourly between matchdays, without overlapping requests.
 - Preserves the last good football data during an upstream failure, publishes bounded stale health on the existing football index without disturbing Manager deployment errors, and presents clear live, saved or delayed freshness instead of provider telemetry.
+- Recreates all transient football sensors in the same adaptive polling cycle when Home Assistant Core reports that the football index was recreated after a restart, while retaining hash-based suppression during normal operation.
 - Preserves Fantasy Premier League's provisional-finish signal so an ended match is shown as full-time and included in the provisional table rather than remaining falsely live.
 - Publishes fixed-origin official Premier League crest URLs from FPL's numeric team codes, with code badges retained as the safe fallback.
 - Separates camera wake-up, video buffering, live and stopping phases; Home Assistant's native player is mounted as soon as the secure stream exists but remains behind a calm loading surface until its first frame arrives.
