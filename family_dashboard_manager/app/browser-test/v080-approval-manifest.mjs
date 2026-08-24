@@ -1,6 +1,8 @@
 export const APPROVAL_PROJECTS = Object.freeze([
+  "approval-chromium-1024x768",
   "approval-chromium-1112x834",
   "approval-chromium-1440x900",
+  "approval-webkit-1024x768",
   "approval-webkit-1112x834",
   "approval-webkit-1440x900"
 ]);

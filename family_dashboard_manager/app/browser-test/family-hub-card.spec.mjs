@@ -239,10 +239,13 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     });
   });
   await page.route("**/api/camera_proxy/**", async (route) => {
+    const isVacuumMap = route.request().url().includes("camera.example_vacuum_map");
     await route.fulfill({
       status: 200,
       contentType: "image/svg+xml",
-      body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60"><rect width="100" height="60" fill="#eef0f4"/></svg>'
+      body: isVacuumMap
+        ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520"><rect width="800" height="520" rx="28" fill="#F1F5F9"/><path d="M92 86h250v128H211v190H92zM368 86h338v142H558v176H368z" fill="#fff" stroke="#A9B7C8" stroke-width="12" stroke-linejoin="round"/><path d="M211 214h157M558 228v176" fill="none" stroke="#A9B7C8" stroke-width="10"/><path d="M130 363c74-18 124-78 166-130 68-83 167-99 260-70 58 18 92 65 118 121-81 0-139 20-184 62-66 62-143 77-228 52-49-15-90-25-132-35z" fill="none" stroke="#1463E8" stroke-width="9" stroke-linecap="round" stroke-dasharray="7 13"/><circle cx="130" cy="363" r="22" fill="#00A887"/><circle cx="674" cy="284" r="22" fill="#1463E8"/><text x="108" y="472" fill="#5E6B80" font-family="system-ui,sans-serif" font-size="24" font-weight="700">Ground floor cleaning map</text></svg>'
+        : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60"><rect width="100" height="60" fill="#eef0f4"/></svg>'
     });
   });
   await page.route("https://resources.premierleague.com/premierleague/badges/**", async (route) => {
@@ -265,12 +268,18 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     class HaCard extends HTMLElement {}
     class HaIcon extends HTMLElement {}
     class MockChildCard extends HTMLElement {
-      set hass(value) { this._hass = value; }
+      set hass(value) {
+        this._hass = value;
+        this._renderMockState?.();
+      }
       connectedCallback() {
         if (this._eventsBound) return;
         this._eventsBound = true;
-        this.querySelector("[data-mock-service]")?.addEventListener("click", () => {
-          this._hass?.callService?.("media_player", "media_play_pause", { entity_id: "media_player.kitchen" });
+        const root = this.shadowRoot || this;
+        root.querySelector("[data-mock-service]")?.addEventListener("click", (event) => {
+          this._hass?.callService?.("media_player", "media_play_pause", {
+            entity_id: event.currentTarget.dataset.mockEntity || "media_player.kitchen"
+          });
         });
       }
     }
@@ -295,19 +304,80 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
         element.dataset.holdAction = cardConfig.hold_action?.action || "";
         element.dataset.entity = cardConfig.entity || cardConfig.entity_id || "";
         if (cardConfig.type === "custom:mediocre-multi-media-player-card") {
+          const playerEntries = Array.isArray(cardConfig.media_players) ? cardConfig.media_players : [];
+          const initialPlayer = playerEntries.find((entry) => entry.entity_id === cardConfig.entity_id) || playerEntries[0] || {};
+          const initialEntity = initialPlayer.entity_id || cardConfig.entity_id || "media_player.kitchen";
+          const initialName = initialPlayer.name || "Living room";
+          const serviceEntity = playerEntries.find((entry) => entry.entity_id === "media_player.kitchen")?.entity_id || initialEntity;
+          const playerChips = playerEntries.map((entry, index) => `<span class="mock-chip ${index === 0 ? "is-active" : ""}">${entry.name || `Room ${index + 1}`}</span>`).join("");
+          const playerRows = playerEntries.map((entry) => `<div class="mock-player-row"><span><strong>${entry.name || "Room"}</strong><small>${entry.entity_id === initialEntity ? "Playing" : "Ready to join"}</small></span><b>${entry.entity_id === initialEntity ? "Now" : "+"}</b></div>`).join("");
           element.style.height = cardConfig.height || "754px";
-          element.innerHTML = `<div class="mock-media-player" style="height:100%;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px;background:var(--mmpc-card);color:var(--mmpc-on-card);overflow:hidden">
-            <section class="mock-massive" style="min-height:0;overflow:auto;padding:8px"><strong>Kitchen</strong><div style="height:230px;margin:14px auto;background:#131827;border-radius:16px"></div><button type="button" data-mock-service>Play</button><div style="height:150px"></div></section>
-            <section class="mock-speaker-scroll" style="min-width:0;min-height:0;overflow:auto;padding:8px"><strong>Join media players</strong><div class="mock-chip-scroll" style="max-width:100%;margin-top:14px;overflow-x:auto"><div style="display:flex;width:max-content;gap:8px"><span class="mock-chip" style="display:inline-block;padding:8px 24px;border:1px solid var(--mmpc-chip-border);border-radius:999px;background:var(--mmpc-chip-background);color:var(--mmpc-chip-foreground)">Garage</span>${["Living Room", "Master Bedroom", "Playroom", "Kitchen"].map((name) => `<span style="display:inline-block;padding:8px 24px;border:1px solid var(--mmpc-chip-border);border-radius:999px;background:var(--mmpc-chip-background);color:var(--mmpc-chip-foreground)">${name}</span>`).join("")}</div></div><h3>Player focus</h3>${["Kitchen", "Living Room", "Playroom", "Master Bedroom", "Garage"].map((name) => `<div style="height:70px;margin-top:8px;padding:16px;background:rgba(255,255,255,.06)">${name}</div>`).join("")}</section>
+          const mediaRoot = element.attachShadow({ mode: "open" });
+          mediaRoot.innerHTML = `<style>
+            :host{display:block;height:100%;min-height:0;color:var(--mmpc-on-card);font-family:inherit}
+            *{box-sizing:border-box}button{font:inherit}
+            .mock-media-player{height:100%;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;padding:18px;background:var(--mmpc-card);color:var(--mmpc-on-card);overflow:hidden}
+            .mock-massive,.mock-speaker-scroll{min-width:0;min-height:0;overflow:auto;padding:8px;scrollbar-color:rgba(255,255,255,.24) transparent}
+            .mock-massive{display:flex;flex-direction:column}.mock-kicker{color:var(--mmpc-on-card-muted);font-size:12px;font-weight:750;letter-spacing:.08em;text-transform:uppercase}
+            .mock-now-playing{margin-top:10px}.mock-now-playing strong{display:block;color:var(--mmpc-on-card);font-size:22px}.mock-now-playing small{display:block;margin-top:5px;color:var(--mmpc-on-card-muted);font-size:13px}
+            .mock-artwork{min-height:190px;margin:18px 0;display:grid;place-items:center;border:1px solid rgba(255,255,255,.1);border-radius:20px;background:radial-gradient(circle at 32% 28%,rgba(143,216,203,.52),transparent 32%),linear-gradient(145deg,#1463e8,#061b3a);font-size:54px;color:#fff}
+            [data-mock-service]{min-width:48px;min-height:48px;align-self:flex-start;padding:0 18px;border:0;border-radius:14px;background:#1463e8;color:#fff;font-weight:800;cursor:pointer}
+            .mock-speaker-scroll>strong,.mock-speaker-scroll>h3{display:block;margin:0;color:var(--mmpc-on-card)}.mock-speaker-scroll>h3{margin-top:22px;font-size:15px}
+            .mock-chip-scroll{max-width:100%;margin-top:14px;overflow-x:auto}.mock-chip-row{display:flex;width:max-content;gap:8px;padding-bottom:4px}
+            .mock-chip{display:inline-block;padding:9px 18px;border:1px solid var(--mmpc-chip-border);border-radius:999px;background:var(--mmpc-chip-background);color:var(--mmpc-chip-foreground);white-space:nowrap}.mock-chip.is-active{border-color:#8fd8cb}
+            .mock-player-row,.mock-queue-row{min-height:64px;margin-top:9px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.055)}
+            .mock-player-row strong,.mock-player-row small{display:block;color:var(--mmpc-on-card)}.mock-player-row small{margin-top:3px;color:var(--mmpc-on-card-muted);font-size:12px}.mock-player-row b{color:#8fd8cb}
+            .mock-queue-row{min-height:54px;color:var(--mmpc-on-card-muted);font-size:13px}.mock-queue-row strong{color:var(--mmpc-on-card)}
+            @media(max-width:620px){.mock-media-player{grid-template-columns:1fr;overflow:auto}.mock-massive,.mock-speaker-scroll{overflow:visible}}
+          </style><div class="mock-media-player">
+            <section class="mock-massive"><span class="mock-kicker">Now playing</span><div class="mock-now-playing"><strong data-mock-state-name>${initialName}</strong><small data-mock-state-track>Dashboard test song · Test artist</small></div><div class="mock-artwork" aria-hidden="true">♫</div><button type="button" data-mock-service data-mock-entity="${serviceEntity}">Play / pause</button></section>
+            <section class="mock-speaker-scroll"><strong>Join media players</strong><div class="mock-chip-scroll"><div class="mock-chip-row">${playerChips}</div></div><h3>Player focus</h3>${playerRows}<h3>Up next</h3>${["Family favourites", "Kitchen radio", "Evening mix", "Recently played"].map((name, index) => `<div class="mock-queue-row"><span><strong>${name}</strong><br>Queue item ${index + 1}</span><b>${index + 1}</b></div>`).join("")}</section>
           </div>`;
+          element._renderMockState = () => {
+            const playerState = element._hass?.states?.[initialEntity];
+            const nameNode = mediaRoot.querySelector("[data-mock-state-name]");
+            const trackNode = mediaRoot.querySelector("[data-mock-state-track]");
+            if (nameNode) nameNode.textContent = initialPlayer.name || playerState?.attributes?.friendly_name || initialName;
+            if (trackNode) trackNode.textContent = playerState?.attributes?.media_title
+              ? `${playerState.attributes.media_title}${playerState.attributes.media_artist ? ` · ${playerState.attributes.media_artist}` : ""}`
+              : "Ready to play";
+          };
         } else if (["custom:daylight-calendar-card", "custom:skylight-calendar-card"].includes(cardConfig.type)) {
-          element.innerHTML = `<div class="mock-calendar" style="height:100%;padding:16px;background:#111a2d;color:#fff"><strong>${cardConfig.default_view}</strong><button type="button" data-mock-calendar-write>Add event</button><p>${cardConfig.entities.join(" · ")}</p></div>`;
-          element.querySelector("[data-mock-calendar-write]").addEventListener("click", () => {
+          const calendarRoot = element.attachShadow({ mode: "open" });
+          const calendarLabels = Object.values(cardConfig.calendar_names || {});
+          const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+          calendarRoot.innerHTML = `<style>
+            :host{display:block;height:100%;min-height:0;color:#0b1830;font-family:inherit}*{box-sizing:border-box}
+            .mock-calendar{height:100%;min-height:0;padding:16px;display:grid;grid-template-rows:auto minmax(0,1fr);gap:14px;background:${cardConfig.color_scheme === "light" ? "#fff" : "#111a2d"};color:${cardConfig.color_scheme === "light" ? "#0b1830" : "#fff"}}
+            .mock-calendar-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.mock-calendar-head>strong{font-size:15px}.mock-legends{display:flex;gap:12px;flex-wrap:wrap;color:#5e6b80;font-size:12px;font-weight:700}.mock-legends span{display:flex;align-items:center;gap:5px}.mock-legends i{width:8px;height:8px;border-radius:50%;background:#1463e8}.mock-legends span:nth-child(2) i{background:#e76f51}
+            .mock-week{min-height:0;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}.mock-day{min-width:0;padding:10px 8px;border:1px solid #dce4ee;border-radius:14px;background:#f8fafc}.mock-day.is-today{border-color:#8db7f8;background:#f1f6ff;box-shadow:inset 0 3px 0 #1463e8}.mock-day header{display:grid;gap:3px;padding-bottom:9px;border-bottom:1px solid #dce4ee}.mock-day header span{color:#5e6b80;font-size:12px;font-weight:800;text-transform:uppercase}.mock-day header strong{font-size:19px}.mock-event{margin-top:9px;padding:8px;border-left:4px solid #1463e8;border-radius:9px;background:#eaf2ff;color:#0b1830;line-height:1.3}.mock-event strong,.mock-event small{display:block;font-size:12px}.mock-event small{margin-top:3px;color:#5e6b80}.mock-event.is-school{border-color:#e76f51;background:#fff0ed}.mock-empty{margin-top:11px;color:#7a8799;font-size:12px}
+            [data-mock-calendar-write]{display:none}
+            @media(max-width:620px){.mock-calendar{overflow:auto}.mock-week{min-width:760px}}
+          </style><div class="mock-calendar"><div class="mock-calendar-head"><strong>${String(cardConfig.default_view || "week-compact").replace("-compact", "").replace(/^./, (letter) => letter.toUpperCase())} view</strong><div class="mock-legends">${calendarLabels.map((label) => `<span><i></i>${label}</span>`).join("")}</div><button type="button" data-mock-calendar-write aria-hidden="true" tabindex="-1">Add event</button></div><div class="mock-week">${weekdays.map((day, index) => `<section class="mock-day ${index === 0 ? "is-today" : ""}"><header><span>${day.slice(0, 3)}</span><strong>${24 + index}</strong></header>${index === 0 ? '<div class="mock-event"><strong>Family dinner</strong><small>16:08</small></div>' : index === 1 ? '<div class="mock-event is-school"><strong>School assembly</strong><small>17:08</small></div>' : '<div class="mock-empty">Nothing planned</div>'}</section>`).join("")}</div></div>`;
+          calendarRoot.querySelector("[data-mock-calendar-write]").addEventListener("click", () => {
             element._hass?.callService?.("calendar", "create_event", { entity_id: "calendar.family" });
           });
+        } else if (cardConfig.type === "map") {
+          const mapRoot = element.attachShadow({ mode: "open" });
+          const markerLabels = (cardConfig.entities || []).map((_, index) => index === 0 ? "P" : `C${index}`);
+          mapRoot.innerHTML = `<style>
+            :host{display:block;height:100%;min-height:0;font-family:inherit}*{box-sizing:border-box}.mock-map{position:relative;height:100%;min-height:260px;overflow:hidden;border-radius:14px;background:#dfece5}.mock-map::before{content:"";position:absolute;inset:-12%;background:linear-gradient(32deg,transparent 47%,rgba(255,255,255,.96) 48% 52%,transparent 53%),linear-gradient(148deg,transparent 43%,rgba(255,255,255,.82) 44% 48%,transparent 49%),radial-gradient(circle at 25% 25%,#c5dfc2 0 18%,transparent 19%),radial-gradient(circle at 78% 70%,#bed8bb 0 21%,transparent 22%),#dce8e2}.mock-water{position:absolute;inset:auto -8% 8% 30%;height:22%;border-radius:50%;background:#b9ddeb;transform:rotate(-8deg)}.mock-place{position:absolute;padding:5px 8px;border-radius:8px;background:rgba(255,255,255,.88);color:#516176;font-size:12px;font-weight:700;box-shadow:0 3px 10px rgba(11,24,48,.12)}.mock-place.home{left:42%;top:48%}.mock-place.school{right:13%;top:20%}.mock-marker{position:absolute;width:42px;height:42px;display:grid;place-items:center;border:4px solid #fff;border-radius:50% 50% 50% 8px;background:#1463e8;color:#fff;font-size:13px;font-weight:850;box-shadow:0 5px 14px rgba(11,24,48,.25);transform:rotate(-45deg)}.mock-marker span{transform:rotate(45deg)}.mock-marker:nth-of-type(1){left:34%;top:37%}.mock-marker:nth-of-type(2){left:59%;top:24%;background:#e76f51}.mock-marker:nth-of-type(3){left:68%;top:59%;background:#00a887}.mock-map-tools{position:absolute;right:12px;top:12px;display:grid;gap:7px}.mock-map-tools span{width:38px;height:38px;display:grid;place-items:center;border:1px solid #dce4ee;border-radius:12px;background:#fff;color:#33445c;font-size:18px;font-weight:800;box-shadow:0 4px 12px rgba(11,24,48,.12)}</style><div class="mock-map" aria-label="Representative Home Assistant family map">${markerLabels.map((label) => `<div class="mock-marker"><span>${label}</span></div>`).join("")}<div class="mock-water"></div><span class="mock-place home">Home</span><span class="mock-place school">School</span><div class="mock-map-tools" aria-hidden="true"><span>⌖</span><span>◎</span></div></div>`;
         } else if (cardConfig.type === "picture-entity") {
           const pictureRoot = element.attachShadow({ mode: "open" });
-          pictureRoot.innerHTML = `<div class="mock-picture" style="height:100%;min-height:140px;background:#070d1b;color:#fff;display:grid;place-items:center">${cardConfig.entity}</div>`;
+          if (cardConfig.camera_view === "live") {
+            pictureRoot.innerHTML = `<style>:host{display:block;height:100%;min-height:140px}.mock-picture{height:100%;min-height:140px;background:radial-gradient(circle at 50% 45%,#17375d,#070d1b 72%);color:#fff;display:grid;place-items:center;font:700 13px system-ui}</style><div class="mock-picture">Secure camera fixture</div>`;
+          } else {
+            pictureRoot.innerHTML = `<style>:host{display:block;height:100%;min-height:140px;font-family:inherit}.mock-picture{width:100%;height:100%;min-height:140px;display:block;object-fit:contain;background:#f1f5f9}.mock-picture-status{height:100%;min-height:140px;display:grid;place-items:center;background:#f1f5f9;color:#5e6b80;font-family:inherit;font-size:13px;font-weight:700}</style><img class="mock-picture" alt="Representative robot vacuum map"><div class="mock-picture-status" hidden>Map unavailable</div>`;
+            element._renderMockState = () => {
+              const pictureState = element._hass?.states?.[cardConfig.entity];
+              const picture = pictureRoot.querySelector(".mock-picture");
+              const status = pictureRoot.querySelector(".mock-picture-status");
+              const unavailable = !pictureState || ["unknown", "unavailable"].includes(String(pictureState.state).toLowerCase());
+              picture.hidden = unavailable;
+              status.hidden = !unavailable;
+              if (!unavailable) picture.src = pictureState.attributes?.entity_picture || `/api/camera_proxy/${encodeURIComponent(cardConfig.entity)}`;
+            };
+          }
           if (cardConfig.camera_view === "live" && window.__cameraPlayerAutoLoad !== false) {
             setTimeout(() => {
               pictureRoot.querySelector(".mock-picture")?.dispatchEvent(new Event("load", { bubbles: true, composed: true }));
@@ -458,7 +528,7 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   await card.locator('[data-calendar-mode="day"]').click();
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-default-view", "schedule");
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-rolling-days-schedule", "1");
-  await card.locator('[data-mock-calendar-write]').click();
+  await card.locator('[data-mock-calendar-write]').evaluate((button) => button.click());
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
 
   await card.locator('[data-view="today"]').first().click();
@@ -1439,6 +1509,12 @@ test("loads only allowlisted crest_url badges and renders initials for untrusted
 test("enforces read-only mode at every interactive control boundary", async ({ page }, testInfo) => {
   const previewConfig = structuredClone(config);
   previewConfig.display.read_only = true;
+  previewConfig.media.players.push(
+    { entity_id: "media_player.child_one_room", name: "Child one room", can_be_grouped: true },
+    { entity_id: "media_player.child_two_room", name: "Child two room", can_be_grouped: true },
+    { entity_id: "media_player.garage", name: "Garage", can_be_grouped: true },
+    { entity_id: "media_player.upstairs", name: "Upstairs", can_be_grouped: true }
+  );
   previewConfig.features.location_map = false;
   previewConfig.location.entities = [];
   for (const person of previewConfig.people) delete person.location_entity;
@@ -1467,7 +1543,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
 
   await card.locator('.nav-button[data-view="calendar"]').click();
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-read-only-guard", "service-boundary");
-  await card.locator('[data-mock-calendar-write]').click();
+  await card.locator('[data-mock-calendar-write]').evaluate((button) => button.click());
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
 
   await card.locator('.nav-button[data-view="entry"]').click();
@@ -1494,9 +1570,10 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-height", "100%");
   const mediaMetrics = await card.locator(".media-player-stage").evaluate((stage) => {
     const child = stage.querySelector("mock-child-card");
-    const chip = child.querySelector(".mock-chip");
-    const chipScroll = child.querySelector(".mock-chip-scroll");
-    const speakerScroll = child.querySelector(".mock-speaker-scroll");
+    const childRoot = child.shadowRoot;
+    const chip = childRoot.querySelector(".mock-chip");
+    const chipScroll = childRoot.querySelector(".mock-chip-scroll");
+    const speakerScroll = childRoot.querySelector(".mock-speaker-scroll");
     const stageRect = stage.getBoundingClientRect();
     const childRect = child.getBoundingClientRect();
     const chipStyle = getComputedStyle(chip);
@@ -1513,6 +1590,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
       speakerScrollHeight: speakerScroll.scrollHeight,
       speakerClientHeight: speakerScroll.clientHeight,
       speakerScrollTop: speakerScroll.scrollTop,
+      chipOverflow: getComputedStyle(chipScroll).overflowX,
       chipScrollWidth: chipScroll.scrollWidth,
       chipClientWidth: chipScroll.clientWidth,
       chipScrollLeft: chipScroll.scrollLeft,
@@ -1525,6 +1603,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   expect(mediaMetrics.chipBackground).toBe("rgba(38, 47, 76, 0.96)");
   expect(mediaMetrics.speakerOverflow).toBe("auto");
   expect(mediaMetrics.speakerScrollHeight).toBeGreaterThanOrEqual(mediaMetrics.speakerClientHeight);
+  expect(mediaMetrics.chipOverflow).toBe("auto");
   expect(mediaMetrics.chipScrollWidth).toBeGreaterThan(mediaMetrics.chipClientWidth);
   expect(mediaMetrics.chipScrollLeft).toBeGreaterThan(0);
   expect(mediaMetrics.childInert).toBe(false);
@@ -1556,12 +1635,21 @@ async function expectApprovalQuality(page, { hotspots = false, securityLabels = 
   const audit = await card.evaluate((element, options) => {
     const root = element.shadowRoot.querySelector(".view");
     const rootRect = root.getBoundingClientRect();
-    const typography = [...root.querySelectorAll("*")]
+    const renderedHeading = element.shadowRoot.querySelector(".topbar h1");
+    const fontFamily = getComputedStyle(renderedHeading).fontFamily;
+    const auditRoots = [root];
+    for (let index = 0; index < auditRoots.length; index += 1) {
+      for (const node of auditRoots[index].querySelectorAll("*")) {
+        if (node.shadowRoot) auditRoots.push(node.shadowRoot);
+      }
+    }
+    const queryAuditRoots = (selector) => auditRoots.flatMap((auditRoot) => [...auditRoot.querySelectorAll(selector)]);
+    const typography = queryAuditRoots("*")
       .filter((node) => node.children.length === 0 && node.textContent.trim() && node.getClientRects().length)
       .filter((node) => !node.classList.contains("sr-only"))
       .map((node) => ({ text: node.textContent.trim(), size: Number.parseFloat(getComputedStyle(node).fontSize) }))
       .filter(({ size }) => Number.isFinite(size) && size < 12);
-    const controls = [...root.querySelectorAll("button:not([disabled]),select:not([disabled])")]
+    const controls = queryAuditRoots("button:not([disabled]),select:not([disabled])")
       .filter((node) => node.getClientRects().length)
       .map((node) => {
         const bounds = node.getBoundingClientRect();
@@ -1569,7 +1657,7 @@ async function expectApprovalQuality(page, { hotspots = false, securityLabels = 
       })
       .filter(({ width, height }) => width < 48 || height < 48);
     const hotspotSizes = options.hotspots
-      ? [...root.querySelectorAll("[data-room]")].filter((node) => node.getClientRects().length).map((node) => {
+      ? queryAuditRoots("[data-room]").filter((node) => node.getClientRects().length).map((node) => {
         const bounds = node.getBoundingClientRect();
         return { room: node.getAttribute("aria-label"), width: bounds.width, height: bounds.height };
       }).filter(({ width, height }) => width < 48 || height < 48)
@@ -1597,6 +1685,19 @@ async function expectApprovalQuality(page, { hotspots = false, securityLabels = 
           scrollHeight: node.scrollHeight
         }))
         .filter(({ width, scrollWidth, height, scrollHeight }) => scrollWidth > width + 1 || scrollHeight > height + 1)
+      : [];
+    const fragmentedSecurityLabels = options.securityLabels
+      ? [...root.querySelectorAll(".security-signal strong,.security-signal small")]
+        .filter((node) => node.getClientRects().length)
+        .map((node) => {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          const lines = [...range.getClientRects()]
+            .filter((rect) => rect.width > 0.5 && rect.height > 0.5)
+            .length;
+          return { text: node.textContent.trim(), lines };
+        })
+        .filter(({ lines }) => lines > 1)
       : [];
     const securityCardBounds = options.securityLabels
       ? [...root.querySelectorAll(".security-camera")].map((node) => {
@@ -1630,12 +1731,14 @@ async function expectApprovalQuality(page, { hotspots = false, securityLabels = 
         };
       }).filter(({ outsidePicker, outsideRoot, visibleChildren }) => outsidePicker || outsideRoot || visibleChildren.length)
       : [];
-    return { typography, controls, hotspotSizes, clippedSecurityLabels, securityCardBounds };
+    return { fontFamily, typography, controls, hotspotSizes, clippedSecurityLabels, fragmentedSecurityLabels, securityCardBounds };
   }, { hotspots, securityLabels });
+  expect(audit.fontFamily).toMatch(/system-ui/i);
   expect(audit.typography).toEqual([]);
   expect(audit.controls).toEqual([]);
   expect(audit.hotspotSizes).toEqual([]);
   expect(audit.clippedSecurityLabels).toEqual([]);
+  expect(audit.fragmentedSecurityLabels).toEqual([]);
   expect(audit.securityCardBounds).toEqual([]);
 }
 
@@ -1693,8 +1796,14 @@ async function expectContrast(card, checks) {
       }
       return { colour, unresolvedBackdrop };
     };
+    const roots = [element.shadowRoot];
+    for (let index = 0; index < roots.length; index += 1) {
+      for (const node of roots[index].querySelectorAll("*")) {
+        if (node.shadowRoot) roots.push(node.shadowRoot);
+      }
+    }
     return requested.flatMap(({ foreground, background, minimum }) => {
-      const foregroundNodes = [...element.shadowRoot.querySelectorAll(foreground)].filter(isVisible);
+      const foregroundNodes = roots.flatMap((root) => [...root.querySelectorAll(foreground)]).filter(isVisible);
       if (!foregroundNodes.length) return [{ foreground, background, minimum, ratio: 0, missing: true }];
       return foregroundNodes.map((foregroundNode, index) => {
         const backgroundNode = backgroundFor(foregroundNode, background);
@@ -2019,8 +2128,11 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
   test.skip(!testInfo.project.name.startsWith("approval-"), "Rendered only by the design approval project");
   const pageErrors = await mount(page, config, {
     ...approvalFootballStates("live"),
-    "camera.example_vacuum_map": state("camera.example_vacuum_map", "unavailable"),
-    "camera.example_doorbell": state("camera.example_doorbell", "idle")
+    "camera.example_doorbell": state("camera.example_doorbell", "idle"),
+    "sensor.child_two_choreops_chore_status_get_dressed": state("sensor.child_two_choreops_chore_status_get_dressed", "pending", {
+      chore_name: "Pack school bag, PE kit and filled water bottle",
+      default_points: 4
+    })
   });
   const card = page.locator("family-hub-card");
 
@@ -2061,11 +2173,35 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
     if (view === "family") {
       await expect(card.locator(".map-panel")).toBeVisible();
       await expect(card.locator(".family-sidebar")).toBeVisible();
+      const truncatedRoutines = await card.locator(".family-sidebar .chore-row strong,.family-sidebar .chore-row small").evaluateAll((nodes) => {
+        return nodes
+          .filter((node) => node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1)
+          .map((node) => node.textContent.trim());
+      });
+      expect(truncatedRoutines).toEqual([]);
+      const overwrappedRoutines = await card.locator(".family-sidebar .chore-row strong,.family-sidebar .chore-row small").evaluateAll((nodes) => {
+        return nodes
+          .map((node) => {
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const lines = [...range.getClientRects()].filter((rect) => rect.width > 0.5 && rect.height > 0.5).length;
+            return { text: node.textContent.trim(), lines };
+          })
+          .filter(({ lines }) => lines > 2);
+      });
+      expect(overwrappedRoutines).toEqual([]);
       await expectContrast(card, [
         { foreground: ".chore-row small", background: ".chore-row", minimum: 4.5 },
         { foreground: ".family-facts span", background: ".family-facts span", minimum: 4.5 },
         { foreground: ".family-person-heading > span", background: ".family-person-heading > span", minimum: 4.5 },
         { foreground: ".chore-row b", background: ".chore-row", minimum: 4.5 }
+      ]);
+    }
+    if (view === "music") {
+      await expectContrast(card, [
+        { foreground: ".mock-media-player strong", background: ".media-player-stage", minimum: 4.5 },
+        { foreground: ".mock-media-player h3", background: ".media-player-stage", minimum: 4.5 },
+        { foreground: ".mock-media-player button", background: ".mock-media-player button", minimum: 4.5 }
       ]);
     }
     await captureApproval(page, testInfo, name);

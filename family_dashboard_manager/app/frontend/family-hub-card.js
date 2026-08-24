@@ -2642,7 +2642,7 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _styles() {
     return `
-      :host { --family-ha-header-offset:var(--header-height,56px); display:block; width:100%; min-width:0; min-height:664px; height:calc(100vh - var(--family-ha-header-offset)); margin-top:var(--family-ha-header-offset); color:var(--primary-text-color); }
+      :host { --family-ha-header-offset:var(--header-height,56px); display:block; width:100%; min-width:0; min-height:664px; height:calc(100vh - var(--family-ha-header-offset)); margin-top:var(--family-ha-header-offset); color:var(--primary-text-color); font-family:var(--family-font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif); }
       *, *::before, *::after { box-sizing:border-box; }
       button, select { font:inherit; }
       button { -webkit-tap-highlight-color:transparent; }
@@ -3337,6 +3337,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .agenda-event small,.agenda-empty { color:#5E6B80; }
 
       .family-rhythm { border:0; background:linear-gradient(125deg,#0C315D,#1463E8); }
+      .family-layout { grid-template-columns:minmax(0,1.45fr) minmax(350px,.8fr); }
       .family-rhythm .eyebrow { color:#9BE1D5; }
       .family-rhythm h2 { color:#fff; }
       .family-rhythm p:last-child { color:#D4E1F0; font-size:13px; }
@@ -3351,6 +3352,8 @@ export class FamilyHubCard extends HTMLElementBase {
       .chore-check { background:#EEF2F6; color:#33445C; }
       .chore-row strong { color:#0B1830; font-size:13px; }
       .chore-row small { color:#5E6B80; font-size:12px; }
+      .family-sidebar .chore-list { grid-template-columns:1fr; }
+      .family-sidebar .chore-row strong,.family-sidebar .chore-row small { overflow:visible; white-space:normal; text-overflow:clip; line-height:1.2; overflow-wrap:normal; }
       .chore-row b { color:#33445C; font-size:12px; }
       .chore-row.is-done { opacity:1; border-color:#B7DEC9; background:#F1FAF5; }
       .chore-row.is-done .chore-check { background:#DFF3E8; color:#18794E; }
@@ -3442,6 +3445,13 @@ export class FamilyHubCard extends HTMLElementBase {
         .security-layout { grid-template-columns:minmax(0,1fr) 274px; }
         .security-camera-picker { grid-template-columns:repeat(2,minmax(0,1fr)); }
         .security-stage-media { width:auto; max-width:100%; height:100%; place-self:stretch center; }
+      }
+      @media (min-width:901px) and (max-width:1180px) {
+        .security-camera .security-signals { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .security-signal:last-child:nth-child(odd) { grid-column:1/-1; }
+        .security-signal { grid-template-columns:1fr; grid-template-rows:auto auto; justify-items:center; gap:1px; padding:5px 4px; text-align:center; }
+        .security-signal ha-icon { display:none; }
+        .security-signal strong,.security-signal small { white-space:nowrap; overflow-wrap:normal; }
       }
       @media (max-width:900px) {
         .security-layout { display:flex; flex-direction:column; height:auto; }

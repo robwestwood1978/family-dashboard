@@ -24,8 +24,10 @@ export default defineConfig({
     trace: "retain-on-failure"
   },
   projects: [
+    approvalViewport("chromium", 1024, 768),
     approvalViewport("chromium", 1112, 834),
     approvalViewport("chromium", 1440, 900),
+    approvalViewport("webkit", 1024, 768),
     approvalViewport("webkit", 1112, 834),
     approvalViewport("webkit", 1440, 900)
   ]
