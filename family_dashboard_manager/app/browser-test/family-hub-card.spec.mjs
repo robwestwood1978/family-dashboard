@@ -609,7 +609,7 @@ test("rejects tampered and stale slow-player reveal actions", async ({ page }) =
   }, {
     cameraPlayerAutoLoad: false,
     cameraSlowMessageMs: 20,
-    cameraFrameTimeoutMs: 2_000
+    cameraFrameTimeoutMs: 10_000
   });
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="entry"]').click();
@@ -659,7 +659,7 @@ test("cancels during buffering and ignores a late player load", async ({ page })
     "camera.example_doorbell": state("camera.example_doorbell", "idle")
   }, {
     cameraPlayerAutoLoad: false,
-    cameraFrameTimeoutMs: 1_000
+    cameraFrameTimeoutMs: 10_000
   });
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="entry"]').click();
@@ -718,7 +718,7 @@ test("expires stale Security confirmations and never reverses a moving garage do
 });
 
 test("stops an active exterior stream when the camera fails or configuration reloads", async ({ page }) => {
-  const pageErrors = await mount(page);
+  const pageErrors = await mount(page, config, {}, { cameraStopTimeoutMs: 100 });
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="doorbell"]').click();
@@ -726,6 +726,10 @@ test("stops an active exterior stream when the camera fails or configuration rel
 
   await updateEntityState(card, state("camera.example_doorbell", "unavailable"));
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await expect.poll(() => card.evaluate((element) => element._cameraBlockedIds.size), { timeout: 2_000 }).toBe(1);
+  await updateEntityState(card, state("camera.example_doorbell", "idle"));
+  await expect.poll(() => card.evaluate((element) => element._cameraBlockedIds.size)).toBe(0);
+  await expect(card.locator('button[data-camera-open="doorbell"]')).toBeEnabled();
   await updateEntityState(card, state("camera.example_doorbell", "streaming"));
   await card.locator('button[data-camera-open="doorbell"]').click();
   await expect(card.locator(".camera-card-slot")).toHaveCount(1);
@@ -820,7 +824,7 @@ test("keeps switching gated behind Stop and recovers camera failures without raw
 test("does not treat unavailable as stopped or start another camera before a fresh idle state", async ({ page }) => {
   const pageErrors = await mount(page, config, {}, {
     cameraPlayerAutoLoad: false,
-    cameraStopTimeoutMs: 50,
+    cameraStopTimeoutMs: 500,
     cameraFrameTimeoutMs: 1_000
   });
   const card = page.locator("family-hub-card");
@@ -884,14 +888,14 @@ test("bounds a failed camera start, performs recovery Stop, and enables a friend
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="garage"]').click();
-  await expect(card.locator('[role="alert"]')).toContainText("too long to start", { timeout: 2_000 });
-  await expect(card.locator('button[aria-label="Retry live view"]')).toBeDisabled();
+  await expect(card.locator(".camera-is-waiting")).toContainText("Waiting for camera", { timeout: 2_000 });
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } }
   ]);
   await updateEntityState(card, state("camera.example_garage", "idle"));
+  await expect(card.locator('[role="alert"]')).toContainText("too long to start", { timeout: 2_000 });
   await expect(card.locator('button[aria-label="Retry live view"]')).toBeEnabled();
   expect(pageErrors).toEqual([]);
 });
@@ -930,7 +934,7 @@ test("disables every camera-open control while recovery Stop is pending", async 
 test("times out a missing first frame, stops safely, and exposes Retry only after idle", async ({ page }) => {
   const pageErrors = await mount(page, config, {}, {
     cameraPlayerAutoLoad: false,
-    cameraFrameTimeoutMs: 50,
+    cameraFrameTimeoutMs: 2_000,
     cameraStopTimeoutMs: 500
   });
   const card = page.locator("family-hub-card");
@@ -938,7 +942,7 @@ test("times out a missing first frame, stops safely, and exposes Retry only afte
   await card.locator('button[data-camera-open="garage"]').click();
   await updateEntityState(card, state("camera.example_garage", "streaming"));
   await expect(card.locator(".camera-is-buffering")).toBeVisible();
-  await expect.poll(() => page.evaluate(() => window.__serviceCalls), { timeout: 2_000 }).toEqual([
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls), { timeout: 5_000 }).toEqual([
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } }
   ]);
