@@ -3173,7 +3173,6 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-people-grid { min-height:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
       .family-people-grid .family-person { padding:18px 20px; }
       .family-people-grid .chore-list { grid-template-columns:1fr; }
-      .family-people-grid .chore-row { min-height:62px; }
       .chore-heading { display:flex; align-items:center; justify-content:space-between; margin-top:14px; }
       .chore-heading span { color:var(--hub-muted); font-size:9px; }
       .chore-list { margin:8px 0 0; padding:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; list-style:none; }
@@ -3697,6 +3696,10 @@ export class FamilyHubCard extends HTMLElementBase {
         .home-surface { height:auto; grid-template-rows:auto auto; }
         .home-toolbar { align-items:flex-start; flex-direction:column; }
         .home-segments { width:100%; max-width:100%; overflow-x:auto; }
+        .calendar-view { grid-template-rows:auto minmax(0,1fr); }
+        .calendar-heading { align-items:stretch; flex-direction:column; }
+        .calendar-modes { width:100%; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .calendar-modes .segment { justify-content:center; }
         .whole-home-grid,.heating-grid,.cover-grid { grid-template-columns:1fr; height:auto; }
         .heating-grid,.heating-grid[data-zone-count="6"] { grid-template-columns:1fr; }
         .cleaning-panel { height:auto; display:flex; flex-direction:column; }
