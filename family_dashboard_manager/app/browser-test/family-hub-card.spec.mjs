@@ -20,6 +20,21 @@ const APPROVAL_FOOTBALL_CHECKED_AT = Object.freeze({
   stale: "2026-08-24T12:00:00.000Z"
 });
 
+function installApprovalClock({ fixedNow }) {
+  const NativeDate = Date;
+  const installedAt = NativeDate.now();
+  const fixedAt = NativeDate.parse(fixedNow);
+  class ApprovalDate extends NativeDate {
+    constructor(...args) {
+      super(...(args.length ? args : [fixedAt]));
+    }
+    static now() {
+      return fixedAt + (NativeDate.now() - installedAt);
+    }
+  }
+  globalThis.Date = ApprovalDate;
+}
+
 function state(entityId, value, attributes = {}) {
   return {
     entity_id: entityId,
@@ -244,7 +259,6 @@ function approvalFootballStates(mode = "live") {
 async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOptions = {}) {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
-  await page.clock.setFixedTime(new Date(runtimeOptions.fixedNow || APPROVAL_NOW));
   await page.route("**/local/family-dashboard/assets/**", async (route) => {
     const filename = new URL(route.request().url()).pathname.split("/").pop();
     const approvedAssets = new Set(["example-ground.svg", "example-first.svg", "example-living-room-light.svg", "example-kitchen-light.svg"]);
@@ -287,6 +301,19 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     });
   });
   await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px 0 76px;font:20px system-ui}.ha-sidebar{position:fixed;inset:56px auto 0 0;width:52px;background:#191b20}.ha-main{position:absolute;inset:0 0 0 52px;overflow:hidden}</style><div class="ha-header">Family Hub</div><div class="ha-sidebar"></div><div class="ha-main"></div></body></html>`);
+  await page.evaluate(installApprovalClock, { fixedNow: runtimeOptions.fixedNow || APPROVAL_NOW });
+  const clockContract = await page.evaluate(async () => {
+    const displayBefore = new Date().getTime();
+    const deadlineBefore = Date.now();
+    await new Promise((resolveTimer) => setTimeout(resolveTimer, 10));
+    return {
+      displayBefore,
+      displayAfter: new Date().getTime(),
+      deadlineElapsed: Date.now() - deadlineBefore
+    };
+  });
+  expect(clockContract.displayAfter, "approval display time must remain deterministic").toBe(clockContract.displayBefore);
+  expect(clockContract.deadlineElapsed, "camera deadline time must continue advancing").toBeGreaterThan(0);
   await page.evaluate(() => {
     class HaCard extends HTMLElement {}
     class HaIcon extends HTMLElement {
