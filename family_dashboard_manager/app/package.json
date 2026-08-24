@@ -12,6 +12,7 @@
     "compile:example": "node src/cli.mjs config/example.json generated/example-dashboard.yaml",
     "preview:example": "node preview/render-preview.mjs config/example.json preview/family-dashboard-preview.svg preview/family-dashboard-rooms-preview.svg",
     "generate:example": "npm run compile:example && npm run preview:example",
+    "test:approval": "playwright test --config=playwright.approval.config.mjs && node scripts/check-approval-screens.mjs",
     "test:browser": "playwright test",
     "start": "node src/server.mjs",
     "test": "node --test"

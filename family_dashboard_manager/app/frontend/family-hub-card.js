@@ -302,6 +302,36 @@ export function binarySignalPresentation(state) {
   return { active, available: true, label: active ? "Detected" : "Clear" };
 }
 
+export function todaySecurityPresentation(alarm, garage, entrySignals = []) {
+  const alarmState = entityStateValue(alarm);
+  const garageState = entityStateValue(garage);
+  const armedStates = ["armed_home", "armed_away", "armed_night", "armed_vacation", "armed_custom_bypass"];
+  const transitionStates = ["arming", "pending", "disarming"];
+  const confirmedAlert = (isEntityAvailable(alarm) && alarmState === "triggered")
+    || (isEntityAvailable(garage) && garageState !== "closed")
+    || entrySignals.some((signal) => isEntityAvailable(signal) && isActiveBinaryState(signal));
+  const allSignalsAvailable = isEntityAvailable(alarm)
+    && isEntityAvailable(garage)
+    && entrySignals.every(isEntityAvailable);
+
+  if (confirmedAlert) {
+    return { title: "Check home", detail: "Activity or an open entry", icon: "mdi:shield-alert-outline" };
+  }
+  if (!allSignalsAvailable) {
+    return { title: "Status unavailable", detail: "Some entry signals are unavailable", icon: "mdi:shield-off-outline" };
+  }
+  if (armedStates.includes(alarmState)) {
+    return { title: "Protected", detail: "Alarm armed · no entry alerts", icon: "mdi:shield-check-outline" };
+  }
+  if (alarmState === "disarmed") {
+    return { title: "Quiet at home", detail: "Alarm off · no entry alerts", icon: "mdi:shield-home-outline" };
+  }
+  if (transitionStates.includes(alarmState)) {
+    return { title: "Alarm changing", detail: "Open Security to check progress", icon: "mdi:shield-sync-outline" };
+  }
+  return { title: "Check home", detail: "Alarm status needs attention", icon: "mdi:shield-alert-outline" };
+}
+
 export function heatingPresentation(state) {
   const climateState = String(state?.state || "").trim().toLowerCase();
   if (!isEntityAvailable(state)) {
@@ -504,6 +534,26 @@ function firstPlayingPlayer(config, states) {
     .find(({ state }) => state && ["playing", "paused"].includes(state.state));
 }
 
+function greetingForTime(value = new Date(), timeZone = "Europe/London") {
+  const hour = Number(new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    hourCycle: "h23",
+    timeZone
+  }).format(value));
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+const PREMIER_LEAGUE_CREST_URL = /^https:\/\/resources\.premierleague\.com\/premierleague\/badges\/70\/t[1-9]\d*\.png$/;
+
+export function teamCrest(team = {}) {
+  const crestUrl = team?.crest_url;
+  return typeof crestUrl === "string" && PREMIER_LEAGUE_CREST_URL.test(crestUrl)
+    ? crestUrl
+    : null;
+}
+
 function lightColour(state, fallback) {
   const rgb = state?.attributes?.rgb_color;
   if (Array.isArray(rgb) && rgb.length >= 3 && rgb.every((value) => Number.isFinite(Number(value)))) {
@@ -656,6 +706,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarMode = "week";
     this._floor = null;
     this._room = null;
+    this._securityCameraId = null;
     this._activeCameraId = null;
     this._cameraSession = null;
     this._cameraOperationToken = 0;
@@ -670,6 +721,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._cameraSlowMessageMs = CAMERA_SLOW_MESSAGE_MS;
     this._cameraError = null;
     this._pendingConfirmation = null;
+    this._confirmationReturnFocus = null;
     this._footballTab = "fixtures";
     this._gameweek = null;
     this._entityIds = new Set();
@@ -721,6 +773,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._floor = config.floorplan.default_floor;
     this._room = config.floorplan.floors
       .find((floor) => floor.id === this._floor)?.room_hotspots?.[0]?.room_id || config.rooms[0]?.id || null;
+    this._securityCameraId = config.entry?.primary_camera_id || config.entry?.cameras?.[0]?.id || null;
     this._entityIds = relevantEntityIds(config);
     this._controlPolicy = buildControlPolicy(config);
     this._signature = "";
@@ -730,6 +783,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._activeCameraId = null;
     this._cameraError = null;
     this._pendingConfirmation = null;
+    this._confirmationReturnFocus = null;
     this._musicHassSource = null;
     this._musicHass = null;
     this._childCards.clear();
@@ -843,6 +897,9 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _render() {
     if (!this._config || !this.shadowRoot) return;
+    const confirmationFocusAction = this._pendingConfirmation
+      ? this.shadowRoot.activeElement?.dataset?.confirmAction || "cancel"
+      : null;
     const theme = this._config.theme;
     this.shadowRoot.innerHTML = `
       <style>${this._styles()}</style>
@@ -869,20 +926,57 @@ export class FamilyHubCard extends HTMLElementBase {
         </div>
       </ha-card>
     `;
+    for (const crest of this.shadowRoot.querySelectorAll("img[data-team-crest]")) {
+      const showFallback = () => {
+        crest.hidden = true;
+        crest.previousElementSibling?.setAttribute("aria-hidden", "false");
+      };
+      crest.addEventListener("error", showFallback, { once: true });
+      if (crest.complete && !crest.naturalWidth) showFallback();
+    }
     this._mountChildCards();
+    this._syncConfirmationFocus(confirmationFocusAction);
+  }
+
+  _syncConfirmationFocus(confirmationFocusAction = null) {
+    if (this._pendingConfirmation) {
+      const action = ["cancel", "confirm"].includes(confirmationFocusAction)
+        ? confirmationFocusAction
+        : "cancel";
+      const control = this.shadowRoot.querySelector(`button[data-confirm-action="${action}"]`)
+        || this.shadowRoot.querySelector('button[data-confirm-action="cancel"]');
+      control?.focus();
+      return;
+    }
+    if (!this._confirmationReturnFocus) return;
+    const descriptor = this._confirmationReturnFocus;
+    this._confirmationReturnFocus = null;
+    const control = [...this.shadowRoot.querySelectorAll("button")].find((button) => (
+      button.dataset[descriptor.datasetKey] === descriptor.action
+      && button.dataset.entity === descriptor.entity
+    ));
+    const fallback = this.shadowRoot.querySelector(descriptor.datasetKey === "secureCoverAction"
+      ? ".garage-panel"
+      : ".alarm-panel");
+    if (control && !control.disabled && control.getAttribute("aria-disabled") !== "true") control.focus();
+    else fallback?.focus();
   }
 
   _renderNavigation() {
-    const buttons = this._enabledViews().map((view) => `
+    const coreIds = new Set(["today", "calendar", "rooms", "family", "entry"]);
+    const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
+    const renderButtons = (views) => views.map((view) => `
       <button class="nav-button ${this._view === view.id ? "is-active" : ""}" type="button" data-view="${view.id}" aria-current="${this._view === view.id ? "page" : "false"}">
         <ha-icon icon="${view.icon}" aria-hidden="true"></ha-icon>
         <span>${escapeHtml(view.label)}</span>
       </button>
     `).join("");
+    const views = this._enabledViews();
     return `
-      <nav class="navigation" aria-label="Family Dashboard views">
-        <button class="brand" type="button" data-view="today" aria-label="Open Today"><ha-icon icon="mdi:home-heart" aria-hidden="true"></ha-icon></button>
-        <div class="nav-items">${buttons}</div>
+      <nav class="navigation" aria-label="Family Dashboard views"${confirmationGuard}>
+        <button class="brand" type="button" data-view="today" aria-label="Open Today"><ha-icon icon="mdi:home-heart" aria-hidden="true"></ha-icon><span>Family</span></button>
+        <div class="nav-items nav-core">${renderButtons(views.filter((view) => coreIds.has(view.id)))}</div>
+        <div class="nav-items nav-utility" aria-label="More"><span class="nav-divider" aria-hidden="true"></span>${renderButtons(views.filter((view) => !coreIds.has(view.id)))}</div>
       </nav>
     `;
   }
@@ -890,30 +984,27 @@ export class FamilyHubCard extends HTMLElementBase {
   _renderHeader() {
     const now = new Date();
     const locale = this._config.product.locale;
-    const date = new Intl.DateTimeFormat(locale, {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      timeZone: this._config.product.timezone
-    }).format(now);
+    const date = new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", timeZone: this._config.product.timezone }).format(now);
+    const time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", timeZone: this._config.product.timezone }).format(now);
     const weather = this._hass?.states?.[this._config.weather.entity_id];
     const temperature = weather?.attributes?.temperature;
     const weatherText = weather
       ? `${formatTemperature(temperature)} · ${titleCase(weather.state)}`
       : "Home";
     const currentDefinition = VIEW_DEFINITIONS.find((view) => view.id === this._view) || VIEW_DEFINITIONS[0];
+    const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
     return `
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">${escapeHtml(date)}</p>
+      <header class="topbar"${confirmationGuard}>
+        <div class="page-title">
+          <p class="topbar-date">${escapeHtml(date)}</p>
           <h1>${escapeHtml(currentDefinition.label)}</h1>
         </div>
         <div class="header-actions">
-          ${this._config.display.read_only ? '<span class="preview-pill"><ha-icon icon="mdi:eye-outline" aria-hidden="true"></ha-icon>Read-only test</span>' : '<span class="preview-pill"><ha-icon icon="mdi:shield-check-outline" aria-hidden="true"></ha-icon>Controlled live</span>'}
           <button class="weather-pill" type="button" data-more-info="${escapeHtml(this._config.weather.entity_id)}" ${this._config.display.read_only ? 'aria-disabled="true"' : ""}>
             <ha-icon icon="mdi:weather-partly-cloudy" aria-hidden="true"></ha-icon>
             <span>${escapeHtml(weatherText)}</span>
           </button>
+          <time class="topbar-time">${escapeHtml(time)}</time>
         </div>
       </header>
     `;
@@ -944,39 +1035,57 @@ export class FamilyHubCard extends HTMLElementBase {
       .sort((a, b) => new Date(calendarEventStart(a)) - new Date(calendarEventStart(b)))[0];
     const playing = firstPlayingPlayer(this._config, states);
     const featuredFixtures = this._featuredFixtures();
+    const weather = states[this._config.weather.entity_id];
+    const alarm = states[this._config.entry?.alarm_entity];
+    const garage = states[this._config.entry?.garage?.cover_entity];
+    const entrySignals = (this._config.entry?.cameras || []).flatMap((camera) => [
+      camera.ringing_entity,
+      camera.person_entity,
+      camera.motion_entity
+    ]).filter(Boolean).map((entityId) => states[entityId]);
+    const securitySummary = todaySecurityPresentation(alarm, garage, entrySignals);
     return `
       <section class="today-grid" aria-label="Today at a glance">
-        <article class="surface hero-panel">
-          <p class="eyebrow">At home</p>
-          <h2>${lightsOn ? `${lightsOn} light${lightsOn === 1 ? "" : "s"} on` : "Everything looks settled"}</h2>
+        <article class="surface hero-panel today-hero">
+          <div class="today-hero-copy">
+            <p class="eyebrow">${escapeHtml(new Intl.DateTimeFormat(this._config.product.locale, { weekday: "long", timeZone: this._config.product.timezone }).format(new Date()))}</p>
+            <h2>${escapeHtml(greetingForTime(new Date(), this._config.product.timezone))}</h2>
+            <p>${nextCalendar ? `${escapeHtml(nextCalendar.summary || nextCalendar._calendar?.label || "Family event")} is next at ${escapeHtml(formatTime(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}.` : "The day is clear and the house is ready."}</p>
+          </div>
+          <div class="today-weather" aria-label="Current weather">
+            <ha-icon icon="mdi:weather-partly-cloudy" aria-hidden="true"></ha-icon>
+            <strong>${escapeHtml(formatTemperature(weather?.attributes?.temperature))}</strong>
+            <span>${escapeHtml(titleCase(weather?.state || "Home"))}</span>
+          </div>
           <div class="hero-metrics">
-            <button type="button" data-view="rooms"><strong>${formatTemperature(averageTemperature)}</strong><span>Average temperature</span></button>
-            <button type="button" data-view="rooms"><strong>${rooms.length}</strong><span>Mapped rooms</span></button>
-            <button type="button" data-view="music"><strong>${playing ? "Playing" : "Quiet"}</strong><span>${escapeHtml(playing?.player?.name || "Music")}</span></button>
+            <button type="button" data-view="rooms"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${formatTemperature(averageTemperature)}</strong><small>Home average</small></span></button>
+            <button type="button" data-view="rooms"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${lightsOn || "All off"}</strong><small>${lightsOn ? `light${lightsOn === 1 ? "" : "s"} on` : "Lights"}</small></span></button>
+            <button type="button" data-view="entry"><ha-icon icon="${securitySummary.icon}"></ha-icon><span><strong>${securitySummary.title}</strong><small>${securitySummary.detail}</small></span></button>
           </div>
         </article>
-        <article class="surface next-panel">
-          <p class="eyebrow">Up next</p>
+        <article class="surface next-panel today-next">
+          <div class="today-card-icon is-amber"><ha-icon icon="mdi:calendar-clock"></ha-icon></div>
+          <p class="eyebrow">Coming up</p>
           ${nextCalendar ? `
             <h2>${escapeHtml(nextCalendar.summary || nextCalendar._calendar?.label || "Family event")}</h2>
-            <p class="supporting">${escapeHtml(formatDay(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}${isAllDayCalendarEvent(nextCalendar) ? " · All day" : ` · ${escapeHtml(formatTime(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}`}</p>
-            <button class="text-action" type="button" data-view="calendar">Open family calendar</button>
+            <p class="supporting">${escapeHtml(formatDay(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}${isAllDayCalendarEvent(nextCalendar) ? " · All day" : ` at ${escapeHtml(formatTime(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}`}</p>
+            <button class="text-action" type="button" data-view="calendar">See the day <ha-icon icon="mdi:arrow-right"></ha-icon></button>
           ` : `
-            <h2>No upcoming event is available</h2>
-            <p class="supporting">Open Calendar to check the full family week.</p>
-            <button class="text-action" type="button" data-view="calendar">Open calendar</button>
+            <h2>No plans yet</h2>
+            <p class="supporting">The next family event will appear here.</p>
+            <button class="text-action" type="button" data-view="calendar">Open calendar <ha-icon icon="mdi:arrow-right"></ha-icon></button>
           `}
         </article>
-        <article class="surface children-panel">
-          <div class="section-heading"><div><p class="eyebrow">Children</p><h2>School & chores</h2></div><button type="button" data-view="family">View family</button></div>
+        <article class="surface children-panel today-family">
+          <div class="section-heading"><div><p class="eyebrow">Family</p><h2>Today’s rhythm</h2></div><button type="button" data-view="family">Open</button></div>
           <div class="person-summary-list">${this._renderChildSummaries()}</div>
         </article>
-        <article class="surface football-panel">
-          <div class="section-heading"><div><p class="eyebrow">Premier League</p><h2>Featured clubs</h2></div><button type="button" data-view="football">All fixtures</button></div>
-          <div class="featured-fixtures">${featuredFixtures || '<p class="empty-state">Fixtures will appear after the football provider publishes its first update.</p>'}</div>
+        <article class="surface football-panel today-football">
+          <div class="section-heading"><div><p class="eyebrow">Football</p><h2>Spurs & Villa</h2></div><button type="button" data-view="football">Open</button></div>
+          <div class="featured-fixtures">${featuredFixtures || '<p class="empty-state">No fixtures yet. We’ll show the next Spurs or Villa match here.</p>'}</div>
         </article>
-        <article class="surface now-playing-panel">
-          <p class="eyebrow">Now playing</p>
+        <article class="surface now-playing-panel today-music">
+          <div class="section-heading"><div><p class="eyebrow">Music</p><h2>${playing ? "Now playing" : "House sound"}</h2></div><button type="button" data-view="music">Open</button></div>
           ${playing ? `
             <div class="now-playing">
               <div class="artwork">${playing.state.attributes.entity_picture ? `<img src="${escapeHtml(playing.state.attributes.entity_picture)}" alt="">` : '<ha-icon icon="mdi:music-note" aria-hidden="true"></ha-icon>'}</div>
@@ -984,7 +1093,7 @@ export class FamilyHubCard extends HTMLElementBase {
               <button type="button" class="icon-action" data-media-toggle="${escapeHtml(playing.player.entity_id)}" aria-label="Play or pause" ${this._config.display.read_only ? 'disabled aria-disabled="true"' : ""}><ha-icon icon="${playing.state.state === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon></button>
             </div>
           ` : `
-            <h2>The house is quiet</h2><p class="supporting">Choose a room and start Spotify from Music.</p>
+            <div class="quiet-music"><div class="today-card-icon is-coral"><ha-icon icon="mdi:music-note"></ha-icon></div><div><strong>The house is quiet</strong><span>Choose a room in Music</span></div></div>
           `}
         </article>
       </section>
@@ -1086,7 +1195,7 @@ export class FamilyHubCard extends HTMLElementBase {
     return `
       <section class="home-surface">
         <div class="home-toolbar">
-          <div><p class="eyebrow">Whole home</p><h2>One calm place for every room</h2></div>
+          <div><p class="eyebrow">At a glance</p><h2>Your home, room by room</h2></div>
           <div class="segments home-segments" role="group" aria-label="Choose Home section">${sectionButtons}</div>
         </div>
         <div class="home-section" data-home-section-current="${escapeHtml(this._homeSection)}">${this._renderHomeSection()}</div>
@@ -1116,12 +1225,12 @@ export class FamilyHubCard extends HTMLElementBase {
       <section class="rooms-layout">
         <article class="surface floorplan-panel">
           <div class="section-heading floorplan-heading">
-            <div><p class="eyebrow">Interactive house</p><h2>${this._config.display.read_only ? "Tap a room to explore it" : "Tap a room to control it"}</h2></div>
+            <div><p class="eyebrow">${escapeHtml(floor.name)}</p><h2>${this._config.display.read_only ? "Choose a room to explore" : "Choose a room"}</h2></div>
             <div class="segments" role="group" aria-label="Choose floor">${floorButtons}</div>
           </div>
           ${this._renderFloorplan(floor, selectedRoom)}
         </article>
-        <aside class="surface room-detail">${this._renderRoomDetail(selectedRoom)}</aside>
+        <aside class="surface room-detail home-drawer" aria-label="Selected room controls">${this._renderRoomDetail(selectedRoom)}</aside>
       </section>
     `;
   }
@@ -1141,7 +1250,7 @@ export class FamilyHubCard extends HTMLElementBase {
       }).join("");
       return `<article class="surface whole-home-card"><div class="whole-home-heading"><span><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><h3>${escapeHtml(room.name)}</h3><p>${onCount} of ${room.lights.length} on</p></div></div><div class="whole-home-controls">${controls}</div></article>`;
     }).join("");
-    return `<div class="whole-home-grid">${rooms || '<p class="empty-state">No room lights are mapped.</p>'}</div>`;
+    return `<div class="whole-home-grid">${rooms || '<p class="empty-state">No room lights are available yet.</p>'}</div>`;
   }
 
   _renderAllHeating() {
@@ -1184,7 +1293,7 @@ export class FamilyHubCard extends HTMLElementBase {
         </article>
       `;
     }).join("");
-    return `<div class="heating-grid">${zones || '<p class="empty-state">No heating zones are mapped.</p>'}</div>`;
+    return `<div class="heating-grid">${zones || '<p class="empty-state">No heating controls are available yet.</p>'}</div>`;
   }
 
   _renderAllCovers() {
@@ -1209,7 +1318,7 @@ export class FamilyHubCard extends HTMLElementBase {
         <div class="cover-actions is-single"><button type="button" data-view="entry"><ha-icon icon="mdi:shield-home-outline"></ha-icon>Open Security</button></div>
       </article>
     ` : "";
-    return `<div class="cover-grid">${cards}${garageCard || (!cards ? '<p class="empty-state">No household blinds or doors are mapped.</p>' : "")}</div>`;
+    return `<div class="cover-grid">${cards}${garageCard || (!cards ? '<p class="empty-state">No blinds or door controls are available yet.</p>' : "")}</div>`;
   }
 
   _renderCleaning() {
@@ -1231,7 +1340,7 @@ export class FamilyHubCard extends HTMLElementBase {
         <div class="cleaning-hero"><span><ha-icon icon="${ICONS.vacuum}"></ha-icon></span><div><p class="eyebrow">Whole-home cleaning</p><h2>${escapeHtml(entityName(vacuum, "Robot vacuum"))}</h2><p>${escapeHtml(titleCase(vacuum?.state || "unavailable"))}</p></div></div>
         <div class="cleaning-facts">${facts}</div>
         <div class="cleaning-actions"><button type="button" data-vacuum-action="start" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:play"></ha-icon>Start</button><button type="button" data-vacuum-action="pause" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:pause"></ha-icon>Pause</button><button type="button" data-vacuum-action="return_to_base" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:home-map-marker"></ha-icon>Return home</button></div>
-        ${config.map_entity ? '<div id="vacuum-map-card-slot" class="child-card-slot vacuum-map-slot"></div>' : '<div class="vacuum-map-placeholder"><ha-icon icon="mdi:map-outline"></ha-icon><span>The cleaning map can be added when its private camera entity is mapped.</span></div>'}
+        ${config.map_entity ? '<div id="vacuum-map-card-slot" class="child-card-slot vacuum-map-slot"></div>' : '<div class="vacuum-map-placeholder"><ha-icon icon="mdi:map-outline"></ha-icon><span>The cleaning map is not available yet.</span></div>'}
       </article>
     `;
   }
@@ -1328,7 +1437,7 @@ export class FamilyHubCard extends HTMLElementBase {
       <div class="room-control-list">${climateControl}${lights}${covers}</div>
       ${scenes ? `<div class="scene-list"><p class="eyebrow">Scenes</p>${scenes}</div>` : ""}
       ${media ? `<div class="room-media"><p class="eyebrow">Music</p>${media}</div>` : ""}
-      ${!climate && !lights && !covers && !scenes && !media ? '<p class="empty-state">No controls are mapped for this room yet.</p>' : ""}
+      ${!climate && !lights && !covers && !scenes && !media ? '<p class="empty-state">No controls are available for this room yet.</p>' : ""}
     `;
   }
 
@@ -1338,6 +1447,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const alarm = states[entry.alarm_entity];
     const garage = states[entry.garage.cover_entity];
     const readOnly = this._config.display.read_only === true;
+    const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
     const garageState = entityStateValue(garage);
     const garageAction = garageState === "closed"
       ? "open_cover"
@@ -1372,7 +1482,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const cameraOperationPending = this._cameraSession?.phase === "stopping"
       || Boolean(this._cameraRecoveryPromise);
     const hasBlockedCamera = this._cameraBlockedIds.size > 0;
-    const cameraCards = entry.cameras.map((camera) => {
+    const presentCamera = (camera) => {
       const signalDefinitions = [
         [camera.ringing_entity, "Ringing", "mdi:bell-ring-outline"],
         [camera.person_entity, "Person", "mdi:account-alert-outline"],
@@ -1397,22 +1507,11 @@ export class FamilyHubCard extends HTMLElementBase {
       const cameraReady = ["idle", "preparing", "streaming"].includes(phase);
       const canOpen = cameraAvailable
         && cameraReady
+        && !session
         && !cameraOperationPending
         && !hasBlockedCamera
         && (!readOnly || phase === "streaming");
       const hasMountedStream = (isBuffering || isViewing) && phase === "streaming" && cameraAvailable;
-      const bufferingMessage = session?.slow
-        ? "Still loading—this camera can take around 20 seconds."
-        : "The secure stream is ready; waiting for the first picture.";
-      const stream = hasMountedStream
-        ? `<div class="camera-stream ${isBuffering ? "is-buffering" : "is-live"}" data-camera-phase="${isBuffering ? "buffering" : "viewing"}"><slot id="camera-card-slot-${escapeHtml(camera.id)}" name="camera-${escapeHtml(camera.id)}" class="child-card-slot camera-card-slot"></slot>${isBuffering ? `<div class="camera-stream-overlay camera-is-buffering" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Loading video…</strong><small>${escapeHtml(bufferingMessage)}</small>${session.slow ? `<button type="button" data-camera-reveal="${escapeHtml(camera.id)}" data-camera-session-token="${Number(session.token)}"><ha-icon icon="mdi:eye-outline"></ha-icon>Show video now</button>` : ""}</div></div>` : '<span class="camera-live-indicator" role="status"><span></span>Live</span>'}<button type="button" class="camera-close" data-camera-close="${escapeHtml(camera.id)}"><ha-icon icon="mdi:close"></ha-icon>${isBuffering ? "Cancel" : "Close live view"}</button></div>`
-        : isStarting
-          ? `<div class="camera-idle camera-is-starting" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Waking camera…</strong><small>Waiting for the secure stream to become available.</small></div><button type="button" data-camera-close="${escapeHtml(camera.id)}"><ha-icon icon="mdi:close"></ha-icon>Cancel</button></div>`
-          : isStopping
-            ? `<div class="camera-idle camera-is-stopping" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Stopping…</strong><small>Closing the secure stream before another camera can open.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
-            : isWaiting
-              ? `<div class="camera-idle camera-is-waiting" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:shield-clock-outline"></ha-icon><div><strong>Waiting for camera…</strong><small>The previous secure stream must become idle before another camera can open.</small></div><button type="button" data-camera-open="${escapeHtml(camera.id)}" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
-            : `<div class="camera-idle" ${cameraError ? 'role="alert"' : ""}><ha-icon icon="${camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon><div><strong>${cameraError ? "Live view unavailable" : "No automatic stream"}</strong><small>${cameraError ? escapeHtml(cameraError) : cameraAvailable ? !cameraReady ? "The camera is not ready to start a live view." : readOnly && phase !== "streaming" ? "Live video is not already running in read-only mode." : "Live video starts only when you ask for it." : camera.entity_id ? cameraEntityAvailable && !commandPairValid ? "The mapped camera start and stop controls do not form a safe pair." : "The mapped camera is currently unavailable." : "Safe signals are mapped; the private camera entity still needs confirming."}</small></div><button type="button" data-camera-open="${escapeHtml(camera.id)}" aria-label="${cameraError ? "Retry live view" : "View live"}" ${canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="mdi:play-circle-outline"></ha-icon>${cameraError ? "Retry" : "View live"}</button></div>`;
       const cameraStatus = isWaiting
         ? { label: "Waiting…", icon: "mdi:shield-clock-outline" }
         : session
@@ -1422,23 +1521,67 @@ export class FamilyHubCard extends HTMLElementBase {
         || (camera.entity_id ? cameraEntityAvailable && !commandPairValid ? "Controls unavailable" : "Camera unavailable" : "Signals only");
       const badgeIcon = cameraStatus?.icon
         || (camera.entity_id ? "mdi:camera-off-outline" : "mdi:shield-check-outline");
-      return `<article class="surface security-camera"><div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(camera.role))}</p><h2>${escapeHtml(camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${badgeIcon}"></ha-icon>${badgeLabel}</span></div>${signals ? `<div class="security-signals">${signals}</div>` : ""}${stream}</article>`;
-    }).join("");
+      return {
+        camera,
+        signals,
+        cameraAvailable,
+        cameraReady,
+        canOpen,
+        hasMountedStream,
+        isStarting,
+        isBuffering,
+        isViewing,
+        isStopping,
+        isWaiting,
+        cameraError,
+        badgeLabel,
+        badgeIcon,
+        session
+      };
+    };
+    const cameras = entry.cameras.map(presentCamera);
+    const selectedId = this._cameraSession?.id || this._securityCameraId || entry.primary_camera_id || cameras[0]?.camera.id;
+    const selected = cameras.find((item) => item.camera.id === selectedId) || cameras[0];
+    const cameraCards = cameras.map((item) => `
+      <article class="surface security-camera ${item.camera.id === selected?.camera.id ? "is-selected" : ""}">
+        <div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(item.camera.role))}</p><h2>${escapeHtml(item.camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${item.badgeIcon}"></ha-icon>${item.badgeLabel}</span></div>
+        ${item.signals ? `<div class="security-signals">${item.signals}</div>` : ""}
+        <button type="button" class="camera-select-action" data-camera-open="${escapeHtml(item.camera.id)}" aria-label="${item.cameraError ? "Retry live view" : `View ${escapeHtml(item.camera.name)} live`}" ${item.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="${item.isViewing ? "mdi:video" : item.isWaiting ? "mdi:shield-clock-outline" : "mdi:play-circle-outline"}"></ha-icon>${item.isViewing ? "Live" : item.isWaiting || item.isStopping ? "Please wait" : item.cameraError ? "Retry" : "View live"}</button>
+      </article>
+    `).join("");
+    const bufferingMessage = selected?.session?.slow
+      ? "Still loading—this camera can take around 20 seconds."
+      : "The secure stream is ready; waiting for the first picture.";
+    const selectedStream = selected?.hasMountedStream
+      ? `<div class="camera-stream ${selected.isBuffering ? "is-buffering" : "is-live"}" data-camera-phase="${selected.isBuffering ? "buffering" : "viewing"}"><slot id="camera-card-slot-${escapeHtml(selected.camera.id)}" name="camera-${escapeHtml(selected.camera.id)}" class="child-card-slot camera-card-slot"></slot>${selected.isBuffering ? `<div class="camera-stream-overlay camera-is-buffering" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Loading video…</strong><small>${escapeHtml(bufferingMessage)}</small>${selected.session.slow ? `<button type="button" data-camera-reveal="${escapeHtml(selected.camera.id)}" data-camera-session-token="${Number(selected.session.token)}"><ha-icon icon="mdi:eye-outline"></ha-icon>Show video now</button>` : ""}</div></div>` : '<span class="camera-live-indicator" role="status"><span></span>Live</span>'}<button type="button" class="camera-close" data-camera-close="${escapeHtml(selected.camera.id)}"><ha-icon icon="mdi:close"></ha-icon>${selected.isBuffering ? "Cancel" : "Close live view"}</button></div>`
+      : selected?.isStarting
+        ? `<div class="camera-idle camera-is-starting" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:loading"></ha-icon></span><div><strong>Waking camera…</strong><small>${escapeHtml(selected.camera.name)} secure video will appear here when it is ready.</small></div><button type="button" data-camera-close="${escapeHtml(selected.camera.id)}"><ha-icon icon="mdi:close"></ha-icon>Cancel</button></div>`
+        : selected?.isStopping
+          ? `<div class="camera-idle camera-is-stopping" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:loading"></ha-icon></span><div><strong>Stopping live view…</strong><small>Closing the secure stream before another camera can open.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
+          : selected?.isWaiting
+            ? `<div class="camera-idle camera-is-waiting" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:shield-clock-outline"></ha-icon></span><div><strong>Waiting for camera…</strong><small>The previous secure stream must become idle before another camera can open.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
+          : `<div class="camera-idle security-stage-poster" ${selected?.cameraError || !selected?.cameraAvailable ? 'role="alert"' : ""}><span class="camera-stage-icon"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon></span><div><strong>${selected?.cameraError ? "Live view unavailable" : !selected?.cameraAvailable ? "Camera unavailable" : !selected?.cameraReady ? "Camera not ready" : `${escapeHtml(selected?.camera.name || "Camera")} is ready`}</strong><small>${selected?.cameraError ? escapeHtml(selected.cameraError) : selected?.cameraAvailable ? selected?.cameraReady ? "Video stays off until you choose View live." : "The camera is getting ready. Try again in a moment." : "This camera is currently unavailable."}</small></div><button type="button" data-camera-stage-open="${escapeHtml(selected?.camera.id || "")}" aria-label="Start selected live view" ${selected?.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="mdi:play"></ha-icon>${selected?.cameraError ? "Retry" : "View live"}</button></div>`;
     return `
       <section class="security-layout">
-        <div class="security-main">${cameraCards}</div>
-        <aside class="security-sidebar">
-          <article class="surface alarm-panel">
+        <div class="security-main"${confirmationGuard}>
+          <article class="security-stage" aria-label="Selected secure camera">
+            <div class="security-stage-heading"><div><p class="eyebrow">Live view</p><h2>${escapeHtml(selected?.camera.name || "Entry camera")}</h2></div><span class="stage-privacy"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Private · on demand</span></div>
+            <div class="security-stage-media">${selectedStream}</div>
+          </article>
+          <div class="security-camera-picker" aria-label="Choose an entry camera">${cameraCards}</div>
+        </div>
+        <aside class="security-sidebar"${confirmationGuard}>
+          <article class="surface alarm-panel" tabindex="-1" aria-label="Home alarm controls">
             <div class="security-card-heading"><div><p class="eyebrow">Home alarm</p><h2>${escapeHtml(titleCase(alarm?.state || "unavailable"))}</h2></div><span class="alarm-state ${String(alarm?.state || "").includes("triggered") ? "is-alert" : ""} ${isEntityAvailable(alarm) ? "" : "is-unavailable"}"><ha-icon icon="${ICONS.security}"></ha-icon></span></div>
-            <p>Every alarm change asks for a second confirmation. A Home Assistant PIN remains authoritative where configured.</p>
+            <p>You’ll confirm before the alarm changes.</p>
             <div class="alarm-actions"><button type="button" data-alarm-action="alarm_arm_home" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Arm home"${alarmDisabled("alarm_arm_home")}><ha-icon icon="mdi:shield-home-outline"></ha-icon>Home</button><button type="button" data-alarm-action="alarm_arm_away" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Arm away"${alarmDisabled("alarm_arm_away")}><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Away</button><button type="button" class="is-danger" data-alarm-action="alarm_disarm" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Disarm alarm"${alarmDisabled("alarm_disarm")}><ha-icon icon="mdi:shield-off-outline"></ha-icon>Disarm</button></div>
           </article>
-          <article class="surface garage-panel">
+          <article class="surface garage-panel" tabindex="-1" aria-label="Garage controls">
             <div class="garage-heading"><span><ha-icon icon="mdi:garage-variant"></ha-icon></span><div><p class="eyebrow">Garage door</p><h2>${escapeHtml(titleCase(garage?.state || "unavailable"))}</h2></div></div>
             ${garageMotion ? `<p class="garage-motion ${garageMotion.active ? "is-active" : ""} ${garageMotion.available ? "" : "is-unavailable"}"><ha-icon icon="mdi:motion-sensor"></ha-icon>${garageMotion.available ? garageMotion.active ? "Motion detected" : "No motion detected" : "Motion unavailable"}</p>` : ""}
             <button type="button" class="garage-action"${garageActionAttributes}${garageDisabled}><ha-icon icon="${garageAction === "open_cover" ? "mdi:garage-open-variant" : garageAction === "close_cover" ? "mdi:garage-alert-variant" : "mdi:garage-clock"}"></ha-icon>${garageButtonLabel}</button>
           </article>
-          <p class="security-privacy-note"><ha-icon icon="mdi:shield-account-outline"></ha-icon>Only household entry cameras are allowed here. Child and bedroom cameras are blocked by validation.</p>
+          <p class="security-privacy-note"><ha-icon icon="mdi:shield-account-outline"></ha-icon>Entry cameras only. The viewer opens only when you choose it. Streams started here stop when you close the view or leave Security.</p>
         </aside>
         ${this._renderConfirmation()}
       </section>
@@ -1472,7 +1615,7 @@ export class FamilyHubCard extends HTMLElementBase {
         <section class="family-dashboard">
           <article class="surface family-rhythm">
             <div><p class="eyebrow">Today together</p><h2>Small routines, visible progress</h2><p>Actual ChoreOps tasks are shown below. This test stays read-only.</p></div>
-            <div class="rhythm-stats"><span><strong>${due}</strong> due today</span><span><strong>${completed}</strong> completed</span><span><strong>${allChoreStates.length}</strong> routines mapped</span></div>
+            <div class="rhythm-stats"><span><strong>${due}</strong> due today</span><span><strong>${completed}</strong> completed</span><span><strong>${allChoreStates.length}</strong> routines</span></div>
           </article>
           <div class="family-people-grid">${children.map((person) => this._renderFamilyPerson(person)).join("")}</div>
         </section>
@@ -1522,8 +1665,8 @@ export class FamilyHubCard extends HTMLElementBase {
       <article class="surface family-person" style="--person-colour:${escapeHtml(person.colour)}">
         <div class="family-person-heading"><span>${escapeHtml(person.name.slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person.name)}</p><h2>${escapeHtml(presence)}</h2></div></div>
         <div class="family-facts"><span><strong>${escapeHtml(points || "0")}</strong> chore points</span><span><strong>${due}</strong> due today</span><span><strong>${assignments.length}</strong> assignments</span></div>
-        <div class="chore-heading"><p class="eyebrow">Today’s routines</p><span>${choreRows ? `${(chore?.status_entities || []).length} mapped` : "Not mapped"}</span></div>
-        ${choreRows ? `<ul class="chore-list">${choreRows}</ul>` : '<p class="empty-state compact">No individual ChoreOps status sensors are mapped.</p>'}
+        <div class="chore-heading"><p class="eyebrow">Today’s routines</p><span>${choreRows ? `${(chore?.status_entities || []).length} available` : "None yet"}</span></div>
+        ${choreRows ? `<ul class="chore-list">${choreRows}</ul>` : '<p class="empty-state compact">No individual routines are available yet.</p>'}
         ${classroomStatus}
       </article>
     `;
@@ -1572,17 +1715,49 @@ export class FamilyHubCard extends HTMLElementBase {
     `;
   }
 
+  _renderTeamMark(team, size = "small") {
+    const crest = teamCrest(team);
+    const code = team?.short_name || team?.code || String(team?.name || "?").slice(0, 3).toUpperCase();
+    return `<span class="team-mark is-${escapeHtml(size)}"><strong aria-hidden="${crest ? "true" : "false"}">${escapeHtml(code)}</strong>${crest ? `<img data-team-crest src="${escapeHtml(crest)}" alt="${escapeHtml(`${team?.name || code} crest`)}">` : ""}</span>`;
+  }
+
   _renderFootball() {
     const { index, gameweek, gameweekState, table } = this._footballState();
     const events = gameweekState?.attributes?.events || [];
     const available = index?.attributes?.available_gameweeks || Array.from({ length: 38 }, (_, position) => position + 1);
+    const heroFixture = events.find((fixture) => fixture.spotlight && normaliseFixtureStatus(fixture) === "live")
+      || events.find((fixture) => fixture.spotlight && normaliseFixtureStatus(fixture) === "upcoming")
+      || events.find((fixture) => fixture.spotlight)
+      || events[0];
+    const heroStatus = heroFixture ? normaliseFixtureStatus(heroFixture) : "upcoming";
     const freshness = footballFreshness(index);
+    const heroScore = !heroFixture
+      ? "—"
+      : heroStatus === "upcoming"
+        ? formatTime(heroFixture.kickoff_time, this._config.product.locale, this._config.product.timezone)
+        : `${heroFixture.home_score ?? "–"} — ${heroFixture.away_score ?? "–"}`;
+    const heroLabel = !heroFixture
+      ? "Next fixture coming soon"
+      : heroStatus === "live"
+        ? `LIVE · ${heroFixture.minutes || 0}'`
+        : heroStatus === "finished"
+          ? "Full time"
+          : formatDay(heroFixture.kickoff_time, this._config.product.locale, this._config.product.timezone);
     this._gameweek = gameweek;
     return `
-      <section class="football-layout">
-        <article class="surface football-main">
+      <section class="football-experience">
+        <article class="football-hero ${heroStatus === "live" ? "is-live" : ""}">
+          <div class="football-hero-heading"><div><p class="eyebrow">Premier League · Matchweek ${gameweek}</p><h2>${heroStatus === "live" ? "Live now" : heroStatus === "finished" ? "Latest result" : "Up next"}</h2></div><span class="football-freshness is-${freshness.status}"><i></i><span><strong>${escapeHtml(freshness.title)}</strong><small>${escapeHtml(freshness.detail)}${index?.attributes?.last_checked ? ` Checked ${escapeHtml(formatTime(index.attributes.last_checked, this._config.product.locale, this._config.product.timezone))}.` : ""}</small></span></span></div>
+          ${heroFixture ? `<div class="hero-match">
+            <div class="hero-team">${this._renderTeamMark(heroFixture.home, "hero")}<strong>${escapeHtml(compactClubName(heroFixture.home))}</strong></div>
+            <div class="hero-score"><span>${escapeHtml(heroScore)}</span><small>${escapeHtml(heroLabel)}</small></div>
+            <div class="hero-team is-away">${this._renderTeamMark(heroFixture.away, "hero")}<strong>${escapeHtml(compactClubName(heroFixture.away))}</strong></div>
+          </div>` : '<div class="hero-match is-empty"><ha-icon icon="mdi:soccer"></ha-icon><strong>The next featured match will appear here.</strong></div>'}
+        </article>
+        <div class="football-layout">
+          <article class="surface football-main">
           <div class="football-toolbar">
-            <div><p class="eyebrow">Premier League</p><h2>Matchweek ${gameweek}</h2></div>
+            <div><p class="eyebrow">Match centre</p><h2>Matchweek ${gameweek}</h2></div>
             <div class="matchweek-controls">
               <button type="button" data-gameweek="${Math.max(1, gameweek - 1)}" ${gameweek <= 1 ? "disabled" : ""} aria-label="Previous matchweek"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
               <label><span class="sr-only">Choose matchweek</span><select data-gameweek-select>${available.map((entry) => `<option value="${entry}" ${entry === gameweek ? "selected" : ""}>MW ${entry}</option>`).join("")}</select></label>
@@ -1594,11 +1769,11 @@ export class FamilyHubCard extends HTMLElementBase {
             </div>
           </div>
           ${this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(events)}
-        </article>
-        <aside class="football-sidebar">
-          <article class="surface spotlight-panel"><p class="eyebrow">Spotlight</p><h2>Tottenham & Aston Villa</h2>${this._renderSpotlightClubs(events)}</article>
-          <article class="surface provider-panel is-${freshness.status}"><p class="eyebrow">Updates</p><h2>${escapeHtml(freshness.title)}</h2><p>${escapeHtml(freshness.detail)}${index?.attributes?.last_checked ? ` Checked ${escapeHtml(formatTime(index.attributes.last_checked, this._config.product.locale, this._config.product.timezone))}.` : ""}</p></article>
-        </aside>
+          </article>
+          <aside class="football-sidebar">
+            <article class="surface spotlight-panel"><p class="eyebrow">Family favourites</p><h2>Tottenham & Aston Villa</h2>${this._renderSpotlightClubs(events)}</article>
+          </aside>
+        </div>
       </section>
     `;
   }
@@ -1607,7 +1782,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!events.length) return `
       <div class="football-empty">
         <span class="football-orbit"><ha-icon icon="mdi:soccer" aria-hidden="true"></ha-icon></span>
-        <div><p class="eyebrow">Between matchweeks</p><h3>The next fixtures are still in the tunnel</h3><p>Tottenham and Aston Villa will be highlighted here as soon as the provider publishes this matchweek.</p></div>
+        <div><p class="eyebrow">Between matchweeks</p><h3>No fixtures yet</h3><p>We’ll show the next Spurs or Aston Villa match here as soon as it is announced.</p></div>
         <div class="empty-clubs"><span>TOT</span><i></i><span>AVL</span></div>
       </div>
     `;
@@ -1633,9 +1808,9 @@ export class FamilyHubCard extends HTMLElementBase {
     ];
     return `
       <div class="fixture ${fixture.spotlight ? "is-spotlight" : ""} ${status === "live" ? "is-live" : ""}">
-        <span class="team home-team">${escapeHtml(fixture.home?.name || "Home")}</span>
+        <span class="team home-team">${this._renderTeamMark(fixture.home)}<span>${escapeHtml(fixture.home?.name || "Home")}</span></span>
         <strong class="fixture-score">${escapeHtml(score)}<small>${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "FT" : ""}</small></strong>
-        <span class="team away-team">${escapeHtml(fixture.away?.name || "Away")}</span>
+        <span class="team away-team"><span>${escapeHtml(fixture.away?.name || "Away")}</span>${this._renderTeamMark(fixture.away)}</span>
         ${scorers.length ? `<span class="scorers">${escapeHtml(scorers.join(" · "))}</span>` : ""}
       </div>
     `;
@@ -1643,7 +1818,7 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _renderLeagueTable(tableState) {
     const rows = tableState?.attributes?.rows || [];
-    if (!rows.length) return '<p class="empty-state large">The table will appear after the football provider publishes results.</p>';
+    if (!rows.length) return '<p class="empty-state large">The league table will appear after the first results.</p>';
     return `
       <div class="league-table-wrap"><table class="league-table"><thead><tr><th>#</th><th>Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody>
         ${rows.map((row) => `<tr class="${row.spotlight ? "is-spotlight" : ""}"><td>${row.position}</td><td><strong>${escapeHtml(row.name)}</strong></td><td>${row.played}</td><td>${row.won}</td><td>${row.drawn}</td><td>${row.lost}</td><td>${row.goal_difference > 0 ? "+" : ""}${row.goal_difference}</td><td><strong>${row.points}</strong></td></tr>`).join("")}
@@ -1656,7 +1831,7 @@ export class FamilyHubCard extends HTMLElementBase {
       const fixture = events.find((entry) => entry.home?.short_name === code || entry.away?.short_name === code);
       const name = fixture?.home?.short_name === code ? fixture.home.name : fixture?.away?.name;
       return `
-        <div class="spotlight-club"><span class="club-badge">${escapeHtml(code)}</span><div><strong>${escapeHtml(name || (code === "TOT" ? "Tottenham Hotspur" : code === "AVL" ? "Aston Villa" : code))}</strong><small>${fixture ? `${fixture.home.name} v ${fixture.away.name}` : "No fixture in this matchweek"}</small></div></div>
+        <div class="spotlight-club">${this._renderTeamMark(fixture?.home?.short_name === code ? fixture.home : fixture?.away?.short_name === code ? fixture.away : { short_name: code, name })}<div><strong>${escapeHtml(name || (code === "TOT" ? "Tottenham Hotspur" : code === "AVL" ? "Aston Villa" : code))}</strong><small>${fixture ? `${fixture.home.name} v ${fixture.away.name}` : "No fixture this matchweek"}</small></div></div>
       `;
     }).join("");
   }
@@ -1696,7 +1871,7 @@ export class FamilyHubCard extends HTMLElementBase {
         preference_storage_key: this._config.calendar.preference_storage_key,
         compact_header: true,
         compact_height: true,
-        color_scheme: "dark",
+        color_scheme: "light",
         language: this._config.product.locale.split("-")[0],
         locale: this._config.product.locale,
         time_zone: this._config.product.timezone
@@ -1794,10 +1969,18 @@ export class FamilyHubCard extends HTMLElementBase {
         delete child.dataset.readOnlyGuard;
       }
     }
-    if (key.startsWith("calendar:") || key.startsWith("camera:") || key === "vacuum-map") {
+    if (key.startsWith("calendar:") || key === "vacuum-map") {
       child.inert = false;
       child.setAttribute("data-read-only-guard", "service-boundary");
       child.setAttribute("aria-label", key.startsWith("calendar:") ? "Read-only family calendar" : "Read-only camera view");
+    }
+    if (key.startsWith("camera:")) {
+      const buffering = this._cameraSession?.phase === "buffering";
+      child.inert = buffering;
+      child.setAttribute("data-read-only-guard", "service-boundary");
+      child.setAttribute("aria-label", "Read-only camera view");
+      if (buffering) child.setAttribute("aria-hidden", "true");
+      else child.removeAttribute("aria-hidden");
     }
     child.hass = this._hassForChild(key);
     if (key.startsWith("camera:")) {
@@ -1870,6 +2053,29 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _handleKeydown(event) {
+    if (this._pendingConfirmation) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this._pendingConfirmation = null;
+        this._scheduleRender(true);
+        return;
+      }
+      if (event.key === "Tab") {
+        const controls = [...this.shadowRoot.querySelectorAll('.confirmation-dialog button:not([disabled])')];
+        if (!controls.length) return;
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        const active = this.shadowRoot.activeElement;
+        if (event.shiftKey && (active === first || !controls.includes(active))) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (active === last || !controls.includes(active))) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+      return;
+    }
     const target = event.target.closest?.("[data-room]");
     if (!target || !["Enter", " "].includes(event.key)) return;
     event.preventDefault();
@@ -1886,6 +2092,7 @@ export class FamilyHubCard extends HTMLElementBase {
   _handleClick(event) {
     const target = event.target.closest?.("button, [data-room]");
     if (!target) return;
+    if (this._pendingConfirmation && !target.dataset.confirmAction) return;
     if (target.dataset.view) {
       if (!this._enabledViews().some((view) => view.id === target.dataset.view)) return;
       if (this._view === "entry" && target.dataset.view !== "entry") this._closeActiveCamera({ render: false, invalidate: true });
@@ -1934,6 +2141,10 @@ export class FamilyHubCard extends HTMLElementBase {
       void this._openCamera(target.dataset.cameraOpen);
       return;
     }
+    if (target.dataset.cameraStageOpen) {
+      void this._openCamera(target.dataset.cameraStageOpen);
+      return;
+    }
     if (target.dataset.cameraClose) {
       this._closeActiveCamera();
       return;
@@ -1968,6 +2179,11 @@ export class FamilyHubCard extends HTMLElementBase {
         expectedState: entityStateValue(this._hass?.states?.[target.dataset.entity]),
         label: ALARM_ACTION_LABELS[target.dataset.alarmAction]
       };
+      this._confirmationReturnFocus = {
+        datasetKey: "alarmAction",
+        action: target.dataset.alarmAction,
+        entity: target.dataset.entity
+      };
       this._scheduleRender(true);
       return;
     }
@@ -1980,6 +2196,11 @@ export class FamilyHubCard extends HTMLElementBase {
         entity: target.dataset.entity,
         expectedState: entityStateValue(this._hass?.states?.[target.dataset.entity]),
         label: target.dataset.secureCoverAction === "open_cover" ? "Open garage door" : target.dataset.secureCoverAction === "close_cover" ? "Close garage door" : "Stop garage door"
+      };
+      this._confirmationReturnFocus = {
+        datasetKey: "secureCoverAction",
+        action: target.dataset.secureCoverAction,
+        entity: target.dataset.entity
       };
       this._scheduleRender(true);
       return;
@@ -2052,6 +2273,8 @@ export class FamilyHubCard extends HTMLElementBase {
       this._scheduleRender(true);
       return;
     }
+
+    this._securityCameraId = cameraId;
 
     const token = ++this._cameraOperationToken;
     this._clearCameraStartTimer();
@@ -2183,7 +2406,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (session.phase === "starting") {
       if (phase === "streaming") this._bufferCameraSession(session);
       else if (["unavailable", "unexpected"].includes(phase)) {
-        void this._recoverCameraSession(session, "The mapped camera became unavailable. Please try again.");
+        void this._recoverCameraSession(session, "The camera became unavailable. Please try again.");
       }
       return;
     }
@@ -2822,7 +3045,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .media-player-stage .embedded-card { height:100%; min-height:0; overflow:hidden; --ha-card-border-width:0; --ha-card-box-shadow:none; }
       @keyframes pulse { 0%,100% { opacity:.45; transform:scale(.8); } 50% { opacity:1; transform:scale(1); } }
       .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
-      button:focus-visible,select:focus-visible,.room-hotspot:focus-visible { outline:3px solid color-mix(in srgb,var(--hub-accent) 60%,#fff); outline-offset:2px; }
+      button:focus-visible,select:focus-visible,.room-hotspot:focus-visible,.alarm-panel:focus-visible,.garage-panel:focus-visible { outline:3px solid color-mix(in srgb,var(--hub-accent) 60%,#fff); outline-offset:2px; }
       @media (max-width:1030px) {
         .shell { grid-template-columns:74px minmax(0,1fr); }
         .navigation { padding-inline:7px; }
@@ -2861,6 +3084,342 @@ export class FamilyHubCard extends HTMLElementBase {
         .family-sidebar { display:flex; flex-direction:column; }
         .floorplan-canvas { min-height:420px; }
         .football-main { min-height:620px; }
+      }
+
+      /* v0.8 design approval: warm, light Family OS. These rules intentionally
+         sit after the production styles so the prototype is exercised through
+         the real component and interaction boundaries. */
+      .hub-card { --hub-accent:#1463E8 !important; --hub-background:#F4F7FA !important; --hub-surface:#FFFFFF !important; --hub-text:#0B1830 !important; --hub-muted:#5E6B80 !important; --hub-nav:#061B3A !important; --hub-backdrop-start:#F4F7FA !important; --hub-backdrop-mid:#EEF3F8 !important; --hub-backdrop-end:#E6EEF7 !important; }
+      .hub-card,.shell { background:#F4F7FA; color:#0B1830; }
+      .shell { grid-template-columns:108px minmax(0,1fr); }
+      .navigation { padding:18px 12px; gap:18px; background:#061B3A; border:0; box-shadow:12px 0 34px rgba(6,27,58,.08); }
+      .brand { width:68px; height:68px; margin:0 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; border:1px solid rgba(255,255,255,.16); border-radius:22px; background:rgba(255,255,255,.09); box-shadow:none; }
+      .brand ha-icon { --mdc-icon-size:25px; }
+      .brand span { font-size:12px; font-weight:750; letter-spacing:.01em; }
+      .nav-items { flex:0 0 auto; justify-content:flex-start; gap:6px; }
+      .nav-core { flex:1; }
+      .nav-utility { margin-top:auto; }
+      .nav-divider { display:block; height:1px; margin:2px 10px 8px; background:rgba(255,255,255,.13); }
+      .nav-button { min-height:58px; gap:5px; border:0; border-radius:17px; color:#A8B7CB; }
+      .nav-button ha-icon { --mdc-icon-size:23px; }
+      .nav-button span { font-size:12px; font-weight:700; }
+      .nav-button.is-active { color:#061B3A; background:#fff; border:0; box-shadow:0 8px 24px rgba(0,0,0,.18); }
+      .content { padding:16px 26px 24px; grid-template-rows:70px minmax(0,1fr); gap:14px; background:#F4F7FA; }
+      .topbar { color:#0B1830; padding:0; }
+      .page-title { display:flex; align-items:baseline; gap:14px; }
+      .topbar h1 { margin:0; font-size:34px; line-height:1; letter-spacing:-.035em; font-weight:800; }
+      .topbar-date { order:2; margin:0; color:#5E6B80; font-size:14px; font-weight:650; }
+      .header-actions { gap:10px; }
+      .weather-pill { min-height:48px; padding:0 15px; border:1px solid #DCE4EE; border-radius:16px; background:#fff; color:#0B1830; box-shadow:0 5px 18px rgba(11,24,48,.05); font-size:14px; font-weight:700; }
+      .weather-pill ha-icon { color:#E7A93D; }
+      .topbar-time { min-width:82px; color:#0B1830; font-size:26px; line-height:1; font-weight:800; letter-spacing:-.03em; text-align:right; }
+      .eyebrow { color:#5E6B80; font-size:12px; line-height:1.2; font-weight:800; letter-spacing:.1em; }
+      .surface { color:#0B1830; border:1px solid #DCE4EE; background:#fff; border-radius:24px; box-shadow:0 12px 32px rgba(21,43,75,.065); -webkit-backdrop-filter:none; backdrop-filter:none; }
+      .surface .eyebrow { color:#5E6B80; }
+      .surface h2,.surface h3,.surface strong { color:#0B1830; }
+      .section-heading h2 { font-size:20px; }
+      .section-heading button,.text-action { min-width:48px; min-height:48px; padding:0 4px; display:flex; align-items:center; gap:4px; color:#1463E8; font-size:14px; }
+      .section-heading button { margin-top:-8px; }
+      .text-action ha-icon { --mdc-icon-size:17px; }
+      .supporting { color:#5E6B80; font-size:15px; line-height:1.45; }
+      .icon-action { width:48px; height:48px; background:#EAF2FF; color:#1463E8; }
+
+      .today-grid { height:100%; grid-template-columns:repeat(6,minmax(0,1fr)); grid-template-rows:minmax(282px,1.08fr) minmax(226px,.92fr); gap:16px; }
+      .today-grid article { padding:24px; }
+      .today-grid h2 { font-size:24px; }
+      .hero-panel.today-hero { position:relative; grid-column:1/5; display:grid; grid-template-columns:minmax(0,1fr) 132px; grid-template-rows:minmax(0,1fr) auto; gap:18px 26px; overflow:hidden; border:0; background:radial-gradient(circle at 90% 5%,rgba(42,117,209,.32),transparent 38%),linear-gradient(135deg,#061B3A,#0C315D); color:#fff; box-shadow:0 20px 44px rgba(6,27,58,.22); }
+      .today-hero::after { content:""; position:absolute; right:-70px; bottom:-105px; width:260px; height:260px; border:1px solid rgba(255,255,255,.1); border-radius:50%; box-shadow:0 0 0 36px rgba(255,255,255,.025),0 0 0 78px rgba(255,255,255,.018); pointer-events:none; }
+      .today-hero-copy { position:relative; z-index:1; align-self:center; }
+      .today-hero .eyebrow { color:#8FD8CB; }
+      .today-hero h2 { margin:8px 0 0; color:#fff; font-size:44px; line-height:1; letter-spacing:-.045em; }
+      .today-hero-copy > p:last-child { max-width:520px; margin:14px 0 0; color:#C7D4E4; font-size:16px; line-height:1.45; }
+      .today-weather { position:relative; z-index:1; align-self:center; display:grid; justify-items:end; }
+      .today-weather ha-icon { --mdc-icon-size:34px; color:#FFD27B; }
+      .today-weather strong { margin-top:8px; color:#fff; font-size:42px; line-height:1; letter-spacing:-.05em; }
+      .today-weather span { margin-top:6px; color:#B7C6DA; font-size:13px; font-weight:650; }
+      .hero-metrics { position:relative; z-index:1; grid-column:1/-1; margin:0; gap:10px; }
+      .hero-metrics button { min-height:70px; padding:11px 14px; display:flex; align-items:center; gap:11px; border:1px solid rgba(255,255,255,.14); border-radius:16px; background:rgba(255,255,255,.075); }
+      .hero-metrics button > ha-icon { flex:0 0 auto; --mdc-icon-size:22px; color:#8FD8CB; }
+      .hero-metrics button > span { min-width:0; }
+      .hero-metrics strong { color:#fff; font-size:16px; }
+      .hero-metrics small { display:block; margin-top:3px; color:#AFC0D5; font-size:12px; }
+      .today-next { position:relative; grid-column:5/7; justify-content:flex-start; background:#fff; }
+      .today-card-icon { width:50px; height:50px; margin-bottom:18px; display:grid; place-items:center; border-radius:16px; background:#FFF4D9; color:#A86800; }
+      .today-card-icon ha-icon { --mdc-icon-size:24px; }
+      .today-card-icon.is-coral { margin:0; background:#FFEAE6; color:#C94F3C; }
+      .today-next h2 { margin-top:10px; font-size:28px; line-height:1.14; }
+      .today-family,.today-football,.today-music { grid-row:2; justify-content:flex-start; background:#fff; }
+      .today-family { grid-column:1/3; }
+      .today-football { grid-column:3/5; }
+      .today-music { grid-column:5/7; }
+      .person-summary-list { gap:9px; margin-top:10px; }
+      .person-summary { min-height:60px; padding:10px 12px; border:1px solid color-mix(in srgb,var(--person-colour) 16%,#DCE4EE); background:color-mix(in srgb,var(--person-colour) 5%,#fff); border-radius:16px; }
+      .person-initial { width:38px; height:38px; border:3px solid color-mix(in srgb,var(--person-colour) 72%,#fff); background:#0B1830; color:#fff; font-size:15px; }
+      .person-summary strong { font-size:14px; }
+      .person-summary small { font-size:12px; }
+      .points { color:#33445C; font-size:12px; }
+      .featured-fixtures { gap:8px; margin-top:10px; }
+      .compact-fixture { min-height:62px; border-color:#DCE4EE; background:#F7F9FC; border-radius:16px; }
+      .compact-fixture > span { font-size:12px; }
+      .compact-fixture strong { font-size:15px; }
+      .compact-fixture small { color:#5E6B80; font-size:12px; }
+      .now-playing { grid-template-columns:64px minmax(0,1fr) 48px; margin-top:13px; }
+      .artwork { width:64px; height:64px; background:linear-gradient(145deg,#1463E8,#00A887); }
+      .now-playing h2 { font-size:17px; }
+      .now-playing p { font-size:13px; }
+      .quiet-music { min-height:92px; display:flex; align-items:center; gap:13px; }
+      .quiet-music strong,.quiet-music span { display:block; }
+      .quiet-music strong { font-size:16px; }
+      .quiet-music span { margin-top:4px; color:#5E6B80; font-size:13px; }
+
+      .home-surface { grid-template-rows:64px minmax(0,1fr); gap:14px; }
+      .home-toolbar { color:#0B1830; padding:0; }
+      .home-toolbar h2 { margin-top:5px; font-size:22px; }
+      .home-toolbar .eyebrow { color:#5E6B80; }
+      .home-segments { max-width:72%; padding:4px; background:#E8EEF5; border-radius:16px; }
+      .segment { min-height:48px; padding:0 15px; border-radius:12px; color:#5E6B80; font-size:13px; }
+      .segment.is-selected { color:#fff; background:#1463E8; box-shadow:0 5px 14px rgba(20,99,232,.2); }
+      .home-segments ha-icon,.calendar-modes ha-icon { --mdc-icon-size:18px; }
+      .rooms-layout { grid-template-columns:minmax(0,1fr) clamp(340px,31vw,390px); gap:16px; }
+      .floorplan-panel { padding:20px; grid-template-rows:58px minmax(0,1fr); gap:12px; }
+      .floorplan-heading h2 { font-size:24px; }
+      .floorplan-canvas { border:1px solid #DCE4EE; border-radius:20px; background:radial-gradient(circle at 50% 44%,#fff 0,#F0F5FA 68%,#E5EDF5 100%); }
+      .floorplan-backdrop { background:radial-gradient(ellipse at 50% 90%,rgba(41,74,108,.09),transparent 58%); }
+      .light-overlay { mix-blend-mode:multiply; }
+      .room-hotspot.has-light polygon { fill:color-mix(in srgb,#E7A93D 15%,transparent); filter:drop-shadow(0 0 3px rgba(231,169,61,.65)); }
+      .room-hotspot.is-selected polygon,.room-hotspot:focus polygon { fill:color-mix(in srgb,#1463E8 9%,transparent); stroke:#1463E8; stroke-width:.72; filter:drop-shadow(0 0 3px rgba(20,99,232,.4)); }
+      .room-detail.home-drawer { padding:24px; background:#fff; }
+      .room-title { align-items:flex-start; }
+      .room-icon { width:52px; height:52px; border-radius:16px; background:#EAF2FF; color:#1463E8; }
+      .room-title h2 { font-size:26px; }
+      .room-title p:last-child { color:#5E6B80; font-size:13px; }
+      .room-control-list { gap:10px; margin-top:22px; }
+      .control-row { grid-template-columns:minmax(0,1fr) 48px; gap:8px; }
+      .control-main,.media-room-control,.climate-control,.cover-control { min-height:60px; border:1px solid #DCE4EE; background:#F7F9FC; color:#0B1830; }
+      .control-main { padding:10px 14px; }
+      .control-main strong,.media-room-control strong,.cover-control strong { font-size:14px; }
+      .control-main small,.media-room-control small,.cover-control small { color:#5E6B80; font-size:12px; }
+      .control-main.is-on { border-color:#F1D398; background:#FFF8E8; }
+      .climate-control span,.climate-control small { color:#5E6B80; font-size:12px; }
+      .climate-control strong { font-size:30px; }
+      .stepper button,.cover-control button { width:48px; height:48px; border:1px solid #DCE4EE; background:#fff; color:#1463E8; }
+      .scene-button { min-height:48px; background:#EAF2FF; color:#1463E8; font-size:13px; }
+
+      .whole-home-card,.heating-card,.cover-card,.cleaning-panel { border-color:#DCE4EE; background:#fff; color:#0B1830; }
+      .whole-home-heading > span,.heating-card-heading > span,.cover-card-heading > span { width:48px; height:48px; flex-basis:48px; border-radius:15px; background:#EAF2FF; color:#1463E8; }
+      .whole-home-heading h3,.heating-card-heading h3,.cover-card-heading h3 { color:#0B1830; font-size:16px; }
+      .whole-home-heading p,.heating-card-heading p,.cover-card-heading p { color:#5E6B80; font-size:12px; }
+      .whole-home-controls { gap:9px; }
+      .whole-home-control { min-height:58px; border-color:#DCE4EE; background:#F7F9FC; color:#0B1830; }
+      .whole-home-control.is-on { border-color:#E8C67E; background:#FFF7E5; color:#765000; }
+      .whole-home-control strong { color:inherit; font-size:13px; }
+      .whole-home-control small { color:#5E6B80; font-size:12px; }
+      .heating-card { min-height:190px; }
+      .heating-card.is-heating { border-color:#E8C67E; background:linear-gradient(145deg,#FFF9EC,#fff); }
+      .heating-card.is-off,.heating-card.is-unavailable { background:#F7F9FC; }
+      .heating-card.is-heating .heating-icon,.heating-card.is-heating .heating-status { color:#8B5B00; }
+      .heating-card-heading .heating-status,.heating-current small,.heating-target-control > small { color:#5E6B80; font-size:12px; }
+      .heating-current-value,.heating-target-value { color:#0B1830; }
+      .heating-power { min-width:68px; min-height:48px; border-color:#DCE4EE; background:#F7F9FC; color:#5E6B80; font-size:12px; }
+      .heating-power.is-on { border-color:#E8C67E; background:#FFF4D9; color:#765000; }
+      .heating-stepper { grid-template-columns:48px minmax(54px,1fr) 48px; border-color:#DCE4EE; background:#F7F9FC; }
+      .heating-stepper button,.heating-target-value { min-height:48px; color:#1463E8; }
+      .heating-stepper button { width:48px; height:48px; }
+      .heating-target-value { border-color:#DCE4EE; color:#0B1830; }
+      .cover-actions { gap:8px; }
+      .cover-actions button { min-height:48px; border:1px solid #DCE4EE; background:#F7F9FC; color:#1463E8; font-size:12px; }
+      .cleaning-panel { padding:24px; }
+      .cleaning-hero > span { background:linear-gradient(145deg,#1463E8,#00A887); }
+      .cleaning-hero p:last-child { color:#5E6B80; font-size:13px; }
+      .cleaning-facts span { border-color:#DCE4EE; background:#F7F9FC; }
+      .cleaning-facts strong { color:#0B1830; font-size:16px; }
+      .cleaning-facts small { color:#5E6B80; font-size:12px; }
+      .cleaning-actions button { min-height:48px; border:1px solid #C9DAF4; background:#EAF2FF; color:#1463E8; font-size:13px; }
+      .vacuum-map-slot,.vacuum-map-placeholder { border-color:#DCE4EE; background:#F1F5F9; color:#5E6B80; }
+      .vacuum-map-placeholder { font-size:13px; }
+
+      .security-layout { grid-template-columns:minmax(0,1fr) clamp(286px,27vw,334px); gap:18px; }
+      .security-main { display:grid; grid-template-rows:minmax(0,1fr) auto; gap:14px; }
+      .security-stage { min-height:0; padding:18px; display:grid; grid-template-rows:56px minmax(0,1fr); border:0; border-radius:24px; background:#061B3A; color:#fff; box-shadow:0 18px 42px rgba(6,27,58,.2); overflow:hidden; }
+      .security-stage-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
+      .security-stage-heading .eyebrow { color:#8FD8CB; }
+      .security-stage-heading h2 { margin:3px 0 0; color:#fff; font-size:24px; }
+      .stage-privacy { min-height:38px; padding:0 12px; display:flex; align-items:center; gap:6px; border:1px solid rgba(255,255,255,.15); border-radius:13px; background:rgba(255,255,255,.07); color:#C5D2E2; font-size:12px; font-weight:700; }
+      .stage-privacy ha-icon { --mdc-icon-size:17px; color:#8FD8CB; }
+      .security-stage-media { width:100%; max-width:780px; min-height:0; aspect-ratio:16/9; place-self:center; overflow:hidden; border-radius:18px; background:radial-gradient(circle at 50% 46%,#102F54,#041225 72%); }
+      .camera-idle { height:100%; min-height:0; grid-template-columns:70px minmax(0,1fr) auto; gap:18px; padding:24px; border:0; border-radius:18px; background:radial-gradient(circle at 12% 50%,rgba(20,99,232,.25),transparent 34%); }
+      .camera-stage-icon { width:64px; height:64px; display:grid; place-items:center; border-radius:20px; background:rgba(255,255,255,.09); color:#8FD8CB; }
+      .camera-stage-icon ha-icon { --mdc-icon-size:34px; }
+      .camera-is-starting .camera-stage-icon ha-icon,.camera-is-stopping .camera-stage-icon ha-icon { animation:spin 1.1s linear infinite; }
+      .camera-idle strong { color:#fff; font-size:19px; }
+      .camera-idle small { max-width:360px; margin-top:6px; color:#B5C4D6; font-size:13px; line-height:1.45; }
+      .camera-idle button,.camera-close,.camera-select-action { min-height:48px; padding:0 16px; border-radius:14px; background:#1463E8; font-size:13px; }
+      .camera-stream { width:100%; height:100%; border-radius:18px; }
+      .camera-card-slot,.camera-card-slot::slotted(.embedded-card) { height:100%; min-height:100%; }
+      .camera-live-chip { position:absolute; z-index:4; top:12px; left:12px; min-height:34px; padding:0 11px; display:flex; align-items:center; gap:7px; border-radius:12px; background:rgba(4,18,37,.8); color:#fff; font-size:12px; font-weight:800; }
+      .camera-live-chip span { width:8px; height:8px; border-radius:50%; background:#E86E5A; box-shadow:0 0 0 4px rgba(232,110,90,.2); }
+      .camera-close { right:12px; bottom:12px; background:rgba(4,18,37,.86); }
+      .security-camera-picker { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+      .security-camera { min-height:174px; padding:15px; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(46px,auto) 48px; gap:9px; border-radius:20px; background:#fff; overflow:hidden; }
+      .security-camera .security-card-heading { grid-column:1; }
+      .security-camera.is-selected { border-color:#8DB7F8; box-shadow:0 0 0 2px rgba(20,99,232,.09),0 10px 26px rgba(21,43,75,.06); }
+      .security-card-heading { min-width:0; align-items:flex-start; flex-wrap:wrap; }
+      .security-card-heading > div { min-width:0; }
+      .security-card-heading h2 { font-size:18px; overflow-wrap:anywhere; }
+      .privacy-badge { flex:0 1 auto; max-width:100%; min-height:34px; padding:7px 9px; border:1px solid #DCE4EE; background:#F7F9FC; color:#5E6B80; font-size:12px; line-height:1.25; white-space:normal; overflow-wrap:anywhere; }
+      .privacy-badge ha-icon { --mdc-icon-size:16px; color:#1463E8; }
+      .security-signals { gap:6px; }
+      .security-camera .security-signals { min-width:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); }
+      .security-signal { min-height:48px; grid-template-columns:22px minmax(0,1fr); padding:6px 7px; border:1px solid #E1E8F0; background:#F7F9FC; }
+      .security-signal ha-icon { --mdc-icon-size:18px; color:#79869A; }
+      .security-signal strong,.security-signal small { overflow:visible; white-space:normal; text-overflow:clip; overflow-wrap:anywhere; }
+      .security-signal strong { font-size:12px; }
+      .security-signal small { color:#5E6B80; font-size:12px; }
+      .security-signal.is-active { border-color:#F0CD89; background:#FFF7E5; }
+      .security-signal.is-active ha-icon { color:#B87500; }
+      .security-signal.is-unavailable { background:#F7F9FC; }
+      .camera-select-action { width:100%; min-width:0; justify-content:center; background:#EAF2FF; color:#1463E8; line-height:1.25; white-space:normal; }
+      .security-sidebar { grid-template-rows:minmax(218px,1fr) auto auto; gap:12px; }
+      .alarm-panel,.garage-panel { padding:20px; background:#fff; }
+      .alarm-state { width:48px; height:48px; background:#E2F5EF; color:#008C71; }
+      .alarm-state.is-alert { background:#FFE7E3; color:#D64545; }
+      .alarm-state.is-unavailable { background:#EEF2F6; color:#718097; }
+      .alarm-panel > p { margin-top:14px; color:#5E6B80; font-size:13px; }
+      .alarm-actions { gap:7px; margin-top:16px; }
+      .alarm-actions button { min-height:58px; border:1px solid #DCE4EE; background:#EAF2FF; color:#1463E8; font-size:12px; }
+      .alarm-actions button.is-danger { border-color:#E5A7A4; background:#FFF0EE; color:#B4232B; }
+      .alarm-actions ha-icon { --mdc-icon-size:20px; }
+      .garage-heading > span { width:48px; height:48px; background:#EAF2FF; color:#1463E8; }
+      .garage-heading h2 { font-size:20px; }
+      .garage-motion { margin-top:14px; color:#5E6B80; font-size:12px; }
+      .garage-action { min-height:50px; border:0; background:#1463E8; color:#fff; font-size:13px; }
+      .security-privacy-note { min-height:58px; align-items:center; padding:11px 13px; border:1px solid #DCE4EE; background:#fff; color:#5E6B80; font-size:12px; }
+      .security-privacy-note ha-icon { --mdc-icon-size:19px; color:#00A887; }
+      .confirmation-dialog { background:#fff; color:#0B1830; border:1px solid #DCE4EE; }
+      .confirmation-dialog h2 { color:#0B1830; }
+      .confirmation-dialog > p:not(.eyebrow) { color:#5E6B80; font-size:14px; }
+      .confirmation-dialog button { min-height:50px; border-color:#DCE4EE; background:#F7F9FC; color:#0B1830; }
+      .confirmation-dialog button.confirm-primary { border-color:#1463E8; background:#1463E8; color:#fff; }
+
+      .calendar-view { border-color:#DCE4EE; background:#fff; }
+      .calendar-heading h2 { color:#0B1830; }
+      .calendar-legends { color:#0B1830; }
+      .calendar-legend { color:#3E4D63; font-size:12px; }
+      .calendar-card-slot { border-color:#DCE4EE; background:#fff; --ha-card-background:#fff; --card-background-color:#fff; --primary-text-color:#0B1830; --secondary-text-color:#5E6B80; }
+      .calendar-loading { color:#33445C; font-size:12px; }
+      .calendar-warning { color:#704B0D; font-size:12px; }
+      .agenda-day { border-color:#DCE4EE; background:#fff; }
+      .agenda-day.is-today { border-color:#8DB7F8; background:#F1F6FF; }
+      .agenda-day > header { border-color:#DCE4EE; color:#0B1830; }
+      .agenda-day > header span,.agenda-day > header small { color:#5E6B80; font-size:12px; }
+      .agenda-event { border:1px solid color-mix(in srgb,var(--calendar-colour) 30%,#DCE4EE); background:color-mix(in srgb,var(--calendar-colour) 8%,#fff); color:#0B1830; }
+      .agenda-event .event-time,.agenda-event strong,.agenda-event small,.agenda-empty,.agenda-more { font-size:12px; }
+      .agenda-event strong { color:#0B1830; }
+      .agenda-event small,.agenda-empty { color:#5E6B80; }
+
+      .family-rhythm { border:0; background:linear-gradient(125deg,#0C315D,#1463E8); }
+      .family-rhythm .eyebrow { color:#9BE1D5; }
+      .family-rhythm h2 { color:#fff; }
+      .family-rhythm p:last-child { color:#D4E1F0; font-size:13px; }
+      .rhythm-stats span { min-height:74px; color:#D4E1F0; font-size:12px; }
+      .rhythm-stats strong { color:#fff; }
+      .family-person { border-color:#DCE4EE; background:#fff; color:#0B1830; }
+      .family-person-heading > span { border:3px solid color-mix(in srgb,var(--person-colour) 72%,#fff); background:#0B1830; color:#fff; }
+      .family-facts span { border:1px solid color-mix(in srgb,var(--person-colour) 18%,#DCE4EE); background:color-mix(in srgb,var(--person-colour) 5%,#fff); color:#4F5F75; font-size:12px; }
+      .family-facts strong { color:#0B1830; }
+      .chore-heading span { color:#5E6B80; font-size:12px; }
+      .chore-row { border-color:color-mix(in srgb,var(--person-colour) 22%,#DCE4EE); background:color-mix(in srgb,var(--person-colour) 5%,#fff); }
+      .chore-row strong { color:#0B1830; font-size:13px; }
+      .chore-row small { color:#5E6B80; font-size:12px; }
+      .chore-row b { color:#33445C; font-size:12px; }
+      .assignment { border-color:#DCE4EE; color:#0B1830; }
+      .assignment small { color:#5E6B80; font-size:12px; }
+
+      .media-player-panel { border:0; background:radial-gradient(circle at 85% 10%,rgba(20,99,232,.28),transparent 35%),linear-gradient(145deg,#061B3A,#0C315D); }
+      .music-heading .eyebrow { color:#8FD8CB; }
+      .music-heading h2 { color:#fff; }
+      .music-meta { color:#C7D4E4; font-size:12px; }
+      .media-player-stage { border-color:rgba(255,255,255,.16); background:#041225; }
+
+      .compact-fixture,.compact-fixture > span,.compact-fixture > strong { color:#0B1830; }
+
+      .view button:not([disabled]),.view select:not([disabled]) { min-height:48px; }
+      .view small { font-size:12px; }
+
+      .football-experience { height:100%; min-height:0; display:grid; grid-template-rows:214px minmax(0,1fr); gap:16px; }
+      .football-hero { position:relative; padding:22px 28px; overflow:hidden; border-radius:24px; background:radial-gradient(circle at 12% 105%,rgba(0,168,135,.28),transparent 36%),radial-gradient(circle at 88% 0,rgba(20,99,232,.34),transparent 36%),#061B3A; color:#fff; box-shadow:0 18px 42px rgba(6,27,58,.2); }
+      .football-hero::after { content:""; position:absolute; right:50%; bottom:-120px; width:300px; height:300px; transform:translateX(50%); border:1px solid rgba(255,255,255,.07); border-radius:50%; box-shadow:0 0 0 34px rgba(255,255,255,.018),0 0 0 72px rgba(255,255,255,.012); }
+      .football-hero-heading { position:relative; z-index:1; display:flex; justify-content:space-between; align-items:flex-start; }
+      .football-hero .eyebrow { color:#8FD8CB; }
+      .football-hero h2 { margin:4px 0 0; color:#fff; font-size:27px; }
+      .football-freshness { min-height:42px; padding:0 12px; display:flex; align-items:center; gap:9px; border:1px solid rgba(255,255,255,.14); border-radius:14px; background:rgba(255,255,255,.07); }
+      .football-freshness > i { width:9px; height:9px; border-radius:50%; background:#00C69D; box-shadow:0 0 0 4px rgba(0,198,157,.16); }
+      .football-freshness.is-cached > i { background:#E7A93D; box-shadow:0 0 0 4px rgba(231,169,61,.16); }
+      .football-freshness.is-stale > i { background:#E86E5A; box-shadow:0 0 0 4px rgba(232,110,90,.16); }
+      .football-freshness strong,.football-freshness small { display:block; color:#fff; }
+      .football-freshness strong { font-size:12px; }
+      .football-freshness small { margin-top:2px; color:#AFC0D5; font-size:12px; }
+      .hero-match { position:relative; z-index:1; max-width:680px; margin:14px auto 0; display:grid; grid-template-columns:minmax(0,1fr) 150px minmax(0,1fr); align-items:center; gap:24px; }
+      .hero-team { display:flex; align-items:center; justify-content:flex-end; gap:15px; }
+      .hero-team.is-away { flex-direction:row-reverse; }
+      .hero-team > strong { color:#fff; font-size:19px; }
+      .team-mark { position:relative; flex:0 0 auto; display:grid; place-items:center; overflow:hidden; border-radius:50%; background:#fff; color:#061B3A; box-shadow:0 5px 16px rgba(3,12,28,.18); }
+      .team-mark img { position:absolute; inset:11%; width:78%; height:78%; object-fit:contain; background:#fff; }
+      .team-mark img[hidden] { display:none; }
+      .team-mark.is-hero { width:70px; height:70px; }
+      .team-mark.is-hero strong { font-size:14px; }
+      .team-mark.is-small { width:30px; height:30px; }
+      .team-mark.is-small strong { font-size:12px; }
+      .hero-score { text-align:center; }
+      .hero-score > span { display:block; color:#fff; font-size:30px; font-weight:850; letter-spacing:-.035em; }
+      .hero-score small { display:block; margin-top:6px; color:#8FD8CB; font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
+      .hero-match.is-empty { display:flex; justify-content:center; color:#fff; font-size:16px; }
+      .football-layout { grid-template-columns:minmax(0,1fr) clamp(260px,25vw,320px); gap:16px; }
+      .football-main,.spotlight-panel { border-color:#DCE4EE; background:#fff; }
+      .football-main { padding:18px 20px; grid-template-rows:58px minmax(0,1fr); }
+      .football-toolbar h2 { font-size:21px; }
+      .matchweek-controls { gap:5px; }
+      .matchweek-controls button { width:48px; height:48px; background:#EAF2FF; color:#1463E8; }
+      .matchweek-controls select { height:48px; min-width:82px; border-color:#DCE4EE; background:#fff; color:#0B1830; font-size:13px; }
+      .football-tabs .segment { min-height:48px; }
+      .fixture-groups { padding-right:5px; }
+      .fixture-day h3 { margin:12px 0 7px; color:#5E6B80; font-size:12px; }
+      .fixture { min-height:58px; grid-template-columns:minmax(0,1fr) 92px minmax(0,1fr); gap:10px; padding:8px 10px; border-color:#E1E8F0; }
+      .fixture.is-spotlight { border-color:#BFD3F2; background:#F4F8FF; }
+      .fixture.is-live { border-color:#E86E5A; }
+      .team { display:flex; align-items:center; gap:8px; color:#0B1830; font-size:13px; }
+      .away-team { justify-content:flex-end; }
+      .fixture-score { font-size:16px; }
+      .fixture-score small,.scorers { color:#5E6B80; font-size:12px; }
+      .spotlight-panel { padding:20px; }
+      .spotlight-panel h2 { font-size:20px; }
+      .spotlight-club { gap:12px; margin-top:12px; padding-top:12px; border-color:#E1E8F0; }
+      .spotlight-club strong { font-size:14px; }
+      .spotlight-club small { color:#5E6B80; font-size:12px; line-height:1.35; }
+      .league-table { font-size:13px; }
+      .league-table th,.league-table td { padding:9px 8px; border-color:#E1E8F0; }
+      .league-table tr.is-spotlight { background:#F1F6FF; }
+
+      @keyframes spin { to { transform:rotate(360deg); } }
+      @media (max-width:1030px) {
+        .shell { grid-template-columns:92px minmax(0,1fr); }
+        .navigation { padding-inline:10px; }
+        .brand { width:62px; height:62px; }
+        .content { padding-inline:18px; }
+        .rooms-layout { grid-template-columns:minmax(0,1fr) 330px; }
+        .security-layout { grid-template-columns:minmax(0,1fr) 274px; }
+        .football-layout { grid-template-columns:minmax(0,1fr) 270px; }
+        .nav-button { min-height:55px; }
+      }
+      @media (max-width:1180px) {
+        .security-layout { grid-template-columns:minmax(0,1fr) 274px; }
+        .security-camera-picker { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .security-stage-media { width:auto; max-width:100%; height:100%; place-self:stretch center; }
+      }
+      @media (max-width:900px) {
+        .security-layout { display:flex; flex-direction:column; height:auto; }
+        .security-main { display:flex; flex-direction:column; }
+        .security-camera-picker { grid-template-columns:1fr; }
       }
       @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
     `;

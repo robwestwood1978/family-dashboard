@@ -43,3 +43,16 @@ jobs:
         working-directory: family_dashboard_manager/app
       - run: npm run test:browser
         working-directory: family_dashboard_manager/app
+      - name: Render v0.8 design approval screens
+        run: npm run test:approval
+        working-directory: family_dashboard_manager/app
+      - name: Upload v0.8 design approval screens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v080-design-approval-screens
+          path: |
+            family_dashboard_manager/app/test-results/v080-approval/screens/**/*.png
+            family_dashboard_manager/app/test-results/v080-approval/approval-manifest.json
+          if-no-files-found: error
+          retention-days: 14

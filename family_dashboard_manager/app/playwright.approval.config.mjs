@@ -1,0 +1,32 @@
+import { defineConfig } from "@playwright/test";
+
+const approvalViewport = (browserName, width, height) => ({
+  name: `approval-${browserName}-${width}x${height}`,
+  use: {
+    browserName,
+    viewport: { width, height },
+    deviceScaleFactor: 1,
+    hasTouch: true
+  }
+});
+
+export default defineConfig({
+  testDir: "./browser-test",
+  testMatch: "family-hub-card.spec.mjs",
+  grep: /v0\.8 design approval/,
+  fullyParallel: false,
+  forbidOnly: true,
+  retries: 0,
+  reporter: "list",
+  outputDir: "test-results/v080-approval",
+  use: {
+    headless: true,
+    trace: "retain-on-failure"
+  },
+  projects: [
+    approvalViewport("chromium", 1112, 834),
+    approvalViewport("chromium", 1440, 900),
+    approvalViewport("webkit", 1112, 834),
+    approvalViewport("webkit", 1440, 900)
+  ]
+});

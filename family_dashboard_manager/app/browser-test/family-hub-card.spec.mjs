@@ -1,8 +1,19 @@
 import { test, expect } from "@playwright/test";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import {
+  buildFootballStates,
+  FOOTBALL_POLLING_INTERVALS,
+  normaliseFootballData
+} from "../src/football-provider.mjs";
+import {
+  APPROVAL_ZOOM_PROJECT,
+  APPROVAL_ZOOM_VIEW_NAMES
+} from "./v080-approval-manifest.mjs";
 
 const config = JSON.parse(await readFile(new URL("../config/example.json", import.meta.url), "utf8"));
 const cardSource = await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8");
+const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
 
 function state(entityId, value, attributes = {}) {
   return {
@@ -31,7 +42,7 @@ function fixtureStates() {
     "button.example_garage_stop_stream": state("button.example_garage_stop_stream", "unknown"),
     "alarm_control_panel.example_home": state("alarm_control_panel.example_home", "disarmed", { supported_features: 63 }),
     "binary_sensor.example_doorbell_motion": state("binary_sensor.example_doorbell_motion", "off"),
-    "binary_sensor.example_doorbell_person": state("binary_sensor.example_doorbell_person", "on"),
+    "binary_sensor.example_doorbell_person": state("binary_sensor.example_doorbell_person", "off"),
     "binary_sensor.example_doorbell_ringing": state("binary_sensor.example_doorbell_ringing", "off"),
     "binary_sensor.example_garage_motion": state("binary_sensor.example_garage_motion", "off"),
     "binary_sensor.example_garage_person": state("binary_sensor.example_garage_person", "off"),
@@ -88,14 +99,143 @@ function fixtureStates() {
   return states;
 }
 
+function approvalFootballStates(mode = "live") {
+  const namedTeams = [
+    [1, "Tottenham Hotspur", "TOT", 6],
+    [2, "Aston Villa", "AVL", 7],
+    [3, "Burnley", "BUR", 90],
+    [4, "Newcastle United", "NEW", 4],
+    [5, "Arsenal", "ARS", 3],
+    [6, "Chelsea", "CHE", 8]
+  ];
+  const teams = [
+    ...namedTeams.map(([id, name, shortName, badgeCode]) => ({ id, name, short_name: shortName, code: badgeCode })),
+    ...Array.from({ length: 14 }, (_, index) => ({
+      id: index + 7,
+      name: `Premier League Club ${index + 7}`,
+      short_name: `T${String(index + 7).padStart(2, "0")}`,
+      code: index + 101
+    }))
+  ];
+  const fetchedAt = mode === "stale"
+    ? "2026-08-24T12:00:00.000Z"
+    : mode === "cached"
+      ? "2026-08-24T14:55:00.000Z"
+      : "2026-08-24T15:07:00.000Z";
+  const fixtureStats = (homeElement, awayElement) => [{
+    identifier: "goals_scored",
+    h: homeElement ? [{ element: homeElement, value: 2 }] : [],
+    a: awayElement ? [{ element: awayElement, value: 1 }] : []
+  }];
+  const data = normaliseFootballData({
+    bootstrap: {
+      teams,
+      events: [{
+        id: 1,
+        is_current: true,
+        is_next: false,
+        deadline_time: "2026-08-21T17:30:00.000Z"
+      }],
+      elements: [
+        { id: 101, web_name: "Solanke" },
+        { id: 102, web_name: "Watkins" }
+      ]
+    },
+    fixtures: [
+      {
+        id: 101,
+        event: 1,
+        kickoff_time: "2026-08-24T14:00:00.000Z",
+        started: true,
+        finished: false,
+        finished_provisional: false,
+        minutes: 67,
+        team_h: 1,
+        team_a: 2,
+        team_h_score: 2,
+        team_a_score: 1,
+        stats: fixtureStats(101, 102)
+      },
+      {
+        id: 102,
+        event: 1,
+        kickoff_time: "2026-08-24T11:30:00.000Z",
+        started: true,
+        finished: false,
+        finished_provisional: true,
+        minutes: 90,
+        team_h: 3,
+        team_a: 4,
+        team_h_score: 1,
+        team_a_score: 1,
+        stats: fixtureStats(null, null)
+      },
+      {
+        id: 103,
+        event: 1,
+        kickoff_time: "2026-08-25T18:45:00.000Z",
+        started: false,
+        finished: false,
+        finished_provisional: false,
+        minutes: 0,
+        team_h: 5,
+        team_a: 6,
+        team_h_score: null,
+        team_a_score: null,
+        stats: fixtureStats(null, null)
+      }
+    ],
+    spotlightTeamCodes: config.football.spotlight_team_codes,
+    fetchedAt
+  });
+  const built = buildFootballStates(data, config.football, {
+    dataStatus: mode === "cached" ? "cached" : "live",
+    checkedAt: fetchedAt,
+    refreshIntervalMs: FOOTBALL_POLLING_INTERVALS.live
+  });
+  const states = Object.fromEntries(built.map((entry) => [
+    entry.entity_id,
+    state(entry.entity_id, entry.state, entry.attributes)
+  ]));
+  if (mode === "stale") {
+    states[config.football.index_entity] = state(config.football.index_entity, "1", {
+      ...states[config.football.index_entity].attributes,
+      data_status: "stale",
+      poller_status: "error",
+      last_checked: fetchedAt,
+      last_updated: fetchedAt
+    });
+  }
+  return states;
+}
+
 async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOptions = {}) {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.addInitScript(({ fixedNow }) => {
+    const NativeDate = Date;
+    const installedAt = NativeDate.now();
+    const fixedAt = NativeDate.parse(fixedNow);
+    class ApprovalDate extends NativeDate {
+      constructor(...args) {
+        super(...(args.length ? args : [fixedAt + (NativeDate.now() - installedAt)]));
+      }
+      static now() {
+        return fixedAt + (NativeDate.now() - installedAt);
+      }
+    }
+    globalThis.Date = ApprovalDate;
+  }, { fixedNow: runtimeOptions.fixedNow || APPROVAL_NOW });
   await page.route("**/local/family-dashboard/assets/**", async (route) => {
+    const filename = new URL(route.request().url()).pathname.split("/").pop();
+    const approvedAssets = new Set(["example-ground.svg", "example-first.svg", "example-living-room-light.svg", "example-kitchen-light.svg"]);
+    const body = approvedAssets.has(filename)
+      ? await readFile(new URL(`../frontend/assets/${filename}`, import.meta.url), "utf8")
+      : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#eef0f4"/></svg>';
     await route.fulfill({
       status: 200,
       contentType: "image/svg+xml",
-      body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#eef0f4"/></svg>'
+      body
     });
   });
   await page.route("**/api/camera_proxy/**", async (route) => {
@@ -103,6 +243,21 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       status: 200,
       contentType: "image/svg+xml",
       body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60"><rect width="100" height="60" fill="#eef0f4"/></svg>'
+    });
+  });
+  await page.route("https://resources.premierleague.com/premierleague/badges/**", async (route) => {
+    if (route.request().url().includes("/t90.png")) {
+      await route.abort("failed");
+      return;
+    }
+    const isVilla = route.request().url().includes("/t7.png");
+    const background = isVilla ? "#7A263A" : "#132257";
+    const accent = isVilla ? "#95BFE5" : "#FFFFFF";
+    const code = isVilla ? "AVL" : "TOT";
+    await route.fulfill({
+      status: 200,
+      contentType: "image/svg+xml",
+      body: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 90"><path d="M45 4 79 16v25c0 22-13 37-34 45C24 78 11 63 11 41V16Z" fill="${background}" stroke="${accent}" stroke-width="5"/><text x="45" y="53" fill="${accent}" font-family="system-ui,sans-serif" font-size="20" font-weight="800" text-anchor="middle">${code}</text></svg>`
     });
   });
   await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px 0 76px;font:20px system-ui}.ha-sidebar{position:fixed;inset:56px auto 0 0;width:52px;background:#191b20}.ha-main{position:absolute;inset:0 0 0 52px;overflow:hidden}</style><div class="ha-header">Family Hub</div><div class="ha-sidebar"></div><div class="ha-main"></div></body></html>`);
@@ -284,7 +439,8 @@ async function expectNoRootOverflow(page) {
 test("fits the supported iPad landscapes and exposes every approved surface", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
-  await expect(card.locator(".preview-pill")).toHaveText(/Controlled live/);
+  await expect(card.locator(".preview-pill")).toHaveCount(0);
+  await expect(card).not.toContainText(/Controlled live|mapped rooms|fixtures loaded/i);
   await expect(card.locator(".nav-button")).toHaveCount(7);
   await expect(card.locator(".nav-button")).toContainText(["Today", "Calendar", "Home", "Family", "Security", "Music", "Football"]);
   await expectNoRootOverflow(page);
@@ -309,6 +465,51 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   await expect(card.locator(".next-panel")).toContainText("Family dinner");
   await expect(card.locator(".next-panel")).not.toContainText("Finished early appointment");
 
+  expect(pageErrors).toEqual([]);
+});
+
+test("reports Today Security from confirmed alerts before availability without guessing an open garage", async ({ page }) => {
+  const pageErrors = await mount(page);
+  const card = page.locator("family-hub-card");
+  const summary = card.locator(".hero-metrics button[data-view='entry']");
+
+  await expect(summary).toContainText("Quiet at home");
+  await expect(summary).toContainText("no entry alerts");
+
+  await updateEntityState(card, state("cover.example_garage", "closing", { supported_features: 3 }));
+  await expect(summary).toContainText("Check home");
+
+  await updateEntityStates(card, {
+    "cover.example_garage": state("cover.example_garage", "closed", { supported_features: 3 }),
+    "alarm_control_panel.example_home": state("alarm_control_panel.example_home", "arming", { supported_features: 3 })
+  });
+  await expect(summary).toContainText("Alarm changing");
+  await expect(summary).not.toContainText("Quiet at home");
+
+  await updateEntityState(card, state("alarm_control_panel.example_home", "disarmed", { supported_features: 3 }));
+  await updateEntityState(card, state("binary_sensor.example_garage_person", "on"));
+  await expect(summary).toContainText("Check home");
+
+  await updateEntityStates(card, {
+    "binary_sensor.example_garage_person": state("binary_sensor.example_garage_person", "off"),
+    "cover.example_garage": state("cover.example_garage", "unavailable", { supported_features: 3 })
+  });
+  await expect(summary).toContainText("Status unavailable");
+  await expect(summary).toContainText("entry signals are unavailable");
+  await expect(summary).not.toContainText(/open entry|garage open/i);
+
+  await updateEntityStates(card, {
+    "cover.example_garage": state("cover.example_garage", "closed", { supported_features: 3 }),
+    "binary_sensor.example_doorbell_motion": state("binary_sensor.example_doorbell_motion", "unknown")
+  });
+  await expect(summary).toContainText("Status unavailable");
+
+  await updateEntityStates(card, {
+    "binary_sensor.example_doorbell_motion": state("binary_sensor.example_doorbell_motion", "off"),
+    "binary_sensor.example_doorbell_ringing": state("binary_sensor.example_doorbell_ringing", "on"),
+    "camera.example_garage": state("camera.example_garage", "unavailable")
+  });
+  await expect(summary).toContainText("Check home");
   expect(pageErrors).toEqual([]);
 });
 
@@ -493,6 +694,9 @@ test("starts cameras deliberately and confirms garage and alarm actions", async 
   await expect(card.locator(".security-camera")).toHaveCount(2);
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
   await expect(card.locator(".security-camera").filter({ hasText: /bedroom|child room/i })).toHaveCount(0);
+  await expect(card.locator(".security-privacy-note")).toContainText("Entry cameras only");
+  await expect(card.locator(".security-privacy-note")).toContainText("viewer opens only when you choose it");
+  await expect(card.locator(".security-privacy-note")).toContainText("Streams started here stop when you close the view or leave Security");
 
   await card.locator('button[data-camera-open="doorbell"]').click();
   await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]')).toBeVisible();
@@ -514,6 +718,25 @@ test("starts cameras deliberately and confirms garage and alarm actions", async 
 
   await card.locator('button[data-secure-cover-action="open_cover"]').click();
   await expect(card.locator(".confirmation-dialog")).toContainText("Open garage door");
+  for (const selector of [".navigation", ".topbar", ".security-main", ".security-sidebar"]) {
+    await expect(card.locator(selector)).toHaveAttribute("inert", "");
+    await expect(card.locator(selector)).toHaveAttribute("aria-hidden", "true");
+  }
+  await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.dataset?.confirmAction)).toBe("cancel");
+  await card.locator('.nav-button[data-view="today"]').evaluate((button) => button.click());
+  await expect(card.locator('[data-current-view="entry"]')).toBeVisible();
+  await expect(card.locator(".confirmation-dialog")).toBeVisible();
+  await page.keyboard.press("Shift+Tab");
+  await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.dataset?.confirmAction)).toBe("confirm");
+  await updateEntityState(card, state("binary_sensor.example_garage_motion", "on"));
+  await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.dataset?.confirmAction)).toBe("confirm");
+  await page.keyboard.press("Tab");
+  await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.dataset?.confirmAction)).toBe("cancel");
+  await page.keyboard.press("Escape");
+  await expect(card.locator(".confirmation-dialog")).toHaveCount(0);
+  await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.dataset?.secureCoverAction)).toBe("open_cover");
+
+  await card.locator('button[data-secure-cover-action="open_cover"]').click();
   await card.locator('button[data-confirm-action="cancel"]').click();
   await card.locator('button[data-secure-cover-action="open_cover"]').click();
   await card.locator('button[data-confirm-action="confirm"]').click();
@@ -556,6 +779,8 @@ test("separates camera wake-up, first-frame buffering, and live readiness withou
   await updateEntityState(card, state("camera.example_doorbell", "streaming"));
   const player = card.locator('[data-card-type="picture-entity"][data-entity="camera.example_doorbell"]');
   await expect(player).toBeVisible();
+  await expect(player).toHaveAttribute("aria-hidden", "true");
+  await expect(player).toHaveJSProperty("inert", true);
   await expect(card.locator('.camera-is-buffering[role="status"][aria-busy="true"]')).toContainText("Loading video");
   await expect(card.locator(".privacy-badge").filter({ hasText: "Loading video" })).toHaveCount(1);
   const instance = await player.getAttribute("data-instance-id");
@@ -570,6 +795,8 @@ test("separates camera wake-up, first-frame buffering, and live readiness withou
   await expect(card.locator(".camera-live-indicator")).toHaveText("Live");
   await expect(card.locator(".privacy-badge").filter({ hasText: /^Live$/ })).toHaveCount(1);
   await expect(card.locator(".camera-is-buffering")).toHaveCount(0);
+  await expect(player).not.toHaveAttribute("aria-hidden", "true");
+  await expect(player).toHaveJSProperty("inert", false);
   await expect(player).toHaveAttribute("data-instance-id", instance);
   expect(pageErrors).toEqual([]);
 });
@@ -695,8 +922,10 @@ test("expires stale Security confirmations and never reverses a moving garage do
   await expect(card.locator(".confirmation-dialog")).toContainText("Open garage door");
   await updateEntityState(card, state("cover.example_garage", "opening", { current_position: 20, supported_features: 3 }));
   await expect(card.locator(".confirmation-dialog")).toBeVisible();
+  await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.dataset?.confirmAction)).toBe("cancel");
   await card.locator('button[data-confirm-action="confirm"]').click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.getAttribute("aria-label"))).toBe("Garage controls");
   await expect(card.locator(".garage-action")).toHaveText("Opening…");
   await expect(card.locator(".garage-action")).toBeDisabled();
   expect(await card.locator(".garage-action").evaluate((button) => button.hasAttribute("data-secure-cover-action"))).toBe(false);
@@ -799,7 +1028,8 @@ test("keeps switching gated behind Stop and recovers camera failures without raw
   await expect(card.locator('button[data-camera-open="garage"]')).toBeEnabled();
   await card.locator('button[data-camera-open="garage"]').click();
   await expect(card.locator('.camera-is-stopping[role="status"][aria-busy="true"]')).toContainText("Stopping");
-  await expect(card.locator('.camera-is-waiting[role="status"][aria-busy="true"]')).toContainText("Waiting for camera");
+  await expect(card.locator('.camera-is-waiting[role="status"][aria-busy="true"]')).toHaveCount(0);
+  await expect(card.locator('button[data-camera-open="garage"]')).toContainText("Please wait");
   expect(await card.locator('button[data-camera-open]').evaluateAll((buttons) => {
     return buttons.length > 0 && buttons.every((button) => button.disabled);
   })).toBe(true);
@@ -835,8 +1065,8 @@ test("does not treat unavailable as stopped or start another camera before a fre
   await expect(card.locator(".camera-is-stopping")).toBeVisible();
   await updateEntityState(card, state("camera.example_doorbell", "unavailable"));
 
-  await expect(card.locator(".camera-is-waiting")).toHaveCount(2, { timeout: 2_000 });
-  await expect(card.locator(".camera-is-waiting")).toContainText(["Waiting for camera", "Waiting for camera"]);
+  await expect(card.locator(".camera-is-waiting")).toHaveCount(1, { timeout: 2_000 });
+  await expect(card.locator(".camera-is-waiting")).toContainText("Waiting for camera");
   expect(await card.locator('button[data-camera-open]').evaluateAll((buttons) => {
     return buttons.length === 2 && buttons.every((button) => button.disabled);
   })).toBe(true);
@@ -917,7 +1147,8 @@ test("disables every camera-open control while recovery Stop is pending", async 
   await card.locator('button[data-camera-open="garage"]').click();
 
   await expect(card.locator(".camera-is-stopping")).toContainText("Stopping");
-  await expect(card.locator(".camera-is-waiting")).toContainText("Waiting for camera");
+  await expect(card.locator(".camera-is-waiting")).toHaveCount(0);
+  await expect(card.locator('button[data-camera-open="doorbell"]')).toContainText("Please wait");
   expect(await card.locator('button[data-camera-open]').evaluateAll((buttons) => {
     return buttons.length > 0 && buttons.every((button) => button.disabled);
   })).toBe(true);
@@ -1111,6 +1342,87 @@ test("keeps the family map private and spotlights both requested clubs", async (
   expect(pageErrors).toEqual([]);
 });
 
+test("loads only allowlisted crest_url badges and renders initials for untrusted or legacy fields", async ({ page }) => {
+  const blockedUrls = [
+    "https://hostile.example/team-badge.png",
+    "https://resources.premierleague.com/premierleague/badges/70/t701.png",
+    "https://resources.premierleague.com/premierleague/badges/70/t702.png",
+    "https://resources.premierleague.com/premierleague/badges/70/t703.png"
+  ];
+  const requestedBlockedUrls = [];
+  page.on("request", (request) => {
+    if (blockedUrls.includes(request.url())) requestedBlockedUrls.push(request.url());
+  });
+  await page.route("https://hostile.example/**", (route) => route.abort("blockedbyclient"));
+
+  const events = [
+    {
+      id: 901,
+      kickoff_time: "2026-08-24T18:00:00.000Z",
+      started: false,
+      finished: false,
+      minutes: 0,
+      home: {
+        name: "Valid Badge",
+        short_name: "VAL",
+        crest_url: "https://resources.premierleague.com/premierleague/badges/70/t6.png"
+      },
+      away: {
+        name: "Hostile Badge",
+        short_name: "BAD",
+        crest_url: blockedUrls[0]
+      },
+      home_score: null,
+      away_score: null,
+      home_scorers: [],
+      away_scorers: [],
+      spotlight: true
+    },
+    {
+      id: 902,
+      kickoff_time: "2026-08-25T18:00:00.000Z",
+      started: false,
+      finished: false,
+      minutes: 0,
+      home: { name: "Legacy Crest", short_name: "LCR", crest: blockedUrls[1] },
+      away: { name: "Legacy Badge", short_name: "LBD", badge_url: blockedUrls[2] },
+      home_score: null,
+      away_score: null,
+      home_scorers: [],
+      away_scorers: [],
+      spotlight: false
+    },
+    {
+      id: 903,
+      kickoff_time: "2026-08-26T18:00:00.000Z",
+      started: false,
+      finished: false,
+      minutes: 0,
+      home: { name: "Legacy Logo", short_name: "LGO", logo_url: blockedUrls[3] },
+      away: { name: "Initials Only", short_name: "INI" },
+      home_score: null,
+      away_score: null,
+      home_scorers: [],
+      away_scorers: [],
+      spotlight: false
+    }
+  ];
+  const pageErrors = await mount(page, config, {
+    "sensor.family_dashboard_premier_league_gw_1": state("sensor.family_dashboard_premier_league_gw_1", "3", { events })
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="football"]').click();
+
+  await expect(card.locator('.football-hero img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
+  for (const code of ["BAD", "LCR", "LBD", "LGO", "INI"]) {
+    const mark = card.locator(".fixture .team-mark").filter({ hasText: code }).first();
+    await expect(mark.locator("img")).toHaveCount(0);
+    await expect(mark.locator("strong")).toHaveAttribute("aria-hidden", "false");
+  }
+  expect(requestedBlockedUrls).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
 test("enforces read-only mode at every interactive control boundary", async ({ page }, testInfo) => {
   const previewConfig = structuredClone(config);
   previewConfig.display.read_only = true;
@@ -1120,7 +1432,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   const pageErrors = await mount(page, previewConfig);
   const card = page.locator("family-hub-card");
 
-  await expect(card.locator(".preview-pill")).toHaveText(/Read-only test/);
+  await expect(card.locator(".preview-pill")).toHaveCount(0);
   await expect(card.locator('[data-media-toggle="media_player.living_room"]')).toBeDisabled();
 
   await card.locator('.nav-button[data-view="rooms"]').click();
@@ -1212,5 +1524,547 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect(card.locator(".family-rhythm")).toContainText("Actual ChoreOps tasks are shown below");
   await expect(card.locator(".chore-row")).toHaveCount(6);
   await expect(card.locator('[data-card-type="map"]')).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
+});
+
+async function updateEntityStates(card, nextStates) {
+  await card.evaluate((element, values) => {
+    element.hass = {
+      ...element._hass,
+      states: { ...element._hass.states, ...values }
+    };
+  }, nextStates);
+}
+
+async function expectApprovalQuality(page, { hotspots = false, securityLabels = false } = {}) {
+  const card = page.locator("family-hub-card");
+  await expectNoRootOverflow(page);
+  await expect(card).not.toContainText(/Controlled live|mapped(?:\s+rooms|\s+routines)?|fixtures loaded|provider publishes/i);
+  const audit = await card.evaluate((element, options) => {
+    const root = element.shadowRoot.querySelector(".view");
+    const rootRect = root.getBoundingClientRect();
+    const typography = [...root.querySelectorAll("*")]
+      .filter((node) => node.children.length === 0 && node.textContent.trim() && node.getClientRects().length)
+      .filter((node) => !node.classList.contains("sr-only"))
+      .map((node) => ({ text: node.textContent.trim(), size: Number.parseFloat(getComputedStyle(node).fontSize) }))
+      .filter(({ size }) => Number.isFinite(size) && size < 12);
+    const controls = [...root.querySelectorAll("button:not([disabled]),select:not([disabled])")]
+      .filter((node) => node.getClientRects().length)
+      .map((node) => {
+        const bounds = node.getBoundingClientRect();
+        return { label: node.getAttribute("aria-label") || node.textContent.trim(), width: bounds.width, height: bounds.height };
+      })
+      .filter(({ width, height }) => width < 48 || height < 48);
+    const hotspotSizes = options.hotspots
+      ? [...root.querySelectorAll("[data-room]")].filter((node) => node.getClientRects().length).map((node) => {
+        const bounds = node.getBoundingClientRect();
+        return { room: node.getAttribute("aria-label"), width: bounds.width, height: bounds.height };
+      }).filter(({ width, height }) => width < 48 || height < 48)
+      : [];
+    const securityLabelSelector = [
+      ".security-signal strong",
+      ".security-signal small",
+      ".privacy-badge",
+      ".security-card-heading h2",
+      ".security-stage-heading h2",
+      ".stage-privacy",
+      ".camera-select-action",
+      ".garage-action",
+      ".alarm-actions button",
+      ".security-privacy-note"
+    ].join(",");
+    const clippedSecurityLabels = options.securityLabels
+      ? [...root.querySelectorAll(securityLabelSelector)]
+        .filter((node) => node.getClientRects().length)
+        .map((node) => ({
+          text: node.textContent.trim(),
+          width: node.clientWidth,
+          scrollWidth: node.scrollWidth,
+          height: node.clientHeight,
+          scrollHeight: node.scrollHeight
+        }))
+        .filter(({ width, scrollWidth, height, scrollHeight }) => scrollWidth > width + 1 || scrollHeight > height + 1)
+      : [];
+    const securityCardBounds = options.securityLabels
+      ? [...root.querySelectorAll(".security-camera")].map((node) => {
+        const bounds = node.getBoundingClientRect();
+        const picker = node.closest(".security-camera-picker")?.getBoundingClientRect();
+        const visibleChildren = [...node.querySelectorAll(".security-card-heading,.security-card-heading h2,.privacy-badge,.security-signals,.camera-select-action")]
+          .filter((child) => child.getClientRects().length)
+          .map((child) => {
+            const childBounds = child.getBoundingClientRect();
+            return {
+              text: child.textContent.trim(),
+              outsideCard: childBounds.left < bounds.left - 1
+                || childBounds.right > bounds.right + 1
+                || childBounds.top < bounds.top - 1
+                || childBounds.bottom > bounds.bottom + 1
+            };
+          })
+          .filter(({ outsideCard }) => outsideCard);
+        return {
+          label: node.textContent.trim(),
+          outsidePicker: !picker
+            || bounds.left < picker.left - 1
+            || bounds.right > picker.right + 1
+            || bounds.top < picker.top - 1
+            || bounds.bottom > picker.bottom + 1,
+          outsideRoot: bounds.left < rootRect.left - 1
+            || bounds.right > rootRect.right + 1
+            || bounds.top < rootRect.top - 1
+            || bounds.bottom > rootRect.bottom + 1,
+          visibleChildren
+        };
+      }).filter(({ outsidePicker, outsideRoot, visibleChildren }) => outsidePicker || outsideRoot || visibleChildren.length)
+      : [];
+    return { typography, controls, hotspotSizes, clippedSecurityLabels, securityCardBounds };
+  }, { hotspots, securityLabels });
+  expect(audit.typography).toEqual([]);
+  expect(audit.controls).toEqual([]);
+  expect(audit.hotspotSizes).toEqual([]);
+  expect(audit.clippedSecurityLabels).toEqual([]);
+  expect(audit.securityCardBounds).toEqual([]);
+}
+
+async function expectContrast(card, checks) {
+  const results = await card.evaluate((element, requested) => {
+    const composedParent = (node) => node?.parentElement || node?.getRootNode?.()?.host || null;
+    const parse = (value) => {
+      const serialised = String(value).trim().toLowerCase();
+      if (!serialised || serialised === "transparent") return { r: 0, g: 0, b: 0, a: 0 };
+      const channels = serialised.match(/[-+]?(?:\d*\.)?\d+/g)?.map(Number) || [];
+      if (serialised.startsWith("color(srgb")) {
+        return { r: (channels[0] || 0) * 255, g: (channels[1] || 0) * 255, b: (channels[2] || 0) * 255, a: channels[3] ?? 1 };
+      }
+      return { r: channels[0] || 0, g: channels[1] || 0, b: channels[2] || 0, a: channels[3] ?? 1 };
+    };
+    const luminance = ({ r, g, b }) => {
+      const transform = (channel) => {
+        const value = channel / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * transform(r) + 0.7152 * transform(g) + 0.0722 * transform(b);
+    };
+    const blend = (front, back) => ({
+      r: front.r * front.a + back.r * (1 - front.a),
+      g: front.g * front.a + back.g * (1 - front.a),
+      b: front.b * front.a + back.b * (1 - front.a),
+      a: 1
+    });
+    const isVisible = (node) => {
+      if (!node.getClientRects().length) return false;
+      for (let current = node; current; current = composedParent(current)) {
+        const style = getComputedStyle(current);
+        if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+        if (current.hidden || current.getAttribute?.("aria-hidden") === "true") return false;
+      }
+      return true;
+    };
+    const backgroundFor = (foregroundNode, selector) => {
+      for (let current = foregroundNode; current; current = composedParent(current)) {
+        if (current.matches?.(selector)) return current;
+      }
+      return null;
+    };
+    const backdropFor = (node) => {
+      const chain = [];
+      for (let current = node; current; current = composedParent(current)) chain.unshift(current);
+      let colour = { r: 255, g: 255, b: 255, a: 1 };
+      let unresolvedBackdrop = false;
+      for (const current of chain) {
+        const style = getComputedStyle(current);
+        const background = parse(style.backgroundColor);
+        if (background.a >= 0.999) unresolvedBackdrop = false;
+        colour = blend(background, colour);
+        if (style.backgroundImage !== "none") unresolvedBackdrop = true;
+      }
+      return { colour, unresolvedBackdrop };
+    };
+    return requested.flatMap(({ foreground, background, minimum }) => {
+      const foregroundNodes = [...element.shadowRoot.querySelectorAll(foreground)].filter(isVisible);
+      if (!foregroundNodes.length) return [{ foreground, background, minimum, ratio: 0, missing: true }];
+      return foregroundNodes.map((foregroundNode, index) => {
+        const backgroundNode = backgroundFor(foregroundNode, background);
+        if (!backgroundNode) return { foreground, background, minimum, index, ratio: 0, missing: true };
+        const { colour: backgroundColour, unresolvedBackdrop } = backdropFor(foregroundNode);
+        const foregroundColour = blend(parse(getComputedStyle(foregroundNode).color), backgroundColour);
+        const light = Math.max(luminance(foregroundColour), luminance(backgroundColour));
+        const dark = Math.min(luminance(foregroundColour), luminance(backgroundColour));
+        return {
+          foreground,
+          background,
+          minimum,
+          index,
+          text: foregroundNode.textContent.trim(),
+          ratio: (light + 0.05) / (dark + 0.05),
+          unresolvedBackdrop
+        };
+      });
+    });
+  }, checks);
+  for (const result of results) {
+    const label = `${result.foreground}[${result.index ?? "missing"}] “${result.text || ""}” on ${result.background}`;
+    expect(result.missing, `${label} must resolve to a visible foreground with the requested backdrop`).not.toBe(true);
+    expect(result.unresolvedBackdrop, `${label} must use a measurable composited backdrop`).not.toBe(true);
+    expect(result.ratio, label).toBeGreaterThanOrEqual(result.minimum);
+  }
+}
+
+async function approvalGlyphHeight(page) {
+  return page.locator("family-hub-card").evaluate((element) => {
+    const roots = [element.shadowRoot];
+    for (let index = 0; index < roots.length; index += 1) {
+      for (const node of roots[index].querySelectorAll("*")) {
+        if (node.shadowRoot) roots.push(node.shadowRoot);
+      }
+    }
+    for (const root of roots) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let textNode = walker.nextNode(); textNode; textNode = walker.nextNode()) {
+        const match = textNode.data.match(/\S/);
+        if (!match) continue;
+        const parent = textNode.parentElement;
+        if (!parent || parent.closest(".sr-only,[hidden],[aria-hidden='true'],[inert]")) continue;
+        const style = getComputedStyle(parent);
+        if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+        const range = document.createRange();
+        range.setStart(textNode, match.index);
+        range.setEnd(textNode, match.index + 1);
+        const height = range.getBoundingClientRect().height;
+        if (height > 0) return height;
+      }
+    }
+    return 0;
+  });
+}
+
+async function setApprovalRootZoom(page, enabled) {
+  await page.evaluate((turnOn) => {
+    const html = document.documentElement;
+    const body = document.body;
+    const main = document.querySelector(".ha-main");
+    if (turnOn) {
+      if (window.__v080ApprovalZoomRestore) throw new Error("Approval root zoom is already active");
+      window.__v080ApprovalZoomRestore = {
+        html: html.getAttribute("style"),
+        body: body.getAttribute("style"),
+        main: main.getAttribute("style"),
+        x: window.scrollX,
+        y: window.scrollY
+      };
+      html.style.zoom = "2";
+      html.style.overflow = "auto";
+      body.style.overflow = "visible";
+      main.style.overflow = "visible";
+      window.scrollTo(0, 0);
+      return;
+    }
+    const restore = window.__v080ApprovalZoomRestore;
+    if (!restore) return;
+    const restoreStyle = (node, value) => value === null ? node.removeAttribute("style") : node.setAttribute("style", value);
+    restoreStyle(html, restore.html);
+    restoreStyle(body, restore.body);
+    restoreStyle(main, restore.main);
+    window.scrollTo(restore.x, restore.y);
+    delete window.__v080ApprovalZoomRestore;
+  }, enabled);
+  await page.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(resolveFrame))));
+}
+
+async function auditApprovalTextZoom(page, testInfo, name) {
+  const beforeGlyphHeight = await approvalGlyphHeight(page);
+  await setApprovalRootZoom(page, true);
+  try {
+    const afterGlyphHeight = await approvalGlyphHeight(page);
+    expect(beforeGlyphHeight, `${name} must expose visible text before zoom`).toBeGreaterThan(0);
+    expect(afterGlyphHeight / beforeGlyphHeight, `${name} must exercise a real 200% root zoom`).toBeGreaterThanOrEqual(1.9);
+    const audit = await page.locator("family-hub-card").evaluate((element) => {
+      const cardRoot = element.shadowRoot;
+      const composedParent = (node) => node?.parentElement || node?.getRootNode?.()?.host || null;
+      const isComposedWithin = (node, ancestor) => {
+        for (let current = node; current; current = composedParent(current)) {
+          if (current === ancestor) return true;
+        }
+        return false;
+      };
+      const deepestElementFromPoint = (x, y) => {
+        let hit = document.elementFromPoint(x, y);
+        while (hit?.shadowRoot?.elementFromPoint) {
+          const inner = hit.shadowRoot.elementFromPoint(x, y);
+          if (!inner || inner === hit) break;
+          hit = inner;
+        }
+        return hit;
+      };
+      const isTopmost = (rect, parent) => {
+        const left = Math.max(0, rect.left);
+        const right = Math.min(window.innerWidth, rect.right);
+        const top = Math.max(0, rect.top);
+        const bottom = Math.min(window.innerHeight, rect.bottom);
+        if (right <= left || bottom <= top) return true;
+        const y = top + ((bottom - top) / 2);
+        return [0.2, 0.5, 0.8].some((fraction) => {
+          const x = left + ((right - left) * fraction);
+          const hit = deepestElementFromPoint(x, y);
+          return hit && (isComposedWithin(hit, parent) || isComposedWithin(parent, hit));
+        });
+      };
+      const nodeLabel = (node) => {
+        if (!node) return "unknown";
+        const identity = node.id ? `#${node.id}` : [...node.classList || []].slice(0, 2).map((name) => `.${name}`).join("");
+        return `${node.localName || "node"}${identity}`;
+      };
+      const isVisible = (node) => {
+        for (let current = node; current; current = composedParent(current)) {
+          if (current.nodeType !== Node.ELEMENT_NODE) continue;
+          const style = getComputedStyle(current);
+          if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+          if (current.hidden || current.inert || current.getAttribute("aria-hidden") === "true" || current.classList.contains("sr-only")) return false;
+        }
+        return true;
+      };
+      const roots = [cardRoot];
+      for (let index = 0; index < roots.length; index += 1) {
+        for (const node of roots[index].querySelectorAll("*")) {
+          if (node.shadowRoot) roots.push(node.shadowRoot);
+        }
+      }
+      const textRects = [];
+      for (const root of roots) {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        for (let textNode = walker.nextNode(); textNode; textNode = walker.nextNode()) {
+          const text = textNode.data.replace(/\s+/g, " ").trim();
+          const parent = textNode.parentElement;
+          if (!text || !parent || !isVisible(parent)) continue;
+          const range = document.createRange();
+          range.selectNodeContents(textNode);
+          const rects = [...range.getClientRects()]
+            .filter((rect) => rect.width > 0.5 && rect.height > 0.5)
+            .map((rect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }))
+            .filter((rect) => isTopmost(rect, parent));
+          const visibleRects = rects.map((rect) => {
+            const visible = { ...rect };
+            for (let ancestor = parent; ancestor; ancestor = composedParent(ancestor)) {
+              if (ancestor.nodeType !== Node.ELEMENT_NODE) continue;
+              const style = getComputedStyle(ancestor);
+              const bounds = ancestor.getBoundingClientRect();
+              if (["auto", "scroll", "hidden", "clip"].includes(style.overflowX)) {
+                visible.left = Math.max(visible.left, bounds.left);
+                visible.right = Math.min(visible.right, bounds.right);
+              }
+              if (["auto", "scroll", "hidden", "clip"].includes(style.overflowY)) {
+                visible.top = Math.max(visible.top, bounds.top);
+                visible.bottom = Math.min(visible.bottom, bounds.bottom);
+              }
+            }
+            visible.width = visible.right - visible.left;
+            visible.height = visible.bottom - visible.top;
+            return visible;
+          }).filter((rect) => rect.width > 0.5 && rect.height > 0.5);
+          if (rects.length) textRects.push({ text: text.slice(0, 80), parent, rects, visibleRects });
+        }
+      }
+      const clipped = [];
+      const clippedKeys = new Set();
+      for (const entry of textRects) {
+        for (const rect of entry.rects) {
+          let horizontalScrollReach = false;
+          let verticalScrollReach = false;
+          for (let ancestor = entry.parent; ancestor; ancestor = composedParent(ancestor)) {
+            if (ancestor.nodeType !== Node.ELEMENT_NODE) continue;
+            const style = getComputedStyle(ancestor);
+            const overflowX = style.overflowX;
+            const overflowY = style.overflowY;
+            const bounds = ancestor.getBoundingClientRect();
+            const scrollableX = ["auto", "scroll"].includes(overflowX) && ancestor.scrollWidth > ancestor.clientWidth + 1;
+            const scrollableY = ["auto", "scroll"].includes(overflowY) && ancestor.scrollHeight > ancestor.clientHeight + 1;
+            if (["hidden", "clip"].includes(overflowX) && !horizontalScrollReach && (rect.left < bounds.left - 1 || rect.right > bounds.right + 1)) {
+              const key = `${entry.text}|${nodeLabel(ancestor)}|x`;
+              if (!clippedKeys.has(key)) clipped.push({ text: entry.text, ancestor: nodeLabel(ancestor), axis: "horizontal" });
+              clippedKeys.add(key);
+            }
+            if (["hidden", "clip"].includes(overflowY) && !verticalScrollReach && (rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1)) {
+              const key = `${entry.text}|${nodeLabel(ancestor)}|y`;
+              if (!clippedKeys.has(key)) clipped.push({ text: entry.text, ancestor: nodeLabel(ancestor), axis: "vertical" });
+              clippedKeys.add(key);
+            }
+            horizontalScrollReach ||= scrollableX;
+            verticalScrollReach ||= scrollableY;
+          }
+        }
+      }
+      const overlaps = [];
+      for (let firstIndex = 0; firstIndex < textRects.length; firstIndex += 1) {
+        for (let secondIndex = firstIndex + 1; secondIndex < textRects.length; secondIndex += 1) {
+          const first = textRects[firstIndex];
+          const second = textRects[secondIndex];
+          let intersects = false;
+          for (const firstRect of first.visibleRects) {
+            for (const secondRect of second.visibleRects) {
+              const width = Math.min(firstRect.right, secondRect.right) - Math.max(firstRect.left, secondRect.left);
+              const height = Math.min(firstRect.bottom, secondRect.bottom) - Math.max(firstRect.top, secondRect.top);
+              if (width > 2 && height > 2) intersects = true;
+            }
+          }
+          if (intersects) overlaps.push({ first: first.text, second: second.text });
+        }
+      }
+      return { clipped, overlaps, textCount: textRects.length };
+    });
+    expect(audit.textCount, `${name} must audit all visible text at 200%`).toBeGreaterThan(0);
+    expect(audit.clipped, `${name} has text clipped by its nearest non-scrollable ancestor at 200%`).toEqual([]);
+    expect(audit.overlaps, `${name} has overlapping visible text at 200%`).toEqual([]);
+    if (testInfo.project.name === APPROVAL_ZOOM_PROJECT && APPROVAL_ZOOM_VIEW_NAMES.includes(name)) {
+      const directory = resolve("test-results/v080-approval/screens", testInfo.project.name);
+      await mkdir(directory, { recursive: true });
+      const path = resolve(directory, `v080-zoom-${name}.png`);
+      await page.screenshot({ path, animations: "disabled", fullPage: true });
+      await testInfo.attach(`v0.8 200% zoom ${name} · ${testInfo.project.name}`, { path, contentType: "image/png" });
+    }
+  } finally {
+    await setApprovalRootZoom(page, false);
+  }
+}
+
+async function captureApproval(page, testInfo, name, options = {}) {
+  await expectApprovalQuality(page, options);
+  await page.waitForTimeout(120);
+  const directory = resolve("test-results/v080-approval/screens", testInfo.project.name);
+  await mkdir(directory, { recursive: true });
+  const path = resolve(directory, `v080-${name}.png`);
+  await page.screenshot({ path, animations: "disabled" });
+  await testInfo.attach(`v0.8 ${name} · ${testInfo.project.name}`, { path, contentType: "image/png" });
+  await auditApprovalTextZoom(page, testInfo, name);
+}
+
+test("v0.8 design approval captures Today, every Home tab, and global palette smoke views", async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith("approval-"), "Rendered only by the design approval project");
+  const pageErrors = await mount(page, config, {
+    ...approvalFootballStates("live"),
+    "camera.example_vacuum_map": state("camera.example_vacuum_map", "unavailable"),
+    "camera.example_doorbell": state("camera.example_doorbell", "idle")
+  });
+  const card = page.locator("family-hub-card");
+
+  await expect(card.locator(".today-hero")).toContainText("Good afternoon");
+  await expect(card.locator(".hero-metrics button[data-view='entry']")).toContainText("Quiet at home");
+  await expect(card.locator(".hero-metrics button[data-view='entry']")).not.toContainText("All secure");
+  await expectContrast(card, [
+    { foreground: ".compact-fixture > span", background: ".compact-fixture", minimum: 4.5 },
+    { foreground: ".person-summary small", background: ".person-summary", minimum: 4.5 },
+    { foreground: ".person-summary .points", background: ".person-summary", minimum: 4.5 },
+    { foreground: ".person-summary .person-initial", background: ".person-summary .person-initial", minimum: 4.5 }
+  ]);
+  await captureApproval(page, testInfo, "today");
+
+  await updateEntityState(card, state("alarm_control_panel.example_home", "armed_home", { supported_features: 63 }));
+  await expect(card.locator(".hero-metrics button[data-view='entry']")).toContainText("Protected");
+  await updateEntityState(card, state("alarm_control_panel.example_home", "disarmed", { supported_features: 63 }));
+
+  await card.locator('.nav-button[data-view="rooms"]').click();
+  const homeSections = ["rooms", "lights", "heating", "covers", "cleaning"];
+  for (const section of homeSections) {
+    await card.locator(`[data-home-section="${section}"]`).click();
+    await expect(card.locator(`[data-home-section-current="${section}"]`)).toBeVisible();
+    if (section === "rooms") {
+      await expect(card.locator(".home-drawer")).toBeVisible();
+    }
+    await captureApproval(page, testInfo, `home-${section}`, { hotspots: section === "rooms" });
+  }
+
+  for (const [view, name, selector] of [
+    ["calendar", "calendar-smoke", ".calendar-view"],
+    ["family", "family-smoke", ".family-dashboard"],
+    ["music", "music-smoke", ".media-player-panel"]
+  ]) {
+    await card.locator(`.nav-button[data-view="${view}"]`).click();
+    await expect(card.locator(selector)).toBeVisible();
+    if (view === "family") {
+      await expectContrast(card, [
+        { foreground: ".chore-row small", background: ".chore-row", minimum: 4.5 },
+        { foreground: ".family-facts span", background: ".family-facts span", minimum: 4.5 },
+        { foreground: ".family-person-heading > span", background: ".family-person-heading > span", minimum: 4.5 },
+        { foreground: ".chore-row b", background: ".chore-row", minimum: 4.5 }
+      ]);
+    }
+    await captureApproval(page, testInfo, name);
+  }
+  expect(pageErrors).toEqual([]);
+});
+
+test("v0.8 design approval captures the complete secure-camera lifecycle and protected confirmation", async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith("approval-"), "Rendered only by the design approval project");
+  const pageErrors = await mount(page, config, {
+    "camera.example_doorbell": state("camera.example_doorbell", "idle")
+  }, {
+    cameraPlayerAutoLoad: false,
+    cameraFrameTimeoutMs: 20_000,
+    cameraSlowMessageMs: 10_000
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="entry"]').click();
+  await expect(card.locator(".security-stage-poster")).toBeVisible();
+  await expectContrast(card, [
+    { foreground: ".alarm-actions button.is-danger", background: ".alarm-actions button.is-danger", minimum: 4.5 }
+  ]);
+  await captureApproval(page, testInfo, "security-idle", { securityLabels: true });
+
+  await card.locator('button[data-camera-open="doorbell"]').click();
+  await expect(card.locator('.camera-is-starting[aria-busy="true"]')).toContainText("Waking camera");
+  await captureApproval(page, testInfo, "security-waking", { securityLabels: true });
+
+  await updateEntityState(card, state("camera.example_doorbell", "streaming"));
+  await expect(card.locator('.camera-is-buffering[aria-busy="true"]')).toContainText("Loading video");
+  await expect(card.locator('[data-card-type="picture-entity"][data-entity="camera.example_doorbell"]')).toBeVisible();
+  await captureApproval(page, testInfo, "security-buffering", { securityLabels: true });
+
+  await card.locator('button[data-alarm-action="alarm_arm_away"]').click();
+  await expect(card.locator(".confirmation-dialog")).toContainText("Arm away");
+  await expectContrast(card, [
+    { foreground: ".confirmation-dialog > p:not(.eyebrow)", background: ".confirmation-dialog", minimum: 4.5 },
+    { foreground: ".confirmation-dialog .confirm-primary", background: ".confirmation-dialog .confirm-primary", minimum: 4.5 }
+  ]);
+  await captureApproval(page, testInfo, "security-confirmation", { securityLabels: true });
+  await card.locator('button[data-confirm-action="cancel"]').click();
+
+  await card.locator('button[data-camera-close="doorbell"]').click();
+  await updateEntityState(card, state("camera.example_doorbell", "idle"));
+  await expect(card.locator(".security-stage-poster")).toBeVisible();
+  await updateEntityStates(card, {
+    "camera.example_doorbell": state("camera.example_doorbell", "unavailable"),
+    "alarm_control_panel.example_home": state("alarm_control_panel.example_home", "triggered", { supported_features: 63 }),
+    "binary_sensor.example_doorbell_ringing": state("binary_sensor.example_doorbell_ringing", "on"),
+    "cover.example_garage": state("cover.example_garage", "open", { current_position: 100, supported_features: 3 })
+  });
+  await expect(card.locator(".alarm-panel")).toContainText("Triggered");
+  await expect(card.locator(".security-camera").first()).toContainText("Camera unavailable");
+  await captureApproval(page, testInfo, "security-alert-unavailable", { securityLabels: true });
+  expect(pageErrors).toEqual([]);
+});
+
+test("v0.8 design approval captures live, cached, and stale football health", async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith("approval-"), "Rendered only by the design approval project");
+  const pageErrors = await mount(page, config, approvalFootballStates("live"));
+  const card = page.locator("family-hub-card");
+  await card.locator('.nav-button[data-view="football"]').click();
+  await expect(card.locator(".football-hero.is-live")).toBeVisible();
+  await expect(card.locator(".football-freshness")).toContainText("Scores up to date");
+  await expect(card.locator('.football-hero img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
+  await expect(card.locator('.football-hero img[src="https://resources.premierleague.com/premierleague/badges/70/t7.png"]')).toBeVisible();
+  await expect(card.locator('.fixture .team-mark img[src$="/t90.png"]')).toBeHidden();
+  await expect(card.locator('.fixture .team-mark').filter({ hasText: "BUR" }).locator("strong")).toHaveAttribute("aria-hidden", "false");
+  await expectContrast(card, [
+    { foreground: ".fixture .team", background: ".fixture", minimum: 4.5 },
+    { foreground: ".spotlight-club small", background: ".spotlight-panel", minimum: 4.5 }
+  ]);
+  await captureApproval(page, testInfo, "football-live");
+
+  await updateEntityStates(card, approvalFootballStates("cached"));
+  await expect(card.locator(".football-freshness.is-cached")).toContainText("Showing saved scores");
+  await captureApproval(page, testInfo, "football-cached");
+
+  await updateEntityStates(card, approvalFootballStates("stale"));
+  await expect(card.locator(".football-freshness.is-stale")).toContainText("Scores may be delayed");
+  await captureApproval(page, testInfo, "football-stale");
   expect(pageErrors).toEqual([]);
 });
