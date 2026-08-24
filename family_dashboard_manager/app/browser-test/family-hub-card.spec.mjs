@@ -888,7 +888,8 @@ test("bounds a failed camera start, performs recovery Stop, and enables a friend
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="garage"]').click();
-  await expect(card.locator(".camera-is-waiting")).toContainText("Waiting for camera", { timeout: 2_000 });
+  const garage = card.locator(".security-camera").filter({ hasText: "Garage" });
+  await expect(garage.locator(".camera-is-waiting")).toContainText("Waiting for camera", { timeout: 2_000 });
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
