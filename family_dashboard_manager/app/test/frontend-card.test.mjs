@@ -238,23 +238,8 @@ test("accepts only idle as a stopped camera state and requires fresh idle when r
   assert.equal(await card._waitForCameraStopped(entityId, 0, staleIdle), true);
 });
 
-test("allows slow-player reveal only for the exact current session token", () => {
-  const card = Object.create(FamilyHubCard.prototype);
-  const player = {};
-  const promotions = [];
-  card._cameraSession = { id: "doorbell", token: 7, phase: "buffering", slow: true };
-  card._childCards = new Map([["camera:doorbell", player]]);
-  card._markCameraFrameReady = (...args) => promotions.push(args);
-
-  card._revealCameraFrame("garage", 7);
-  card._revealCameraFrame("doorbell", 6);
-  assert.deepEqual(promotions, []);
-  card._childCards.clear();
-  card._revealCameraFrame("doorbell", 7);
-  assert.deepEqual(promotions, []);
-  card._childCards.set("camera:doorbell", player);
-  card._revealCameraFrame("doorbell", 7);
-  assert.deepEqual(promotions, [["doorbell", 7, player]]);
+test("does not expose a manual camera frame promotion path", () => {
+  assert.equal(typeof FamilyHubCard.prototype._revealCameraFrame, "undefined");
 });
 
 test("identifies every Home Assistant write action blocked by read-only mode", () => {
@@ -319,10 +304,22 @@ test("allows the configured Sonos and Music Assistant services without exposing 
     media: {
       players: [
         { entity_id: "media_player.kitchen", ma_entity_id: "media_player.kitchen_music_assistant" },
-        { entity_id: "media_player.living_room" }
+        { entity_id: "media_player.living_room" },
+        { entity_id: "media_player.child_one_room" },
+        { entity_id: "media_player.child_two_room" },
+        { entity_id: "media_player.family_room", ma_entity_id: "media_player.family_room_music_assistant" }
       ]
     }
   });
+  for (const entityId of [
+    "media_player.kitchen",
+    "media_player.living_room",
+    "media_player.child_one_room",
+    "media_player.child_two_room",
+    "media_player.family_room"
+  ]) {
+    assert.equal(isApprovedMediaServiceCall(policy, "media_player", "media_play_pause", { entity_id: entityId }), true);
+  }
   assert.equal(isApprovedMediaServiceCall(policy, "media_player", "join", {
     entity_id: "media_player.kitchen",
     group_members: ["media_player.living_room"]
@@ -487,6 +484,18 @@ test("presents football freshness without exposing provider internals", () => {
     title: "Scores up to date",
     detail: "Checking every 3 minutes."
   });
+  assert.equal(footballFreshness({ attributes: {
+    data_status: "live",
+    poller_status: "healthy",
+    last_checked: "2026-08-21T19:07:31Z",
+    refresh_interval_seconds: 180
+  } }, now).status, "live");
+  assert.equal(footballFreshness({ attributes: {
+    data_status: "live",
+    poller_status: "healthy",
+    last_checked: "2026-08-21T19:07:29Z",
+    refresh_interval_seconds: 180
+  } }, now).status, "stale");
   assert.equal(footballFreshness({ attributes: {
     data_status: "cached",
     last_checked: "2026-08-21T19:12:00Z"

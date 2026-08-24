@@ -620,7 +620,7 @@ export function footballFreshness(index, now = new Date()) {
   const ageMs = Number.isFinite(checkedAt) ? Math.max(0, new Date(now).getTime() - checkedAt) : Infinity;
   const cached = attributes.data_status === "cached" || attributes.poller_status === "degraded";
   const failed = attributes.poller_status === "error";
-  const overdue = ageMs > Math.max(20 * 60 * 1000, intervalMs * 2.5);
+  const overdue = ageMs > intervalMs * 2.5;
   if (failed) return { status: "stale", title: "Scores may be delayed", detail: "The latest football check could not complete. Retrying automatically." };
   if (overdue) return { status: "stale", title: "Scores may be delayed", detail: "The last football check is older than expected." };
   if (cached) return { status: "cached", title: "Showing saved scores", detail: "Live updates are temporarily unavailable." };
@@ -1112,7 +1112,7 @@ export class FamilyHubCard extends HTMLElementBase {
           ${playing ? `
             <div class="now-playing">
               <div class="artwork">${playing.state.attributes.entity_picture ? `<img src="${escapeHtml(playing.state.attributes.entity_picture)}" alt="">` : '<ha-icon icon="mdi:music-note" aria-hidden="true"></ha-icon>'}</div>
-              <div><h2>${escapeHtml(playing.state.attributes.media_title || "Music")}</h2><p>${escapeHtml(playing.state.attributes.media_artist || playing.player.name)}</p></div>
+              <div class="now-playing-copy" title="${escapeHtml(`${playing.state.attributes.media_title || "Music"} · ${playing.state.attributes.media_artist || playing.player.name}`)}"><h2>${escapeHtml(playing.state.attributes.media_title || "Music")}</h2><p>${escapeHtml(playing.state.attributes.media_artist || playing.player.name)}</p></div>
               <button type="button" class="icon-action" data-media-toggle="${escapeHtml(playing.player.entity_id)}" aria-label="Play or pause" ${this._config.display.read_only ? 'disabled aria-disabled="true"' : ""}><ha-icon icon="${playing.state.state === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon></button>
             </div>
           ` : `
@@ -1665,7 +1665,7 @@ export class FamilyHubCard extends HTMLElementBase {
       ? "mdi:lock-outline"
       : selected?.canOpen ? "mdi:play" : "mdi:camera-off-outline";
     const selectedStream = selected?.hasMountedStream
-      ? `<div class="camera-stream ${selected.isBuffering ? "is-buffering" : "is-live"}" data-camera-phase="${selected.isBuffering ? "buffering" : "viewing"}"><slot id="camera-card-slot-${escapeHtml(selected.camera.id)}" name="camera-${escapeHtml(selected.camera.id)}" class="child-card-slot camera-card-slot"></slot>${selected.isBuffering ? `<div class="camera-stream-overlay camera-is-buffering" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Loading video…</strong><small>${escapeHtml(bufferingMessage)}</small>${selected.session.slow ? `<button type="button" data-camera-reveal="${escapeHtml(selected.camera.id)}" data-camera-session-token="${Number(selected.session.token)}"><ha-icon icon="mdi:eye-outline"></ha-icon>Show video now</button>` : ""}</div></div>` : '<span class="camera-live-indicator" role="status"><span></span>Live</span>'}<button type="button" class="camera-close" data-camera-close="${escapeHtml(selected.camera.id)}"><ha-icon icon="mdi:close"></ha-icon>${selected.isBuffering ? "Cancel" : "Close live view"}</button></div>`
+      ? `<div class="camera-stream ${selected.isBuffering ? "is-buffering" : "is-live"}" data-camera-phase="${selected.isBuffering ? "buffering" : "viewing"}"><slot id="camera-card-slot-${escapeHtml(selected.camera.id)}" name="camera-${escapeHtml(selected.camera.id)}" class="child-card-slot camera-card-slot"></slot>${selected.isBuffering ? `<div class="camera-stream-overlay camera-is-buffering" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Loading video…</strong><small>${escapeHtml(bufferingMessage)}</small></div></div>` : '<span class="camera-live-indicator" role="status"><span></span>Live</span>'}<button type="button" class="camera-close" data-camera-close="${escapeHtml(selected.camera.id)}"><ha-icon icon="mdi:close"></ha-icon>${selected.isBuffering ? "Cancel" : "Close live view"}</button></div>`
       : selected?.isStarting
         ? `<div class="camera-idle camera-is-starting" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:loading"></ha-icon></span><div><strong>Waking camera…</strong><small>${escapeHtml(selected.camera.name)} secure video will appear here when it is ready.</small></div><button type="button" data-camera-close="${escapeHtml(selected.camera.id)}"><ha-icon icon="mdi:close"></ha-icon>Cancel</button></div>`
         : selected?.isStopping
@@ -1726,7 +1726,7 @@ export class FamilyHubCard extends HTMLElementBase {
       return `
         <section class="family-dashboard">
           <article class="surface family-rhythm">
-            <div><p class="eyebrow">Today together</p><h2>Small routines, visible progress</h2><p>Actual ChoreOps tasks are shown below. This test stays read-only.</p></div>
+            <div><p class="eyebrow">Today together</p><h2>Small routines, visible progress</h2><p>Chores, points and school work stay together without sharing anyone’s location.</p><span class="location-off-badge"><ha-icon icon="mdi:map-marker-off-outline" aria-hidden="true"></ha-icon>Location sharing off</span></div>
             <div class="rhythm-stats"><span><strong>${due}</strong> due today</span><span><strong>${completed}</strong> completed</span><span><strong>${allChoreStates.length}</strong> routines</span></div>
           </article>
           <div class="family-people-grid">${children.map((person) => this._renderFamilyPerson(person)).join("")}</div>
@@ -1856,11 +1856,15 @@ export class FamilyHubCard extends HTMLElementBase {
         : heroStatus === "finished"
           ? "Full time"
           : formatDay(heroFixture.kickoff_time, this._config.product.locale, this._config.product.timezone);
+    const checkedLabel = index?.attributes?.last_checked
+      ? `Checked ${formatTime(index.attributes.last_checked, this._config.product.locale, this._config.product.timezone)}`
+      : "Awaiting first check";
     this._gameweek = gameweek;
     return `
       <section class="football-experience">
         <article class="football-hero ${heroStatus === "live" ? "is-live" : ""}">
-          <div class="football-hero-heading"><div><p class="eyebrow">Premier League · Matchweek ${gameweek}</p><h2>${heroStatus === "live" ? "Live now" : heroStatus === "finished" ? "Latest result" : "Up next"}</h2></div><span class="football-freshness is-${freshness.status}"><i></i><span><strong>${escapeHtml(freshness.title)}</strong><small>${escapeHtml(freshness.detail)}${index?.attributes?.last_checked ? ` Checked ${escapeHtml(formatTime(index.attributes.last_checked, this._config.product.locale, this._config.product.timezone))}.` : ""}</small></span></span></div>
+          <div class="football-hero-heading"><div><p class="eyebrow">Premier League · Matchweek ${gameweek}</p><h2>${heroStatus === "live" ? "Live now" : heroStatus === "finished" ? "Latest result" : "Up next"}</h2></div><span class="football-freshness is-${freshness.status}"><i></i><span><strong>${escapeHtml(freshness.title)}</strong><small>${escapeHtml(freshness.status === "live" ? `${freshness.detail} ${checkedLabel}.` : `${checkedLabel}.`)}</small></span></span></div>
+          ${freshness.status === "live" ? "" : `<p class="football-health-note is-${freshness.status}" role="status">${escapeHtml(freshness.detail)}</p>`}
           ${heroFixture ? `<div class="hero-match">
             <div class="hero-team">${this._renderTeamMark(heroFixture.home, "hero")}<strong>${escapeHtml(compactClubName(heroFixture.home))}</strong></div>
             <div class="hero-score"><span>${escapeHtml(heroScore)}</span><small>${escapeHtml(heroLabel)}</small></div>
@@ -1940,11 +1944,24 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderSpotlightClubs(events) {
+    const renderedFixtures = new Set();
     return this._config.football.spotlight_team_codes.map((code) => {
       const fixture = events.find((entry) => entry.home?.short_name === code || entry.away?.short_name === code);
       const name = fixture?.home?.short_name === code ? fixture.home.name : fixture?.away?.name;
+      const fixtureKey = fixture && String(fixture.id || `${fixture.kickoff_time}:${fixture.home?.short_name}:${fixture.away?.short_name}`);
+      if (fixtureKey && renderedFixtures.has(fixtureKey)) return "";
+      if (fixtureKey) renderedFixtures.add(fixtureKey);
+      const bothFavourites = fixture && this._config.football.spotlight_team_codes.every((teamCode) => (
+        fixture.home?.short_name === teamCode || fixture.away?.short_name === teamCode
+      ));
+      const status = fixture ? normaliseFixtureStatus(fixture) : "upcoming";
+      const fixtureDetail = !fixture
+        ? "No fixture this matchweek"
+        : bothFavourites
+          ? `Both favourites · ${status === "live" ? `Live ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)}`
+          : `${compactClubName(fixture.home)} v ${compactClubName(fixture.away)}`;
       return `
-        <div class="spotlight-club">${this._renderTeamMark(fixture?.home?.short_name === code ? fixture.home : fixture?.away?.short_name === code ? fixture.away : { short_name: code, name })}<div><strong>${escapeHtml(name || (code === "TOT" ? "Tottenham Hotspur" : code === "AVL" ? "Aston Villa" : code))}</strong><small>${fixture ? `${fixture.home.name} v ${fixture.away.name}` : "No fixture this matchweek"}</small></div></div>
+        <div class="spotlight-club">${this._renderTeamMark(fixture?.home?.short_name === code ? fixture.home : fixture?.away?.short_name === code ? fixture.away : { short_name: code, name })}<div><strong>${escapeHtml(bothFavourites ? `${compactClubName(fixture.home)} v ${compactClubName(fixture.away)}` : name || (code === "TOT" ? "Tottenham Hotspur" : code === "AVL" ? "Aston Villa" : code))}</strong><small>${escapeHtml(fixtureDetail)}</small></div></div>
       `;
     }).join("");
   }
@@ -1960,11 +1977,16 @@ export class FamilyHubCard extends HTMLElementBase {
       };
       const calendarNames = Object.fromEntries(this._config.calendar.entities.map((entry) => [entry.entity_id, entry.label]));
       const colours = Object.fromEntries(this._config.calendar.entities.map((entry) => [entry.entity_id, entry.colour]));
+      const calendarIcons = Object.fromEntries(this._config.calendar.entities.map((entry) => [
+        entry.entity_id,
+        /school/i.test(`${entry.label} ${entry.entity_id}`) ? "mdi:school-outline" : "mdi:home-heart"
+      ]));
       this._ensureChildCard(`calendar:${this._calendarMode}`, {
         type: this._config.calendar.card_type,
         title: "",
         entities: this._config.calendar.entities.map((entry) => entry.entity_id),
         calendar_names: calendarNames,
+        calendar_badge_icons: calendarIcons,
         colors: colours,
         default_view: viewMap[this._calendarMode] || "week-compact",
         ...(this._calendarMode === "day" ? { rolling_days_schedule: 1 } : {}),
@@ -1976,6 +1998,9 @@ export class FamilyHubCard extends HTMLElementBase {
         show_event_location: true,
         show_current_time_bar: true,
         past_event_mode: "muted",
+        show_header_controls: true,
+        hide_navigation_buttons: false,
+        hide_calendars: false,
         hide_view_selector: true,
         hide_add_event_button: true,
         hide_dark_mode_toggle: true,
@@ -2000,13 +2025,19 @@ export class FamilyHubCard extends HTMLElementBase {
       }, "map-card-slot");
     }
     if (this._view === "music") {
+      const mediaPlayers = this._config.media.players.map((player) => ({
+        ...player,
+        ...(player.ma_entity_id ? {
+          media_browser: player.media_browser || [{ entity_id: player.ma_entity_id, name: "Spotify & Music" }]
+        } : {})
+      }));
       this._ensureChildCard("music", {
         type: this._config.media.card_type,
         size: "large",
         mode: "in-card",
         height: "100%",
         entity_id: this._config.media.initial_player,
-        media_players: this._config.media.players,
+        media_players: mediaPlayers,
         options: {
           player_is_active_when: "playing_or_paused",
           show_volume_step_buttons: true,
@@ -2055,15 +2086,6 @@ export class FamilyHubCard extends HTMLElementBase {
         if (!this._isCurrentCameraSlot(key, slotId, slot)) return;
         child = helpers.createCardElement(cardConfig);
         child.classList.add("embedded-card");
-        if (key.startsWith("camera:")) {
-          const cameraId = key.slice("camera:".length);
-          const session = this._cameraSession;
-          const sessionToken = session?.token;
-          child.addEventListener("load", (event) => {
-            if (!event.bubbles || !event.composed) return;
-            this._markCameraFrameReady(cameraId, sessionToken, child);
-          });
-        }
         this._childCards.set(key, child);
       } catch (error) {
         slot.innerHTML = `<p class="empty-state">${key.startsWith("camera:") ? "The secure live view could not load. Please try again." : `This Home Assistant card could not load: ${escapeHtml(error?.message || error)}`}</p>`;
@@ -2099,6 +2121,12 @@ export class FamilyHubCard extends HTMLElementBase {
     if (key.startsWith("camera:")) {
       child.slot = `camera-${key.slice("camera:".length)}`;
       if (child.parentElement !== this) this.append(child);
+      const cameraId = key.slice("camera:".length);
+      const sessionToken = this._cameraSession?.token;
+      if (child.__familyCameraObserverToken !== sessionToken) {
+        child.__familyCameraObserverCleanup?.();
+        this._observeCameraMedia(child, cameraId, sessionToken);
+      }
     } else {
       slot.replaceChildren(child);
     }
@@ -2112,6 +2140,84 @@ export class FamilyHubCard extends HTMLElementBase {
       && ["buffering", "viewing"].includes(this._cameraSession?.phase)
       && cameraStreamPhase(this._hass?.states?.[this._controlPolicy.cameras.get(cameraId)?.entity]) === "streaming"
       && this.shadowRoot.getElementById(slotId) === slot;
+  }
+
+  _observeCameraMedia(child, cameraId, sessionToken) {
+    let settled = false;
+    let scanTimer = null;
+    const observedRoots = new Map();
+    const mediaReady = (media) => {
+      if (media?.tagName === "IMG") return media.complete && media.naturalWidth > 0;
+      if (media?.tagName === "VIDEO") return media.readyState >= 2;
+      return false;
+    };
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      if (scanTimer !== null) clearTimeout(scanTimer);
+      for (const [root, observer] of observedRoots) {
+        observer?.disconnect();
+        root.removeEventListener("load", markReady, true);
+        root.removeEventListener("loadeddata", markReady, true);
+        root.removeEventListener("playing", markReady, true);
+        root.removeEventListener("canplay", markReady, true);
+      }
+      observedRoots.clear();
+    };
+    const markReady = (event) => {
+      const media = event?.target;
+      if (!mediaReady(media)) return;
+      cleanup();
+      this._markCameraFrameReady(cameraId, sessionToken, child);
+    };
+    const scheduleScan = (delay = 100) => {
+      if (settled) return;
+      if (scanTimer !== null) clearTimeout(scanTimer);
+      scanTimer = setTimeout(() => {
+        scanTimer = null;
+        inspect();
+      }, delay);
+    };
+    const observeRoot = (root) => {
+      if (!root || observedRoots.has(root)) return;
+      root.addEventListener("load", markReady, true);
+      root.addEventListener("loadeddata", markReady, true);
+      root.addEventListener("playing", markReady, true);
+      root.addEventListener("canplay", markReady, true);
+      const observer = typeof MutationObserver === "function"
+        ? new MutationObserver(() => scheduleScan(0))
+        : null;
+      observer?.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
+      observedRoots.set(root, observer);
+    };
+    const inspectRoot = (root) => {
+      if (!root || settled) return null;
+      observeRoot(root);
+      if (root.shadowRoot) {
+        const readyInOwnShadow = inspectRoot(root.shadowRoot);
+        if (readyInOwnShadow) return readyInOwnShadow;
+      }
+      for (const element of root.querySelectorAll?.("*") || []) {
+        if (mediaReady(element)) return element;
+        if (element.shadowRoot) {
+          const readyInNestedShadow = inspectRoot(element.shadowRoot);
+          if (readyInNestedShadow) return readyInNestedShadow;
+        }
+      }
+      return null;
+    };
+    const inspect = () => {
+      if (settled) return;
+      const readyMedia = inspectRoot(child);
+      if (readyMedia) {
+        markReady({ target: readyMedia });
+        return;
+      }
+      scheduleScan();
+    };
+    child.__familyCameraObserverToken = sessionToken;
+    child.__familyCameraObserverCleanup = cleanup;
+    inspect();
   }
 
   _hassForChild(key) {
@@ -2241,13 +2347,6 @@ export class FamilyHubCard extends HTMLElementBase {
     if (target.dataset.gameweek) {
       this._gameweek = safeNumber(target.dataset.gameweek, 1);
       this._scheduleRender(true);
-      return;
-    }
-    if (target.dataset.cameraReveal) {
-      this._revealCameraFrame(
-        target.dataset.cameraReveal,
-        Number(target.dataset.cameraSessionToken)
-      );
       return;
     }
     if (target.dataset.cameraOpen) {
@@ -2488,22 +2587,6 @@ export class FamilyHubCard extends HTMLElementBase {
     this._scheduleRender(true);
   }
 
-  _revealCameraFrame(cameraId, token) {
-    const session = this._cameraSession;
-    if (!session
-      || session.id !== cameraId
-      || session.token !== token
-      || session.phase !== "buffering"
-      || !session.slow) return;
-    const child = this._childCards.get(`camera:${cameraId}`);
-    if (!child) return;
-    this._markCameraFrameReady(
-      cameraId,
-      token,
-      child
-    );
-  }
-
   _reconcileCameraSession(states) {
     const session = this._cameraSession;
     for (const [cameraId, block] of this._cameraBlockedIds) {
@@ -2713,6 +2796,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!cameraId) return;
     const key = `camera:${cameraId}`;
     const child = this._childCards.get(key);
+    child?.__familyCameraObserverCleanup?.();
     child?.remove?.();
     this._childCards.delete(key);
   }
@@ -2796,8 +2880,10 @@ export class FamilyHubCard extends HTMLElementBase {
       .now-playing { display:grid; grid-template-columns:58px minmax(0,1fr) 38px; gap:12px; align-items:center; margin-top:14px; }
       .artwork { width:58px; height:58px; border-radius:14px; overflow:hidden; display:grid; place-items:center; background:linear-gradient(145deg,var(--hub-accent),var(--hub-backdrop-end)); color:#fff; }
       .artwork img { width:100%; height:100%; object-fit:cover; }
-      .now-playing h2 { font-size:16px; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      .now-playing p { margin:4px 0 0; color:var(--hub-muted); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .now-playing-copy { min-width:0; }
+      .now-playing h2 { display:-webkit-box; margin:0; overflow:hidden; font-size:16px; line-height:1.18; overflow-wrap:anywhere; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+      .now-playing p { display:-webkit-box; margin:4px 0 0; overflow:hidden; color:var(--hub-muted); font-size:11px; line-height:1.25; overflow-wrap:anywhere; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+      .today-next h2 { display:-webkit-box; overflow:hidden; overflow-wrap:anywhere; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
       .icon-action { width:38px; height:38px; padding:0; display:grid; place-items:center; border:0; border-radius:50%; background:color-mix(in srgb,var(--hub-accent) 12%,var(--hub-surface)); color:var(--hub-accent); cursor:pointer; }
       .single-surface { height:100%; padding:18px; overflow:hidden; }
       .embedded-view { display:grid; grid-template-rows:48px minmax(0,1fr); gap:10px; }
@@ -3074,11 +3160,13 @@ export class FamilyHubCard extends HTMLElementBase {
       .agenda-event small ha-icon { --mdc-icon-size:11px; }
       .agenda-empty { margin:12px 4px; color:#8a8f9d; font-size:9px; line-height:1.4; }
       .agenda-more { margin:auto 4px 2px; color:var(--hub-accent); font-size:9px; font-weight:750; }
-      .family-dashboard { height:100%; display:grid; grid-template-rows:116px minmax(0,1fr); gap:14px; }
+      .family-dashboard { height:100%; display:grid; grid-template-rows:148px minmax(0,1fr); gap:14px; }
       .family-rhythm { padding:20px 22px; display:flex; align-items:center; justify-content:space-between; gap:18px; background:linear-gradient(125deg,color-mix(in srgb,var(--hub-accent) 86%,#1b2342),color-mix(in srgb,var(--hub-backdrop-end) 82%,#db8e72)); color:#fff; }
       .family-rhythm .eyebrow { color:rgba(255,255,255,.7); }
       .family-rhythm h2 { margin:5px 0 0; font-size:22px; }
       .family-rhythm p:last-child { margin:5px 0 0; color:rgba(255,255,255,.72); font-size:11px; }
+      .location-off-badge { width:max-content; min-height:28px; margin-top:9px; padding:0 9px; display:flex; align-items:center; gap:5px; border:1px solid rgba(255,255,255,.22); border-radius:999px; background:rgba(255,255,255,.11); color:#fff; font-size:10px; font-weight:750; }
+      .location-off-badge ha-icon { --mdc-icon-size:15px; }
       .rhythm-stats { display:grid; grid-template-columns:repeat(3,88px); gap:8px; }
       .rhythm-stats span { min-height:70px; padding:10px; border:1px solid rgba(255,255,255,.2); border-radius:15px; background:rgba(255,255,255,.12); color:rgba(255,255,255,.72); font-size:9px; }
       .rhythm-stats strong { display:block; margin-bottom:3px; color:#fff; font-size:22px; }
@@ -3281,6 +3369,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .artwork { width:64px; height:64px; background:linear-gradient(145deg,#1463E8,#00A887); }
       .now-playing h2 { font-size:17px; }
       .now-playing p { font-size:13px; }
+      .today-music .now-playing,.quiet-music { flex:1; align-content:center; }
       .quiet-music { min-height:92px; display:flex; align-items:center; gap:13px; }
       .quiet-music strong,.quiet-music span { display:block; }
       .quiet-music strong { font-size:16px; }
@@ -3441,6 +3530,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-rhythm .eyebrow { color:#9BE1D5; }
       .family-rhythm h2 { color:#fff; }
       .family-rhythm p:last-child { color:#D4E1F0; font-size:13px; }
+      .location-off-badge { color:#fff; font-size:12px; }
       .rhythm-stats span { min-height:74px; color:#D4E1F0; font-size:12px; }
       .rhythm-stats strong { color:#fff; }
       .family-person { border-color:#DCE4EE; background:#fff; color:#0B1830; }
@@ -3489,14 +3579,19 @@ export class FamilyHubCard extends HTMLElementBase {
       .football-hero-heading { position:relative; z-index:1; display:flex; justify-content:space-between; align-items:flex-start; }
       .football-hero .eyebrow { color:#8FD8CB; }
       .football-hero h2 { margin:4px 0 0; color:#fff; font-size:27px; }
-      .football-freshness { min-height:42px; padding:0 12px; display:flex; align-items:center; gap:9px; border:1px solid rgba(255,255,255,.14); border-radius:14px; background:rgba(255,255,255,.07); }
+      .football-freshness { max-width:370px; min-height:42px; padding:7px 12px; display:flex; align-items:center; gap:9px; border:1px solid rgba(255,255,255,.14); border-radius:14px; background:rgba(255,255,255,.07); }
+      .football-freshness > span { min-width:0; }
       .football-freshness > i { width:9px; height:9px; border-radius:50%; background:#00C69D; box-shadow:0 0 0 4px rgba(0,198,157,.16); }
       .football-freshness.is-cached > i { background:#E7A93D; box-shadow:0 0 0 4px rgba(231,169,61,.16); }
       .football-freshness.is-stale > i { background:#E86E5A; box-shadow:0 0 0 4px rgba(232,110,90,.16); }
       .football-freshness strong,.football-freshness small { display:block; color:#fff; }
       .football-freshness strong { font-size:12px; }
-      .football-freshness small { margin-top:2px; color:#AFC0D5; font-size:12px; }
+      .football-freshness small { margin-top:2px; color:#AFC0D5; font-size:12px; line-height:1.25; overflow-wrap:anywhere; }
+      .football-health-note { position:relative; z-index:1; width:max-content; max-width:min(430px,62%); margin:7px 0 0 auto; padding:7px 10px; border:1px solid rgba(255,255,255,.14); border-radius:11px; background:rgba(255,255,255,.07); color:#E7F0FA; font-size:12px; line-height:1.3; }
+      .football-health-note.is-cached { border-color:rgba(231,169,61,.45); }
+      .football-health-note.is-stale { border-color:rgba(232,110,90,.5); }
       .hero-match { position:relative; z-index:1; max-width:680px; margin:14px auto 0; display:grid; grid-template-columns:minmax(0,1fr) 150px minmax(0,1fr); align-items:center; gap:24px; }
+      .football-health-note + .hero-match { margin-top:7px; }
       .hero-team { display:flex; align-items:center; justify-content:flex-end; gap:15px; }
       .hero-team.is-away { flex-direction:row-reverse; }
       .hero-team > strong { color:#fff; font-size:19px; }
@@ -3551,7 +3646,10 @@ export class FamilyHubCard extends HTMLElementBase {
         .cover-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
       }
       @media (max-width:1279px) {
-        .heating-grid,.heating-grid[data-zone-count="6"] { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .heating-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .heating-grid[data-zone-count="6"] { grid-template-columns:repeat(3,minmax(0,1fr)); }
+        .heating-grid[data-zone-count="6"] .heating-card { min-height:174px; padding:14px; gap:9px; }
+        .heating-grid[data-zone-count="6"] .heating-card-heading > .heating-icon { width:42px; flex-basis:42px; }
       }
       @media (max-width:1180px) {
         .security-layout { grid-template-columns:minmax(0,1fr) 274px; }

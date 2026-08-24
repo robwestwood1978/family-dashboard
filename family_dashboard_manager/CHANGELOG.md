@@ -1,3 +1,14 @@
+## 0.8.0
+
+- Introduce the Family OS tablet hierarchy across Today, Calendar, Home, Family, Security, Music and Football while retaining the existing dashboard, app, image and tunnel identities.
+- Carry forward the v0.7.4 adaptive football polling, last-good recovery and deliberate camera wake, buffering, first-frame and stopping lifecycle.
+- Remove the slow-player manual promotion to **Live**; the viewer now waits for a positive image/video readiness event or times out to the existing safe Stop-and-Retry path.
+- Tighten football staleness to 2.5 times the published polling cadence, keep saved/delayed health readable, and collapse a duplicated favourite-club fixture.
+- Make all six heating zones visible together in a 3 × 2 tablet grid, approve the real location-sharing-off Family layout, and use a structural public floorplan fixture instead of a cleaning-map route.
+- Restore visible calendar navigation and source toggles, qualify five Sonos rooms with Spotify/Music Assistant browse and search, paint deterministic approval icons, and preserve long Today track titles without clipping.
+- Refresh the existing Lovelace module query to v0.8.0 so Home Assistant loads the corrected frontend instead of retaining the previous cached resource.
+- Preserve schema-v6 controlled-live validation, bounded household mappings, read-only Calendar and Classroom, one-at-a-time exterior cameras, and second confirmation for garage and alarm changes.
+
 ## 0.7.4
 
 - Restores the Premier League poller for the accepted schema-v6 household configuration; the stale schema-v5 gate had silently prevented every scheduled refresh.

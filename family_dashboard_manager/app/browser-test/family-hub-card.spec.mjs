@@ -17,7 +17,7 @@ const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
 const APPROVAL_FOOTBALL_CHECKED_AT = Object.freeze({
   live: "2026-08-24T15:07:00.000Z",
   cached: "2026-08-24T14:55:00.000Z",
-  stale: "2026-08-24T12:00:00.000Z"
+  stale: "2026-08-24T15:00:00.000Z"
 });
 
 function installApprovalClock({ fixedNow }) {
@@ -150,6 +150,34 @@ function sixZoneStateOverrides() {
   };
 }
 
+function locationDisabledConfig() {
+  const familyConfig = structuredClone(config);
+  familyConfig.features.location_map = false;
+  familyConfig.location.entities = [];
+  for (const person of familyConfig.people) delete person.location_entity;
+  return familyConfig;
+}
+
+function fiveRoomMusicConfig() {
+  const familyConfig = structuredClone(config);
+  familyConfig.media.players.push(
+    { entity_id: "media_player.child_one_room", name: "Child one room", ma_entity_id: "media_player.child_one_room_music_assistant", can_be_grouped: true },
+    { entity_id: "media_player.child_two_room", name: "Child two room", can_be_grouped: true },
+    { entity_id: "media_player.family_room", name: "Family room", ma_entity_id: "media_player.family_room_music_assistant", can_be_grouped: true }
+  );
+  return familyConfig;
+}
+
+function fiveRoomMusicStates() {
+  return {
+    "media_player.child_one_room": state("media_player.child_one_room", "idle", { friendly_name: "Child one room" }),
+    "media_player.child_one_room_music_assistant": state("media_player.child_one_room_music_assistant", "idle", { friendly_name: "Child one room Music Assistant" }),
+    "media_player.child_two_room": state("media_player.child_two_room", "paused", { friendly_name: "Child two room" }),
+    "media_player.family_room": state("media_player.family_room", "idle", { friendly_name: "Family room" }),
+    "media_player.family_room_music_assistant": state("media_player.family_room_music_assistant", "idle", { friendly_name: "Family room Music Assistant" })
+  };
+}
+
 function approvalFootballStates(mode = "live") {
   const namedTeams = [
     [1, "Tottenham Hotspur", "TOT", 6],
@@ -244,15 +272,6 @@ function approvalFootballStates(mode = "live") {
     entry.entity_id,
     state(entry.entity_id, entry.state, entry.attributes)
   ]));
-  if (mode === "stale") {
-    states[config.football.index_entity] = state(config.football.index_entity, "1", {
-      ...states[config.football.index_entity].attributes,
-      data_status: "stale",
-      poller_status: "error",
-      last_checked: fetchedAt,
-      last_updated: fetchedAt
-    });
-  }
   return states;
 }
 
@@ -327,22 +346,63 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
         if (this.isConnected) this._renderNavigationGlyph();
       }
       _renderNavigationGlyph() {
-        const parent = this.parentElement;
-        if (!parent?.matches(".brand,.nav-button")) return;
-        const view = parent.classList.contains("brand") ? "brand" : parent.dataset.view;
-        const glyph = {
-          brand: "⌂",
-          today: "T",
-          calendar: "C",
-          rooms: "H",
-          family: "F",
-          entry: "S",
-          music: "M",
-          football: "B"
-        }[view] || "•";
-        this.textContent = glyph;
-        this.dataset.mockGlyph = glyph;
-        this.style.cssText = "display:inline-grid;place-items:center;width:var(--mdc-icon-size,22px);height:var(--mdc-icon-size,22px);font:800 11px/1 system-ui,sans-serif;color:currentColor";
+        const icon = this.getAttribute("icon") || "mdi:shape-outline";
+        const exact = {
+          "mdi:home-heart": '<path d="M3 11 12 3l9 8v9h-6v-6H9v6H3z"/><path d="M12 12c-2-2-5 1 0 4 5-3 2-6 0-4z"/>',
+          "mdi:calendar-month": '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18M8 14h2m4 0h2m-8 4h2m4 0h2"/>',
+          "mdi:floor-plan": '<path d="M3 3h8v7H7v11H3zm8 0h10v10h-6v8H7V10h4z"/>',
+          "mdi:account-group": '<circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2.5 20c.4-4 2.2-6 5.5-6s5.1 2 5.5 6m.5-5.3c3.7-.7 6.4 1.1 7 4.3"/>',
+          "mdi:shield-home": '<path d="M12 2 20 5v6c0 5-3 9-8 11-5-2-8-6-8-11V5z"/><path d="m8 12 4-4 4 4v4h-3v-3h-2v3H8z"/>',
+          "mdi:music-circle": '<circle cx="12" cy="12" r="9"/><path d="M14.5 7v8.5a2.5 2.5 0 1 1-2-2.45V9l5-1.2v5.7a2.5 2.5 0 1 1-2-2.45"/>',
+          "mdi:soccer": '<circle cx="12" cy="12" r="9"/><path d="m12 8 3 2-1 4h-4l-1-4zm0 0V3m3 7 5-2m-6 6 3 5m-7-5-3 5m2-9L4 8"/>',
+          "mdi:chevron-left": '<path d="m15 5-7 7 7 7"/>',
+          "mdi:chevron-right": '<path d="m9 5 7 7-7 7"/>',
+          "mdi:arrow-left": '<path d="M20 12H5m6-6-6 6 6 6"/>',
+          "mdi:arrow-right": '<path d="M4 12h15m-6-6 6 6-6 6"/>',
+          "mdi:arrow-up": '<path d="M12 20V5m-6 6 6-6 6 6"/>',
+          "mdi:arrow-down": '<path d="M12 4v15m-6-6 6 6 6-6"/>',
+          "mdi:close": '<path d="m5 5 14 14M19 5 5 19"/>',
+          "mdi:play": '<path d="m8 5 11 7-11 7z"/>',
+          "mdi:pause": '<path d="M8 5v14m8-14v14"/>',
+          "mdi:stop": '<rect x="6" y="6" width="12" height="12" rx="1"/>',
+          "mdi:power": '<path d="M12 3v9m-5.7-6.2a8 8 0 1 0 11.4 0"/>',
+          "mdi:loading": '<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M18 3v4h-4"/>',
+          "mdi:weather-partly-cloudy": '<path d="M8 7a4 4 0 1 1 6.5 3.1M8 3V1m-5 6H1m3.5-3.5L3 2"/><path d="M7 20h11a4 4 0 0 0 0-8 6 6 0 0 0-11.3 2A3 3 0 0 0 7 20z"/>',
+          "mdi:lightbulb-outline": '<path d="M9 18h6m-5 3h4m3-11a5 5 0 1 0-10 0c0 2 1 3 2 5h6c1-2 2-3 2-5z"/>',
+          "mdi:radiator": '<rect x="4" y="4" width="16" height="15" rx="2"/><path d="M8 7v9m4-9v9m4-9v9M6 22v-3m12 3v-3"/>',
+          "mdi:school-outline": '<path d="m3 9 9-5 9 5-9 5zM6 11v5c3 3 9 3 12 0v-5m3-2v7"/>',
+          "mdi:music-note": '<path d="M15 4v12a3 3 0 1 1-2-2.8V7l7-2v8a3 3 0 1 1-2-2.8"/>',
+          "mdi:map-marker-off-outline": '<path d="M8 4.5A7 7 0 0 1 19 10c0 4-7 11-7 11s-2.2-2.2-4.1-4.9M5 5c-1.2 1.2-2 3-2 5 0 1.6 1.1 3.7 2.5 5.6M3 3l18 18"/>',
+          "mdi:lock-outline": '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+          "mdi:check": '<path d="m4 12 5 5L20 6"/>',
+          "mdi:alert": '<path d="M12 3 2 21h20zM12 9v5m0 3v1"/>',
+          "mdi:camera-off-outline": '<path d="M3 7h4l2-2h6l2 2h4v12H3zM8 12a4 4 0 0 0 6 3m7 6L3 3"/>',
+          "mdi:cctv": '<path d="m3 6 14-3 2 8-14 3zM9 14l2 4m-5 3h10m0-10 5 4"/>',
+          "mdi:garage-variant": '<path d="M3 21V8l9-5 9 5v13M6 21V10h12v11M8 13h8m-8 4h8"/>'
+        }[icon];
+        const generic = /calendar|clock/.test(icon)
+          ? '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
+          : /shield|lock|security/.test(icon)
+            ? '<path d="M12 2 20 5v6c0 5-3 9-8 11-5-2-8-6-8-11V5z"/><path d="m8 12 3 3 5-6"/>'
+            : /camera|video|doorbell/.test(icon)
+              ? '<rect x="3" y="6" width="14" height="12" rx="2"/><path d="m17 10 4-2v8l-4-2z"/>'
+              : /music|speaker|volume|media/.test(icon)
+                ? '<path d="M14 5v11a3 3 0 1 1-2-2.8V8l7-2v7"/>'
+                : /home|room|house/.test(icon)
+                  ? '<path d="m3 11 9-8 9 8v10h-6v-7H9v7H3z"/>'
+                  : /map|marker|location|floor/.test(icon)
+                    ? '<path d="m4 5 5-2 6 2 5-2v16l-5 2-6-2-5 2zM9 3v16m6-14v16"/>'
+                    : /light|weather|sun/.test(icon)
+                      ? '<circle cx="12" cy="12" r="4"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2m0-14-2 2M7 17l-2 2"/>'
+                      : /account|person|family/.test(icon)
+                        ? '<circle cx="12" cy="8" r="4"/><path d="M4 21c.5-5 3-7 8-7s7.5 2 8 7"/>'
+                        : /robot|vacuum/.test(icon)
+                          ? '<rect x="4" y="7" width="16" height="12" rx="5"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><path d="M12 7V4m-2 0h4"/>'
+                          : '<circle cx="12" cy="12" r="8"/><path d="M12 7v10M7 12h10"/>';
+        this.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${exact || generic}</g></svg>`;
+        this.dataset.mockGlyph = icon;
+        this.style.cssText = "display:inline-grid;place-items:center;width:var(--mdc-icon-size,22px);height:var(--mdc-icon-size,22px);color:currentColor;flex:0 0 auto";
+        this.querySelector("svg").style.cssText = "display:block;width:100%;height:100%";
       }
     }
     class MockChildCard extends HTMLElement {
@@ -361,9 +421,30 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
         });
       }
     }
+    class MockCameraStream extends HTMLElement {
+      connectedCallback() {
+        if (this._renderScheduled || this.shadowRoot) return;
+        this._renderScheduled = true;
+        setTimeout(() => {
+          if (!this.isConnected || this.shadowRoot) return;
+          const root = this.attachShadow({ mode: "open" });
+          root.innerHTML = `<style>:host{position:relative;height:100%;min-height:140px;display:grid;place-items:center;overflow:hidden;background:radial-gradient(circle at 50% 45%,#17375d,#070d1b 72%);color:#fff;font:700 13px system-ui}.mock-camera-media{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.mock-camera-label{position:relative;z-index:1}</style><video class="mock-camera-media" muted playsinline></video><span class="mock-camera-label">Secure camera fixture</span>`;
+        }, 0);
+      }
+      emitReady() {
+        const media = this.shadowRoot?.querySelector(".mock-camera-media");
+        if (!media) {
+          setTimeout(() => this.emitReady(), 0);
+          return;
+        }
+        Object.defineProperty(media, "readyState", { configurable: true, value: 2 });
+        media.dispatchEvent(new Event("loadeddata", { bubbles: true }));
+      }
+    }
     if (!customElements.get("ha-card")) customElements.define("ha-card", HaCard);
     if (!customElements.get("ha-icon")) customElements.define("ha-icon", HaIcon);
     if (!customElements.get("mock-child-card")) customElements.define("mock-child-card", MockChildCard);
+    if (!customElements.get("mock-camera-stream")) customElements.define("mock-camera-stream", MockCameraStream);
     window.loadCardHelpers = async () => ({
       createCardElement(cardConfig) {
         const element = document.createElement("mock-child-card");
@@ -387,8 +468,10 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           const initialEntity = initialPlayer.entity_id || cardConfig.entity_id || "media_player.kitchen";
           const initialName = initialPlayer.name || "Living room";
           const serviceEntity = playerEntries.find((entry) => entry.entity_id === "media_player.kitchen")?.entity_id || initialEntity;
-          const playerChips = playerEntries.map((entry, index) => `<span class="mock-chip ${index === 0 ? "is-active" : ""}">${entry.name || `Room ${index + 1}`}</span>`).join("");
-          const playerRows = playerEntries.map((entry) => `<div class="mock-player-row"><span><strong>${entry.name || "Room"}</strong><small>${entry.entity_id === initialEntity ? "Playing" : "Ready to join"}</small></span><b>${entry.entity_id === initialEntity ? "Now" : "+"}</b></div>`).join("");
+          const playerChips = playerEntries.map((entry, index) => `<button type="button" class="mock-chip ${index === 0 ? "is-active" : ""}" data-mock-player="${entry.entity_id}">${entry.name || `Room ${index + 1}`}</button>`).join("");
+          const playerRows = playerEntries.map((entry) => `<div class="mock-player-row" data-mock-player-row="${entry.entity_id}"><span><strong>${entry.name || "Room"}</strong><small>${entry.entity_id === initialEntity ? "Playing" : "Ready to join"}</small></span><b>${entry.entity_id === initialEntity ? "Now" : "+"}</b></div>`).join("");
+          element.dataset.playerCount = String(playerEntries.length);
+          element.dataset.mediaBrowserCount = String(playerEntries.filter((entry) => Array.isArray(entry.media_browser) && entry.media_browser.length).length);
           element.style.height = cardConfig.height || "754px";
           const mediaRoot = element.attachShadow({ mode: "open" });
           mediaRoot.innerHTML = `<style>
@@ -398,17 +481,18 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
             .mock-massive,.mock-speaker-scroll{min-width:0;min-height:0;overflow:auto;padding:8px;scrollbar-color:rgba(255,255,255,.24) transparent}
             .mock-massive{display:flex;flex-direction:column}.mock-kicker{color:var(--mmpc-on-card-muted);font-size:12px;font-weight:750;letter-spacing:.08em;text-transform:uppercase}
             .mock-now-playing{margin-top:10px}.mock-now-playing strong{display:block;color:var(--mmpc-on-card);font-size:22px}.mock-now-playing small{display:block;margin-top:5px;color:var(--mmpc-on-card-muted);font-size:13px}
-            .mock-artwork{min-height:190px;margin:18px 0;display:grid;place-items:center;border:1px solid rgba(255,255,255,.1);border-radius:20px;background:radial-gradient(circle at 32% 28%,rgba(143,216,203,.52),transparent 32%),linear-gradient(145deg,#1463e8,#061b3a);font-size:54px;color:#fff}
+            .mock-feature-tabs,.mock-transport{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mock-feature-tabs{margin-top:12px}.mock-feature-tabs button,.mock-transport button{min-width:48px;min-height:48px;padding:0 14px;border:1px solid rgba(255,255,255,.14);border-radius:13px;background:rgba(255,255,255,.08);color:var(--mmpc-on-card);font-weight:800}.mock-feature-tabs button:first-child{border-color:#8fd8cb;color:#8fd8cb}
+            .mock-artwork{min-height:142px;margin:12px 0;display:grid;place-items:center;border:1px solid rgba(255,255,255,.1);border-radius:20px;background:radial-gradient(circle at 32% 28%,rgba(143,216,203,.52),transparent 32%),linear-gradient(145deg,#1463e8,#061b3a);font-size:54px;color:#fff}
             [data-mock-service]{min-width:48px;min-height:48px;align-self:flex-start;padding:0 18px;border:0;border-radius:14px;background:#1463e8;color:#fff;font-weight:800;cursor:pointer}
             .mock-speaker-scroll>strong,.mock-speaker-scroll>h3{display:block;margin:0;color:var(--mmpc-on-card)}.mock-speaker-scroll>h3{margin-top:22px;font-size:15px}
             .mock-chip-scroll{max-width:100%;margin-top:14px;overflow-x:auto}.mock-chip-row{display:flex;width:max-content;gap:8px;padding-bottom:4px}
-            .mock-chip{display:inline-block;padding:9px 18px;border:1px solid var(--mmpc-chip-border);border-radius:999px;background:var(--mmpc-chip-background);color:var(--mmpc-chip-foreground);white-space:nowrap}.mock-chip.is-active{border-color:#8fd8cb}
+            .mock-chip{display:inline-block;min-height:48px;padding:9px 18px;border:1px solid var(--mmpc-chip-border);border-radius:999px;background:var(--mmpc-chip-background);color:var(--mmpc-chip-foreground);white-space:nowrap}.mock-chip.is-active{border-color:#8fd8cb}
             .mock-player-row,.mock-queue-row{min-height:64px;margin-top:9px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.055)}
             .mock-player-row strong,.mock-player-row small{display:block;color:var(--mmpc-on-card)}.mock-player-row small{margin-top:3px;color:var(--mmpc-on-card-muted);font-size:12px}.mock-player-row b{color:#8fd8cb}
             .mock-queue-row{min-height:54px;color:var(--mmpc-on-card-muted);font-size:13px}.mock-queue-row strong{color:var(--mmpc-on-card)}
             @media(max-width:620px){.mock-media-player{grid-template-columns:1fr;overflow:auto}.mock-massive,.mock-speaker-scroll{overflow:visible}}
           </style><div class="mock-media-player">
-            <section class="mock-massive"><span class="mock-kicker">Now playing</span><div class="mock-now-playing"><strong data-mock-state-name>${initialName}</strong><small data-mock-state-track>Dashboard test song · Test artist</small></div><div class="mock-artwork" aria-hidden="true">♫</div><button type="button" data-mock-service data-mock-entity="${serviceEntity}">Play / pause</button></section>
+            <section class="mock-massive"><span class="mock-kicker">Spotify · Sonos</span><div class="mock-feature-tabs"><button type="button" data-mock-music-tab="search">Search</button><button type="button" data-mock-music-tab="browse">Browse</button><button type="button" data-mock-music-tab="queue">Queue</button></div><div class="mock-now-playing"><strong data-mock-state-name>${initialName}</strong><small data-mock-state-track>Dashboard test song · Test artist</small></div><div class="mock-artwork" aria-hidden="true">♫</div><div class="mock-transport"><button type="button" aria-label="Previous track">‹</button><button type="button" data-mock-service data-mock-entity="${serviceEntity}">Play / pause</button><button type="button" aria-label="Next track">›</button><button type="button" aria-label="Volume down">−</button><button type="button" aria-label="Volume up">+</button></div></section>
             <section class="mock-speaker-scroll"><strong>Join media players</strong><div class="mock-chip-scroll"><div class="mock-chip-row">${playerChips}</div></div><h3>Player focus</h3>${playerRows}<h3>Up next</h3>${["Family favourites", "Kitchen radio", "Evening mix", "Recently played"].map((name, index) => `<div class="mock-queue-row"><span><strong>${name}</strong><br>Queue item ${index + 1}</span><b>${index + 1}</b></div>`).join("")}</section>
           </div>`;
           element._renderMockState = () => {
@@ -422,16 +506,34 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           };
         } else if (["custom:daylight-calendar-card", "custom:skylight-calendar-card"].includes(cardConfig.type)) {
           const calendarRoot = element.attachShadow({ mode: "open" });
-          const calendarLabels = Object.values(cardConfig.calendar_names || {});
+          const calendarEntries = Object.entries(cardConfig.calendar_names || {});
           const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+          element.dataset.showHeaderControls = String(cardConfig.show_header_controls ?? "");
+          element.dataset.hideNavigationButtons = String(cardConfig.hide_navigation_buttons ?? "");
+          element.dataset.hideCalendars = String(cardConfig.hide_calendars ?? "");
           calendarRoot.innerHTML = `<style>
             :host{display:block;height:100%;min-height:0;color:#0b1830;font-family:inherit}*{box-sizing:border-box}
-            .mock-calendar{height:100%;min-height:0;padding:16px;display:grid;grid-template-rows:auto minmax(0,1fr);gap:14px;background:${cardConfig.color_scheme === "light" ? "#fff" : "#111a2d"};color:${cardConfig.color_scheme === "light" ? "#0b1830" : "#fff"}}
-            .mock-calendar-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.mock-calendar-head>strong{font-size:15px}.mock-legends{display:flex;gap:12px;flex-wrap:wrap;color:#5e6b80;font-size:12px;font-weight:700}.mock-legends span{display:flex;align-items:center;gap:5px}.mock-legends i{width:8px;height:8px;border-radius:50%;background:#1463e8}.mock-legends span:nth-child(2) i{background:#e76f51}
+            button{font:inherit}.mock-calendar{height:100%;min-height:0;padding:14px;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:10px;background:${cardConfig.color_scheme === "light" ? "#fff" : "#111a2d"};color:${cardConfig.color_scheme === "light" ? "#0b1830" : "#fff"}}
+            .mock-calendar-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.mock-calendar-nav,.mock-calendar-sources{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mock-calendar-nav button,.mock-calendar-source{min-width:48px;min-height:48px;border:1px solid #dce4ee;border-radius:12px;background:#f7f9fc;color:#1463e8;font-weight:800}.mock-calendar-nav button[data-calendar-nav=today]{padding:0 14px}.mock-calendar-nav strong{margin-left:4px;color:#0b1830;font-size:14px}.mock-calendar-sources{justify-content:flex-end}.mock-calendar-source{padding:0 14px;display:flex;align-items:center;gap:7px;color:#33445c}.mock-calendar-source i{width:9px;height:9px;border-radius:50%;background:#1463e8}.mock-calendar-source:nth-child(2) i{background:#e76f51}.mock-calendar-source[aria-pressed=false]{opacity:.55;text-decoration:line-through}
             .mock-week{min-height:0;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}.mock-day{min-width:0;padding:10px 8px;border:1px solid #dce4ee;border-radius:14px;background:#f8fafc}.mock-day.is-today{border-color:#8db7f8;background:#f1f6ff;box-shadow:inset 0 3px 0 #1463e8}.mock-day header{display:grid;gap:3px;padding-bottom:9px;border-bottom:1px solid #dce4ee}.mock-day header span{color:#5e6b80;font-size:12px;font-weight:800;text-transform:uppercase}.mock-day header strong{font-size:19px}.mock-event{margin-top:9px;padding:8px;border-left:4px solid #1463e8;border-radius:9px;background:#eaf2ff;color:#0b1830;line-height:1.3}.mock-event strong,.mock-event small{display:block;font-size:12px}.mock-event small{margin-top:3px;color:#5e6b80}.mock-event.is-school{border-color:#e76f51;background:#fff0ed}.mock-empty{margin-top:11px;color:#7a8799;font-size:12px}
             [data-mock-calendar-write]{display:none}
             @media(max-width:620px){.mock-calendar{overflow:auto}.mock-week{min-width:760px}}
-          </style><div class="mock-calendar"><div class="mock-calendar-head"><strong>${String(cardConfig.default_view || "week-compact").replace("-compact", "").replace(/^./, (letter) => letter.toUpperCase())} view</strong><div class="mock-legends">${calendarLabels.map((label) => `<span><i></i>${label}</span>`).join("")}</div><button type="button" data-mock-calendar-write aria-hidden="true" tabindex="-1">Add event</button></div><div class="mock-week">${weekdays.map((day, index) => `<section class="mock-day ${index === 0 ? "is-today" : ""}"><header><span>${day.slice(0, 3)}</span><strong>${24 + index}</strong></header>${index === 0 ? '<div class="mock-event"><strong>Family dinner</strong><small>16:08</small></div>' : index === 1 ? '<div class="mock-event is-school"><strong>School assembly</strong><small>17:08</small></div>' : '<div class="mock-empty">Nothing planned</div>'}</section>`).join("")}</div></div>`;
+          </style><div class="mock-calendar"><div class="mock-calendar-head"><div class="mock-calendar-nav" role="group" aria-label="Calendar navigation"><button type="button" data-calendar-nav="previous" aria-label="Previous period">‹</button><button type="button" data-calendar-nav="today">Today</button><button type="button" data-calendar-nav="next" aria-label="Next period">›</button><strong data-calendar-range>24–30 August 2026</strong></div><button type="button" data-mock-calendar-write aria-hidden="true" tabindex="-1">Add event</button></div><div class="mock-calendar-sources" role="group" aria-label="Calendar sources">${calendarEntries.map(([entityId, label]) => `<button type="button" class="mock-calendar-source" data-calendar-source="${entityId}" aria-pressed="true"><i aria-hidden="true"></i>${label}</button>`).join("")}</div><div class="mock-week">${weekdays.map((day, index) => `<section class="mock-day ${index === 0 ? "is-today" : ""}"><header><span>${day.slice(0, 3)}</span><strong>${24 + index}</strong></header>${index === 0 ? '<div class="mock-event" data-calendar-event="calendar.family"><strong>Family dinner</strong><small>16:08</small></div>' : index === 1 ? '<div class="mock-event is-school" data-calendar-event="calendar.school"><strong>School assembly</strong><small>17:08</small></div>' : '<div class="mock-empty">Nothing planned</div>'}</section>`).join("")}</div></div>`;
+          const range = calendarRoot.querySelector("[data-calendar-range]");
+          const ranges = { previous: "17–23 August 2026", today: "24–30 August 2026", next: "31 August–6 September 2026" };
+          for (const button of calendarRoot.querySelectorAll("[data-calendar-nav]")) {
+            button.addEventListener("click", () => { range.textContent = ranges[button.dataset.calendarNav]; });
+          }
+          for (const button of calendarRoot.querySelectorAll("[data-calendar-source]")) {
+            button.addEventListener("click", () => {
+              const enabled = button.getAttribute("aria-pressed") === "true";
+              const enabledButtons = [...calendarRoot.querySelectorAll('[data-calendar-source][aria-pressed="true"]')];
+              if (enabled && enabledButtons.length === 1) return;
+              button.setAttribute("aria-pressed", String(!enabled));
+              const event = calendarRoot.querySelector(`[data-calendar-event="${button.dataset.calendarSource}"]`);
+              if (event) event.hidden = enabled;
+            });
+          }
           calendarRoot.querySelector("[data-mock-calendar-write]").addEventListener("click", () => {
             element._hass?.callService?.("calendar", "create_event", { entity_id: "calendar.family" });
           });
@@ -443,7 +545,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
         } else if (cardConfig.type === "picture-entity") {
           const pictureRoot = element.attachShadow({ mode: "open" });
           if (cardConfig.camera_view === "live") {
-            pictureRoot.innerHTML = `<style>:host{display:block;height:100%;min-height:140px}.mock-picture{height:100%;min-height:140px;background:radial-gradient(circle at 50% 45%,#17375d,#070d1b 72%);color:#fff;display:grid;place-items:center;font:700 13px system-ui}</style><div class="mock-picture">Secure camera fixture</div>`;
+            pictureRoot.innerHTML = `<style>:host{display:block;height:100%;min-height:140px}.mock-picture{height:100%;min-height:140px;display:block}</style><mock-camera-stream class="mock-picture"></mock-camera-stream>`;
           } else {
             pictureRoot.innerHTML = `<style>:host{display:block;height:100%;min-height:140px;font-family:inherit}.mock-picture{width:100%;height:100%;min-height:140px;display:block;object-fit:contain;background:#f1f5f9}.mock-picture-status{height:100%;min-height:140px;display:grid;place-items:center;background:#f1f5f9;color:#5e6b80;font-family:inherit;font-size:13px;font-weight:700}</style><img class="mock-picture" alt="Representative robot vacuum map"><div class="mock-picture-status" hidden>Map unavailable</div>`;
             element._renderMockState = () => {
@@ -458,7 +560,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           }
           if (cardConfig.camera_view === "live" && window.__cameraPlayerAutoLoad !== false) {
             setTimeout(() => {
-              pictureRoot.querySelector(".mock-picture")?.dispatchEvent(new Event("load", { bubbles: true, composed: true }));
+              pictureRoot.querySelector("mock-camera-stream")?.emitReady();
             }, window.__cameraPlayerLoadDelayMs || 0);
           }
         } else {
@@ -544,7 +646,7 @@ async function updateEntityState(card, nextState) {
 
 async function emitCameraLoad(card, entityId) {
   await card.locator(`[data-card-type="picture-entity"][data-entity="${entityId}"]`).evaluate((player) => {
-    player.shadowRoot.querySelector(".mock-picture").dispatchEvent(new Event("load", { bubbles: true, composed: true }));
+    player.shadowRoot.querySelector("mock-camera-stream").emitReady();
   });
 }
 
@@ -603,6 +705,22 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toBeVisible();
   await expect(card.locator("[data-calendar-mode]")).toHaveCount(4);
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-event-management", "false");
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-show-header-controls", "true");
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-hide-navigation-buttons", "false");
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-hide-calendars", "false");
+  await expect(card.locator("[data-calendar-nav]")).toHaveCount(3);
+  await card.locator('[data-calendar-nav="next"]').click();
+  await expect(card.locator("[data-calendar-range]")).toHaveText("31 August–6 September 2026");
+  await card.locator('[data-calendar-nav="today"]').click();
+  await expect(card.locator("[data-calendar-range]")).toHaveText("24–30 August 2026");
+  const schoolSource = card.locator('[data-calendar-source="calendar.school"]');
+  await schoolSource.click();
+  await expect(schoolSource).toHaveAttribute("aria-pressed", "false");
+  await expect(card.locator('[data-calendar-event="calendar.school"]')).toBeHidden();
+  const familySource = card.locator('[data-calendar-source="calendar.family"]');
+  await familySource.click();
+  await expect(familySource).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
   await card.locator('[data-calendar-mode="day"]').click();
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-default-view", "schedule");
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-rolling-days-schedule", "1");
@@ -791,16 +909,20 @@ test("v0.8 design approval keeps six accessible heating zones contained at every
       columnCount: new Set(cards.map((bounds) => Math.round(bounds.left))).size,
       rowCounts: [...rows.values()],
       horizontalOverflow: grid.scrollWidth - grid.clientWidth,
+      verticalOverflow: grid.scrollHeight - grid.clientHeight,
       cardsInsideHorizontalBounds: cards.every((bounds) => bounds.left >= gridBounds.left - 1 && bounds.right <= gridBounds.right + 1),
+      cardsInsideVisibleBounds: cards.every((bounds) => bounds.top >= gridBounds.top - 1 && bounds.bottom <= Math.min(gridBounds.bottom, innerHeight) + 1),
       widthSpread: Math.max(...cards.map((bounds) => bounds.width)) - Math.min(...cards.map((bounds) => bounds.width))
     };
   });
-  const expectedColumns = testInfo.project.use.viewport.width <= 1279 ? 2 : 3;
+  const expectedColumns = 3;
   expect(layout.zoneCount).toBe("6");
   expect(layout.columnCount).toBe(expectedColumns);
   expect(layout.rowCounts).toEqual(expectedColumns === 2 ? [2, 2, 2] : [3, 3]);
   expect(layout.horizontalOverflow).toBeLessThanOrEqual(1);
+  expect(layout.verticalOverflow, "all six heating zones must be visible together without scrolling").toBeLessThanOrEqual(1);
   expect(layout.cardsInsideHorizontalBounds).toBe(true);
+  expect(layout.cardsInsideVisibleBounds, "all six heating zones must remain inside the visible tablet surface").toBe(true);
   expect(layout.widthSpread).toBeLessThanOrEqual(1);
   if (testInfo.project.name.startsWith("approval-")) {
     await captureApproval(page, testInfo, "home-heating-six");
@@ -833,16 +955,22 @@ test("v0.8 design approval keeps six accessible heating zones contained at every
 });
 
 test("keeps the live music card working inside its configured media boundary", async ({ page }) => {
-  const pageErrors = await mount(page);
+  const pageErrors = await mount(page, fiveRoomMusicConfig(), fiveRoomMusicStates());
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="music"]').click();
-  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toBeVisible();
+  const player = card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]');
+  await expect(player).toBeVisible();
+  await expect(player).toHaveAttribute("data-player-count", "5");
+  await expect(player).toHaveAttribute("data-media-browser-count", "3");
+  await expect(card.locator("[data-mock-player]")).toHaveCount(5);
+  await expect(card.locator("[data-mock-player-row]")).toHaveCount(5);
+  await expect(card.locator("[data-mock-music-tab]")).toHaveCount(3);
   await card.locator("[data-mock-service]").click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "media_player", service: "media_play_pause", data: { entity_id: "media_player.kitchen" } }
   ]);
 
-  await card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]').evaluate(async (child) => {
+  await player.evaluate(async (child) => {
     await child._hass.callService("media_player", "media_play_pause", { entity_id: "media_player.unmapped" });
     await child._hass.callService("light", "toggle", { entity_id: "light.kitchen" });
   });
@@ -964,7 +1092,7 @@ test("separates camera wake-up, first-frame buffering, and live readiness withou
   expect(pageErrors).toEqual([]);
 });
 
-test("offers a guarded fallback for a slow Garage player without restarting its stream", async ({ page }) => {
+test("keeps a slow Garage player in buffering until a verified frame arrives", async ({ page }) => {
   const pageErrors = await mount(page, config, {}, {
     cameraPlayerAutoLoad: false,
     cameraSlowMessageMs: 1_000,
@@ -983,8 +1111,9 @@ test("offers a guarded fallback for a slow Garage player without restarting its 
   const instance = await player.getAttribute("data-instance-id");
   await expect(card.locator('button[data-camera-reveal="garage"]')).toHaveCount(0);
   await expect(card.locator(".camera-is-buffering")).toContainText("can take around 20 seconds", { timeout: 2_000 });
-  await expect(card.locator('button[data-camera-reveal="garage"]')).toHaveText("Show video now");
-  await card.locator('button[data-camera-reveal="garage"]').click();
+  await expect(card.locator('button[data-camera-reveal="garage"]')).toHaveCount(0);
+  await expect(card.locator(".camera-live-indicator")).toHaveCount(0);
+  await emitCameraLoad(card, "camera.example_garage");
   await expect(card.locator(".camera-live-indicator")).toHaveText("Live");
   await expect(player).toHaveAttribute("data-instance-id", instance);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
@@ -993,52 +1122,28 @@ test("offers a guarded fallback for a slow Garage player without restarting its 
   expect(pageErrors).toEqual([]);
 });
 
-test("rejects tampered and stale slow-player reveal actions", async ({ page }) => {
+test("does not infer Live from a non-media load event", async ({ page }) => {
   const pageErrors = await mount(page, config, {
     "camera.example_doorbell": state("camera.example_doorbell", "idle")
   }, {
     cameraPlayerAutoLoad: false,
-    cameraSlowMessageMs: 20,
     cameraFrameTimeoutMs: 10_000
   });
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="doorbell"]').click();
   await updateEntityState(card, state("camera.example_doorbell", "streaming"));
-  const reveal = card.locator('button[data-camera-reveal="doorbell"]');
-  await expect(reveal).toBeVisible();
-  const staleToken = await reveal.getAttribute("data-camera-session-token");
-
-  await reveal.evaluate((button) => {
-    button.dataset.cameraReveal = "child-bedroom";
-    button.click();
+  const player = card.locator('[data-entity="camera.example_doorbell"]');
+  await expect(player).toBeVisible();
+  await player.evaluate((element) => {
+    element.shadowRoot.querySelector(".mock-picture").dispatchEvent(new Event("load", { bubbles: true }));
   });
-  await expect(card.locator(".camera-is-buffering")).toBeVisible();
-  await card.locator('button[data-camera-close="doorbell"]').click();
-  await updateEntityState(card, state("camera.example_doorbell", "idle"));
-  await expect(card.locator('button[data-camera-open="doorbell"]')).toBeEnabled();
-
-  await card.locator('button[data-camera-open="doorbell"]').click();
-  await updateEntityState(card, state("camera.example_doorbell", "streaming"));
-  await expect(card.locator('button[data-camera-reveal="doorbell"]')).toBeVisible();
-  await card.evaluate((element, token) => {
-    element._revealCameraFrame("doorbell", Number(token));
-  }, staleToken);
-  await expect(card.locator(".camera-is-buffering")).toBeVisible();
-  await card.evaluate((element) => element._evictCameraChild("doorbell"));
-  await card.locator('button[data-camera-reveal="doorbell"]').click();
   await expect(card.locator(".camera-is-buffering")).toBeVisible();
   await expect(card.locator(".camera-live-indicator")).toHaveCount(0);
-  await card.evaluate((element) => {
-    element._scheduleRender(true);
-  });
-  await expect(card.locator('[data-entity="camera.example_doorbell"]')).toBeVisible();
-  await expect(card.locator('button[data-camera-reveal="doorbell"]')).toBeVisible();
-  await card.locator('button[data-camera-reveal="doorbell"]').click();
+  await expect(card.locator("[data-camera-reveal]")).toHaveCount(0);
+  await emitCameraLoad(card, "camera.example_doorbell");
   await expect(card.locator(".camera-live-indicator")).toHaveText("Live");
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
-    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
-    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } }
   ]);
   expect(pageErrors).toEqual([]);
@@ -1066,9 +1171,7 @@ test("cancels during buffering and ignores a late player load", async ({ page })
     { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } }
   ]);
-  await page.evaluate(() => {
-    window.__lateCameraPlayer.shadowRoot.querySelector(".mock-picture").dispatchEvent(new Event("load", { bubbles: true, composed: true }));
-  });
+  await page.evaluate(() => window.__lateCameraPlayer.shadowRoot.querySelector("mock-camera-stream").emitReady());
   await updateEntityState(card, state("camera.example_doorbell", "idle"));
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
   await expect(card.locator(".camera-live-indicator")).toHaveCount(0);
@@ -1405,9 +1508,7 @@ test("configuration reload ignores a late first-frame event and completes the ex
   });
 
   await card.evaluate((element, familyConfig) => element.setConfig({ family_config: familyConfig }), config);
-  await page.evaluate(() => {
-    window.__lateReloadPlayer.shadowRoot.querySelector(".mock-picture").dispatchEvent(new Event("load", { bubbles: true, composed: true }));
-  });
+  await page.evaluate(() => window.__lateReloadPlayer.shadowRoot.querySelector("mock-camera-stream").emitReady());
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } }
   ]);
@@ -1717,7 +1818,8 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
 
   await card.locator('.nav-button[data-view="family"]').click();
-  await expect(card.locator(".family-rhythm")).toContainText("Actual ChoreOps tasks are shown below");
+  await expect(card.locator(".family-rhythm")).toContainText("Location sharing off");
+  await expect(card.locator(".family-rhythm")).not.toContainText(/test|preview/i);
   await expect(card.locator(".chore-row")).toHaveCount(6);
   await expect(card.locator('[data-card-type="map"]')).toHaveCount(0);
   expect(pageErrors).toEqual([]);
@@ -1760,6 +1862,18 @@ async function expectApprovalQuality(page, { hotspots = false, securityLabels = 
         return { label: node.getAttribute("aria-label") || node.textContent.trim(), width: bounds.width, height: bounds.height };
       })
       .filter(({ width, height }) => width < 48 || height < 48);
+    const icons = queryAuditRoots("ha-icon[icon]")
+      .filter((node) => node.getClientRects().length)
+      .map((node) => {
+        const bounds = node.getBoundingClientRect();
+        return {
+          icon: node.getAttribute("icon"),
+          hasVector: Boolean(node.querySelector("svg path,svg rect,svg circle")),
+          width: bounds.width,
+          height: bounds.height
+        };
+      })
+      .filter(({ icon, hasVector, width, height }) => !/^mdi:[a-z0-9-]+$/.test(icon || "") || !hasVector || width < 12 || height < 12);
     const hotspotSizes = options.hotspots
       ? queryAuditRoots("[data-room]").filter((node) => node.getClientRects().length).map((node) => {
         const bounds = node.getBoundingClientRect();
@@ -1835,11 +1949,12 @@ async function expectApprovalQuality(page, { hotspots = false, securityLabels = 
         };
       }).filter(({ outsidePicker, outsideRoot, visibleChildren }) => outsidePicker || outsideRoot || visibleChildren.length)
       : [];
-    return { fontFamily, typography, controls, hotspotSizes, clippedSecurityLabels, fragmentedSecurityLabels, securityCardBounds };
+    return { fontFamily, typography, controls, icons, hotspotSizes, clippedSecurityLabels, fragmentedSecurityLabels, securityCardBounds };
   }, { hotspots, securityLabels });
   expect(audit.fontFamily).toMatch(/system-ui/i);
   expect(audit.typography).toEqual([]);
   expect(audit.controls).toEqual([]);
+  expect(audit.icons).toEqual([]);
   expect(audit.hotspotSizes).toEqual([]);
   expect(audit.clippedSecurityLabels).toEqual([]);
   expect(audit.fragmentedSecurityLabels).toEqual([]);
@@ -2331,6 +2446,10 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
   await expect(card.locator(".hero-metrics button[data-view='entry']")).toContainText("Protected");
   await updateEntityState(card, state("alarm_control_panel.example_home", "disarmed", { supported_features: 63 }));
 
+  const structuralFloorplanConfig = structuredClone(config);
+  for (const floor of structuralFloorplanConfig.floorplan.floors) delete floor.vacuum_map_entity;
+  await card.evaluate((element, familyConfig) => element.setConfig({ family_config: familyConfig }), structuralFloorplanConfig);
+  await expect(card.locator('[data-current-view="today"]')).toBeVisible();
   await card.locator('.nav-button[data-view="rooms"]').click();
   const homeSections = ["rooms", "lights", "heating", "covers", "cleaning"];
   for (const section of homeSections) {
@@ -2338,6 +2457,8 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
     await expect(card.locator(`[data-home-section-current="${section}"]`)).toBeVisible();
     if (section === "rooms") {
       await expect(card.locator(".home-drawer")).toBeVisible();
+      await expect(card.locator(".floorplan-image")).toHaveAttribute("href", /example-ground\.svg\?v=/);
+      await expect(card.locator(".floorplan-image")).not.toHaveAttribute("href", /camera_proxy/);
     }
     if (section === "lights") {
       const truncatedLightLabels = await card.locator(".whole-home-control strong,.whole-home-control small").evaluateAll((nodes) => nodes
@@ -2363,24 +2484,40 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
   }
 
   for (const [view, name, selector] of [
-    ["calendar", "calendar-smoke", ".calendar-view"],
-    ["family", "family-smoke", ".family-layout"],
-    ["music", "music-smoke", ".media-player-panel"]
+    ["calendar", "calendar-controls", ".calendar-view"],
+    ["family", "family-location-off", ".family-dashboard"],
+    ["music", "music-five-room", ".media-player-panel"]
   ]) {
+    const nextConfig = view === "family"
+      ? locationDisabledConfig()
+      : view === "music"
+        ? fiveRoomMusicConfig()
+        : config;
+    await card.evaluate((element, familyConfig) => element.setConfig({ family_config: familyConfig }), nextConfig);
+    await expect(card.locator('[data-current-view="today"]')).toBeVisible();
+    if (view === "music") await updateEntityStates(card, fiveRoomMusicStates());
     await card.locator(`.nav-button[data-view="${view}"]`).click();
     await expect(card.locator(`[data-current-view="${view}"]`)).toBeVisible();
     await expect(card.locator(selector)).toBeVisible();
+    if (view === "calendar") {
+      await expect(card.locator("[data-calendar-nav]")).toHaveCount(3);
+      await expect(card.locator("[data-calendar-source]")).toHaveCount(2);
+      await card.locator('[data-calendar-nav="next"]').click();
+      await expect(card.locator("[data-calendar-range]")).toHaveText("31 August–6 September 2026");
+      await card.locator('[data-calendar-nav="today"]').click();
+      await expect(card.locator("[data-calendar-range]")).toHaveText("24–30 August 2026");
+    }
     if (view === "family") {
-      await expect(card.locator(".map-panel")).toBeVisible();
-      await expect(card.locator(".family-sidebar")).toBeVisible();
-      await expect(card.locator(".family-scroll-cue")).toContainText("Swipe for everyone");
-      const truncatedRoutines = await card.locator(".family-sidebar .chore-row strong,.family-sidebar .chore-row small").evaluateAll((nodes) => {
+      await expect(card.locator(".location-off-badge")).toHaveText("Location sharing off");
+      await expect(card.locator(".family-people-grid .family-person")).toHaveCount(2);
+      await expect(card.locator(".map-panel,.family-sidebar,[data-card-type='map']")).toHaveCount(0);
+      const truncatedRoutines = await card.locator(".family-people-grid .chore-row strong,.family-people-grid .chore-row small").evaluateAll((nodes) => {
         return nodes
           .filter((node) => node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1)
           .map((node) => node.textContent.trim());
       });
       expect(truncatedRoutines).toEqual([]);
-      const overwrappedRoutines = await card.locator(".family-sidebar .chore-row strong,.family-sidebar .chore-row small").evaluateAll((nodes) => {
+      const overwrappedRoutines = await card.locator(".family-people-grid .chore-row strong,.family-people-grid .chore-row small").evaluateAll((nodes) => {
         return nodes
           .map((node) => {
             const range = document.createRange();
@@ -2391,7 +2528,7 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
           .filter(({ lines }) => lines > 2);
       });
       expect(overwrappedRoutines).toEqual([]);
-      const internallyScrollablePeople = await card.locator(".family-sidebar .family-person").evaluateAll((people) => people
+      const internallyScrollablePeople = await card.locator(".family-people-grid .family-person").evaluateAll((people) => people
         .filter((person) => person.scrollHeight > person.clientHeight + 1 || person.scrollWidth > person.clientWidth + 1)
         .map((person) => ({
           name: person.querySelector(".eyebrow")?.textContent?.trim() || "Unknown person",
@@ -2399,11 +2536,6 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
           verticalDelta: person.scrollHeight - person.clientHeight
         })));
       expect(internallyScrollablePeople).toEqual([]);
-      const familyScrollBoundary = await card.locator(".family-sidebar").evaluate((sidebar) => ({
-        overflowY: getComputedStyle(sidebar).overflowY,
-        needsScroll: sidebar.scrollHeight > sidebar.clientHeight + 1
-      }));
-      if (familyScrollBoundary.needsScroll) expect(["auto", "scroll"]).toContain(familyScrollBoundary.overflowY);
       await expectContrast(card, [
         { foreground: ".chore-row small", background: ".chore-row", minimum: 4.5 },
         { foreground: ".family-facts span", background: ".family-facts span", minimum: 4.5 },
@@ -2412,6 +2544,10 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
       ]);
     }
     if (view === "music") {
+      await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-player-count", "5");
+      await expect(card.locator("[data-mock-player]")).toHaveCount(5);
+      await expect(card.locator("[data-mock-player-row]")).toHaveCount(5);
+      await expect(card.locator("[data-mock-music-tab]")).toHaveCount(3);
       await expectContrast(card, [
         { foreground: ".music-meta", background: ".music-meta", minimum: 4.5 },
         { foreground: ".mock-media-player strong", background: ".media-player-stage", minimum: 4.5 },
@@ -2516,15 +2652,17 @@ test("v0.8 design approval captures the complete secure-camera lifecycle and pro
   await expect(doorbellPlayer).toBeVisible();
   await expect(doorbellPlayer).toHaveAttribute("aria-hidden", "true");
   await expect(doorbellPlayer).toHaveJSProperty("inert", true);
+  await expect(card.locator(".camera-live-indicator")).toHaveCount(0);
   await captureApproval(page, testInfo, "security-buffering", { securityLabels: true });
 
-  await card.locator('button[data-alarm-action="alarm_arm_away"]').click();
-  await expect(card.locator(".confirmation-dialog")).toContainText("Arm away");
+  await card.locator('button[data-secure-cover-action="open_cover"]').click();
+  await expect(card.locator(".confirmation-dialog")).toContainText("Open garage door");
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.filter((entry) => entry.domain === "cover"))).toEqual([]);
   await expectContrast(card, [
     { foreground: ".confirmation-dialog > p:not(.eyebrow)", background: ".confirmation-dialog", minimum: 4.5 },
     { foreground: ".confirmation-dialog .confirm-primary", background: ".confirmation-dialog .confirm-primary", minimum: 4.5 }
   ]);
-  await captureApproval(page, testInfo, "security-confirmation", { securityLabels: true });
+  await captureApproval(page, testInfo, "security-garage-confirmation", { securityLabels: true });
   await card.locator('button[data-confirm-action="cancel"]').click();
 
   await emitCameraLoad(card, "camera.example_doorbell");
@@ -2615,12 +2753,14 @@ test("v0.8 design approval captures live, cached, and stale football health", as
 
   await updateEntityStates(card, approvalFootballStates("cached"));
   await expect(card.locator(".football-freshness.is-cached strong")).toHaveText("Showing saved scores");
-  await expect(card.locator(".football-freshness.is-cached small")).toHaveText("Live updates are temporarily unavailable. Checked 15:55.");
+  await expect(card.locator(".football-freshness.is-cached small")).toHaveText("Checked 15:55.");
+  await expect(card.locator(".football-health-note.is-cached")).toHaveText("Live updates are temporarily unavailable.");
   await captureApproval(page, testInfo, "football-cached");
 
   await updateEntityStates(card, approvalFootballStates("stale"));
   await expect(card.locator(".football-freshness.is-stale strong")).toHaveText("Scores may be delayed");
-  await expect(card.locator(".football-freshness.is-stale small")).toHaveText("The latest football check could not complete. Retrying automatically. Checked 13:00.");
+  await expect(card.locator(".football-freshness.is-stale small")).toHaveText("Checked 16:00.");
+  await expect(card.locator(".football-health-note.is-stale")).toHaveText("The last football check is older than expected.");
   await captureApproval(page, testInfo, "football-stale");
   expect(pageErrors).toEqual([]);
 });
