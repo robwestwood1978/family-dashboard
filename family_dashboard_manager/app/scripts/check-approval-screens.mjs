@@ -4,6 +4,7 @@ import { relative, resolve, sep } from "node:path";
 import {
   APPROVAL_PROJECTS,
   APPROVAL_VIEW_NAMES,
+  APPROVAL_ZOOM_PROJECTS,
   APPROVAL_ZOOM_VIEW_NAMES,
   expectedApprovalScreens
 } from "../browser-test/v080-approval-manifest.mjs";
@@ -53,7 +54,7 @@ const manifest = {
   schema_version: 1,
   expected_count: expected.length,
   nominal_count: APPROVAL_PROJECTS.length * APPROVAL_VIEW_NAMES.length,
-  zoom_200_count: APPROVAL_ZOOM_VIEW_NAMES.length,
+  zoom_200_count: APPROVAL_ZOOM_PROJECTS.length * APPROVAL_ZOOM_VIEW_NAMES.length,
   projects: APPROVAL_PROJECTS,
   screens
 };

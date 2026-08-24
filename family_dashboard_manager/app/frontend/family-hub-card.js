@@ -1537,17 +1537,31 @@ export class FamilyHubCard extends HTMLElementBase {
         && !hasBlockedCamera
         && (!readOnly || phase === "streaming");
       const hasMountedStream = (isBuffering || isViewing) && phase === "streaming" && cameraAvailable;
-      const cameraStatus = isWaiting
-        ? { label: "Waiting…", icon: "mdi:shield-clock-outline" }
-        : session
-        ? cameraSessionPresentation(session.phase, phase)
-        : readOnlyStartBlocked
-          ? { label: "Stream off", icon: "mdi:lock-outline" }
-          : cameraAvailable && cameraReady ? cameraSessionPresentation(null, phase) : null;
+      const cameraStatus = cameraError
+        ? canOpen
+          ? { label: "Retry available", icon: "mdi:refresh-circle" }
+          : { label: "Live view unavailable", icon: "mdi:camera-off-outline" }
+        : isWaiting
+          ? { label: "Waiting…", icon: "mdi:shield-clock-outline" }
+          : session
+            ? cameraSessionPresentation(session.phase, phase)
+            : readOnlyStartBlocked
+              ? { label: "Stream off", icon: "mdi:lock-outline" }
+              : cameraAvailable && cameraReady ? cameraSessionPresentation(null, phase) : null;
       const badgeLabel = cameraStatus?.label
-        || (camera.entity_id ? cameraEntityAvailable && !commandPairValid ? "Controls unavailable" : "Camera unavailable" : "Signals only");
+        || (camera.entity_id
+          ? cameraEntityAvailable && !commandPairValid
+            ? "Controls unavailable"
+            : cameraEntityAvailable && commandPairValid && !cameraReady
+              ? "Not ready"
+              : "Camera unavailable"
+          : "Signals only");
       const badgeIcon = cameraStatus?.icon
-        || (camera.entity_id ? "mdi:camera-off-outline" : "mdi:shield-check-outline");
+        || (camera.entity_id
+          ? cameraEntityAvailable && commandPairValid && !cameraReady
+            ? "mdi:camera-clock-outline"
+            : "mdi:camera-off-outline"
+          : "mdi:shield-check-outline");
       return {
         camera,
         signals,
@@ -1658,7 +1672,7 @@ export class FamilyHubCard extends HTMLElementBase {
           ? `<div class="camera-idle camera-is-stopping" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:loading"></ha-icon></span><div><strong>Stopping live view…</strong><small>Closing the secure stream before another camera can open.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
           : selected?.isWaiting
             ? `<div class="camera-idle camera-is-waiting" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:shield-clock-outline"></ha-icon></span><div><strong>Waiting for camera…</strong><small>The previous secure stream must become idle before another camera can open.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
-          : `<div class="camera-idle security-stage-poster" ${selected?.cameraError || !selected?.cameraAvailable ? 'role="alert"' : ""}><span class="camera-stage-icon"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon></span><div><strong>${selected?.cameraError ? "Live view unavailable" : !selected?.camera?.entity_id ? "Signals only" : !selected?.cameraAvailable ? "Camera unavailable" : !selected?.cameraReady ? "Camera not ready" : selected?.readOnlyStartBlocked ? "Stream off" : `${escapeHtml(selected?.camera.name || "Camera")} is ready`}</strong><small>${selected?.cameraError ? escapeHtml(selected.cameraError) : !selected?.camera?.entity_id ? "Live video is not configured for this entry camera." : selected?.cameraAvailable ? selected?.cameraReady ? selected?.readOnlyStartBlocked ? "Read-only mode will not start this camera." : "Video stays off until you choose View live." : "The camera is getting ready. Try again in a moment." : "This camera is currently unavailable."}</small></div><button type="button" data-camera-stage-open="${escapeHtml(selected?.camera.id || "")}" aria-label="${stageActionLabel}" ${selected?.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="${stageActionIcon}"></ha-icon>${stageActionText}</button></div>`;
+          : `<div class="camera-idle security-stage-poster" ${selected?.cameraError || (selected?.camera?.entity_id && !selected?.cameraAvailable) ? 'role="alert"' : ""}><span class="camera-stage-icon"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon></span><div><strong>${selected?.cameraError ? "Live view unavailable" : !selected?.camera?.entity_id ? "Signals only" : !selected?.cameraAvailable ? "Camera unavailable" : !selected?.cameraReady ? "Camera not ready" : selected?.readOnlyStartBlocked ? "Stream off" : `${escapeHtml(selected?.camera.name || "Camera")} is ready`}</strong><small>${selected?.cameraError ? escapeHtml(selected.cameraError) : !selected?.camera?.entity_id ? "Live video is not configured for this entry camera." : selected?.cameraAvailable ? selected?.cameraReady ? selected?.readOnlyStartBlocked ? "Read-only mode will not start this camera." : "Video stays off until you choose View live." : "Live view cannot start while the camera is in its current state." : "This camera is currently unavailable."}</small></div><button type="button" data-camera-stage-open="${escapeHtml(selected?.camera.id || "")}" aria-label="${stageActionLabel}" ${selected?.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="${stageActionIcon}"></ha-icon>${stageActionText}</button></div>`;
     return `
       <section class="security-layout">
         <div class="security-main"${confirmationGuard}>

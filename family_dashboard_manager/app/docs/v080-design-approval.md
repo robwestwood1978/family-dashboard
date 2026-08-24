@@ -5,8 +5,8 @@ This review branch renders the real `family-hub-card` component with the reposit
 The approval run freezes the household clock at 24 August 2026, then captures each important state in Chromium and WebKit at 1024 × 768, 1112 × 834, and 1440 × 900:
 
 - Today
-- Home: Rooms, Lights, Heating, Blinds & doors, and Cleaning
-- Security: idle, waking, first-frame buffering, protected confirmation, and alert/unavailable
+- Home: Rooms, Lights, four-zone Heating, exact six-zone Heating, Blinds & doors, and Cleaning
+- Security: idle, read-only, signals-only, not-ready, waking, first-frame buffering, live, stopping, retry/error, protected confirmation, and alert/unavailable
 - Football: live, cached, and stale health
 - Calendar, Family, and Music visual smoke screens
 
@@ -20,6 +20,6 @@ Run locally after installing Playwright Chromium and WebKit:
 npm run test:approval
 ```
 
-On a pull request, the `Validate` workflow uploads the images and their SHA-256 manifest as the `v080-design-approval-screens` artifact. The manifest gate requires all 102 nominal view/project combinations and four representative 200% zoom captures before upload. All entities, events, camera names, states, and club data used by the renderer are synthetic example data. The simulated card exercises the camera lifecycle but never connects to or opens a household camera.
+On a pull request, the `Validate` workflow uploads the images and their SHA-256 manifest as the `v080-design-approval-screens` artifact. The manifest gate requires all 144 nominal view/project combinations and ten representative 200% zoom captures across Chromium and WebKit before upload. The six-zone evidence proves a 3 × 2 wide grid, a two-column tablet grid, and a one-column 200%-zoom reflow. All entities, events, camera names, states, and club data used by the renderer are synthetic example data. The simulated card exercises the camera lifecycle but never connects to or opens a household camera.
 
-The design approval run also checks root overflow, Security-label clipping, meaningful text at 12px or larger, enabled controls at 48 × 48px or larger, floorplan hotspot size, every visible text run under a cross-browser 200% browser-zoom equivalent (half-sized CSS viewport with effective physical text-scale verification), nearest-ancestor clipping and text overlaps, named navigation controls, every match for key WCAG contrast pairs on its composited backdrop, and the absence of operator-facing telemetry copy.
+The design approval run also checks root overflow, Security-label clipping, meaningful text at 12px or larger, enabled controls at 48 × 48px or larger, floorplan hotspot size, every visible text run under a cross-browser 200% browser-zoom equivalent (half-sized CSS viewport with effective physical text-scale verification), nearest-ancestor clipping and text overlaps, visibly distinct zoom navigation icons with named controls, exact six-zone row/column geometry, every match for key WCAG contrast pairs on its composited backdrop, and the absence of operator-facing telemetry copy.

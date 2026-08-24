@@ -7,7 +7,7 @@ import {
   normaliseFootballData
 } from "../src/football-provider.mjs";
 import {
-  APPROVAL_ZOOM_PROJECT,
+  APPROVAL_ZOOM_PROJECTS,
   APPROVAL_ZOOM_VIEW_NAMES
 } from "./v080-approval-manifest.mjs";
 
@@ -97,6 +97,37 @@ function fixtureStates() {
     ]
   });
   return states;
+}
+
+function sixZoneHouseholdConfig() {
+  const familyConfig = structuredClone(config);
+  const roomTemplate = structuredClone(familyConfig.rooms.find((room) => room.id === "hallway"));
+  familyConfig.rooms.push(
+    {
+      ...structuredClone(roomTemplate),
+      id: "utility_test",
+      name: "Utility test",
+      area_id: "utility_test",
+      climate: "climate.utility_test",
+      icon: "mdi:washing-machine"
+    },
+    {
+      ...structuredClone(roomTemplate),
+      id: "upstairs_test",
+      name: "Upstairs test",
+      area_id: "upstairs_test",
+      climate: "climate.upstairs_test",
+      icon: "mdi:stairs"
+    }
+  );
+  return familyConfig;
+}
+
+function sixZoneStateOverrides() {
+  return {
+    "climate.utility_test": state("climate.utility_test", "heat", { current_temperature: 20.5, temperature: 19.5, hvac_action: "idle" }),
+    "climate.upstairs_test": state("climate.upstairs_test", "unavailable", { temperature: 18 })
+  };
 }
 
 function approvalFootballStates(mode = "live") {
@@ -249,24 +280,56 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     });
   });
   await page.route("https://resources.premierleague.com/premierleague/badges/**", async (route) => {
-    if (route.request().url().includes("/t90.png")) {
+    const badgeCode = new URL(route.request().url()).pathname.match(/\/t(\d+)\.png$/)?.[1] || "";
+    if (badgeCode === "90") {
       await route.abort("failed");
       return;
     }
-    const isVilla = route.request().url().includes("/t7.png");
-    const background = isVilla ? "#7A263A" : "#132257";
-    const accent = isVilla ? "#95BFE5" : "#FFFFFF";
-    const code = isVilla ? "AVL" : "TOT";
+    const badge = {
+      "3": { code: "ARS", background: "#EF0107", accent: "#FFFFFF" },
+      "4": { code: "NEW", background: "#111111", accent: "#FFFFFF" },
+      "6": { code: "TOT", background: "#132257", accent: "#FFFFFF" },
+      "7": { code: "AVL", background: "#7A263A", accent: "#95BFE5" },
+      "8": { code: "CHE", background: "#034694", accent: "#FFFFFF" }
+    }[badgeCode] || { code: `T${badgeCode || "?"}`, background: "#243B64", accent: "#FFFFFF" };
     await route.fulfill({
       status: 200,
       contentType: "image/svg+xml",
-      body: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 90"><path d="M45 4 79 16v25c0 22-13 37-34 45C24 78 11 63 11 41V16Z" fill="${background}" stroke="${accent}" stroke-width="5"/><text x="45" y="53" fill="${accent}" font-family="system-ui,sans-serif" font-size="20" font-weight="800" text-anchor="middle">${code}</text></svg>`
+      body: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 90"><path d="M45 4 79 16v25c0 22-13 37-34 45C24 78 11 63 11 41V16Z" fill="${badge.background}" stroke="${badge.accent}" stroke-width="5"/><text x="45" y="53" fill="${badge.accent}" font-family="system-ui,sans-serif" font-size="20" font-weight="800" text-anchor="middle">${badge.code}</text></svg>`
     });
   });
   await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px 0 76px;font:20px system-ui}.ha-sidebar{position:fixed;inset:56px auto 0 0;width:52px;background:#191b20}.ha-main{position:absolute;inset:0 0 0 52px;overflow:hidden}</style><div class="ha-header">Family Hub</div><div class="ha-sidebar"></div><div class="ha-main"></div></body></html>`);
   await page.evaluate(() => {
     class HaCard extends HTMLElement {}
-    class HaIcon extends HTMLElement {}
+    class HaIcon extends HTMLElement {
+      static get observedAttributes() {
+        return ["icon"];
+      }
+      connectedCallback() {
+        this._renderNavigationGlyph();
+      }
+      attributeChangedCallback() {
+        if (this.isConnected) this._renderNavigationGlyph();
+      }
+      _renderNavigationGlyph() {
+        const parent = this.parentElement;
+        if (!parent?.matches(".brand,.nav-button")) return;
+        const view = parent.classList.contains("brand") ? "brand" : parent.dataset.view;
+        const glyph = {
+          brand: "⌂",
+          today: "T",
+          calendar: "C",
+          rooms: "H",
+          family: "F",
+          entry: "S",
+          music: "M",
+          football: "B"
+        }[view] || "•";
+        this.textContent = glyph;
+        this.dataset.mockGlyph = glyph;
+        this.style.cssText = "display:inline-grid;place-items:center;width:var(--mdc-icon-size,22px);height:var(--mdc-icon-size,22px);font:800 11px/1 system-ui,sans-serif;color:currentColor";
+      }
+    }
     class MockChildCard extends HTMLElement {
       set hass(value) {
         this._hass = value;
@@ -684,31 +747,9 @@ test("curates lights, heating, blinds and cleaning inside Home", async ({ page }
   expect(pageErrors).toEqual([]);
 });
 
-test("keeps six accessible heating zones contained at both supported iPad widths", async ({ page }, testInfo) => {
-  const sixZoneConfig = structuredClone(config);
-  const roomTemplate = structuredClone(sixZoneConfig.rooms.find((room) => room.id === "hallway"));
-  sixZoneConfig.rooms.push(
-    {
-      ...structuredClone(roomTemplate),
-      id: "utility_test",
-      name: "Utility test",
-      area_id: "utility_test",
-      climate: "climate.utility_test",
-      icon: "mdi:washing-machine"
-    },
-    {
-      ...structuredClone(roomTemplate),
-      id: "upstairs_test",
-      name: "Upstairs test",
-      area_id: "upstairs_test",
-      climate: "climate.upstairs_test",
-      icon: "mdi:stairs"
-    }
-  );
-  const pageErrors = await mount(page, sixZoneConfig, {
-    "climate.utility_test": state("climate.utility_test", "heat", { current_temperature: 20.5, temperature: 19.5, hvac_action: "idle" }),
-    "climate.upstairs_test": state("climate.upstairs_test", "unavailable", { temperature: 18 })
-  });
+test("v0.8 design approval keeps six accessible heating zones contained at every layout tier", async ({ page }, testInfo) => {
+  const sixZoneConfig = sixZoneHouseholdConfig();
+  const pageErrors = await mount(page, sixZoneConfig, sixZoneStateOverrides());
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="rooms"]').click();
   await card.locator('[data-home-section="heating"]').click();
@@ -722,19 +763,34 @@ test("keeps six accessible heating zones contained at both supported iPad widths
   await expect(unavailablePower).toBeDisabled();
   expect(await unavailablePower.evaluate((button) => button.hasAttribute("aria-pressed"))).toBe(false);
 
-  await card.locator('[data-climate-card="climate.upstairs_test"]').scrollIntoViewIfNeeded();
   const layout = await card.locator(".heating-grid").evaluate((grid) => {
     const gridBounds = grid.getBoundingClientRect();
     const cards = [...grid.querySelectorAll(".heating-card")].map((item) => item.getBoundingClientRect());
+    const rows = new Map();
+    for (const bounds of cards) {
+      const top = Math.round(bounds.top);
+      rows.set(top, (rows.get(top) || 0) + 1);
+    }
     return {
+      zoneCount: grid.dataset.zoneCount,
       columnCount: new Set(cards.map((bounds) => Math.round(bounds.left))).size,
+      rowCounts: [...rows.values()],
       horizontalOverflow: grid.scrollWidth - grid.clientWidth,
-      cardsInsideHorizontalBounds: cards.every((bounds) => bounds.left >= gridBounds.left - 1 && bounds.right <= gridBounds.right + 1)
+      cardsInsideHorizontalBounds: cards.every((bounds) => bounds.left >= gridBounds.left - 1 && bounds.right <= gridBounds.right + 1),
+      widthSpread: Math.max(...cards.map((bounds) => bounds.width)) - Math.min(...cards.map((bounds) => bounds.width))
     };
   });
-  expect(layout.columnCount).toBe(testInfo.project.use.viewport.width <= 1279 ? 2 : 4);
+  const expectedColumns = testInfo.project.use.viewport.width <= 1279 ? 2 : 3;
+  expect(layout.zoneCount).toBe("6");
+  expect(layout.columnCount).toBe(expectedColumns);
+  expect(layout.rowCounts).toEqual(expectedColumns === 2 ? [2, 2, 2] : [3, 3]);
   expect(layout.horizontalOverflow).toBeLessThanOrEqual(1);
   expect(layout.cardsInsideHorizontalBounds).toBe(true);
+  expect(layout.widthSpread).toBeLessThanOrEqual(1);
+  if (testInfo.project.name.startsWith("approval-")) {
+    await captureApproval(page, testInfo, "home-heating-six");
+  }
+  await card.locator('[data-climate-card="climate.upstairs_test"]').scrollIntoViewIfNeeded();
   await expectNoRootOverflow(page);
 
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -1973,6 +2029,16 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     for (let index = 0; index < await navigationButtons.count(); index += 1) {
       await expect(navigationButtons.nth(index), `${name} navigation button ${index + 1} must retain an explicit label when its visual label is hidden`).toHaveAttribute("aria-label", /\S/);
     }
+    const navigationIcons = page.locator("family-hub-card").locator(".nav-button ha-icon");
+    for (let index = 0; index < await navigationIcons.count(); index += 1) {
+      await expect(navigationIcons.nth(index), `${name} navigation icon ${index + 1} must remain visibly identifiable when labels collapse`).toHaveAttribute("data-mock-glyph", /\S/);
+    }
+    const navigationIconGeometry = await navigationIcons.evaluateAll((icons) => icons.map((icon) => {
+      const bounds = icon.getBoundingClientRect();
+      return { glyph: icon.dataset.mockGlyph, width: bounds.width, height: bounds.height };
+    }));
+    expect(new Set(navigationIconGeometry.map(({ glyph }) => glyph)).size, `${name} navigation icons must remain visually distinct at 200%`).toBe(navigationIconGeometry.length);
+    expect(navigationIconGeometry.every(({ width, height }) => width >= 18 && height >= 18), `${name} navigation icons must retain a usable visual footprint at 200%`).toBe(true);
     const exposedNavigationButtons = page.locator("family-hub-card").locator(".navigation:not([aria-hidden='true']):not([inert]) .nav-button");
     for (let index = 0; index < await exposedNavigationButtons.count(); index += 1) {
       await expect(exposedNavigationButtons.nth(index), `${name} exposed navigation button ${index + 1} must retain an accessible name`).toHaveAccessibleName(/\S/);
@@ -2113,6 +2179,33 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     expect(audit.textCount, `${name} must audit all visible text at 200%`).toBeGreaterThan(0);
     expect(audit.clipped, `${name} has text clipped by its nearest non-scrollable ancestor at 200%`).toEqual([]);
     expect(audit.overlaps, `${name} has overlapping visible text at 200%`).toEqual([]);
+    if (name === "home-heating-six") {
+      const heatingLayout = await page.locator("family-hub-card").locator(".heating-grid").evaluate((grid) => {
+        const gridBounds = grid.getBoundingClientRect();
+        const cards = [...grid.querySelectorAll(".heating-card")].map((item) => item.getBoundingClientRect());
+        const rows = new Map();
+        for (const bounds of cards) {
+          const top = Math.round(bounds.top);
+          rows.set(top, (rows.get(top) || 0) + 1);
+        }
+        return {
+          zoneCount: grid.dataset.zoneCount,
+          cardCount: cards.length,
+          columnCount: new Set(cards.map((bounds) => Math.round(bounds.left))).size,
+          rowCounts: [...rows.values()],
+          horizontalOverflow: grid.scrollWidth - grid.clientWidth,
+          cardsInsideHorizontalBounds: cards.every((bounds) => bounds.left >= gridBounds.left - 1 && bounds.right <= gridBounds.right + 1),
+          widthSpread: Math.max(...cards.map((bounds) => bounds.width)) - Math.min(...cards.map((bounds) => bounds.width))
+        };
+      });
+      expect(heatingLayout.zoneCount, `${name} must retain the six-zone contract at 200%`).toBe("6");
+      expect(heatingLayout.cardCount, `${name} must render all six zones at 200%`).toBe(6);
+      expect(heatingLayout.columnCount, `${name} must reflow to one column at 200%`).toBe(1);
+      expect(heatingLayout.rowCounts, `${name} must render one complete zone per row at 200%`).toEqual([1, 1, 1, 1, 1, 1]);
+      expect(heatingLayout.horizontalOverflow, `${name} must not overflow horizontally at 200%`).toBeLessThanOrEqual(1);
+      expect(heatingLayout.cardsInsideHorizontalBounds, `${name} cards must stay inside the Heating grid at 200%`).toBe(true);
+      expect(heatingLayout.widthSpread, `${name} cards must keep equal widths at 200%`).toBeLessThanOrEqual(1);
+    }
     if (name.startsWith("football-")) {
       const footballToolbar = page.locator("family-hub-card").locator(".football-toolbar");
       const footballHeading = page.locator("family-hub-card").locator(".football-toolbar > div:first-child");
@@ -2143,7 +2236,7 @@ async function auditApprovalTextZoom(page, testInfo, name) {
       expect(fixtureDayBox, `${name} must measure the first fixture date at 200%`).not.toBeNull();
       expect(toolbarBox.y + toolbarBox.height, `${name} football toolbar must not crowd the first fixture date at 200%`).toBeLessThanOrEqual(fixtureDayBox.y - 1);
     }
-    if (testInfo.project.name === APPROVAL_ZOOM_PROJECT && APPROVAL_ZOOM_VIEW_NAMES.includes(name)) {
+    if (APPROVAL_ZOOM_PROJECTS.includes(testInfo.project.name) && APPROVAL_ZOOM_VIEW_NAMES.includes(name)) {
       const directory = resolve("test-results/v080-approval/screens", testInfo.project.name);
       await mkdir(directory, { recursive: true });
       const path = resolve(directory, `v080-zoom-${name}.png`);
@@ -2296,14 +2389,28 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
 
 test("v0.8 design approval captures the complete secure-camera lifecycle and protected confirmation", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("approval-"), "Rendered only by the design approval project");
+  test.setTimeout(120_000);
+  const doorbellStopKey = "button.press:button.example_doorbell_stop_stream";
+  const garageStartKey = "button.press:button.example_garage_start_stream";
   const pageErrors = await mount(page, config, {
     "camera.example_doorbell": state("camera.example_doorbell", "idle")
   }, {
     cameraPlayerAutoLoad: false,
-    cameraFrameTimeoutMs: 20_000,
-    cameraSlowMessageMs: 10_000
+    cameraFrameTimeoutMs: 120_000,
+    cameraSlowMessageMs: 120_000,
+    cameraStopTimeoutMs: 120_000,
+    serviceBehaviors: {
+      [doorbellStopKey]: "pending",
+      [garageStartKey]: "reject"
+    }
   });
   const card = page.locator("family-hub-card");
+  const showSecurityWithConfig = async (familyConfig) => {
+    await card.evaluate((element, nextConfig) => element.setConfig({ family_config: nextConfig }), familyConfig);
+    await expect(card.locator('[data-current-view="today"]')).toBeVisible();
+    await card.locator('.nav-button[data-view="entry"]').click();
+    await expect(card.locator('[data-current-view="entry"]')).toBeVisible();
+  };
   await card.locator('.nav-button[data-view="entry"]').click();
   await expect(card.locator(".security-stage-poster")).toBeVisible();
   await expectContrast(card, [
@@ -2311,13 +2418,67 @@ test("v0.8 design approval captures the complete secure-camera lifecycle and pro
   ]);
   await captureApproval(page, testInfo, "security-idle", { securityLabels: true });
 
+  const readOnlyConfig = structuredClone(config);
+  readOnlyConfig.display.read_only = true;
+  await showSecurityWithConfig(readOnlyConfig);
+  await expect(card.locator(".security-stage-poster")).toContainText("Stream off");
+  await expect(card.locator(".security-stage-poster")).toContainText("Read-only mode will not start this camera.");
+  await expect(card.locator(".security-stage-poster")).not.toHaveAttribute("role", "alert");
+  const readOnlyDoorbell = card.locator(".security-camera").filter({ hasText: "Front door" });
+  await expect(readOnlyDoorbell.locator(".privacy-badge")).toHaveText("Stream off");
+  await expect(readOnlyDoorbell.locator('button[data-camera-open="doorbell"]')).toHaveText("Stream off");
+  await expect(readOnlyDoorbell.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
+  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Read only");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toBeDisabled();
+  expect(await card.locator("[data-alarm-action],[data-secure-cover-action]").evaluateAll((buttons) => buttons.length === 4 && buttons.every((button) => button.disabled))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  await captureApproval(page, testInfo, "security-read-only", { securityLabels: true });
+
+  const signalsOnlyConfig = structuredClone(config);
+  const signalsOnlyDoorbell = signalsOnlyConfig.entry.cameras.find((camera) => camera.id === "doorbell");
+  delete signalsOnlyDoorbell.entity_id;
+  await showSecurityWithConfig(signalsOnlyConfig);
+  await expect(card.locator(".security-stage-poster")).toContainText("Signals only");
+  await expect(card.locator(".security-stage-poster")).toContainText("Live video is not configured for this entry camera.");
+  await expect(card.locator(".security-stage-poster")).not.toHaveAttribute("role", "alert");
+  const signalsOnlyDoor = card.locator(".security-camera").filter({ hasText: "Front door" });
+  await expect(signalsOnlyDoor.locator(".privacy-badge")).toHaveText("Signals only");
+  await expect(signalsOnlyDoor.locator(".security-signal")).toHaveCount(3);
+  await expect(signalsOnlyDoor.locator('button[data-camera-open="doorbell"]')).toHaveText("Signals only");
+  await expect(signalsOnlyDoor.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
+  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Signals only");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  await captureApproval(page, testInfo, "security-signals-only", { securityLabels: true });
+
+  await showSecurityWithConfig(config);
+  await updateEntityState(card, state("camera.example_doorbell", "recording"));
+  const notReadyDoorbell = card.locator(".security-camera").filter({ hasText: "Front door" });
+  await expect(notReadyDoorbell.locator(".privacy-badge")).toHaveText("Not ready");
+  await expect(notReadyDoorbell.locator('button[data-camera-open="doorbell"]')).toHaveText("Not ready");
+  await expect(notReadyDoorbell.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
+  await expect(card.locator(".security-stage-poster")).toContainText("Camera not ready");
+  await expect(card.locator(".security-stage-poster")).toContainText("Live view cannot start while the camera is in its current state.");
+  await expect(card.locator(".security-stage-poster")).not.toHaveAttribute("role", "alert");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Not ready");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  await captureApproval(page, testInfo, "security-not-ready", { securityLabels: true });
+  await updateEntityState(card, state("camera.example_doorbell", "idle"));
+
   await card.locator('button[data-camera-open="doorbell"]').click();
   await expect(card.locator('.camera-is-starting[aria-busy="true"]')).toContainText("Waking camera");
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } }
+  ]);
   await captureApproval(page, testInfo, "security-waking", { securityLabels: true });
 
   await updateEntityState(card, state("camera.example_doorbell", "streaming"));
   await expect(card.locator('.camera-is-buffering[aria-busy="true"]')).toContainText("Loading video");
-  await expect(card.locator('[data-card-type="picture-entity"][data-entity="camera.example_doorbell"]')).toBeVisible();
+  const doorbellPlayer = card.locator('[data-card-type="picture-entity"][data-entity="camera.example_doorbell"]');
+  await expect(doorbellPlayer).toBeVisible();
+  await expect(doorbellPlayer).toHaveAttribute("aria-hidden", "true");
+  await expect(doorbellPlayer).toHaveJSProperty("inert", true);
   await captureApproval(page, testInfo, "security-buffering", { securityLabels: true });
 
   await card.locator('button[data-alarm-action="alarm_arm_away"]').click();
@@ -2329,9 +2490,58 @@ test("v0.8 design approval captures the complete secure-camera lifecycle and pro
   await captureApproval(page, testInfo, "security-confirmation", { securityLabels: true });
   await card.locator('button[data-confirm-action="cancel"]').click();
 
+  await emitCameraLoad(card, "camera.example_doorbell");
+  await expect(card.locator(".camera-live-indicator")).toHaveText("Live");
+  await expect(card.locator(".camera-is-buffering")).toHaveCount(0);
+  await expect(doorbellPlayer).not.toHaveAttribute("aria-hidden", "true");
+  await expect(doorbellPlayer).toHaveJSProperty("inert", false);
+  await expect(card.locator(".privacy-badge").filter({ hasText: /^Live$/ })).toHaveCount(1);
+  await captureApproval(page, testInfo, "security-live", { securityLabels: true });
+
   await card.locator('button[data-camera-close="doorbell"]').click();
+  await expect(card.locator('.camera-is-stopping[aria-busy="true"]')).toContainText("Stopping live view");
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  expect(await card.locator("button[data-camera-open]").evaluateAll((buttons) => buttons.length === 2 && buttons.every((button) => button.disabled))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } }
+  ]);
+  await expect.poll(() => page.evaluate((key) => window.__pendingServiceCalls.some((entry) => entry.key === key), doorbellStopKey)).toBe(true);
+  await captureApproval(page, testInfo, "security-stopping", { securityLabels: true });
+  await settlePendingService(page, doorbellStopKey);
   await updateEntityState(card, state("camera.example_doorbell", "idle"));
+  await expect(card.locator(".camera-is-stopping")).toHaveCount(0);
   await expect(card.locator(".security-stage-poster")).toBeVisible();
+  await expect(card.locator('button[data-camera-open="garage"]')).toBeEnabled();
+
+  await card.locator('button[data-camera-open="garage"]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } }
+  ]);
+  await expect(card.locator('button[aria-label="Retry live view"]')).toHaveCount(0);
+  await updateEntityState(card, state("camera.example_garage", "idle"));
+  await expect(card.locator(".security-stage-poster[role='alert']")).toContainText("Live view unavailable", { timeout: 2_000 });
+  await expect(card.locator(".security-stage-poster[role='alert']")).toContainText("Live view could not start. Please try again.");
+  const retryGarage = card.locator(".security-camera").filter({ hasText: "Garage" });
+  await expect(retryGarage.locator(".privacy-badge")).toHaveText("Retry available");
+  const garageRetryButtons = card.locator('button[aria-label="Retry live view"]');
+  await expect(garageRetryButtons).toHaveCount(2);
+  expect(await garageRetryButtons.evaluateAll((buttons) => buttons.every((button) => !button.disabled))).toBe(true);
+  await captureApproval(page, testInfo, "security-retry", { securityLabels: true });
+
+  await updateEntityState(card, state("camera.example_garage", "unavailable"));
+  await expect(retryGarage.locator(".privacy-badge")).toHaveText("Live view unavailable");
+  await expect(card.locator('button[aria-label="Retry live view"]')).toHaveCount(0);
+  await expect(retryGarage.locator('button[data-camera-open="garage"]')).toHaveText("Unavailable");
+  await expect(retryGarage.locator('button[data-camera-open="garage"]')).toBeDisabled();
+  await expect(card.locator('button[data-camera-stage-open="garage"]')).toHaveText("Unavailable");
+  await expect(card.locator('button[data-camera-stage-open="garage"]')).toBeDisabled();
+  await updateEntityState(card, state("camera.example_garage", "idle"));
+
+  await showSecurityWithConfig(config);
   await updateEntityStates(card, {
     "camera.example_doorbell": state("camera.example_doorbell", "unavailable"),
     "alarm_control_panel.example_home": state("alarm_control_panel.example_home", "triggered", { supported_features: 63 }),
