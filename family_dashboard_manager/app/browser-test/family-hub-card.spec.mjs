@@ -14,6 +14,11 @@ import {
 const config = JSON.parse(await readFile(new URL("../config/example.json", import.meta.url), "utf8"));
 const cardSource = await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8");
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
+const APPROVAL_FOOTBALL_CHECKED_AT = Object.freeze({
+  live: "2026-08-24T15:07:00.000Z",
+  cached: "2026-08-24T14:55:00.000Z",
+  stale: "2026-08-24T12:00:00.000Z"
+});
 
 function state(entityId, value, attributes = {}) {
   return {
@@ -148,11 +153,7 @@ function approvalFootballStates(mode = "live") {
       code: index + 101
     }))
   ];
-  const fetchedAt = mode === "stale"
-    ? "2026-08-24T12:00:00.000Z"
-    : mode === "cached"
-      ? "2026-08-24T14:55:00.000Z"
-      : "2026-08-24T15:07:00.000Z";
+  const fetchedAt = APPROVAL_FOOTBALL_CHECKED_AT[mode] || APPROVAL_FOOTBALL_CHECKED_AT.live;
   const fixtureStats = (homeElement, awayElement) => [{
     identifier: "goals_scored",
     h: homeElement ? [{ element: homeElement, value: 2 }] : [],
@@ -243,20 +244,7 @@ function approvalFootballStates(mode = "live") {
 async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOptions = {}) {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
-  await page.addInitScript(({ fixedNow }) => {
-    const NativeDate = Date;
-    const installedAt = NativeDate.now();
-    const fixedAt = NativeDate.parse(fixedNow);
-    class ApprovalDate extends NativeDate {
-      constructor(...args) {
-        super(...(args.length ? args : [fixedAt + (NativeDate.now() - installedAt)]));
-      }
-      static now() {
-        return fixedAt + (NativeDate.now() - installedAt);
-      }
-    }
-    globalThis.Date = ApprovalDate;
-  }, { fixedNow: runtimeOptions.fixedNow || APPROVAL_NOW });
+  await page.clock.setFixedTime(new Date(runtimeOptions.fixedNow || APPROVAL_NOW));
   await page.route("**/local/family-dashboard/assets/**", async (route) => {
     const filename = new URL(route.request().url()).pathname.split("/").pop();
     const approvedAssets = new Set(["example-ground.svg", "example-first.svg", "example-living-room-light.svg", "example-kitchen-light.svg"]);
@@ -2039,6 +2027,28 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     }));
     expect(new Set(navigationIconGeometry.map(({ glyph }) => glyph)).size, `${name} navigation icons must remain visually distinct at 200%`).toBe(navigationIconGeometry.length);
     expect(navigationIconGeometry.every(({ width, height }) => width >= 18 && height >= 18), `${name} navigation icons must retain a usable visual footprint at 200%`).toBe(true);
+    const navigationTargetGeometry = await page.locator("family-hub-card").locator(".navigation > .brand, .navigation .nav-button").evaluateAll((buttons) => buttons.map((button) => {
+      const bounds = button.getBoundingClientRect();
+      return {
+        label: button.getAttribute("aria-label"),
+        left: bounds.left,
+        right: bounds.right,
+        top: bounds.top,
+        bottom: bounds.bottom
+      };
+    }));
+    expect(navigationTargetGeometry.map(({ label }) => label), `${name} compact navigation must retain its semantic order`).toEqual([
+      "Open Today",
+      "Today",
+      "Calendar",
+      "Home",
+      "Family",
+      "Security",
+      "Music",
+      "Football"
+    ]);
+    expect(navigationTargetGeometry.every((target, index, targets) => index === 0 || target.left >= targets[index - 1].right + 1), `${name} compact navigation targets must stay in visual order without overlap`).toBe(true);
+    expect(Math.max(...navigationTargetGeometry.map(({ top }) => top)) - Math.min(...navigationTargetGeometry.map(({ top }) => top)), `${name} compact navigation targets must stay on one aligned row`).toBeLessThanOrEqual(1);
     const exposedNavigationButtons = page.locator("family-hub-card").locator(".navigation:not([aria-hidden='true']):not([inert]) .nav-button");
     for (let index = 0; index < await exposedNavigationButtons.count(); index += 1) {
       await expect(exposedNavigationButtons.nth(index), `${name} exposed navigation button ${index + 1} must retain an accessible name`).toHaveAccessibleName(/\S/);
@@ -2558,11 +2568,14 @@ test("v0.8 design approval captures the complete secure-camera lifecycle and pro
 
 test("v0.8 design approval captures live, cached, and stale football health", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("approval-"), "Rendered only by the design approval project");
+  expect(Object.values(APPROVAL_FOOTBALL_CHECKED_AT).every((checkedAt) => Date.parse(checkedAt) <= Date.parse(APPROVAL_NOW)), "football approval checks must never be in the future").toBe(true);
   const pageErrors = await mount(page, config, approvalFootballStates("live"));
   const card = page.locator("family-hub-card");
   await card.locator('.nav-button[data-view="football"]').click();
   await expect(card.locator(".football-hero.is-live")).toBeVisible();
-  await expect(card.locator(".football-freshness")).toContainText("Scores up to date");
+  await expect(card.locator(".topbar-time")).toHaveText("16:08");
+  await expect(card.locator(".football-freshness.is-live strong")).toHaveText("Scores up to date");
+  await expect(card.locator(".football-freshness.is-live small")).toHaveText("Checking every 3 minutes. Checked 16:07.");
   await expect(card.locator('.football-hero img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
   await expect(card.locator('.football-hero img[src="https://resources.premierleague.com/premierleague/badges/70/t7.png"]')).toBeVisible();
   await expect(card.locator('.fixture .team-mark img[src$="/t90.png"]')).toBeHidden();
@@ -2574,11 +2587,13 @@ test("v0.8 design approval captures live, cached, and stale football health", as
   await captureApproval(page, testInfo, "football-live");
 
   await updateEntityStates(card, approvalFootballStates("cached"));
-  await expect(card.locator(".football-freshness.is-cached")).toContainText("Showing saved scores");
+  await expect(card.locator(".football-freshness.is-cached strong")).toHaveText("Showing saved scores");
+  await expect(card.locator(".football-freshness.is-cached small")).toHaveText("Live updates are temporarily unavailable. Checked 15:55.");
   await captureApproval(page, testInfo, "football-cached");
 
   await updateEntityStates(card, approvalFootballStates("stale"));
-  await expect(card.locator(".football-freshness.is-stale")).toContainText("Scores may be delayed");
+  await expect(card.locator(".football-freshness.is-stale strong")).toHaveText("Scores may be delayed");
+  await expect(card.locator(".football-freshness.is-stale small")).toHaveText("The latest football check could not complete. Retrying automatically. Checked 13:00.");
   await captureApproval(page, testInfo, "football-stale");
   expect(pageErrors).toEqual([]);
 });

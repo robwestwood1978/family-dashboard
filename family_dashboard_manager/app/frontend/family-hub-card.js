@@ -3577,7 +3577,7 @@ export class FamilyHubCard extends HTMLElementBase {
         .navigation { position:sticky; top:0; z-index:20; flex-direction:row; align-items:center; gap:6px; padding:7px; overflow-x:auto; overscroll-behavior-x:contain; box-shadow:0 6px 20px rgba(6,27,58,.16); }
         .brand { flex:0 0 48px; width:48px; height:48px; margin:0; border-radius:15px; }
         .brand span,.nav-button span,.nav-divider { display:none; }
-        .nav-items,.nav-core { flex:0 0 auto; flex-direction:row; justify-content:flex-start; gap:4px; }
+        .nav-items { display:contents; }
         .nav-utility { margin:0; }
         .nav-button { flex:0 0 56px; min-height:48px; border-radius:14px; }
         .content { display:block; padding:10px; }
