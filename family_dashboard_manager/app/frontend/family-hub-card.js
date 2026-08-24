@@ -3370,7 +3370,7 @@ export class FamilyHubCard extends HTMLElementBase {
 
       .compact-fixture,.compact-fixture > span,.compact-fixture > strong { color:#0B1830; }
 
-      .view button:not([disabled]),.view select:not([disabled]) { min-height:48px; }
+      .view button:not([disabled]),.view select:not([disabled]) { min-width:48px; min-height:48px; }
       .view small { font-size:12px; }
 
       .football-experience { height:100%; min-height:0; display:grid; grid-template-rows:214px minmax(0,1fr); gap:16px; }
