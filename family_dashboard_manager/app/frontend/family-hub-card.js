@@ -3171,7 +3171,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .rhythm-stats span { min-height:70px; padding:10px; border:1px solid rgba(255,255,255,.2); border-radius:15px; background:rgba(255,255,255,.12); color:rgba(255,255,255,.72); font-size:9px; }
       .rhythm-stats strong { display:block; margin-bottom:3px; color:#fff; font-size:22px; }
       .family-people-grid { min-height:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
-      .family-people-grid .family-person { padding:18px 20px; }
+      .family-people-grid .family-person { padding:15px 20px; }
       .family-people-grid .chore-list { grid-template-columns:1fr; }
       .chore-heading { display:flex; align-items:center; justify-content:space-between; margin-top:14px; }
       .chore-heading span { color:var(--hub-muted); font-size:9px; }
