@@ -27,11 +27,21 @@ import {
   normaliseChoreStatus,
   normaliseFixtureStatus,
   teamCrest,
-  todaySecurityPresentation
+  todaySecurityPresentation,
+  weatherStateLabel
 } from "../frontend/family-hub-card.js";
 
 test("escapes state-derived text before rendering it into the card", () => {
   assert.equal(escapeHtml('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+});
+
+test("presents Home Assistant weather states as family-friendly labels", () => {
+  assert.equal(weatherStateLabel("partlycloudy"), "Partly cloudy");
+  assert.equal(weatherStateLabel("clear-night"), "Clear night");
+  assert.equal(weatherStateLabel("lightning-rainy"), "Lightning and rain");
+  assert.equal(weatherStateLabel("snowy-rainy"), "Snow and rain");
+  assert.equal(weatherStateLabel("windy-variant"), "Windy");
+  assert.equal(weatherStateLabel("custom-weather_state"), "Custom Weather State");
 });
 
 test("allows only the exact Premier League crest contract", () => {

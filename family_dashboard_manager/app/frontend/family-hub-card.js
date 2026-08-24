@@ -517,6 +517,29 @@ function titleCase(value) {
   return String(value || "").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+const WEATHER_LABELS = {
+  "clear-night": "Clear night",
+  cloudy: "Cloudy",
+  exceptional: "Exceptional",
+  fog: "Fog",
+  hail: "Hail",
+  lightning: "Lightning",
+  "lightning-rainy": "Lightning and rain",
+  partlycloudy: "Partly cloudy",
+  pouring: "Heavy rain",
+  rainy: "Rainy",
+  snowy: "Snowy",
+  "snowy-rainy": "Snow and rain",
+  sunny: "Sunny",
+  windy: "Windy",
+  "windy-variant": "Windy"
+};
+
+export function weatherStateLabel(value) {
+  const raw = String(value || "Home").trim().toLowerCase();
+  return WEATHER_LABELS[raw] || titleCase(raw.replace(/-/g, " "));
+}
+
 function entityName(state, fallback) {
   return state?.attributes?.friendly_name || fallback || state?.entity_id || "Unavailable";
 }
@@ -989,7 +1012,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const weather = this._hass?.states?.[this._config.weather.entity_id];
     const temperature = weather?.attributes?.temperature;
     const weatherText = weather
-      ? `${formatTemperature(temperature)} · ${titleCase(weather.state)}`
+      ? `${formatTemperature(temperature)} · ${weatherStateLabel(weather.state)}`
       : "Home";
     const currentDefinition = VIEW_DEFINITIONS.find((view) => view.id === this._view) || VIEW_DEFINITIONS[0];
     const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
@@ -1055,7 +1078,7 @@ export class FamilyHubCard extends HTMLElementBase {
           <div class="today-weather" aria-label="Current weather">
             <ha-icon icon="mdi:weather-partly-cloudy" aria-hidden="true"></ha-icon>
             <strong>${escapeHtml(formatTemperature(weather?.attributes?.temperature))}</strong>
-            <span>${escapeHtml(titleCase(weather?.state || "Home"))}</span>
+            <span>${escapeHtml(weatherStateLabel(weather?.state || "Home"))}</span>
           </div>
           <div class="hero-metrics">
             <button type="button" data-view="rooms"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${formatTemperature(averageTemperature)}</strong><small>Home average</small></span></button>
@@ -1256,7 +1279,8 @@ export class FamilyHubCard extends HTMLElementBase {
   _renderAllHeating() {
     const states = this._hass?.states || {};
     const readOnly = this._config.display.read_only === true;
-    const zones = this._config.rooms.filter((room) => room.climate).map((room) => {
+    const heatingRooms = this._config.rooms.filter((room) => room.climate);
+    const zones = heatingRooms.map((room) => {
       const state = states[room.climate];
       const current = roomTemperature(room, states);
       const target = safeNumber(state?.attributes?.temperature, NaN);
@@ -1293,7 +1317,7 @@ export class FamilyHubCard extends HTMLElementBase {
         </article>
       `;
     }).join("");
-    return `<div class="heating-grid">${zones || '<p class="empty-state">No heating controls are available yet.</p>'}</div>`;
+    return `<div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="empty-state">No heating controls are available yet.</p>'}</div>`;
   }
 
   _renderAllCovers() {
@@ -1505,6 +1529,7 @@ export class FamilyHubCard extends HTMLElementBase {
       const isWaiting = !session && (cameraOperationPending || hasBlockedCamera);
       const cameraError = this._cameraError?.id === camera.id ? this._cameraError.message : "";
       const cameraReady = ["idle", "preparing", "streaming"].includes(phase);
+      const readOnlyStartBlocked = readOnly && cameraAvailable && cameraReady && phase !== "streaming";
       const canOpen = cameraAvailable
         && cameraReady
         && !session
@@ -1516,7 +1541,9 @@ export class FamilyHubCard extends HTMLElementBase {
         ? { label: "Waiting…", icon: "mdi:shield-clock-outline" }
         : session
         ? cameraSessionPresentation(session.phase, phase)
-        : cameraAvailable && cameraReady ? cameraSessionPresentation(null, phase) : null;
+        : readOnlyStartBlocked
+          ? { label: "Stream off", icon: "mdi:lock-outline" }
+          : cameraAvailable && cameraReady ? cameraSessionPresentation(null, phase) : null;
       const badgeLabel = cameraStatus?.label
         || (camera.entity_id ? cameraEntityAvailable && !commandPairValid ? "Controls unavailable" : "Camera unavailable" : "Signals only");
       const badgeIcon = cameraStatus?.icon
@@ -1526,6 +1553,7 @@ export class FamilyHubCard extends HTMLElementBase {
         signals,
         cameraAvailable,
         cameraReady,
+        readOnlyStartBlocked,
         canOpen,
         hasMountedStream,
         isStarting,
@@ -1551,25 +1579,77 @@ export class FamilyHubCard extends HTMLElementBase {
           ? "Camera controls unavailable while the secure stream closes"
           : item.cameraError
             ? "Live view unavailable"
-            : `View ${escapeHtml(item.camera.name)} live`;
+            : !item.camera.entity_id
+              ? `${escapeHtml(item.camera.name)} has signals only`
+              : !item.cameraAvailable
+                ? `${escapeHtml(item.camera.name)} camera unavailable`
+                : !item.cameraReady
+                  ? `${escapeHtml(item.camera.name)} camera not ready`
+                  : item.readOnlyStartBlocked
+                    ? `${escapeHtml(item.camera.name)} stream is off in read-only mode`
+                    : `View ${escapeHtml(item.camera.name)} live`;
       const actionText = item.isViewing
         ? "Live"
         : waitingForSafeStop
           ? "Please wait"
           : retryAvailable
             ? "Retry"
-            : item.cameraError ? "Unavailable" : "View live";
+            : item.cameraError
+              ? "Unavailable"
+              : !item.camera.entity_id
+                ? "Signals only"
+                : !item.cameraAvailable
+                  ? "Unavailable"
+                  : !item.cameraReady
+                    ? "Not ready"
+                    : item.readOnlyStartBlocked
+                      ? "Stream off"
+                      : "View live";
+      const actionIcon = item.isViewing
+        ? "mdi:video"
+        : waitingForSafeStop
+          ? "mdi:shield-clock-outline"
+          : item.readOnlyStartBlocked
+            ? "mdi:lock-outline"
+            : item.canOpen
+              ? "mdi:play-circle-outline"
+              : "mdi:camera-off-outline";
       return `
         <article class="surface security-camera ${item.camera.id === selected?.camera.id ? "is-selected" : ""}">
           <div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(item.camera.role))}</p><h2>${escapeHtml(item.camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${item.badgeIcon}"></ha-icon>${item.badgeLabel}</span></div>
           ${item.signals ? `<div class="security-signals">${item.signals}</div>` : ""}
-          <button type="button" class="camera-select-action" data-camera-open="${escapeHtml(item.camera.id)}" aria-label="${actionLabel}" ${item.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="${item.isViewing ? "mdi:video" : waitingForSafeStop ? "mdi:shield-clock-outline" : "mdi:play-circle-outline"}"></ha-icon>${actionText}</button>
+          <button type="button" class="camera-select-action" data-camera-open="${escapeHtml(item.camera.id)}" aria-label="${actionLabel}" ${item.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="${actionIcon}"></ha-icon>${actionText}</button>
         </article>
       `;
     }).join("");
     const bufferingMessage = selected?.session?.slow
       ? "Still loading—this camera can take around 20 seconds."
       : "The secure stream is ready; waiting for the first picture.";
+    const stageActionText = selected?.cameraError
+      ? selected.canOpen ? "Retry" : "Unavailable"
+      : !selected?.camera?.entity_id
+        ? "Signals only"
+        : !selected?.cameraAvailable
+          ? "Unavailable"
+          : !selected?.cameraReady
+            ? "Not ready"
+            : selected?.readOnlyStartBlocked
+              ? "Read only"
+              : "View live";
+    const stageActionLabel = selected?.cameraError
+      ? selected.canOpen ? "Retry live view" : "Live view unavailable"
+      : !selected?.camera?.entity_id
+        ? "Live video is not configured for this signals-only camera"
+        : !selected?.cameraAvailable
+          ? "Camera unavailable"
+          : !selected?.cameraReady
+            ? "Camera not ready"
+            : selected?.readOnlyStartBlocked
+              ? "Live stream is off in read-only mode"
+              : "Start selected live view";
+    const stageActionIcon = selected?.readOnlyStartBlocked
+      ? "mdi:lock-outline"
+      : selected?.canOpen ? "mdi:play" : "mdi:camera-off-outline";
     const selectedStream = selected?.hasMountedStream
       ? `<div class="camera-stream ${selected.isBuffering ? "is-buffering" : "is-live"}" data-camera-phase="${selected.isBuffering ? "buffering" : "viewing"}"><slot id="camera-card-slot-${escapeHtml(selected.camera.id)}" name="camera-${escapeHtml(selected.camera.id)}" class="child-card-slot camera-card-slot"></slot>${selected.isBuffering ? `<div class="camera-stream-overlay camera-is-buffering" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Loading video…</strong><small>${escapeHtml(bufferingMessage)}</small>${selected.session.slow ? `<button type="button" data-camera-reveal="${escapeHtml(selected.camera.id)}" data-camera-session-token="${Number(selected.session.token)}"><ha-icon icon="mdi:eye-outline"></ha-icon>Show video now</button>` : ""}</div></div>` : '<span class="camera-live-indicator" role="status"><span></span>Live</span>'}<button type="button" class="camera-close" data-camera-close="${escapeHtml(selected.camera.id)}"><ha-icon icon="mdi:close"></ha-icon>${selected.isBuffering ? "Cancel" : "Close live view"}</button></div>`
       : selected?.isStarting
@@ -1578,7 +1658,7 @@ export class FamilyHubCard extends HTMLElementBase {
           ? `<div class="camera-idle camera-is-stopping" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:loading"></ha-icon></span><div><strong>Stopping live view…</strong><small>Closing the secure stream before another camera can open.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
           : selected?.isWaiting
             ? `<div class="camera-idle camera-is-waiting" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:shield-clock-outline"></ha-icon></span><div><strong>Waiting for camera…</strong><small>The previous secure stream must become idle before another camera can open.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
-          : `<div class="camera-idle security-stage-poster" ${selected?.cameraError || !selected?.cameraAvailable ? 'role="alert"' : ""}><span class="camera-stage-icon"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon></span><div><strong>${selected?.cameraError ? "Live view unavailable" : !selected?.cameraAvailable ? "Camera unavailable" : !selected?.cameraReady ? "Camera not ready" : `${escapeHtml(selected?.camera.name || "Camera")} is ready`}</strong><small>${selected?.cameraError ? escapeHtml(selected.cameraError) : selected?.cameraAvailable ? selected?.cameraReady ? "Video stays off until you choose View live." : "The camera is getting ready. Try again in a moment." : "This camera is currently unavailable."}</small></div><button type="button" data-camera-stage-open="${escapeHtml(selected?.camera.id || "")}" aria-label="${selected?.cameraError && selected?.canOpen ? "Retry live view" : selected?.cameraError ? "Live view unavailable" : "Start selected live view"}" ${selected?.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="mdi:play"></ha-icon>${selected?.cameraError && selected?.canOpen ? "Retry" : selected?.cameraError ? "Unavailable" : "View live"}</button></div>`;
+          : `<div class="camera-idle security-stage-poster" ${selected?.cameraError || !selected?.cameraAvailable ? 'role="alert"' : ""}><span class="camera-stage-icon"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon></span><div><strong>${selected?.cameraError ? "Live view unavailable" : !selected?.camera?.entity_id ? "Signals only" : !selected?.cameraAvailable ? "Camera unavailable" : !selected?.cameraReady ? "Camera not ready" : selected?.readOnlyStartBlocked ? "Stream off" : `${escapeHtml(selected?.camera.name || "Camera")} is ready`}</strong><small>${selected?.cameraError ? escapeHtml(selected.cameraError) : !selected?.camera?.entity_id ? "Live video is not configured for this entry camera." : selected?.cameraAvailable ? selected?.cameraReady ? selected?.readOnlyStartBlocked ? "Read-only mode will not start this camera." : "Video stays off until you choose View live." : "The camera is getting ready. Try again in a moment." : "This camera is currently unavailable."}</small></div><button type="button" data-camera-stage-open="${escapeHtml(selected?.camera.id || "")}" aria-label="${stageActionLabel}" ${selected?.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="${stageActionIcon}"></ha-icon>${stageActionText}</button></div>`;
     return `
       <section class="security-layout">
         <div class="security-main"${confirmationGuard}>
@@ -1645,7 +1725,8 @@ export class FamilyHubCard extends HTMLElementBase {
           <div class="section-heading"><div><p class="eyebrow">${locationEnabled ? "Family map" : "Family overview"}</p><h2>${locationEnabled ? "Presence & location" : "Private family summary"}</h2></div><span>${locationEnabled ? "Private to Home Assistant" : "Location sharing off"}</span></div>
           ${locationEnabled ? '<div id="map-card-slot" class="child-card-slot map-slot"></div>' : '<p class="empty-state">Location sharing is disabled.</p>'}
         </article>
-        <aside class="family-sidebar">
+        <aside class="family-sidebar" aria-label="Family routines">
+          <div class="family-scroll-cue"><strong>Family routines</strong><span><ha-icon icon="mdi:swap-vertical" aria-hidden="true"></ha-icon>Swipe for everyone</span></div>
           ${children.map((person) => this._renderFamilyPerson(person)).join("")}
         </aside>
       </section>
@@ -3228,9 +3309,14 @@ export class FamilyHubCard extends HTMLElementBase {
       .whole-home-heading > span,.heating-card-heading > span,.cover-card-heading > span { width:48px; height:48px; flex-basis:48px; border-radius:15px; background:#EAF2FF; color:#1463E8; }
       .whole-home-heading h3,.heating-card-heading h3,.cover-card-heading h3 { color:#0B1830; font-size:16px; }
       .whole-home-heading p,.heating-card-heading p,.cover-card-heading p { color:#5E6B80; font-size:12px; }
-      .whole-home-controls { gap:9px; }
+      .whole-home-grid { grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); }
+      .heating-grid { grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); }
+      .heating-grid[data-zone-count="6"] { grid-template-columns:repeat(3,minmax(0,1fr)); }
+      .cover-grid { grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); }
+      .whole-home-controls { grid-template-columns:1fr; gap:9px; }
       .whole-home-control { min-height:58px; border-color:#DCE4EE; background:#F7F9FC; color:#0B1830; }
       .whole-home-control.is-on { border-color:#E8C67E; background:#FFF7E5; color:#765000; }
+      .whole-home-control strong,.whole-home-control small { overflow:visible; text-overflow:clip; white-space:normal; line-height:1.2; overflow-wrap:anywhere; }
       .whole-home-control strong { color:inherit; font-size:13px; }
       .whole-home-control small { color:#5E6B80; font-size:12px; }
       .heating-card { min-height:190px; }
@@ -3344,6 +3430,13 @@ export class FamilyHubCard extends HTMLElementBase {
       .rhythm-stats span { min-height:74px; color:#D4E1F0; font-size:12px; }
       .rhythm-stats strong { color:#fff; }
       .family-person { border-color:#DCE4EE; background:#fff; color:#0B1830; }
+      .family-sidebar { grid-template-rows:auto auto auto; align-content:start; overflow-y:auto; overscroll-behavior:contain; padding-right:4px; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:#9FB0C5 transparent; }
+      .family-scroll-cue { position:sticky; top:0; z-index:3; min-height:38px; padding:0 8px; display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid #DCE4EE; background:rgba(244,247,250,.96); color:#33445C; font-size:12px; }
+      .family-scroll-cue span { display:flex; align-items:center; gap:4px; color:#5E6B80; font-weight:700; }
+      .family-scroll-cue ha-icon { --mdc-icon-size:16px; color:#1463E8; }
+      .family-sidebar .family-person { min-height:max-content; overflow:visible; }
+      .family-sidebar::-webkit-scrollbar { width:7px; }
+      .family-sidebar::-webkit-scrollbar-thumb { border:2px solid transparent; border-radius:999px; background:#9FB0C5; background-clip:padding-box; }
       .family-person-heading > span { border:3px solid color-mix(in srgb,var(--person-colour) 72%,#fff); background:#0B1830; color:#fff; }
       .family-facts span { border:1px solid color-mix(in srgb,var(--person-colour) 18%,#DCE4EE); background:color-mix(in srgb,var(--person-colour) 5%,#fff); color:#4F5F75; font-size:12px; }
       .family-facts strong { color:#0B1830; }
@@ -3368,7 +3461,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .media-player-panel { border:0; background:radial-gradient(circle at 85% 10%,rgba(20,99,232,.28),transparent 35%),linear-gradient(145deg,#061B3A,#0C315D); }
       .music-heading .eyebrow { color:#8FD8CB; }
       .music-heading h2 { color:#fff; }
-      .music-meta { color:#C7D4E4; font-size:12px; }
+      .music-heading > .music-meta { min-height:34px; padding:0 10px; border:1px solid rgba(255,255,255,.14); border-radius:999px; background:#123760; color:#E7F0FA; font-size:12px; font-weight:750; }
       .media-player-stage { border-color:rgba(255,255,255,.16); background:#041225; }
 
       .compact-fixture,.compact-fixture > span,.compact-fixture > strong { color:#0B1830; }
@@ -3440,6 +3533,11 @@ export class FamilyHubCard extends HTMLElementBase {
         .security-layout { grid-template-columns:minmax(0,1fr) 274px; }
         .football-layout { grid-template-columns:minmax(0,1fr) 270px; }
         .nav-button { min-height:55px; }
+        .whole-home-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .cover-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      }
+      @media (max-width:1279px) {
+        .heating-grid,.heating-grid[data-zone-count="6"] { grid-template-columns:repeat(2,minmax(0,1fr)); }
       }
       @media (max-width:1180px) {
         .security-layout { grid-template-columns:minmax(0,1fr) 274px; }
@@ -3485,10 +3583,12 @@ export class FamilyHubCard extends HTMLElementBase {
         .home-toolbar { align-items:flex-start; flex-direction:column; }
         .home-segments { width:100%; max-width:100%; overflow-x:auto; }
         .whole-home-grid,.heating-grid,.cover-grid { grid-template-columns:1fr; height:auto; }
+        .heating-grid,.heating-grid[data-zone-count="6"] { grid-template-columns:1fr; }
         .cleaning-panel { height:auto; display:flex; flex-direction:column; }
         .vacuum-map-slot,.vacuum-map-placeholder { min-height:320px; }
         .family-dashboard { height:auto; grid-template-rows:auto auto; }
-        .family-sidebar { display:flex; flex-direction:column; }
+        .family-sidebar { display:flex; flex-direction:column; overflow:visible; padding-right:0; scrollbar-gutter:auto; }
+        .family-scroll-cue { position:static; }
         .family-rhythm { align-items:flex-start; flex-direction:column; }
         .security-main { display:flex; flex-direction:column; }
         .security-stage { min-height:0; }
@@ -3497,8 +3597,15 @@ export class FamilyHubCard extends HTMLElementBase {
         .floorplan-canvas { min-height:420px; }
         .music-experience,.media-player-panel { height:auto; min-height:620px; }
         .football-experience { height:auto; grid-template-rows:auto auto; }
-        .football-hero { min-height:214px; }
-        .hero-match { grid-template-columns:minmax(0,1fr) 110px minmax(0,1fr); gap:12px; }
+        .football-hero { min-height:230px; padding:18px 16px; }
+        .football-hero-heading { gap:10px; flex-wrap:wrap; }
+        .football-freshness { margin-left:auto; }
+        .hero-match { grid-template-columns:minmax(0,1fr) 88px minmax(0,1fr); gap:6px; margin-top:18px; }
+        .hero-team { min-width:0; gap:6px; }
+        .hero-team > strong { min-width:0; font-size:14px; line-height:1.15; text-align:right; overflow-wrap:anywhere; }
+        .hero-team.is-away > strong { text-align:left; }
+        .team-mark.is-hero { width:50px; height:50px; }
+        .hero-score > span { font-size:24px; }
         .football-main { min-height:620px; grid-template-rows:auto minmax(0,1fr); }
         .football-toolbar { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; gap:8px 10px; }
         .football-tabs { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr; }

@@ -732,9 +732,31 @@ test("keeps six accessible heating zones contained at both supported iPad widths
       cardsInsideHorizontalBounds: cards.every((bounds) => bounds.left >= gridBounds.left - 1 && bounds.right <= gridBounds.right + 1)
     };
   });
-  expect(layout.columnCount).toBe(testInfo.project.use.viewport.width <= 1030 ? 2 : 3);
+  expect(layout.columnCount).toBe(testInfo.project.use.viewport.width <= 1279 ? 2 : 4);
   expect(layout.horizontalOverflow).toBeLessThanOrEqual(1);
   expect(layout.cardsInsideHorizontalBounds).toBe(true);
+  await expectNoRootOverflow(page);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(resolveFrame))));
+  const wideLayout = await card.locator(".heating-grid").evaluate((grid) => {
+    const cards = [...grid.querySelectorAll(".heating-card")].map((item) => item.getBoundingClientRect());
+    const rows = new Map();
+    for (const bounds of cards) {
+      const top = Math.round(bounds.top);
+      rows.set(top, (rows.get(top) || 0) + 1);
+    }
+    return {
+      zoneCount: grid.dataset.zoneCount,
+      columnCount: new Set(cards.map((bounds) => Math.round(bounds.left))).size,
+      rowCounts: [...rows.values()],
+      widthSpread: Math.max(...cards.map((bounds) => bounds.width)) - Math.min(...cards.map((bounds) => bounds.width))
+    };
+  });
+  expect(wideLayout.zoneCount).toBe("6");
+  expect(wideLayout.columnCount).toBe(3);
+  expect(wideLayout.rowCounts).toEqual([3, 3]);
+  expect(wideLayout.widthSpread).toBeLessThanOrEqual(1);
   await expectNoRootOverflow(page);
   expect(pageErrors).toEqual([]);
 });
@@ -1384,6 +1406,7 @@ test("fails Security unavailable states safely without presenting them as clear 
   const garageCamera = card.locator(".security-camera").filter({ hasText: "Garage" });
   await expect(garageCamera.locator(".privacy-badge")).toHaveText(/Camera unavailable/);
   await expect(garageCamera.locator('button[data-camera-open="garage"]')).toBeDisabled();
+  await expect(garageCamera.locator('button[data-camera-open="garage"]')).toHaveText("Unavailable");
   await expect(card.locator(".alarm-actions button")).toHaveCount(3);
   expect(await card.locator(".alarm-actions button").evaluateAll((buttons) => buttons.every((button) => button.disabled))).toBe(true);
   await expect(card.locator(".garage-motion")).toHaveText("Motion unavailable");
@@ -1555,6 +1578,16 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await card.locator('button[data-camera-close="doorbell"]').click();
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+
+  await updateEntityState(card, state("camera.example_doorbell", "idle"));
+  const readOnlyDoor = card.locator(".security-camera").filter({ hasText: "Front door" });
+  await expect(readOnlyDoor.locator(".privacy-badge")).toHaveText("Stream off");
+  await expect(readOnlyDoor.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
+  await expect(readOnlyDoor.locator('button[data-camera-open="doorbell"]')).toHaveText("Stream off");
+  await expect(card.locator(".security-stage-poster")).toContainText("Stream off");
+  await expect(card.locator(".security-stage-poster")).toContainText("Read-only mode will not start this camera.");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toBeDisabled();
+  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Read only");
 
   await card.locator('.nav-button[data-view="rooms"]').click();
   await card.locator('[data-home-section="cleaning"]').click();
@@ -2090,6 +2123,20 @@ async function auditApprovalTextZoom(page, testInfo, name) {
       if (name === "football-live") {
         await expect(page.locator("family-hub-card").locator(".football-hero.is-live"), `${name} must retain its live hero at 200%`).toBeVisible();
         await expect(page.locator("family-hub-card").locator(".fixture.is-live").first(), `${name} must retain its live fixture at 200%`).toBeVisible();
+        const heroGeometry = await page.locator("family-hub-card").locator(".football-hero").evaluate((hero) => {
+          const heroBounds = hero.getBoundingClientRect();
+          return [...hero.querySelectorAll(".team-mark.is-hero")].map((mark) => {
+            const bounds = mark.getBoundingClientRect();
+            return {
+              inside: bounds.left >= heroBounds.left - 1
+                && bounds.right <= heroBounds.right + 1
+                && bounds.top >= heroBounds.top - 1
+                && bounds.bottom <= heroBounds.bottom + 1
+            };
+          });
+        });
+        expect(heroGeometry.length, `${name} must render both hero crests at 200%`).toBe(2);
+        expect(heroGeometry.every(({ inside }) => inside), `${name} hero crests must remain fully inside the hero at 200%`).toBe(true);
       }
       const [toolbarBox, fixtureDayBox] = await Promise.all([footballToolbar.boundingBox(), firstFixtureDay.boundingBox()]);
       expect(toolbarBox, `${name} must measure the football toolbar at 200%`).not.toBeNull();
@@ -2137,6 +2184,9 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
   const card = page.locator("family-hub-card");
 
   await expect(card.locator(".today-hero")).toContainText("Good afternoon");
+  await expect(card.locator(".weather-pill")).toContainText("Partly cloudy");
+  await expect(card.locator(".today-weather")).toContainText("Partly cloudy");
+  expect((await card.locator(".weather-pill,.today-weather").allTextContents()).join(" ")).not.toContain("Partlycloudy");
   await expect(card.locator(".hero-metrics button[data-view='entry']")).toContainText("Quiet at home");
   await expect(card.locator(".hero-metrics button[data-view='entry']")).not.toContainText("All secure");
   await expectContrast(card, [
@@ -2159,6 +2209,26 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
     if (section === "rooms") {
       await expect(card.locator(".home-drawer")).toBeVisible();
     }
+    if (section === "lights") {
+      const truncatedLightLabels = await card.locator(".whole-home-control strong,.whole-home-control small").evaluateAll((nodes) => nodes
+        .filter((node) => node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1)
+        .map((node) => node.textContent.trim()));
+      expect(truncatedLightLabels).toEqual([]);
+    }
+    if (["lights", "heating", "covers"].includes(section)) {
+      const gridSelector = section === "lights" ? ".whole-home-grid" : section === "heating" ? ".heating-grid" : ".cover-grid";
+      const cardSelector = section === "lights" ? ".whole-home-card" : section === "heating" ? ".heating-card" : ".cover-card";
+      const columnCount = await card.locator(gridSelector).evaluate((grid, childSelector) => new Set(
+        [...grid.querySelectorAll(childSelector)].map((item) => Math.round(item.getBoundingClientRect().left))
+      ).size, cardSelector);
+      const viewportWidth = testInfo.project.use.viewport.width;
+      const expectedColumns = section === "lights"
+        ? viewportWidth <= 1030 ? 2 : 5
+        : section === "heating"
+          ? viewportWidth <= 1279 ? 2 : 4
+          : viewportWidth <= 1030 ? 2 : 4;
+      expect(columnCount, `${section} must use the balanced approval grid at ${viewportWidth}px`).toBe(expectedColumns);
+    }
     await captureApproval(page, testInfo, `home-${section}`, { hotspots: section === "rooms" });
   }
 
@@ -2173,6 +2243,7 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
     if (view === "family") {
       await expect(card.locator(".map-panel")).toBeVisible();
       await expect(card.locator(".family-sidebar")).toBeVisible();
+      await expect(card.locator(".family-scroll-cue")).toContainText("Swipe for everyone");
       const truncatedRoutines = await card.locator(".family-sidebar .chore-row strong,.family-sidebar .chore-row small").evaluateAll((nodes) => {
         return nodes
           .filter((node) => node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1)
@@ -2190,6 +2261,15 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
           .filter(({ lines }) => lines > 2);
       });
       expect(overwrappedRoutines).toEqual([]);
+      const internallyScrollablePeople = await card.locator(".family-sidebar .family-person").evaluateAll((people) => people
+        .filter((person) => person.scrollHeight > person.clientHeight + 1 || person.scrollWidth > person.clientWidth + 1)
+        .map((person) => person.querySelector(".eyebrow")?.textContent?.trim() || "Unknown person"));
+      expect(internallyScrollablePeople).toEqual([]);
+      const familyScrollBoundary = await card.locator(".family-sidebar").evaluate((sidebar) => ({
+        overflowY: getComputedStyle(sidebar).overflowY,
+        needsScroll: sidebar.scrollHeight > sidebar.clientHeight + 1
+      }));
+      if (familyScrollBoundary.needsScroll) expect(["auto", "scroll"]).toContain(familyScrollBoundary.overflowY);
       await expectContrast(card, [
         { foreground: ".chore-row small", background: ".chore-row", minimum: 4.5 },
         { foreground: ".family-facts span", background: ".family-facts span", minimum: 4.5 },
@@ -2199,6 +2279,7 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
     }
     if (view === "music") {
       await expectContrast(card, [
+        { foreground: ".music-meta", background: ".music-meta", minimum: 4.5 },
         { foreground: ".mock-media-player strong", background: ".media-player-stage", minimum: 4.5 },
         { foreground: ".mock-media-player h3", background: ".media-player-stage", minimum: 4.5 },
         { foreground: ".mock-media-player button", background: ".mock-media-player button", minimum: 4.5 }
@@ -2255,6 +2336,8 @@ test("v0.8 design approval captures the complete secure-camera lifecycle and pro
   });
   await expect(card.locator(".alarm-panel")).toContainText("Triggered");
   await expect(card.locator(".security-camera").first()).toContainText("Camera unavailable");
+  await expect(card.locator('.security-camera').first().locator('button[data-camera-open="doorbell"]')).toHaveText("Unavailable");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Unavailable");
   await captureApproval(page, testInfo, "security-alert-unavailable", { securityLabels: true });
   expect(pageErrors).toEqual([]);
 });
