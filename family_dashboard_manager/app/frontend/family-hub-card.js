@@ -3347,9 +3347,17 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-facts strong { color:#0B1830; }
       .chore-heading span { color:#5E6B80; font-size:12px; }
       .chore-row { border-color:color-mix(in srgb,var(--person-colour) 22%,#DCE4EE); background:color-mix(in srgb,var(--person-colour) 5%,#fff); }
+      .chore-check { background:#EEF2F6; color:#33445C; }
       .chore-row strong { color:#0B1830; font-size:13px; }
       .chore-row small { color:#5E6B80; font-size:12px; }
       .chore-row b { color:#33445C; font-size:12px; }
+      .chore-row.is-done { opacity:1; border-color:#B7DEC9; background:#F1FAF5; }
+      .chore-row.is-done .chore-check { background:#DFF3E8; color:#18794E; }
+      .chore-row.is-overdue,.chore-row.is-missed { border-color:#E5A7A4; background:#FFF0EE; }
+      .chore-row.is-overdue .chore-check,.chore-row.is-missed .chore-check { background:#F9D5D1; color:#A9362D; }
+      .chore-row.is-waiting { border-color:#E8D29D; background:#FFF9E8; }
+      .chore-row.is-waiting .chore-check { background:#FFF0CF; color:#8B5B00; }
+      .chore-row.is-unavailable { border-style:dashed; background:#F7F9FC; }
       .assignment { border-color:#DCE4EE; color:#0B1830; }
       .assignment small { color:#5E6B80; font-size:12px; }
 
