@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { validateConfig } from "../src/validate-config.mjs";
+import { CURRENT_SCHEMA_VERSION } from "../src/schema-version.mjs";
 
 const example = JSON.parse(await readFile(new URL("../config/example.json", import.meta.url), "utf8"));
 
@@ -26,7 +27,13 @@ function withDeferredEntry() {
 }
 
 test("accepts the public schema-v6 configuration", () => {
-  assert.equal(validateConfig(structuredClone(example)).schema_version, 6);
+  assert.equal(validateConfig(structuredClone(example)).schema_version, CURRENT_SCHEMA_VERSION);
+  const stale = structuredClone(example);
+  stale.schema_version = CURRENT_SCHEMA_VERSION - 1;
+  assert.throws(
+    () => validateConfig(stale),
+    new RegExp(`config\\.schema_version: must equal ${CURRENT_SCHEMA_VERSION}`)
+  );
 });
 
 test("requires read-only mode to be explicit", () => {

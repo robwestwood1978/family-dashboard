@@ -52,8 +52,9 @@ const SECURE_COVER_SERVICES = new Set(["open_cover", "close_cover"]);
 const VACUUM_SERVICES = new Set(["start", "pause", "return_to_base"]);
 const CLIMATE_POWER_SERVICES = new Set(["turn_on", "turn_off"]);
 const ALARM_SERVICES = new Set(["alarm_arm_home", "alarm_arm_away", "alarm_disarm"]);
-const CAMERA_START_TIMEOUT_MS = 15_000;
-const CAMERA_STOP_TIMEOUT_MS = 5_000;
+const CAMERA_COMMAND_TIMEOUT_MS = 30_000;
+const CAMERA_FIRST_FRAME_TIMEOUT_MS = 45_000;
+const CAMERA_SLOW_MESSAGE_MS = 10_000;
 const ALARM_ACTION_LABELS = {
   alarm_arm_home: "Arm home",
   alarm_arm_away: "Arm away",
@@ -265,6 +266,16 @@ export function cameraStreamPhase(state) {
   if (value === "streaming") return "streaming";
   if (value === "preparing") return "preparing";
   return "unexpected";
+}
+
+export function cameraSessionPresentation(sessionPhase, streamPhase) {
+  if (sessionPhase === "starting") return { label: "Waking camera…", icon: "mdi:progress-clock" };
+  if (sessionPhase === "buffering") return { label: "Loading video…", icon: "mdi:progress-clock" };
+  if (sessionPhase === "viewing") return { label: "Live", icon: "mdi:record-circle-outline" };
+  if (sessionPhase === "stopping") return { label: "Stopping…", icon: "mdi:progress-clock" };
+  if (streamPhase === "streaming") return { label: "Ready to view", icon: "mdi:gesture-tap-button" };
+  if (["idle", "preparing"].includes(streamPhase)) return { label: "Tap to stream", icon: "mdi:gesture-tap-button" };
+  return null;
 }
 
 export function cameraControlRoute(camera, states = {}) {
@@ -523,9 +534,25 @@ export function deriveRoomState(room, states = {}, accent = "#5B5BD6") {
 }
 
 export function normaliseFixtureStatus(fixture) {
-  if (fixture.finished) return "finished";
+  if (fixture.finished || fixture.finished_provisional) return "finished";
   if (fixture.started || safeNumber(fixture.minutes) > 0) return "live";
   return "upcoming";
+}
+
+export function footballFreshness(index, now = new Date()) {
+  const attributes = index?.attributes || {};
+  if (!index) return { status: "waiting", title: "Waiting for scores", detail: "The first football update has not arrived yet." };
+  const checkedAt = Date.parse(attributes.last_checked || attributes.last_updated || "");
+  const intervalMs = Math.max(60_000, safeNumber(attributes.refresh_interval_seconds, 900) * 1000);
+  const ageMs = Number.isFinite(checkedAt) ? Math.max(0, new Date(now).getTime() - checkedAt) : Infinity;
+  const cached = attributes.data_status === "cached" || attributes.poller_status === "degraded";
+  const failed = attributes.poller_status === "error";
+  const overdue = ageMs > Math.max(20 * 60 * 1000, intervalMs * 2.5);
+  if (failed) return { status: "stale", title: "Scores may be delayed", detail: "The latest football check could not complete. Retrying automatically." };
+  if (overdue) return { status: "stale", title: "Scores may be delayed", detail: "The last football check is older than expected." };
+  if (cached) return { status: "cached", title: "Showing saved scores", detail: "Live updates are temporarily unavailable." };
+  const minutes = Math.max(1, Math.round(intervalMs / 60_000));
+  return { status: "live", title: "Scores up to date", detail: `Checking every ${minutes} minute${minutes === 1 ? "" : "s"}.` };
 }
 
 export function floorplanImageSource(floor, states = {}) {
@@ -633,10 +660,14 @@ export class FamilyHubCard extends HTMLElementBase {
     this._cameraSession = null;
     this._cameraOperationToken = 0;
     this._cameraStartTimer = null;
+    this._cameraFrameTimer = null;
+    this._cameraSlowTimer = null;
     this._cameraRecoveryPromise = null;
     this._cameraBlockedIds = new Map();
-    this._cameraStartTimeoutMs = CAMERA_START_TIMEOUT_MS;
-    this._cameraStopTimeoutMs = CAMERA_STOP_TIMEOUT_MS;
+    this._cameraStartTimeoutMs = CAMERA_COMMAND_TIMEOUT_MS;
+    this._cameraStopTimeoutMs = CAMERA_COMMAND_TIMEOUT_MS;
+    this._cameraFrameTimeoutMs = CAMERA_FIRST_FRAME_TIMEOUT_MS;
+    this._cameraSlowMessageMs = CAMERA_SLOW_MESSAGE_MS;
     this._cameraError = null;
     this._pendingConfirmation = null;
     this._footballTab = "fixtures";
@@ -1338,6 +1369,9 @@ export class FamilyHubCard extends HTMLElementBase {
     const alarmDisabled = (service) => readOnly || !isAlarmActionSupported(alarm, service)
       ? ' disabled aria-disabled="true"'
       : "";
+    const cameraOperationPending = this._cameraSession?.phase === "stopping"
+      || Boolean(this._cameraRecoveryPromise);
+    const hasBlockedCamera = this._cameraBlockedIds.size > 0;
     const cameraCards = entry.cameras.map((camera) => {
       const signalDefinitions = [
         [camera.ringing_entity, "Ringing", "mdi:bell-ring-outline"],
@@ -1354,22 +1388,40 @@ export class FamilyHubCard extends HTMLElementBase {
       const commandPairValid = Boolean(cameraControl?.startButton && cameraControl?.stopButton);
       const phase = cameraStreamPhase(states[camera.entity_id]);
       const session = this._cameraSession?.id === camera.id ? this._cameraSession : null;
-      const isActive = session?.phase === "viewing" && phase === "streaming" && cameraAvailable;
       const isStarting = session?.phase === "starting";
+      const isBuffering = session?.phase === "buffering";
+      const isViewing = session?.phase === "viewing";
       const isStopping = session?.phase === "stopping";
+      const isWaiting = !session && (cameraOperationPending || hasBlockedCamera);
       const cameraError = this._cameraError?.id === camera.id ? this._cameraError.message : "";
       const cameraReady = ["idle", "preparing", "streaming"].includes(phase);
-      const isBlocked = this._cameraBlockedIds.size > 0;
-      const canOpen = cameraAvailable && cameraReady && !isStopping && !isBlocked && (!readOnly || phase === "streaming");
-      const stream = isActive
-        ? `<div class="camera-stream"><slot id="camera-card-slot-${escapeHtml(camera.id)}" name="camera-${escapeHtml(camera.id)}" class="child-card-slot camera-card-slot"></slot><button type="button" class="camera-close" data-camera-close="${escapeHtml(camera.id)}"><ha-icon icon="mdi:close"></ha-icon>Close live view</button></div>`
+      const canOpen = cameraAvailable
+        && cameraReady
+        && !cameraOperationPending
+        && !hasBlockedCamera
+        && (!readOnly || phase === "streaming");
+      const hasMountedStream = (isBuffering || isViewing) && phase === "streaming" && cameraAvailable;
+      const bufferingMessage = session?.slow
+        ? "Still loading—this camera can take around 20 seconds."
+        : "The secure stream is ready; waiting for the first picture.";
+      const stream = hasMountedStream
+        ? `<div class="camera-stream ${isBuffering ? "is-buffering" : "is-live"}" data-camera-phase="${isBuffering ? "buffering" : "viewing"}"><slot id="camera-card-slot-${escapeHtml(camera.id)}" name="camera-${escapeHtml(camera.id)}" class="child-card-slot camera-card-slot"></slot>${isBuffering ? `<div class="camera-stream-overlay camera-is-buffering" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Loading video…</strong><small>${escapeHtml(bufferingMessage)}</small>${session.slow ? `<button type="button" data-camera-reveal="${escapeHtml(camera.id)}" data-camera-session-token="${Number(session.token)}"><ha-icon icon="mdi:eye-outline"></ha-icon>Show video now</button>` : ""}</div></div>` : '<span class="camera-live-indicator" role="status"><span></span>Live</span>'}<button type="button" class="camera-close" data-camera-close="${escapeHtml(camera.id)}"><ha-icon icon="mdi:close"></ha-icon>${isBuffering ? "Cancel" : "Close live view"}</button></div>`
         : isStarting
-          ? `<div class="camera-idle camera-is-starting" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Starting secure live view…</strong><small>Waiting for the camera to report that its stream is ready.</small></div><button type="button" data-camera-close="${escapeHtml(camera.id)}"><ha-icon icon="mdi:close"></ha-icon>Cancel</button></div>`
+          ? `<div class="camera-idle camera-is-starting" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Waking camera…</strong><small>Waiting for the secure stream to become available.</small></div><button type="button" data-camera-close="${escapeHtml(camera.id)}"><ha-icon icon="mdi:close"></ha-icon>Cancel</button></div>`
           : isStopping
-            ? `<div class="camera-idle camera-is-stopping" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Stopping live view…</strong><small>Waiting for the previous secure stream to close.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
+            ? `<div class="camera-idle camera-is-stopping" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Stopping…</strong><small>Closing the secure stream before another camera can open.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
+            : isWaiting
+              ? `<div class="camera-idle camera-is-waiting" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:shield-clock-outline"></ha-icon><div><strong>Waiting for camera…</strong><small>The previous secure stream must become idle before another camera can open.</small></div><button type="button" data-camera-open="${escapeHtml(camera.id)}" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
             : `<div class="camera-idle" ${cameraError ? 'role="alert"' : ""}><ha-icon icon="${camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon><div><strong>${cameraError ? "Live view unavailable" : "No automatic stream"}</strong><small>${cameraError ? escapeHtml(cameraError) : cameraAvailable ? !cameraReady ? "The camera is not ready to start a live view." : readOnly && phase !== "streaming" ? "Live video is not already running in read-only mode." : "Live video starts only when you ask for it." : camera.entity_id ? cameraEntityAvailable && !commandPairValid ? "The mapped camera start and stop controls do not form a safe pair." : "The mapped camera is currently unavailable." : "Safe signals are mapped; the private camera entity still needs confirming."}</small></div><button type="button" data-camera-open="${escapeHtml(camera.id)}" aria-label="${cameraError ? "Retry live view" : "View live"}" ${canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="mdi:play-circle-outline"></ha-icon>${cameraError ? "Retry" : "View live"}</button></div>`;
-      const badgeLabel = isStarting ? "Starting…" : isStopping ? "Stopping…" : cameraAvailable && cameraReady ? "Tap to stream" : camera.entity_id ? cameraEntityAvailable && !commandPairValid ? "Controls unavailable" : "Camera unavailable" : "Signals only";
-      const badgeIcon = cameraAvailable ? "mdi:gesture-tap-button" : camera.entity_id ? "mdi:camera-off-outline" : "mdi:shield-check-outline";
+      const cameraStatus = isWaiting
+        ? { label: "Waiting…", icon: "mdi:shield-clock-outline" }
+        : session
+        ? cameraSessionPresentation(session.phase, phase)
+        : cameraAvailable && cameraReady ? cameraSessionPresentation(null, phase) : null;
+      const badgeLabel = cameraStatus?.label
+        || (camera.entity_id ? cameraEntityAvailable && !commandPairValid ? "Controls unavailable" : "Camera unavailable" : "Signals only");
+      const badgeIcon = cameraStatus?.icon
+        || (camera.entity_id ? "mdi:camera-off-outline" : "mdi:shield-check-outline");
       return `<article class="surface security-camera"><div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(camera.role))}</p><h2>${escapeHtml(camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${badgeIcon}"></ha-icon>${badgeLabel}</span></div>${signals ? `<div class="security-signals">${signals}</div>` : ""}${stream}</article>`;
     }).join("");
     return `
@@ -1524,6 +1576,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const { index, gameweek, gameweekState, table } = this._footballState();
     const events = gameweekState?.attributes?.events || [];
     const available = index?.attributes?.available_gameweeks || Array.from({ length: 38 }, (_, position) => position + 1);
+    const freshness = footballFreshness(index);
     this._gameweek = gameweek;
     return `
       <section class="football-layout">
@@ -1544,7 +1597,7 @@ export class FamilyHubCard extends HTMLElementBase {
         </article>
         <aside class="football-sidebar">
           <article class="surface spotlight-panel"><p class="eyebrow">Spotlight</p><h2>Tottenham & Aston Villa</h2>${this._renderSpotlightClubs(events)}</article>
-          <article class="surface provider-panel"><p class="eyebrow">Data</p><h2>${events.length ? `${events.length} fixtures loaded` : "Waiting for first update"}</h2><p>${escapeHtml(index?.attributes?.last_updated ? `Updated ${formatTime(index.attributes.last_updated, this._config.product.locale, this._config.product.timezone)}` : "The cached provider will retain the last good matchweek if the source is unavailable.")}</p></article>
+          <article class="surface provider-panel is-${freshness.status}"><p class="eyebrow">Updates</p><h2>${escapeHtml(freshness.title)}</h2><p>${escapeHtml(freshness.detail)}${index?.attributes?.last_checked ? ` Checked ${escapeHtml(formatTime(index.attributes.last_checked, this._config.product.locale, this._config.product.timezone))}.` : ""}</p></article>
         </aside>
       </section>
     `;
@@ -1683,7 +1736,9 @@ export class FamilyHubCard extends HTMLElementBase {
         show_state: false
       }, "vacuum-map-card-slot");
     }
-    if (this._view === "entry" && this._cameraSession?.phase === "viewing" && this._activeCameraId) {
+    if (this._view === "entry"
+      && ["buffering", "viewing"].includes(this._cameraSession?.phase)
+      && this._activeCameraId) {
       const camera = this._config.entry.cameras.find((entry) => entry.id === this._activeCameraId);
       if (camera?.entity_id && cameraStreamPhase(this._hass.states?.[camera.entity_id]) === "streaming") {
         this._ensureChildCard(`camera:${camera.id}`, {
@@ -1712,6 +1767,15 @@ export class FamilyHubCard extends HTMLElementBase {
         if (!this._isCurrentCameraSlot(key, slotId, slot)) return;
         child = helpers.createCardElement(cardConfig);
         child.classList.add("embedded-card");
+        if (key.startsWith("camera:")) {
+          const cameraId = key.slice("camera:".length);
+          const session = this._cameraSession;
+          const sessionToken = session?.token;
+          child.addEventListener("load", (event) => {
+            if (!event.bubbles || !event.composed) return;
+            this._markCameraFrameReady(cameraId, sessionToken, child);
+          });
+        }
         this._childCards.set(key, child);
       } catch (error) {
         slot.innerHTML = `<p class="empty-state">${key.startsWith("camera:") ? "The secure live view could not load. Please try again." : `This Home Assistant card could not load: ${escapeHtml(error?.message || error)}`}</p>`;
@@ -1749,7 +1813,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const cameraId = key.slice("camera:".length);
     return this._view === "entry"
       && this._cameraSession?.id === cameraId
-      && this._cameraSession?.phase === "viewing"
+      && ["buffering", "viewing"].includes(this._cameraSession?.phase)
       && cameraStreamPhase(this._hass?.states?.[this._controlPolicy.cameras.get(cameraId)?.entity]) === "streaming"
       && this.shadowRoot.getElementById(slotId) === slot;
   }
@@ -1857,6 +1921,13 @@ export class FamilyHubCard extends HTMLElementBase {
     if (target.dataset.gameweek) {
       this._gameweek = safeNumber(target.dataset.gameweek, 1);
       this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.cameraReveal) {
+      this._revealCameraFrame(
+        target.dataset.cameraReveal,
+        Number(target.dataset.cameraSessionToken)
+      );
       return;
     }
     if (target.dataset.cameraOpen) {
@@ -1968,7 +2039,7 @@ export class FamilyHubCard extends HTMLElementBase {
 
   async _openCamera(cameraId) {
     if (!cameraId || this._cameraSession?.id === cameraId
-      && ["starting", "viewing", "stopping"].includes(this._cameraSession.phase)) return;
+      && ["starting", "buffering", "viewing", "stopping"].includes(this._cameraSession.phase)) return;
     if (this._cameraSession?.phase === "stopping" || this._cameraRecoveryPromise) return;
 
     let camera = this._controlPolicy?.cameras?.get(cameraId);
@@ -2023,7 +2094,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._activeCameraId = null;
 
     if (phase === "streaming") {
-      this._promoteCameraSession(session);
+      this._bufferCameraSession(session);
       return;
     }
 
@@ -2042,22 +2113,59 @@ export class FamilyHubCard extends HTMLElementBase {
     const started = await session.startPromise;
     if (token !== this._cameraOperationToken || this._cameraSession !== session || session.phase !== "starting") return;
     if (cameraStreamPhase(this._hass?.states?.[camera.entity]) === "streaming") {
-      this._promoteCameraSession(session);
+      this._bufferCameraSession(session);
       return;
     }
     if (!started) void this._recoverCameraSession(session, "Live view could not start. Please try again.");
   }
 
-  _promoteCameraSession(session) {
+  _bufferCameraSession(session) {
     if (!session || this._cameraSession !== session || session.token !== this._cameraOperationToken) return;
     const camera = this._controlPolicy?.cameras?.get(session.id);
     if (cameraStreamPhase(this._hass?.states?.[camera?.entity]) !== "streaming") return;
     this._clearCameraStartTimer();
-    this._evictCameraChild(session.id);
-    session.phase = "viewing";
+    this._clearCameraFrameTimers();
+    session.phase = "buffering";
+    session.slow = false;
     this._activeCameraId = session.id;
     this._cameraError = null;
+    this._armCameraFrameTimers(session);
     this._scheduleRender(true);
+  }
+
+  _markCameraFrameReady(cameraId, token, child) {
+    const session = this._cameraSession;
+    if (!child
+      || !session
+      || session.id !== cameraId
+      || session.token !== token
+      || session.token !== this._cameraOperationToken
+      || session.phase !== "buffering"
+      || this._view !== "entry"
+      || this._childCards.get(`camera:${cameraId}`) !== child) return;
+    const camera = this._controlPolicy?.cameras?.get(cameraId);
+    if (cameraStreamPhase(this._hass?.states?.[camera?.entity]) !== "streaming") return;
+    this._clearCameraFrameTimers();
+    session.phase = "viewing";
+    session.slow = false;
+    this._cameraError = null;
+    this._scheduleRender(true);
+  }
+
+  _revealCameraFrame(cameraId, token) {
+    const session = this._cameraSession;
+    if (!session
+      || session.id !== cameraId
+      || session.token !== token
+      || session.phase !== "buffering"
+      || !session.slow) return;
+    const child = this._childCards.get(`camera:${cameraId}`);
+    if (!child) return;
+    this._markCameraFrameReady(
+      cameraId,
+      token,
+      child
+    );
   }
 
   _reconcileCameraSession(states) {
@@ -2073,13 +2181,13 @@ export class FamilyHubCard extends HTMLElementBase {
     const camera = this._controlPolicy?.cameras?.get(session.id);
     const phase = cameraStreamPhase(states[camera?.entity]);
     if (session.phase === "starting") {
-      if (phase === "streaming") this._promoteCameraSession(session);
+      if (phase === "streaming") this._bufferCameraSession(session);
       else if (["unavailable", "unexpected"].includes(phase)) {
         void this._recoverCameraSession(session, "The mapped camera became unavailable. Please try again.");
       }
       return;
     }
-    if (session.phase === "viewing" && phase !== "streaming") {
+    if (["buffering", "viewing"].includes(session.phase) && phase !== "streaming") {
       this._closeActiveCamera({ message: "The live stream ended. You can try again." });
     }
   }
@@ -2095,6 +2203,29 @@ export class FamilyHubCard extends HTMLElementBase {
   _clearCameraStartTimer() {
     if (this._cameraStartTimer !== null) clearTimeout(this._cameraStartTimer);
     this._cameraStartTimer = null;
+  }
+
+  _armCameraFrameTimers(session) {
+    this._cameraSlowTimer = setTimeout(() => {
+      if (this._cameraSession !== session
+        || session.token !== this._cameraOperationToken
+        || session.phase !== "buffering") return;
+      session.slow = true;
+      this._scheduleRender(true);
+    }, this._cameraSlowMessageMs);
+    this._cameraFrameTimer = setTimeout(() => {
+      if (this._cameraSession !== session
+        || session.token !== this._cameraOperationToken
+        || session.phase !== "buffering") return;
+      void this._recoverCameraSession(session, "The video took too long to load. Please try again.");
+    }, this._cameraFrameTimeoutMs);
+  }
+
+  _clearCameraFrameTimers() {
+    if (this._cameraFrameTimer !== null) clearTimeout(this._cameraFrameTimer);
+    if (this._cameraSlowTimer !== null) clearTimeout(this._cameraSlowTimer);
+    this._cameraFrameTimer = null;
+    this._cameraSlowTimer = null;
   }
 
   async _recoverCameraSession(session, message) {
@@ -2120,6 +2251,7 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     ++this._cameraOperationToken;
     this._clearCameraStartTimer();
+    this._clearCameraFrameTimers();
     if (!session) {
       if (this._activeCameraId) this._evictCameraChild(this._activeCameraId);
       this._activeCameraId = null;
@@ -2138,6 +2270,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!session) return true;
     const previousPhase = session.phase;
     this._clearCameraStartTimer();
+    this._clearCameraFrameTimers();
     session.phase = "stopping";
     this._activeCameraId = null;
     this._evictCameraChild(session.id);
@@ -2149,7 +2282,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const preStopState = this._hass?.states?.[camera?.entity];
     const shouldStop = session.writable
       && Boolean(session.route?.stop)
-      && (session.startIssued || previousPhase === "viewing" || ["preparing", "streaming"].includes(phase));
+      && (session.startIssued || ["buffering", "viewing"].includes(previousPhase) || ["preparing", "streaming"].includes(phase));
     const currentRoute = cameraControlRoute(camera, this._hass?.states || {});
     const stopCommand = currentRoute?.stop || session.route.stop;
     const stopped = !shouldStop
@@ -2201,12 +2334,14 @@ export class FamilyHubCard extends HTMLElementBase {
 
   async _waitForCameraStopped(entityId, timeoutMs, staleIdleState = null) {
     const deadline = Date.now() + timeoutMs;
-    while (["preparing", "streaming"].includes(cameraStreamPhase(this._hass?.states?.[entityId]))
-      || staleIdleState && this._hass?.states?.[entityId] === staleIdleState) {
+    while (true) {
+      const state = this._hass?.states?.[entityId];
+      const isFreshIdle = cameraStreamPhase(state) === "idle"
+        && (!staleIdleState || state !== staleIdleState);
+      if (isFreshIdle) return true;
       if (Date.now() >= deadline) return false;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    return true;
   }
 
   async _callCameraCommand(cameraId, direction, command, timeoutMs, authorizedCamera = null) {
@@ -2480,7 +2615,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .security-camera { min-height:0; padding:17px; display:grid; grid-template-rows:auto auto minmax(0,1fr); gap:11px; overflow:hidden; }
       .security-card-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
       .security-card-heading h2 { margin:4px 0 0; font-size:19px; }
-      .privacy-badge { min-height:30px; padding:0 9px; border:1px solid rgba(255,255,255,.11); border-radius:10px; background:rgba(255,255,255,.06); color:var(--hub-muted); display:flex; align-items:center; gap:5px; font-size:8px; font-weight:750; white-space:nowrap; }
+      .privacy-badge { min-height:34px; padding:0 10px; border:1px solid rgba(255,255,255,.11); border-radius:10px; background:rgba(255,255,255,.06); color:var(--hub-muted); display:flex; align-items:center; gap:5px; font-size:12px; font-weight:750; white-space:nowrap; }
       .privacy-badge ha-icon { --mdc-icon-size:14px; color:#bcaeff; }
       .security-signals { display:flex; gap:7px; }
       .security-signal { min-width:0; flex:1; display:grid; grid-template-columns:25px minmax(0,1fr); grid-template-rows:auto auto; align-items:center; column-gap:6px; padding:7px 8px; border:1px solid rgba(255,255,255,.08); border-radius:11px; background:rgba(8,15,31,.44); }
@@ -2495,13 +2630,25 @@ export class FamilyHubCard extends HTMLElementBase {
       .camera-idle { min-height:0; display:grid; grid-template-columns:54px minmax(0,1fr) auto; align-items:center; gap:13px; padding:14px; border:1px dashed rgba(255,255,255,.13); border-radius:15px; background:radial-gradient(circle at 10% 50%,rgba(123,104,211,.18),transparent 32%),rgba(6,12,27,.45); }
       .camera-idle > ha-icon { --mdc-icon-size:42px; color:#a999ff; }
       .camera-idle strong,.camera-idle small { display:block; }
-      .camera-idle small { margin-top:4px; max-width:330px; color:var(--hub-muted); font-size:9px; line-height:1.35; }
-      .camera-idle button,.camera-close { min-height:40px; padding:0 13px; border:0; border-radius:12px; background:var(--hub-accent); color:#fff; display:flex; align-items:center; gap:5px; font-size:9px; font-weight:800; cursor:pointer; }
+      .camera-idle small { margin-top:4px; max-width:330px; color:var(--hub-muted); font-size:12px; line-height:1.4; }
+      .camera-idle button,.camera-close { min-height:44px; padding:0 13px; border:0; border-radius:12px; background:var(--hub-accent); color:#fff; display:flex; align-items:center; gap:5px; font-size:12px; font-weight:800; cursor:pointer; }
       .camera-stream { position:relative; min-height:0; overflow:hidden; border-radius:15px; background:#050a15; }
       .camera-card-slot { display:block; width:100%; height:100%; min-height:130px; border-radius:0; overflow:hidden; }
       .camera-card-slot .embedded-card { height:100%; }
       .camera-card-slot::slotted(.embedded-card) { display:block; height:100%; min-height:130px; }
+      .camera-stream.is-buffering .camera-card-slot { opacity:.24; }
+      .camera-stream-overlay { position:absolute; z-index:3; inset:0; display:flex; align-items:center; justify-content:center; gap:13px; padding:20px 80px 20px 20px; background:radial-gradient(circle at 18% 50%,rgba(123,104,211,.32),transparent 36%),linear-gradient(135deg,rgba(5,10,21,.96),rgba(12,20,39,.91)); color:#fff; }
+      .camera-stream-overlay > ha-icon { flex:0 0 auto; --mdc-icon-size:34px; color:#b9adff; animation:camera-spin 1.4s linear infinite; }
+      .camera-stream-overlay strong,.camera-stream-overlay small { display:block; }
+      .camera-stream-overlay strong { font-size:15px; }
+      .camera-stream-overlay small { margin-top:5px; color:#bac4d7; font-size:12px; line-height:1.4; }
+      .camera-stream-overlay button { min-height:44px; margin-top:12px; padding:0 14px; border:1px solid rgba(255,255,255,.24); border-radius:12px; background:rgba(255,255,255,.1); color:#fff; display:flex; align-items:center; gap:7px; font-size:12px; font-weight:800; cursor:pointer; }
+      .camera-stream-overlay button ha-icon { --mdc-icon-size:18px; }
+      .camera-live-indicator { position:absolute; z-index:3; top:9px; left:9px; min-height:30px; padding:0 11px; border:1px solid rgba(255,255,255,.2); border-radius:999px; background:rgba(8,15,31,.82); color:#fff; display:flex; align-items:center; gap:6px; font-size:12px; font-weight:850; letter-spacing:.04em; text-transform:uppercase; }
+      .camera-live-indicator > span { width:7px; height:7px; border-radius:50%; background:#ff5f64; box-shadow:0 0 0 3px rgba(255,95,100,.18); }
       .camera-close { position:absolute; z-index:4; right:9px; bottom:9px; background:rgba(8,15,31,.86); border:1px solid rgba(255,255,255,.18); }
+      .camera-is-starting > ha-icon,.camera-is-stopping > ha-icon { animation:camera-spin 1.4s linear infinite; }
+      @keyframes camera-spin { to { transform:rotate(360deg); } }
       .security-sidebar { min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto auto; gap:12px; }
       .alarm-panel,.garage-panel { padding:17px; overflow:hidden; }
       .alarm-state { width:42px; height:42px; display:grid; place-items:center; border-radius:14px; background:rgba(70,144,111,.22); color:#7bd4a7; }

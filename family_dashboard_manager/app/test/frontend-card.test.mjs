@@ -4,12 +4,15 @@ import {
   binarySignalPresentation,
   buildControlPolicy,
   cameraControlRoute,
+  cameraSessionPresentation,
   cameraStreamPhase,
   createControlledMediaHass,
   deriveRoomState,
   escapeHtml,
+  FamilyHubCard,
   floorplanImageSource,
   floorplanViewBox,
+  footballFreshness,
   formatPoints,
   heatingPresentation,
   isAlarmActionSupported,
@@ -125,6 +128,70 @@ test("distinguishes unavailable security signals and rejects unavailable or unsu
     "camera.front_door": { state: "idle" },
     "button.front_door_start": { state: "unknown" }
   }), null);
+});
+
+test("presents wake-up, first-frame buffering, live, and stopping as distinct camera phases", () => {
+  assert.deepEqual(cameraSessionPresentation("starting", "idle"), {
+    label: "Waking camera…",
+    icon: "mdi:progress-clock"
+  });
+  assert.deepEqual(cameraSessionPresentation("buffering", "streaming"), {
+    label: "Loading video…",
+    icon: "mdi:progress-clock"
+  });
+  assert.deepEqual(cameraSessionPresentation("viewing", "streaming"), {
+    label: "Live",
+    icon: "mdi:record-circle-outline"
+  });
+  assert.deepEqual(cameraSessionPresentation("stopping", "streaming"), {
+    label: "Stopping…",
+    icon: "mdi:progress-clock"
+  });
+  assert.equal(cameraSessionPresentation(null, "idle").label, "Tap to stream");
+  assert.equal(cameraSessionPresentation(null, "streaming").label, "Ready to view");
+  assert.equal(cameraSessionPresentation(null, "unavailable"), null);
+});
+
+test("accepts only idle as a stopped camera state and requires fresh idle when requested", async () => {
+  const card = Object.create(FamilyHubCard.prototype);
+  const entityId = "camera.front_door";
+  card._hass = { states: {} };
+
+  for (const state of [
+    undefined,
+    { state: "unavailable" },
+    { state: "recording" },
+    { state: "preparing" },
+    { state: "streaming" }
+  ]) {
+    card._hass.states[entityId] = state;
+    assert.equal(await card._waitForCameraStopped(entityId, 0), false);
+  }
+
+  const staleIdle = { state: "idle" };
+  card._hass.states[entityId] = staleIdle;
+  assert.equal(await card._waitForCameraStopped(entityId, 0, staleIdle), false);
+  card._hass.states[entityId] = { state: "idle" };
+  assert.equal(await card._waitForCameraStopped(entityId, 0, staleIdle), true);
+});
+
+test("allows slow-player reveal only for the exact current session token", () => {
+  const card = Object.create(FamilyHubCard.prototype);
+  const player = {};
+  const promotions = [];
+  card._cameraSession = { id: "doorbell", token: 7, phase: "buffering", slow: true };
+  card._childCards = new Map([["camera:doorbell", player]]);
+  card._markCameraFrameReady = (...args) => promotions.push(args);
+
+  card._revealCameraFrame("garage", 7);
+  card._revealCameraFrame("doorbell", 6);
+  assert.deepEqual(promotions, []);
+  card._childCards.clear();
+  card._revealCameraFrame("doorbell", 7);
+  assert.deepEqual(promotions, []);
+  card._childCards.set("camera:doorbell", player);
+  card._revealCameraFrame("doorbell", 7);
+  assert.deepEqual(promotions, [["doorbell", 7, player]]);
 });
 
 test("identifies every Home Assistant write action blocked by read-only mode", () => {
@@ -337,6 +404,55 @@ test("normalises upcoming, live and finished fixture states", () => {
   assert.equal(normaliseFixtureStatus({ started: false, finished: false, minutes: 0 }), "upcoming");
   assert.equal(normaliseFixtureStatus({ started: true, finished: false, minutes: 23 }), "live");
   assert.equal(normaliseFixtureStatus({ started: true, finished: true, minutes: 90 }), "finished");
+  assert.equal(normaliseFixtureStatus({ started: true, finished: false, finished_provisional: true, minutes: 90 }), "finished");
+});
+
+test("presents football freshness without exposing provider internals", () => {
+  const now = new Date("2026-08-21T19:15:00Z");
+  assert.deepEqual(footballFreshness(undefined, now), {
+    status: "waiting",
+    title: "Waiting for scores",
+    detail: "The first football update has not arrived yet."
+  });
+  assert.deepEqual(footballFreshness({ attributes: {
+    data_status: "live",
+    poller_status: "healthy",
+    last_checked: "2026-08-21T19:12:00Z",
+    refresh_interval_seconds: 180
+  } }, now), {
+    status: "live",
+    title: "Scores up to date",
+    detail: "Checking every 3 minutes."
+  });
+  assert.equal(footballFreshness({ attributes: {
+    data_status: "cached",
+    last_checked: "2026-08-21T19:12:00Z"
+  } }, now).status, "cached");
+  assert.equal(footballFreshness({ attributes: {
+    data_status: "live",
+    last_checked: "2026-08-21T18:00:00Z",
+    refresh_interval_seconds: 180
+  } }, now).status, "stale");
+  assert.deepEqual(footballFreshness({ attributes: {
+    data_status: "cached",
+    poller_status: "degraded",
+    last_checked: "2026-08-21T18:00:00Z",
+    refresh_interval_seconds: 180
+  } }, now), {
+    status: "stale",
+    title: "Scores may be delayed",
+    detail: "The last football check is older than expected."
+  });
+  assert.deepEqual(footballFreshness({ attributes: {
+    data_status: "cached",
+    poller_status: "error",
+    last_checked: "2026-08-21T19:12:00Z",
+    refresh_interval_seconds: 180
+  } }, now), {
+    status: "stale",
+    title: "Scores may be delayed",
+    detail: "The latest football check could not complete. Retrying automatically."
+  });
 });
 
 test("normalises ChoreOps state sensors into readable routine states", () => {

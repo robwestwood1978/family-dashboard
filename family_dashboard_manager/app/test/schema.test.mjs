@@ -2,11 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import Ajv2020 from "ajv/dist/2020.js";
+import { CURRENT_SCHEMA_VERSION } from "../src/schema-version.mjs";
 
 const schema = JSON.parse(await readFile(new URL("../config/family-dashboard.schema.json", import.meta.url), "utf8"));
 const example = JSON.parse(await readFile(new URL("../config/example.json", import.meta.url), "utf8"));
 
 test("the draft 2020-12 schema accepts the public v6 example", () => {
+  assert.equal(schema.properties.schema_version.const, CURRENT_SCHEMA_VERSION);
+  assert.equal(example.schema_version, CURRENT_SCHEMA_VERSION);
   const validate = new Ajv2020({ strict: true }).compile(schema);
   assert.equal(validate(example), true, JSON.stringify(validate.errors));
 });
