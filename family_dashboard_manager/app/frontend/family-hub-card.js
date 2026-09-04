@@ -5862,7 +5862,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .music-heading .eyebrow { color:#8FD8CB; }
       .music-heading h2 { color:#fff; }
       .music-heading > .music-meta { min-height:34px; padding:0 10px; border:1px solid rgba(255,255,255,.14); border-radius:999px; background:#123760; color:#E7F0FA; font-size:12px; font-weight:750; }
-      .media-player-stage { border-color:rgba(255,255,255,.16); background:#041225; }
+      .media-player-stage { border-color:rgba(255,255,255,.16); background:#07182F; }
 
       .compact-fixture,.compact-fixture > span,.compact-fixture > strong { color:#0B1830; }
 
