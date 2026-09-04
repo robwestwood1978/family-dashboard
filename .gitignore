@@ -1,4 +1,6 @@
 node_modules/
+__pycache__/
+*.pyc
 family_dashboard_manager/app/test-results/
 family_dashboard_manager/app/playwright-report/
 .DS_Store

@@ -13,6 +13,7 @@ const validateSchema = new Ajv2020({ strict: true, allErrors: true }).compile(sc
 const ENTITY_ID = /^[a-z_][a-z0-9_]*\.[a-z0-9_]+$/;
 const ID = /^[a-z][a-z0-9_]*$/;
 const PANEL_PATH = /^[a-z][a-z0-9_-]*$/;
+const INTERNAL_DASHBOARD_PATH = /^\/[a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)*$/;
 const ICON = /^mdi:[a-z0-9-]+$/;
 const COLOUR = /^#[0-9a-f]{6}$/i;
 const LOCAL_ASSET = /^\/local\/family-dashboard\/[A-Za-z0-9._/-]+$/;
@@ -165,7 +166,7 @@ export function validateConfig(config) {
   if (!PANEL_PATH.test(display.panel_path)) {
     fail("config.display.panel_path", "must be a lowercase dashboard path");
   }
-  const viewNames = ["today", "calendar", "rooms", "family", "entry", "music", "football"];
+  const viewNames = ["today", "calendar", "rooms", "family", "entry", "music", "energy", "football"];
   if (!viewNames.includes(display.default_view)) {
     fail("config.display.default_view", "must name a schema-v6 dashboard view");
   }
@@ -228,8 +229,18 @@ export function validateConfig(config) {
     "entry"
   ];
   for (const feature of featureNames) requireBoolean(features[feature], `config.features.${feature}`);
+  if (features.energy !== undefined) requireBoolean(features.energy, "config.features.energy");
   if (features.location_map && !features.family) {
     fail("config.features.location_map", "requires the Family view");
+  }
+  if (features.chores && !features.family) {
+    fail("config.features.chores", "requires the Family view");
+  }
+  if (features.school && !features.family) {
+    fail("config.features.school", "requires the Family view");
+  }
+  if (features.cleaning && !features.rooms) {
+    fail("config.features.cleaning", "requires the Home view");
   }
   if (display.default_view !== "today" && features[display.default_view] !== true) {
     fail("config.display.default_view", "must be enabled in config.features");
@@ -272,6 +283,25 @@ export function validateConfig(config) {
   const weather = requireObject(config.weather, "config.weather");
   validateEntityId(weather.entity_id, "config.weather.entity_id", "weather");
 
+  if (features.energy && config.energy === undefined) {
+    fail("config.energy", "must be configured when Energy is enabled");
+  }
+  if (config.energy !== undefined) {
+    const energy = requireObject(config.energy, "config.energy");
+    if (energy.stale_after_minutes !== undefined) {
+      requireInteger(energy.stale_after_minutes, "config.energy.stale_after_minutes", 15, 1440);
+    }
+    const energyEntities = [];
+    for (const fuel of ["electricity", "gas"]) {
+      const meter = requireObject(energy[fuel], `config.energy.${fuel}`);
+      for (const field of ["usage_today_entity", "cost_today_entity", "rate_entity", "standing_charge_entity"]) {
+        validateEntityId(meter[field], `config.energy.${fuel}.${field}`, "sensor");
+        energyEntities.push(meter[field]);
+      }
+    }
+    validateUnique(energyEntities, "config.energy meter entities");
+  }
+
   const lists = requireObject(config.lists, "config.lists");
   validateEntityId(lists.reminders_entity, "config.lists.reminders_entity", "todo");
   validateEntityId(lists.shopping_entity, "config.lists.shopping_entity", "todo");
@@ -283,6 +313,7 @@ export function validateConfig(config) {
   if (home.default_section === "cleaning" && !features.cleaning) {
     fail("config.home.default_section", "requires Cleaning to be enabled");
   }
+  if (home.default_room !== undefined) validateId(home.default_room, "config.home.default_room");
 
   const floorplan = requireObject(config.floorplan, "config.floorplan");
   validateId(floorplan.default_floor, "config.floorplan.default_floor");
@@ -378,6 +409,13 @@ export function validateConfig(config) {
     }
   });
   if (features.rooms && rooms.length === 0) fail("config.rooms", "must not be empty when Rooms is enabled");
+  if (home.default_room !== undefined) {
+    const defaultRoom = rooms.find((room) => room.id === home.default_room);
+    if (!defaultRoom) fail("config.home.default_room", "must match one configured room");
+    if (defaultRoom.floor_id !== floorplan.default_floor) {
+      fail("config.home.default_room", "must be on the configured default floor");
+    }
+  }
   for (const room of rooms) {
     if (!hotspots.has(room.id)) fail("config.floorplan", `missing room hotspot for ${room.id}`);
     if (hotspots.get(room.id) !== room.floor_id) {
@@ -424,8 +462,15 @@ export function validateConfig(config) {
 
   const chores = requireObject(config.chores, "config.chores");
   if (chores.profile !== "choreops-status") fail("config.chores.profile", "unsupported chore presentation profile");
+  if (chores.dashboard_path !== undefined) {
+    requireString(chores.dashboard_path, "config.chores.dashboard_path");
+    if (chores.dashboard_path.length > 160 || !INTERNAL_DASHBOARD_PATH.test(chores.dashboard_path)) {
+      fail("config.chores.dashboard_path", "must be a safe internal Home Assistant path beginning with /");
+    }
+  }
   const choreUsers = requireArray(chores.users, "config.chores.users");
   const chorePersonIds = [];
+  const choreEntityIds = [];
   choreUsers.forEach((user, index) => {
     const path = `config.chores.users[${index}]`;
     requireObject(user, path);
@@ -435,20 +480,38 @@ export function validateConfig(config) {
     validateEntityId(user.dashboard_helper_entity, `${path}.dashboard_helper_entity`, "sensor");
     validateEntityId(user.points_entity, `${path}.points_entity`, "sensor");
     validateEntityId(user.chores_entity, `${path}.chores_entity`, "sensor");
+    choreEntityIds.push(user.dashboard_helper_entity, user.points_entity, user.chores_entity);
     const statusEntities = requireArray(user.status_entities, `${path}.status_entities`);
     if (statusEntities.length === 0) fail(`${path}.status_entities`, "must contain at least one ChoreOps status sensor");
     statusEntities.forEach((entityId, entityIndex) => {
       validateEntityId(entityId, `${path}.status_entities[${entityIndex}]`, "sensor");
     });
     validateUnique(statusEntities, `${path}.status_entities`);
+    choreEntityIds.push(...statusEntities);
+    for (const key of ["reward_status_entities", "badge_progress_entities", "achievement_progress_entities"]) {
+      const entities = user[key] === undefined ? [] : requireArray(user[key], `${path}.${key}`);
+      entities.forEach((entityId, entityIndex) => {
+        validateEntityId(entityId, `${path}.${key}[${entityIndex}]`, "sensor");
+      });
+      validateUnique(entities, `${path}.${key}`);
+      if (entities.length > 1) fail(`${path}.${key}`, "must contain at most one featured sensor");
+      choreEntityIds.push(...entities);
+    }
   });
   validateUnique(chorePersonIds, "config.chores.users[].person_id");
-  if (features.chores && choreUsers.length === 0) fail("config.chores.users", "must not be empty when Chores is enabled");
+  validateUnique(choreEntityIds, "config.chores.users[] entity mappings");
+  if (features.chores) {
+    const childPersonIds = config.people.filter((person) => person.role === "child").map((person) => person.id);
+    const missingChildren = childPersonIds.filter((personId) => !chorePersonIds.includes(personId));
+    if (missingChildren.length) {
+      fail("config.chores.users", `must map every child when Chores is enabled; missing ${missingChildren.join(", ")}`);
+    }
+  }
 
   const football = requireObject(config.football, "config.football");
   if (football.provider !== "fpl") fail("config.football.provider", "unsupported football provider");
   const teamCodes = requireArray(football.spotlight_team_codes, "config.football.spotlight_team_codes");
-  if (teamCodes.length === 0) fail("config.football.spotlight_team_codes", "must not be empty");
+  if (teamCodes.length !== 2) fail("config.football.spotlight_team_codes", "must contain exactly the two family spotlight clubs");
   teamCodes.forEach((code, index) => {
     if (typeof code !== "string" || !TEAM_CODE.test(code)) {
       fail(`config.football.spotlight_team_codes[${index}]`, "must be a three-letter team code");
@@ -469,6 +532,7 @@ export function validateConfig(config) {
   const school = requireObject(config.school, "config.school");
   const classroomStudents = requireArray(school.classroom_students, "config.school.classroom_students");
   const classroomPersonIds = [];
+  const classroomAssignmentEntities = [];
   classroomStudents.forEach((student, index) => {
     const path = `config.school.classroom_students[${index}]`;
     requireObject(student, path);
@@ -476,10 +540,16 @@ export function validateConfig(config) {
     if (personRoles.get(student.person_id) !== "child") fail(`${path}.person_id`, "must reference a child");
     classroomPersonIds.push(student.person_id);
     validateEntityId(student.assignments_entity, `${path}.assignments_entity`, "sensor");
+    classroomAssignmentEntities.push(student.assignments_entity);
   });
   validateUnique(classroomPersonIds, "config.school.classroom_students[].person_id");
-  if (features.school && classroomStudents.length === 0) {
-    fail("config.school.classroom_students", "must not be empty when School is enabled");
+  validateUnique(classroomAssignmentEntities, "config.school.classroom_students[].assignments_entity");
+  if (features.school) {
+    const childPersonIds = config.people.filter((person) => person.role === "child").map((person) => person.id);
+    const missingChildren = childPersonIds.filter((personId) => !classroomPersonIds.includes(personId));
+    if (missingChildren.length) {
+      fail("config.school.classroom_students", `must map every child when School is enabled; missing ${missingChildren.join(", ")}`);
+    }
   }
   for (const key of ["calendar_entities", "scopay_calendar_entities"]) {
     const entities = requireArray(school[key], `config.school.${key}`);

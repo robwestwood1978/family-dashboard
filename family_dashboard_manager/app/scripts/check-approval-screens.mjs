@@ -7,9 +7,9 @@ import {
   APPROVAL_ZOOM_PROJECTS,
   APPROVAL_ZOOM_VIEW_NAMES,
   expectedApprovalScreens
-} from "../browser-test/v080-approval-manifest.mjs";
+} from "../browser-test/v090-approval-manifest.mjs";
 
-const outputRoot = resolve("test-results/v080-approval");
+const outputRoot = resolve("test-results/v090-approval");
 const screenRoot = resolve(outputRoot, "screens");
 
 async function pngFiles(directory) {
@@ -31,7 +31,7 @@ const unexpected = actualPaths.filter((path) => !expectedPaths.includes(path));
 
 if (missing.length || unexpected.length || actualPaths.length !== expectedPaths.length) {
   throw new Error([
-    `v0.8 approval screenshot manifest mismatch: expected ${expectedPaths.length}, found ${actualPaths.length}.`,
+    `v0.9 approval screenshot manifest mismatch: expected ${expectedPaths.length}, found ${actualPaths.length}.`,
     missing.length ? `Missing:\n- ${missing.join("\n- ")}` : "",
     unexpected.length ? `Unexpected:\n- ${unexpected.join("\n- ")}` : ""
   ].filter(Boolean).join("\n"));

@@ -5,6 +5,7 @@ const VIEW_DEFINITIONS = [
   { id: "family", label: "Family", icon: "mdi:account-group", feature: "family" },
   { id: "entry", label: "Security", icon: "mdi:shield-home", feature: "entry" },
   { id: "music", label: "Music", icon: "mdi:music-circle", feature: "music" },
+  { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
 
@@ -18,7 +19,8 @@ const ICONS = {
   school: "mdi:school-outline",
   chore: "mdi:checkbox-marked-circle-outline",
   vacuum: "mdi:robot-vacuum",
-  security: "mdi:shield-home-outline"
+  security: "mdi:shield-home-outline",
+  energy: "mdi:lightning-bolt-outline"
 };
 
 const htmlEscapeMap = {
@@ -52,9 +54,17 @@ const SECURE_COVER_SERVICES = new Set(["open_cover", "close_cover"]);
 const VACUUM_SERVICES = new Set(["start", "pause", "return_to_base"]);
 const CLIMATE_POWER_SERVICES = new Set(["turn_on", "turn_off"]);
 const ALARM_SERVICES = new Set(["alarm_arm_home", "alarm_arm_away", "alarm_disarm"]);
-const CAMERA_COMMAND_TIMEOUT_MS = 30_000;
+// Eufy RTSP wake-up can legitimately take around 30 seconds on the household hardware.
+// Keep a bounded margin so a late successful wake is not stopped at the threshold.
+const CAMERA_START_TIMEOUT_MS = 60_000;
+const CAMERA_STOP_TIMEOUT_MS = 30_000;
 const CAMERA_FIRST_FRAME_TIMEOUT_MS = 45_000;
 const CAMERA_SLOW_MESSAGE_MS = 10_000;
+const CAMERA_SESSION_EXPIRY_MS = 120_000;
+const CONFIRMATION_EXPIRY_MS = 30_000;
+const FRESHNESS_REFRESH_MS = 60_000;
+const CLASSROOM_ASSIGNMENT_LIMIT = 20;
+const MAX_CALENDAR_RANGE_MS = 62 * 86_400_000;
 const ALARM_ACTION_LABELS = {
   alarm_arm_home: "Arm home",
   alarm_arm_away: "Arm away",
@@ -84,7 +94,16 @@ const MEDIA_PLAYER_SERVICES = new Set([
   "volume_set",
   "volume_up"
 ]);
-const MUSIC_ASSISTANT_SERVICES = new Set(["play_media", "search", "transfer_queue"]);
+const MUSIC_ASSISTANT_SERVICES = new Set(["get_library", "play_media", "search", "transfer_queue"]);
+const MUSIC_ASSISTANT_LIBRARY_MEDIA_TYPES = new Set([
+  "album",
+  "artist",
+  "audiobook",
+  "playlist",
+  "podcast",
+  "radio",
+  "track"
+]);
 const MASS_QUEUE_SERVICES = new Set([
   "get_queue_items",
   "move_queue_item_down",
@@ -92,6 +111,38 @@ const MASS_QUEUE_SERVICES = new Set([
   "play_queue_item",
   "remove_queue_item"
 ]);
+
+export function nextFreshnessRefreshDelay(now = Date.now()) {
+  const timestamp = Number(now);
+  if (!Number.isFinite(timestamp)) return FRESHNESS_REFRESH_MS;
+  const remainder = ((timestamp % FRESHNESS_REFRESH_MS) + FRESHNESS_REFRESH_MS) % FRESHNESS_REFRESH_MS;
+  return FRESHNESS_REFRESH_MS - remainder + 25;
+}
+
+function isBoundedCalendarRange(start, end) {
+  const startTime = Date.parse(String(start || ""));
+  const endTime = Date.parse(String(end || ""));
+  return Number.isFinite(startTime)
+    && Number.isFinite(endTime)
+    && endTime > startTime
+    && endTime - startTime <= MAX_CALENDAR_RANGE_MS;
+}
+
+export function isAllowedCalendarApiRequest(method, path, calendarEntities = new Set()) {
+  if (String(method || "GET").toUpperCase() !== "GET" || typeof path !== "string" || path.length > 1_000) return false;
+  try {
+    const request = new URL(path, "https://family-dashboard.invalid/");
+    const match = request.pathname.match(/^\/calendars\/([^/]+)$/);
+    if (!match || [...request.searchParams.keys()].some((key) => !["start", "end"].includes(key))) return false;
+    const entityId = decodeURIComponent(match[1]);
+    return calendarEntities.has(entityId)
+      && request.searchParams.getAll("start").length === 1
+      && request.searchParams.getAll("end").length === 1
+      && isBoundedCalendarRange(request.searchParams.get("start"), request.searchParams.get("end"));
+  } catch {
+    return false;
+  }
+}
 
 function addEntity(set, value) {
   if (typeof value === "string" && value.includes(".")) set.add(value);
@@ -108,6 +159,200 @@ function isConfiguredEntity(value, configuredEntities) {
   return entities.length > 0 && entities.every((entityId) => configuredEntities.has(entityId));
 }
 
+const READ_ONLY_CHILD_WS_TYPES = new Set([
+  "auth/current_user",
+  "config/area_registry/list",
+  "config/device_registry/list",
+  "config/entity_registry/list",
+  "config/floor_registry/list",
+  "frontend/get_translations",
+  "get_config",
+  "get_panels",
+  "get_services"
+]);
+
+const SAFE_CHILD_HASS_FUNCTIONS = new Set([
+  "formatEntityAttributeName",
+  "formatEntityAttributeValue",
+  "formatEntityName",
+  "formatEntityState",
+  "hassUrl",
+  "loadBackendTranslation",
+  "localize"
+]);
+const SAFE_CHILD_HASS_VALUES = new Set([
+  "areas",
+  "config",
+  "connected",
+  "devices",
+  "dockedSidebar",
+  "entities",
+  "floors",
+  "language",
+  "locale",
+  "moreInfoEntityId",
+  "panels",
+  "resources",
+  "selectedLanguage",
+  "selectedTheme",
+  "services",
+  "states",
+  "themes",
+  "user"
+]);
+const SAFE_CHILD_CONNECTION_VALUES = new Set(["connected", "haVersion"]);
+
+function snapshotChildObject(value, fallback = null) {
+  if (value === undefined || value === null) return fallback;
+  try {
+    const snapshot = typeof structuredClone === "function"
+      ? structuredClone(value)
+      : JSON.parse(JSON.stringify(value));
+    return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+      ? snapshot
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const EMPTY_CHILD_STATES = Object.freeze(Object.create(null));
+
+function guardedChildResult(result, isActive) {
+  return Promise.resolve(result).then(
+    (value) => isActive() ? value : undefined,
+    (error) => {
+      if (isActive()) throw error;
+      return undefined;
+    }
+  );
+}
+
+function guardedChildConnection(connection, allowMessage, isActive = () => true) {
+  if (!connection) return connection;
+  const facade = Object.create(null);
+  for (const property of SAFE_CHILD_CONNECTION_VALUES) {
+    Object.defineProperty(facade, property, {
+      enumerable: true,
+      get: () => isActive() ? connection[property] : undefined
+    });
+  }
+  facade.sendMessagePromise = (message, ...args) => {
+    const snapshot = snapshotChildObject(message);
+    return isActive() && snapshot && allowMessage(snapshot)
+      ? guardedChildResult(connection.sendMessagePromise?.(snapshot, ...args), isActive)
+      : Promise.resolve(undefined);
+  };
+  facade.sendMessage = (message, ...args) => {
+    const snapshot = snapshotChildObject(message);
+    return isActive() && snapshot && allowMessage(snapshot)
+      ? connection.sendMessage?.(snapshot, ...args)
+      : undefined;
+  };
+  facade.subscribeMessage = (callback, message, ...args) => {
+    const snapshot = snapshotChildObject(message);
+    const guardedCallback = (...callbackArgs) => {
+      if (isActive()) return callback?.(...callbackArgs);
+      return undefined;
+    };
+    if (!isActive() || !snapshot || !allowMessage(snapshot)) return Promise.resolve(() => undefined);
+    return Promise.resolve(connection.subscribeMessage?.(guardedCallback, snapshot, ...args)).then(
+      (unsubscribe) => {
+        const rawStop = typeof unsubscribe === "function" ? unsubscribe : () => undefined;
+        let stopped = false;
+        const stop = () => {
+          if (stopped) return;
+          stopped = true;
+          rawStop();
+        };
+        if (!isActive()) {
+          stop();
+          return () => undefined;
+        }
+        const unregisterRevocation = isActive.onRevoke?.(stop);
+        return () => {
+          unregisterRevocation?.();
+          stop();
+        };
+      },
+      (error) => {
+        if (isActive()) throw error;
+        return () => undefined;
+      }
+    );
+  };
+  return Object.freeze(facade);
+}
+
+function guardedChildHass(source, overrides = {}, isActive = () => true) {
+  const facade = Object.create(null);
+  for (const property of SAFE_CHILD_HASS_VALUES) {
+    if (Object.prototype.hasOwnProperty.call(overrides, property)) continue;
+    Object.defineProperty(facade, property, {
+      enumerable: true,
+      get: () => isActive() ? source[property] : undefined
+    });
+  }
+  for (const property of SAFE_CHILD_HASS_FUNCTIONS) {
+    if (typeof source[property] === "function") {
+      facade[property] = (...args) => isActive() ? source[property](...args) : undefined;
+    }
+  }
+  for (const [property, value] of Object.entries(overrides)) {
+    if (property === "states") {
+      Object.defineProperty(facade, property, {
+        enumerable: true,
+        get: () => isActive() ? value : EMPTY_CHILD_STATES
+      });
+    } else {
+      facade[property] = value;
+    }
+  }
+  return Object.freeze(facade);
+}
+
+export function isReadOnlyChildMessageAllowed(message, {
+  cameraEntity = null,
+  allowCameraStream = false,
+  calendarEntities = new Set()
+} = {}) {
+  if (!message || typeof message !== "object") return false;
+  const type = String(message.type || "");
+  if (READ_ONLY_CHILD_WS_TYPES.has(type)) return true;
+  if (type === "calendar/events") {
+    return isConfiguredEntity(message.entity_id, calendarEntities)
+      && isBoundedCalendarRange(message.start_date_time, message.end_date_time);
+  }
+  if (type === "auth/sign_path") {
+    return Boolean(cameraEntity)
+      && message.expires === undefined
+      && message.path === `/api/camera_proxy/${cameraEntity}`;
+  }
+  if ([
+    "camera/capabilities",
+    "camera/get_prefs",
+    "camera/stream",
+    "camera/web_rtc_offer",
+    "camera/webrtc/candidate",
+    "camera/webrtc/get_client_config",
+    "camera/webrtc/offer"
+  ].includes(type)) {
+    return allowCameraStream
+      && Boolean(cameraEntity)
+      && isConfiguredEntity(message.entity_id, new Set([cameraEntity]));
+  }
+  return false;
+}
+
+export function isConfirmationStillValid(action, currentState, now = Date.now()) {
+  if (!action || !currentState || currentState !== action.expectedStateObject) return false;
+  const createdAt = Number(action.createdAt);
+  const age = Number(now) - createdAt;
+  if (!Number.isFinite(createdAt) || !Number.isFinite(age) || age < 0 || age > CONFIRMATION_EXPIRY_MS) return false;
+  if (entityStateValue(currentState) !== action.expectedState) return false;
+  return !action.expectedLastChanged || currentState.last_changed === action.expectedLastChanged;
+}
+
 export function buildControlPolicy(config = {}) {
   const policy = {
     lights: new Set(),
@@ -117,30 +362,35 @@ export function buildControlPolicy(config = {}) {
     climates: new Set(),
     moreInfo: new Set(),
     cameras: new Map(),
-    vacuum: config.cleaning?.vacuum_entity || null,
-    alarm: config.entry?.alarm_entity || null,
+    musicAssistantConfigEntries: new Set(),
+    vacuum: config.features?.cleaning !== false ? config.cleaning?.vacuum_entity || null : null,
+    alarm: config.features?.entry !== false ? config.entry?.alarm_entity || null : null,
+    // Keep the garage classified as a protected cover even when Security is hidden.
+    // Visibility determines whether actions are offered; it must never downgrade the entity.
     secureCover: config.entry?.garage?.cover_entity || null
   };
 
-  for (const room of config.rooms || []) {
+  for (const room of config.features?.rooms !== false ? config.rooms || [] : []) {
     for (const entityId of room.lights || []) {
       addEntity(policy.lights, entityId);
       addEntity(policy.moreInfo, entityId);
     }
     for (const entityId of room.scenes || []) addEntity(policy.scenes, entityId);
-    for (const entityId of room.media_players || []) addEntity(policy.mediaPlayers, entityId);
+    if (config.features?.music !== false) {
+      for (const entityId of room.media_players || []) addEntity(policy.mediaPlayers, entityId);
+    }
     for (const entityId of room.covers || []) addEntity(policy.covers, entityId);
     addEntity(policy.climates, room.climate);
   }
 
-  for (const player of config.media?.players || []) {
+  for (const player of config.features?.music !== false ? config.media?.players || [] : []) {
     addEntity(policy.mediaPlayers, player.entity_id);
     addEntity(policy.mediaPlayers, player.ma_entity_id);
     addEntity(policy.mediaPlayers, player.speaker_group_entity_id);
   }
-  addEntity(policy.moreInfo, config.weather?.entity_id);
+  if (config.features?.weather !== false) addEntity(policy.moreInfo, config.weather?.entity_id);
 
-  for (const camera of config.entry?.cameras || []) {
+  for (const camera of config.features?.entry !== false ? config.entry?.cameras || [] : []) {
     policy.cameras.set(camera.id, {
       entity: camera.entity_id || null,
       startButton: camera.start_stream_entity || null,
@@ -166,14 +416,35 @@ export function isApprovedMediaServiceCall(policy, domain, service, serviceData 
 
   if (domain === "music_assistant") {
     if (!MUSIC_ASSISTANT_SERVICES.has(service)) return false;
+    if (service === "get_library") {
+      const keys = Object.keys(data).sort();
+      return keys.length === 4
+        && keys.join(",") === "config_entry_id,favorite,limit,media_type"
+        && policy?.musicAssistantConfigEntries?.has(data.config_entry_id)
+        && MUSIC_ASSISTANT_LIBRARY_MEDIA_TYPES.has(data.media_type)
+        && data.favorite === true
+        && Number.isInteger(data.limit)
+        && data.limit >= 1
+        && data.limit <= 20
+        && Object.keys(serviceTarget).length === 0;
+    }
     if (service === "search") return true;
-    if (service === "play_media") return isConfiguredEntity(data.entity_id ?? serviceTarget.entity_id, mediaPlayers);
+    const destinationEntities = [
+      ...entityList(data.entity_id),
+      ...entityList(serviceTarget.entity_id)
+    ];
+    if (service === "play_media") return isConfiguredEntity(destinationEntities, mediaPlayers);
     return isConfiguredEntity(data.source_player, mediaPlayers)
-      && isConfiguredEntity(serviceTarget.entity_id ?? data.entity_id, mediaPlayers);
+      && isConfiguredEntity(destinationEntities, mediaPlayers);
   }
 
   if (domain === "mass_queue") {
-    return MASS_QUEUE_SERVICES.has(service) && isConfiguredEntity(data.entity, mediaPlayers);
+    const queueEntities = [
+      ...entityList(data.entity),
+      ...entityList(data.entity_id),
+      ...entityList(serviceTarget.entity_id)
+    ];
+    return MASS_QUEUE_SERVICES.has(service) && isConfiguredEntity(queueEntities, mediaPlayers);
   }
 
   return false;
@@ -182,6 +453,9 @@ export function isApprovedMediaServiceCall(policy, domain, service, serviceData 
 function isApprovedMediaMessage(policy, message) {
   if (!message || typeof message !== "object") return false;
   if (message.type === "call_service") {
+    if (message.domain === "music_assistant"
+      && message.service === "get_library"
+      && message.return_response !== true) return false;
     return isApprovedMediaServiceCall(
       policy,
       message.domain,
@@ -194,48 +468,59 @@ function isApprovedMediaMessage(policy, message) {
     && isConfiguredEntity(message.entity_id, policy?.mediaPlayers || new Set());
 }
 
-export function createControlledMediaHass(source, policy) {
+export function createControlledMediaHass(source, policy, isActive = () => true) {
   if (!source) return source;
-  const connection = source.connection && new Proxy(source.connection, {
-    get(target, property) {
-      if (property === "sendMessagePromise") {
-        return (message, ...args) => isApprovedMediaMessage(policy, message)
-          ? target.sendMessagePromise?.(message, ...args)
-          : Promise.resolve(undefined);
-      }
-      if (property === "sendMessage") {
-        return (message, ...args) => isApprovedMediaMessage(policy, message)
-          ? target.sendMessage?.(message, ...args)
-          : undefined;
-      }
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    }
-  });
+  const scopedStates = Object.freeze(Object.fromEntries(
+    [...(policy?.mediaPlayers || [])]
+      .filter((entityId) => source.states?.[entityId])
+      .map((entityId) => [entityId, source.states[entityId]])
+  ));
+  const connection = guardedChildConnection(
+    source.connection,
+    (message) => isApprovedMediaMessage(policy, message),
+    isActive
+  );
 
-  return new Proxy(source, {
-    get(target, property) {
-      if (property === "callService") {
-        return (domain, service, data, serviceTarget, ...args) => isApprovedMediaServiceCall(policy, domain, service, data, serviceTarget)
-          ? target.callService?.(domain, service, data, serviceTarget, ...args)
-          : Promise.resolve(undefined);
+  return guardedChildHass(source, {
+    states: scopedStates,
+    callService: (domain, service, data, serviceTarget, ...args) => {
+      const safeDomain = String(domain || "");
+      const safeService = String(service || "");
+      const safeData = snapshotChildObject(data, {});
+      const safeTarget = snapshotChildObject(serviceTarget, {});
+      // Music Assistant library reads require `return_response: true`, which the
+      // generic hass.callService surface cannot express. The embedded card uses
+      // the guarded websocket message path for this request.
+      if (safeDomain === "music_assistant" && safeService === "get_library") {
+        return Promise.resolve(undefined);
       }
-      if (property === "callWS") {
-        return (message, ...args) => isApprovedMediaMessage(policy, message)
-          ? target.callWS?.(message, ...args)
-          : Promise.resolve(undefined);
-      }
-      if (property === "callApi") {
-        return (method, path, ...args) => String(method || "GET").toUpperCase() === "GET"
-          && path === "config/config_entries/entry"
-          ? target.callApi?.(method, path, ...args)
-          : Promise.resolve(undefined);
-      }
-      if (property === "connection" && connection) return connection;
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    }
-  });
+      return isActive() && safeData && safeTarget && isApprovedMediaServiceCall(policy, safeDomain, safeService, safeData, safeTarget)
+        ? guardedChildResult(source.callService?.(safeDomain, safeService, safeData, safeTarget, ...args), isActive)
+        : Promise.resolve(undefined);
+    },
+    callWS: (message, ...args) => {
+      const snapshot = snapshotChildObject(message);
+      return isActive() && snapshot && isApprovedMediaMessage(policy, snapshot)
+        ? guardedChildResult(source.callWS?.(snapshot, ...args), isActive)
+        : Promise.resolve(undefined);
+    },
+    callApi: async (method, path, ...args) => {
+      const safeMethod = String(method || "GET").toUpperCase();
+      const safePath = String(path || "");
+      if (!isActive() || safeMethod !== "GET" || safePath !== "config/config_entries/entry") return undefined;
+      const response = await guardedChildResult(source.callApi?.(safeMethod, safePath, ...args), isActive);
+      if (!isActive()) return undefined;
+      const entries = (Array.isArray(response) ? response : []).filter((entry) => (
+        entry?.domain === "music_assistant"
+        && entry?.state === "loaded"
+        && typeof entry?.entry_id === "string"
+        && /^[a-zA-Z0-9_-]{1,128}$/.test(entry.entry_id)
+      ));
+      policy.musicAssistantConfigEntries = new Set(entries.map((entry) => entry.entry_id));
+      return entries;
+    },
+    ...(connection ? { connection } : {})
+  }, isActive);
 }
 
 export function isActiveBinaryState(state) {
@@ -355,6 +640,250 @@ export function heatingPresentation(state) {
   return { available: true, isOn: true, label: "On", tone: "on" };
 }
 
+function numericEntityValue(state) {
+  if (!isEntityAvailable(state)) return NaN;
+  return safeNumber(state?.state, NaN);
+}
+
+function energyUnit(state) {
+  return String(state?.attributes?.unit_of_measurement || "").trim();
+}
+
+function energyCurrency(state) {
+  const unit = energyUnit(state);
+  if (/^[A-Z]{3}$/.test(unit)) return unit;
+  if (unit === "£") return "GBP";
+  return null;
+}
+
+function formatDecimal(value, locale, maximumFractionDigits = 2) {
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits
+  }).format(value);
+}
+
+export function formatEnergyReading(state, locale = "en-GB", kind = "measurement") {
+  const value = numericEntityValue(state);
+  if (!Number.isFinite(value)) return "—";
+  const unit = energyUnit(state);
+  if (kind === "cost") {
+    const currency = energyCurrency(state);
+    if (currency) {
+      try {
+        return new Intl.NumberFormat(locale, {
+          style: "currency",
+          currency,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        }).format(value);
+      } catch {
+        // Fall through to the entity's own unit when Home Assistant exposes a non-standard code.
+      }
+    }
+  }
+  if (/^GBP\//i.test(unit)) return `£${formatDecimal(value, locale, 3)}/${unit.slice(4)}`;
+  if (/^£\//.test(unit)) return `£${formatDecimal(value, locale, 3)}/${unit.slice(2)}`;
+  const formatted = formatDecimal(value, locale, kind === "tariff" ? 3 : 2);
+  return unit ? `${formatted} ${unit}` : formatted;
+}
+
+function energyStateTimestamp(state) {
+  const value = Date.parse(state?.last_updated || state?.last_changed || "");
+  return Number.isFinite(value) ? value : NaN;
+}
+
+function energyFreshness(timestamp, now, locale, timeZone, staleAfterMinutes) {
+  if (!Number.isFinite(timestamp)) return { known: false, stale: false, label: "Update time unavailable" };
+  const ageMs = Math.max(0, new Date(now).getTime() - timestamp);
+  const updated = new Date(timestamp);
+  const sameDay = dateKey(updated, timeZone) === dateKey(now, timeZone);
+  const stale = !sameDay || ageMs > staleAfterMinutes * 60_000;
+  const when = sameDay
+    ? formatTime(updated, locale, timeZone)
+    : formatDay(updated, locale, timeZone);
+  return {
+    known: true,
+    stale,
+    label: stale ? `Last update ${when} · delayed` : `Updated ${when}`
+  };
+}
+
+export function energyFuelPresentation(
+  meter = {},
+  states = {},
+  { locale = "en-GB", timeZone = "Europe/London", now = new Date(), staleAfterMinutes = 180 } = {}
+) {
+  const usageState = states[meter.usage_today_entity];
+  const costState = states[meter.cost_today_entity];
+  const rateState = states[meter.rate_entity];
+  const standingChargeState = states[meter.standing_charge_entity];
+  const usageValue = numericEntityValue(usageState);
+  const costValue = numericEntityValue(costState);
+  const rateValue = numericEntityValue(rateState);
+  const standingChargeValue = numericEntityValue(standingChargeState);
+  const complete = [usageValue, costValue, rateValue, standingChargeValue].every(Number.isFinite);
+  const hasData = [usageValue, costValue, rateValue, standingChargeValue].some(Number.isFinite);
+  const displayedReadings = [
+    [usageValue, usageState],
+    [costValue, costState]
+  ].filter(([value]) => Number.isFinite(value));
+  const knownTimestamps = displayedReadings
+    .map(([, state]) => energyStateTimestamp(state))
+    .filter(Number.isFinite);
+  const oldestKnownTimestamp = knownTimestamps.length ? Math.min(...knownTimestamps) : NaN;
+  const oldestKnownFreshness = energyFreshness(oldestKnownTimestamp, now, locale, timeZone, staleAfterMinutes);
+  const freshness = oldestKnownFreshness.stale
+    ? oldestKnownFreshness
+    : knownTimestamps.length === displayedReadings.length && displayedReadings.length > 0
+      ? oldestKnownFreshness
+      : { known: false, stale: false, label: "Update time unavailable" };
+  const timestamp = freshness.known ? oldestKnownTimestamp : NaN;
+  const status = !hasData
+    ? "unavailable"
+    : freshness.known && freshness.stale
+      ? "stale"
+      : !complete
+        ? "partial"
+        : !freshness.known
+          ? "unverified"
+          : "current";
+  return {
+    status,
+    complete,
+    costValue,
+    costCurrency: energyCurrency(costState),
+    cost: formatEnergyReading(costState, locale, "cost"),
+    usage: formatEnergyReading(usageState, locale),
+    rate: formatEnergyReading(rateState, locale, "tariff"),
+    standingCharge: formatEnergyReading(standingChargeState, locale, "tariff"),
+    freshness: !hasData
+      ? "Awaiting meter data"
+      : freshness.known && freshness.stale
+        ? freshness.label
+        : !complete
+          ? "Partial meter data"
+          : freshness.label,
+    updatedAt: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null
+  };
+}
+
+export function energyOverviewPresentation(config = {}, states = {}, options = {}) {
+  const staleAfterMinutes = safeNumber(config.stale_after_minutes, 180);
+  const presentationOptions = { ...options, staleAfterMinutes };
+  const electricity = energyFuelPresentation(config.electricity, states, presentationOptions);
+  const gas = energyFuelPresentation(config.gas, states, presentationOptions);
+  const compatibleCurrency = electricity.costCurrency
+    && electricity.costCurrency === gas.costCurrency
+    ? electricity.costCurrency
+    : null;
+  const completeCost = compatibleCurrency
+    && Number.isFinite(electricity.costValue)
+    && Number.isFinite(gas.costValue);
+  const totalCost = completeCost
+    ? formatEnergyReading({
+      state: electricity.costValue + gas.costValue,
+      attributes: { unit_of_measurement: compatibleCurrency }
+    }, options.locale || "en-GB", "cost")
+    : "—";
+  const delayed = [electricity, gas].some((fuel) => fuel.status === "stale");
+  const unavailable = [electricity, gas].every((fuel) => fuel.status === "unavailable");
+  const partial = !unavailable && (!completeCost || [electricity, gas].some((fuel) => fuel.status === "partial"));
+  const unverified = [electricity, gas].some((fuel) => fuel.status === "unverified");
+  return {
+    electricity,
+    gas,
+    totalCost,
+    status: unavailable ? "unavailable" : delayed ? "stale" : partial ? "partial" : unverified ? "unverified" : "current",
+    detail: unavailable
+      ? "Waiting for smart-meter data"
+      : delayed
+        ? "Meter update delayed · totals may be from an earlier period"
+      : partial
+        ? "Partial meter data · today so far"
+        : unverified
+          ? "Update time unavailable · today so far"
+          : "Electricity + gas · today so far"
+  };
+}
+
+export function energyCompactPresentation(summary) {
+  if (!summary) return null;
+  if (summary.status === "unavailable") return { value: "Meters unavailable", detail: "Energy · waiting for data" };
+  if (summary.status === "stale") return { value: "Update delayed", detail: "Energy · cached totals" };
+  if (summary.status === "unverified") {
+    return { value: summary.totalCost === "—" ? "View meters" : summary.totalCost, detail: "Energy · update time unknown" };
+  }
+  if (summary.status === "partial") {
+    return { value: summary.totalCost === "—" ? "View meters" : summary.totalCost, detail: "Energy · partial data" };
+  }
+  return { value: summary.totalCost === "—" ? "View meters" : summary.totalCost, detail: "Energy · today so far" };
+}
+
+export function homeLightingCompactPresentation(summary = {}) {
+  if (summary.lightCount === 0) return { value: "No lights configured", detail: "Lighting" };
+  if (summary.availableLights === 0) return { value: "Status unavailable", detail: "Lighting" };
+  if (summary.availableLights < summary.lightCount) {
+    return { value: "Status incomplete", detail: `${summary.availableLights} of ${summary.lightCount} lights reporting` };
+  }
+  if (summary.roomsLit) {
+    return { value: summary.roomsLit, detail: `room${summary.roomsLit === 1 ? "" : "s"} lit` };
+  }
+  return { value: "All off", detail: "Lighting" };
+}
+
+export function homeHeatingCompactPresentation(summary = {}) {
+  if (summary.heatingZones === 0) return { value: "No heating configured", detail: "Heating" };
+  if (summary.availableHeatingZones === 0) return { value: "Status unavailable", detail: "Heating" };
+  if (summary.availableHeatingZones < summary.heatingZones) {
+    return { value: "Status incomplete", detail: `${summary.availableHeatingZones} of ${summary.heatingZones} zones reporting` };
+  }
+  if (summary.zonesHeating) {
+    return { value: summary.zonesHeating, detail: `zone${summary.zonesHeating === 1 ? "" : "s"} heating` };
+  }
+  return { value: formatTemperature(summary.averageTemperature), detail: "Home average" };
+}
+
+export function homeSummaryPresentation(config = {}, states = {}) {
+  const secureCover = config.entry?.garage?.cover_entity;
+  const rooms = (config.rooms || []).map((room) => {
+    const summaryRoom = config.features?.entry === false && secureCover
+      ? { ...room, covers: (room.covers || []).filter((entityId) => entityId !== secureCover) }
+      : room;
+    return {
+      room: summaryRoom,
+      summary: deriveRoomState(summaryRoom, states, config.theme?.accent)
+    };
+  });
+  const temperatures = rooms.map(({ summary }) => summary.temperature).filter(Number.isFinite);
+  const heatingRooms = rooms.filter(({ room }) => room.climate);
+  const lightingRooms = rooms.filter(({ room }) => room.lights?.length);
+  const lights = [...new Set(rooms.flatMap(({ room }) => room.lights || []))];
+  const covers = [...new Set(rooms.flatMap(({ room }) => room.covers || []))];
+  if (config.features?.entry === true && secureCover && !covers.includes(secureCover)) covers.push(secureCover);
+  return {
+    roomsLit: rooms.filter(({ summary }) => summary.lightsOn > 0).length,
+    lightingRooms: lightingRooms.length,
+    lightCount: lights.length,
+    availableLights: lights.filter((entityId) => isEntityAvailable(states[entityId])).length,
+    availableLightingRooms: lightingRooms.filter(({ room }) => (
+      room.lights.some((entityId) => isEntityAvailable(states[entityId]))
+    )).length,
+    lightsOn: rooms.reduce((total, { summary }) => total + summary.lightsOn, 0),
+    zonesHeating: heatingRooms.filter(({ room }) => heatingPresentation(states[room.climate]).tone === "heating").length,
+    heatingZones: heatingRooms.length,
+    availableHeatingZones: heatingRooms.filter(({ room }) => isEntityAvailable(states[room.climate])).length,
+    openCovers: covers.filter((entityId) => (
+      isEntityAvailable(states[entityId]) && entityStateValue(states[entityId]) !== "closed"
+    )).length,
+    coverCount: covers.length,
+    availableCovers: covers.filter((entityId) => isEntityAvailable(states[entityId])).length,
+    averageTemperature: temperatures.length
+      ? temperatures.reduce((total, value) => total + value, 0) / temperatures.length
+      : NaN
+  };
+}
+
 export function isAlarmActionSupported(state, service) {
   if (!isEntityAvailable(state) || !ALARM_SERVICES.has(service)) return false;
   if (service === "alarm_disarm") return true;
@@ -401,6 +930,20 @@ function formatDay(value, locale = "en-GB", timeZone) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Date TBC";
   return new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short", timeZone }).format(date);
+}
+
+export function formatClassroomDueDay(value, locale = "en-GB", timeZone) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) {
+    const date = new Date(`${value}T00:00:00Z`);
+    if (Number.isNaN(date.getTime())) return "Date TBC";
+    return new Intl.DateTimeFormat(locale, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC"
+    }).format(date);
+  }
+  return formatDay(value, locale, timeZone);
 }
 
 function calendarEventStart(event) {
@@ -513,6 +1056,184 @@ export function normaliseChoreStatus(state, entityId = "") {
   };
 }
 
+const CHOREOPS_SUMMARY_KINDS = Object.freeze({
+  reward: {
+    attribute: "reward_name",
+    fallback: "Reward",
+    icon: "mdi:gift-outline",
+    marker: "_choreops_reward_status_"
+  },
+  badge: {
+    attribute: "badge_name",
+    fallback: "Badge",
+    icon: "mdi:medal-outline",
+    marker: "_choreops_badge_progress_"
+  },
+  achievement: {
+    attribute: "achievement_name",
+    fallback: "Achievement",
+    icon: "mdi:trophy-outline",
+    marker: "_choreops_achievement_progress_"
+  }
+});
+
+function choreOpsSummaryName(state, entityId, kind) {
+  const presentation = CHOREOPS_SUMMARY_KINDS[kind];
+  const attributes = state?.attributes || {};
+  const explicitName = attributes[presentation.attribute] || attributes.name;
+  if (typeof explicitName === "string" && explicitName.trim()) return explicitName.trim();
+
+  const friendlyName = typeof attributes.friendly_name === "string" ? attributes.friendly_name.trim() : "";
+  if (friendlyName) {
+    const stripped = friendlyName
+      .replace(/^.*?\(?choreops\)?\s*/i, "")
+      .replace(/^(?:reward status|badge progress|achievement progress)\s*[-:]\s*/i, "")
+      .trim();
+    if (stripped && stripped !== friendlyName) return stripped;
+    return friendlyName;
+  }
+
+  const entityName = String(entityId || "").split(presentation.marker)[1];
+  return entityName ? titleCase(entityName) : presentation.fallback;
+}
+
+function firstFiniteNumber(values) {
+  for (const value of values) {
+    const parsed = safeNumber(value, NaN);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return NaN;
+}
+
+function percentageFromFraction(value) {
+  const number = safeNumber(value, NaN);
+  return Number.isFinite(number) && number >= 0 && number <= 1 ? number * 100 : number;
+}
+
+export function normaliseChoreOpsSummary(state, entityId = "", kind = "reward") {
+  const summaryKind = Object.prototype.hasOwnProperty.call(CHOREOPS_SUMMARY_KINDS, kind) ? kind : "reward";
+  const presentation = CHOREOPS_SUMMARY_KINDS[summaryKind];
+  const attributes = state?.attributes || {};
+  const rawState = entityStateValue(state);
+  const status = String(attributes.status || rawState || "unavailable").trim().toLowerCase();
+  const available = isEntityAvailable(state);
+  const completed = ["approved", "completed", "earned", "redeemed"].includes(status)
+    || (summaryKind === "achievement" && attributes.awarded === true);
+  let label = "Unavailable";
+  let tone = "unavailable";
+
+  if (available && summaryKind === "reward") {
+    const labels = {
+      approved: "Approved",
+      available: "Available",
+      claimed: "Claimed",
+      completed: "Complete",
+      earned: "Earned",
+      locked: "Locked",
+      pending: "Not ready yet",
+      redeemed: "Redeemed"
+    };
+    const cost = firstFiniteNumber([attributes.reward_cost, attributes.cost, attributes.points_required]);
+    label = labels[status] || titleCase(status);
+    if (Number.isFinite(cost)) label += ` · ${formatPoints(cost)} pts`;
+    tone = completed ? "done" : status === "available" ? "available" : "progress";
+  } else if (available && summaryKind === "badge") {
+    const rawProgress = safeNumber(rawState, NaN);
+    const normalisedOverallProgress = percentageFromFraction(attributes.overall_progress);
+    const progress = firstFiniteNumber([
+      attributes.unit_of_measurement === "%" ? rawProgress : NaN,
+      attributes.percentage,
+      attributes.progress,
+      normalisedOverallProgress,
+      rawProgress
+    ]);
+    const percentage = Number.isFinite(progress) ? Math.max(0, Math.min(100, progress)) : NaN;
+    if (completed || percentage >= 100) {
+      label = "Earned";
+      tone = "done";
+    } else if (Number.isFinite(percentage)) {
+      label = `${formatPoints(percentage)}% complete`;
+      tone = "progress";
+    } else {
+      label = titleCase(status);
+      tone = "progress";
+    }
+  } else if (available && summaryKind === "achievement") {
+    const current = firstFiniteNumber([
+      attributes.current_value,
+      attributes.current,
+      attributes.progress_value,
+      attributes.raw_progress,
+      attributes.completed_count
+    ]);
+    const target = firstFiniteNumber([
+      attributes.target_value,
+      attributes.target,
+      attributes.threshold_value,
+      attributes.required_count
+    ]);
+    const rawProgress = safeNumber(rawState, NaN);
+    const percentage = firstFiniteNumber([
+      attributes.unit_of_measurement === "%" ? rawProgress : NaN,
+      attributes.percentage,
+      percentageFromFraction(attributes.overall_progress),
+      rawProgress
+    ]);
+    if (completed || (Number.isFinite(percentage) && percentage >= 100)) {
+      label = "Complete";
+      tone = "done";
+    } else if (Number.isFinite(current) && Number.isFinite(target)) {
+      label = `${formatPoints(current)} of ${formatPoints(target)}`;
+      tone = "progress";
+    } else if (Number.isFinite(percentage)) {
+      label = `${formatPoints(Math.max(0, Math.min(100, percentage)))}% complete`;
+      tone = "progress";
+    } else {
+      label = titleCase(status);
+      tone = "progress";
+    }
+  }
+
+  return {
+    name: choreOpsSummaryName(state, entityId, summaryKind),
+    label,
+    tone,
+    icon: presentation.icon,
+    kind: summaryKind
+  };
+}
+
+function safeInternalDashboardPath(value) {
+  const path = String(value || "");
+  return path.length <= 160 && /^\/[a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)*$/.test(path) ? path : null;
+}
+
+export function safeClassroomLink(value) {
+  const link = String(value || "");
+  return link.length <= 1_000 && /^https:\/\/classroom\.google\.com\//.test(link) ? link : null;
+}
+
+export function classroomAssignmentPresentation(state) {
+  const assignments = Array.isArray(state?.attributes?.assignments)
+    ? state.attributes.assignments
+    : [];
+  const count = safeNumber(state?.state, NaN);
+  const truncated = state?.attributes?.assignments_truncated === true;
+  const countMatchesPayload = Number.isInteger(count)
+    && count >= 0
+    && assignments.length <= CLASSROOM_ASSIGNMENT_LIMIT
+    && (truncated
+      ? count > CLASSROOM_ASSIGNMENT_LIMIT && assignments.length === CLASSROOM_ASSIGNMENT_LIMIT
+      : count === assignments.length);
+  return {
+    available: isEntityAvailable(state) && Array.isArray(state?.attributes?.assignments) && countMatchesPayload,
+    assignments,
+    count,
+    truncated,
+    stale: state?.attributes?.data_stale === true
+  };
+}
+
 function titleCase(value) {
   return String(value || "").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
@@ -546,9 +1267,14 @@ function entityName(state, fallback) {
 
 function roomTemperature(room, states) {
   const sensor = room.temperature_sensor ? states[room.temperature_sensor] : null;
-  if (sensor) return safeNumber(sensor.state, NaN);
+  if (isEntityAvailable(sensor)) {
+    const reading = safeNumber(sensor.state, NaN);
+    if (Number.isFinite(reading)) return reading;
+  }
   const climate = room.climate ? states[room.climate] : null;
-  return safeNumber(climate?.attributes?.current_temperature, NaN);
+  return isEntityAvailable(climate)
+    ? safeNumber(climate?.attributes?.current_temperature, NaN)
+    : NaN;
 }
 
 function firstPlayingPlayer(config, states) {
@@ -569,6 +1295,14 @@ function greetingForTime(value = new Date(), timeZone = "Europe/London") {
 }
 
 const PREMIER_LEAGUE_CREST_URL = /^https:\/\/resources\.premierleague\.com\/premierleague\/badges\/70\/t[1-9]\d*\.png$/;
+const FOOTBALL_CLUB_PRESENTATION = Object.freeze({
+  TOT: Object.freeze({ label: "Spurs", primary: "#132257", accent: "#FFFFFF" }),
+  AVL: Object.freeze({ label: "Villa", primary: "#670E36", accent: "#95BFE5" })
+});
+const FOOTBALL_CLUB_NAMES = Object.freeze({
+  TOT: "Tottenham Hotspur",
+  AVL: "Aston Villa"
+});
 
 export function teamCrest(team = {}) {
   const crestUrl = team?.crest_url;
@@ -587,19 +1321,23 @@ function lightColour(state, fallback) {
 
 export function deriveRoomState(room, states = {}, accent = "#5B5BD6") {
   const lightStates = room.lights.map((entityId) => states[entityId]).filter(Boolean);
-  const lightsOn = lightStates.filter((state) => state.state === "on");
+  const availableLights = lightStates.filter(isEntityAvailable);
+  const lightsOn = availableLights.filter((state) => state.state === "on");
   const climate = room.climate ? states[room.climate] : null;
   const playing = room.media_players
     .map((entityId) => states[entityId])
     .find((state) => state?.state === "playing");
   const openCovers = room.covers
     .map((entityId) => states[entityId])
-    .filter((state) => state && !["closed", "closing"].includes(state.state));
+    .filter((state) => isEntityAvailable(state) && entityStateValue(state) !== "closed");
   return {
     lightsOn: lightsOn.length,
     totalLights: room.lights.length,
+    availableLights: availableLights.length,
     temperature: roomTemperature(room, states),
-    targetTemperature: safeNumber(climate?.attributes?.temperature, NaN),
+    targetTemperature: isEntityAvailable(climate)
+      ? safeNumber(climate?.attributes?.temperature, NaN)
+      : NaN,
     playing: playing ? entityName(playing) : null,
     openCovers: openCovers.length,
     colour: lightColour(lightsOn[0], accent)
@@ -612,9 +1350,116 @@ export function normaliseFixtureStatus(fixture) {
   return "upcoming";
 }
 
+function footballTeamCode(team = {}) {
+  return String(team?.short_name || team?.code || "").trim().toUpperCase();
+}
+
+function fixtureIncludesTeam(fixture, code) {
+  const normalisedCode = String(code || "").trim().toUpperCase();
+  return footballTeamCode(fixture?.home) === normalisedCode || footballTeamCode(fixture?.away) === normalisedCode;
+}
+
+function fixtureKickoffValue(fixture, fallback) {
+  const value = Date.parse(fixture?.kickoff_time || "");
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function compareFixtureIds(left, right) {
+  const leftNumber = Number(left?.id);
+  const rightNumber = Number(right?.id);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftNumber !== rightNumber) {
+    return leftNumber - rightNumber;
+  }
+  const a = String(left?.id ?? "");
+  const b = String(right?.id ?? "");
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+export function selectFavouriteFixture(events = [], teamCode = "") {
+  const code = String(teamCode).trim().toUpperCase();
+  if (!code || !Array.isArray(events)) return null;
+  const relevant = events.filter((fixture) => fixtureIncludesTeam(fixture, code));
+  const live = relevant
+    .filter((fixture) => normaliseFixtureStatus(fixture) === "live")
+    .sort((left, right) => (
+      fixtureKickoffValue(left, Number.POSITIVE_INFINITY) - fixtureKickoffValue(right, Number.POSITIVE_INFINITY)
+      || compareFixtureIds(left, right)
+    ));
+  if (live.length) return live[0];
+  const upcoming = relevant
+    .filter((fixture) => normaliseFixtureStatus(fixture) === "upcoming")
+    .sort((left, right) => (
+      fixtureKickoffValue(left, Number.POSITIVE_INFINITY) - fixtureKickoffValue(right, Number.POSITIVE_INFINITY)
+      || compareFixtureIds(left, right)
+    ));
+  if (upcoming.length) return upcoming[0];
+  const finished = relevant
+    .filter((fixture) => normaliseFixtureStatus(fixture) === "finished")
+    .sort((left, right) => (
+      fixtureKickoffValue(right, Number.NEGATIVE_INFINITY) - fixtureKickoffValue(left, Number.NEGATIVE_INFINITY)
+      || compareFixtureIds(left, right)
+    ));
+  return finished[0] || null;
+}
+
+export function buildFavouriteClubModels(events = [], spotlightTeamCodes = [], tableRows = []) {
+  const fixtures = Array.isArray(events) ? events : [];
+  const rows = Array.isArray(tableRows) ? tableRows : [];
+  return (Array.isArray(spotlightTeamCodes) ? spotlightTeamCodes : []).map((rawCode) => {
+    const code = String(rawCode).trim().toUpperCase();
+    const fixture = selectFavouriteFixture(fixtures, code);
+    const standing = rows.find((row) => String(row?.code || "").trim().toUpperCase() === code) || null;
+    const fixtureTeam = footballTeamCode(fixture?.home) === code
+      ? fixture.home
+      : footballTeamCode(fixture?.away) === code
+        ? fixture.away
+        : null;
+    const team = {
+      id: fixtureTeam?.id ?? standing?.team_id ?? null,
+      code,
+      short_name: code,
+      name: fixtureTeam?.name || standing?.name || FOOTBALL_CLUB_NAMES[code] || code,
+      crest_url: fixtureTeam?.crest_url || standing?.crest_url || null
+    };
+    const opponent = fixture
+      ? footballTeamCode(fixture.home) === code ? fixture.away : fixture.home
+      : null;
+    return {
+      code,
+      team,
+      fixture,
+      opponent,
+      standing,
+      status: fixture ? normaliseFixtureStatus(fixture) : "none",
+      is_home: fixture ? footballTeamCode(fixture.home) === code : false
+    };
+  });
+}
+
+function fixtureIdentity(fixture) {
+  if (!fixture) return null;
+  if (fixture.id !== undefined && fixture.id !== null) return `id:${fixture.id}`;
+  return [
+    fixture.kickoff_time || "",
+    footballTeamCode(fixture.home),
+    footballTeamCode(fixture.away)
+  ].join(":");
+}
+
+export function favouriteDerbyFixture(models = []) {
+  if (!Array.isArray(models) || models.length !== 2) return null;
+  const fixture = models[0]?.fixture;
+  const identity = fixtureIdentity(fixture);
+  if (!identity || fixtureIdentity(models[1]?.fixture) !== identity) return null;
+  return models.every((model) => fixtureIncludesTeam(fixture, model.code)) ? fixture : null;
+}
+
 export function footballFreshness(index, now = new Date()) {
   const attributes = index?.attributes || {};
   if (!index) return { status: "waiting", title: "Waiting for scores", detail: "The first football update has not arrived yet." };
+  if (["unknown", "unavailable"].includes(entityStateValue(index))) {
+    return { status: "waiting", title: "Scores unavailable", detail: "Home Assistant cannot read the football feed right now." };
+  }
   const checkedAt = Date.parse(attributes.last_checked || attributes.last_updated || "");
   const intervalMs = Math.max(60_000, safeNumber(attributes.refresh_interval_seconds, 900) * 1000);
   const ageMs = Number.isFinite(checkedAt) ? Math.max(0, new Date(now).getTime() - checkedAt) : Infinity;
@@ -707,6 +1552,27 @@ function stateSignature(states, entityIds) {
       attributes.default_points,
       attributes.due_date,
       attributes.due_at,
+      attributes.reward_name,
+      attributes.reward_cost,
+      attributes.cost,
+      attributes.points_required,
+      attributes.badge_name,
+      attributes.achievement_name,
+      attributes.status,
+      attributes.overall_progress,
+      attributes.progress,
+      attributes.percentage,
+      attributes.current_value,
+      attributes.current,
+      attributes.progress_value,
+      attributes.raw_progress,
+      attributes.completed_count,
+      attributes.target_value,
+      attributes.target,
+      attributes.threshold_value,
+      attributes.required_count,
+      attributes.awarded,
+      attributes.unit_of_measurement,
       attributes.last_updated,
       attributes.events?.length,
       attributes.rows?.length,
@@ -736,12 +1602,18 @@ export class FamilyHubCard extends HTMLElementBase {
     this._cameraStartTimer = null;
     this._cameraFrameTimer = null;
     this._cameraSlowTimer = null;
+    this._cameraExpiryTimer = null;
     this._cameraRecoveryPromise = null;
     this._cameraBlockedIds = new Map();
-    this._cameraStartTimeoutMs = CAMERA_COMMAND_TIMEOUT_MS;
-    this._cameraStopTimeoutMs = CAMERA_COMMAND_TIMEOUT_MS;
+    this._pendingCameraStarts = new Map();
+    this._cameraBlockTimer = null;
+    this._freshnessTimer = null;
+    this._cameraBlockRetryMs = CAMERA_START_TIMEOUT_MS;
+    this._cameraStartTimeoutMs = CAMERA_START_TIMEOUT_MS;
+    this._cameraStopTimeoutMs = CAMERA_STOP_TIMEOUT_MS;
     this._cameraFrameTimeoutMs = CAMERA_FIRST_FRAME_TIMEOUT_MS;
     this._cameraSlowMessageMs = CAMERA_SLOW_MESSAGE_MS;
+    this._cameraExpiryMs = CAMERA_SESSION_EXPIRY_MS;
     this._cameraError = null;
     this._pendingConfirmation = null;
     this._confirmationReturnFocus = null;
@@ -758,26 +1630,47 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarRequestKey = "";
     this._calendarRequest = 0;
     this._readOnlyHassSource = null;
-    this._readOnlyHass = null;
+    this._readOnlyHass = new Map();
     this._musicHassSource = null;
     this._musicHass = null;
+    this._childHassTokens = new Map();
+    this._childMountGeneration = 0;
     this._boundClick = (event) => this._handleClick(event);
     this._boundChange = (event) => this._handleChange(event);
     this._boundKeydown = (event) => this._handleKeydown(event);
+    this._boundVisibilityChange = () => {
+      if (globalThis.document?.visibilityState === "hidden") {
+        this._clearFreshnessTimer();
+        this._closeActiveCamera({ render: false, invalidate: true });
+      } else {
+        this._scheduleRender(true);
+        this._armFreshnessTimer();
+      }
+    };
+    this._boundPageHide = () => this._closeActiveCamera({ render: false, invalidate: true });
   }
 
   connectedCallback() {
     this.shadowRoot.addEventListener("click", this._boundClick);
     this.shadowRoot.addEventListener("change", this._boundChange);
     this.shadowRoot.addEventListener("keydown", this._boundKeydown);
+    globalThis.document?.addEventListener?.("visibilitychange", this._boundVisibilityChange);
+    globalThis.addEventListener?.("pagehide", this._boundPageHide);
+    this._armFreshnessTimer();
     this._scheduleRender(true);
   }
 
   disconnectedCallback() {
+    this._childMountGeneration += 1;
+    this._invalidateChildHass();
     this.shadowRoot.removeEventListener("click", this._boundClick);
     this.shadowRoot.removeEventListener("change", this._boundChange);
     this.shadowRoot.removeEventListener("keydown", this._boundKeydown);
+    globalThis.document?.removeEventListener?.("visibilitychange", this._boundVisibilityChange);
+    globalThis.removeEventListener?.("pagehide", this._boundPageHide);
+    this._clearFreshnessTimer();
     this._closeActiveCamera({ render: false, invalidate: true });
+    this._clearCameraBlockTimer();
     this._childCards.clear();
   }
 
@@ -788,13 +1681,18 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!config || config.schema_version !== 6) {
       throw new Error("Family Hub requires a schema-v6 family configuration");
     }
+    this._childMountGeneration += 1;
+    this._invalidateChildHass();
     this._closeActiveCamera({ render: false, invalidate: true });
     this._config = config;
     this._view = config.display.default_view || "today";
     this._homeSection = config.home.default_section || "rooms";
     this._calendarMode = config.calendar.initial_view || "week";
     this._floor = config.floorplan.default_floor;
-    this._room = config.floorplan.floors
+    const defaultRoom = config.home.default_room
+      ? config.rooms.find((room) => room.id === config.home.default_room && room.floor_id === this._floor)
+      : null;
+    this._room = defaultRoom?.id || config.floorplan.floors
       .find((floor) => floor.id === this._floor)?.room_hotspots?.[0]?.room_id || config.rooms[0]?.id || null;
     this._securityCameraId = config.entry?.primary_camera_id || config.entry?.cameras?.[0]?.id || null;
     this._entityIds = relevantEntityIds(config);
@@ -805,27 +1703,29 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarError = null;
     this._activeCameraId = null;
     this._cameraError = null;
+    for (const [cameraId, block] of this._cameraBlockedIds) {
+      if (!block.pendingStart) this._cameraBlockedIds.delete(cameraId);
+    }
+    this._clearCameraBlockTimer();
     this._pendingConfirmation = null;
     this._confirmationReturnFocus = null;
-    this._musicHassSource = null;
-    this._musicHass = null;
     this._childCards.clear();
     this._scheduleRender(true);
   }
 
   set hass(hass) {
+    this._invalidateChildHass();
     this._hass = hass;
-    this._readOnlyHassSource = null;
-    this._readOnlyHass = null;
-    this._musicHassSource = null;
-    this._musicHass = null;
+    this._pruneInactiveChildCards();
     for (const [key, child] of this._childCards.entries()) child.hass = this._hassForChild(key);
     this._reconcileCameraSession(hass?.states || {});
     if (!this._config) return;
     const nextSignature = stateSignature(hass?.states || {}, this._entityIds);
     if (nextSignature !== this._signature) {
       this._signature = nextSignature;
-      this._scheduleRender();
+      // The embedded player receives the new hass object above. Rebuilding the
+      // outer shell for every playback tick would reset its browsing position.
+      if (this._view !== "music") this._scheduleRender();
     }
     this._loadCalendarEvents();
   }
@@ -848,6 +1748,37 @@ export class FamilyHubCard extends HTMLElementBase {
     };
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(callback);
     else queueMicrotask(callback);
+  }
+
+  _armFreshnessTimer() {
+    this._clearFreshnessTimer();
+    if (!this.isConnected || globalThis.document?.visibilityState === "hidden") return;
+    this._freshnessTimer = setTimeout(() => {
+      this._freshnessTimer = null;
+      if (!this.isConnected || globalThis.document?.visibilityState === "hidden") return;
+      this._refreshTimeSensitiveView();
+      this._armFreshnessTimer();
+    }, nextFreshnessRefreshDelay());
+  }
+
+  _clearFreshnessTimer() {
+    if (this._freshnessTimer !== null) clearTimeout(this._freshnessTimer);
+    this._freshnessTimer = null;
+  }
+
+  _refreshTimeSensitiveView(now = new Date()) {
+    if (this._view === "music") {
+      const clock = this.shadowRoot?.querySelector?.(".hub-topbar-time");
+      if (clock && this._config) {
+        clock.textContent = new Intl.DateTimeFormat(this._config.product.locale, {
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: this._config.product.timezone
+        }).format(now);
+      }
+      return;
+    }
+    this._scheduleRender();
   }
 
   _enabledViews() {
@@ -920,9 +1851,13 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _render() {
     if (!this._config || !this.shadowRoot) return;
+    const renderFocus = this._captureRenderFocus();
+    const embeddedRenderState = this._captureEmbeddedRenderState();
     const confirmationFocusAction = this._pendingConfirmation
       ? this.shadowRoot.activeElement?.dataset?.confirmAction || "cancel"
       : null;
+    this._childMountGeneration += 1;
+    this._invalidateChildHass();
     const theme = this._config.theme;
     this.shadowRoot.innerHTML = `
       <style>${this._styles()}</style>
@@ -938,11 +1873,11 @@ export class FamilyHubCard extends HTMLElementBase {
         --hub-backdrop-end:${escapeHtml(theme.backdrop_end)};
         --hub-radius:${Number(theme.radius_px)}px;
       ">
-        <div class="shell">
+        <div class="hub-shell">
           ${this._renderNavigation()}
-          <main class="content">
+          <main class="hub-content">
             ${this._renderHeader()}
-            <div class="view" data-current-view="${escapeHtml(this._view)}">
+            <div class="hub-view" data-current-view="${escapeHtml(this._view)}">
               ${this._renderView()}
             </div>
           </main>
@@ -958,7 +1893,97 @@ export class FamilyHubCard extends HTMLElementBase {
       if (crest.complete && !crest.naturalWidth) showFallback();
     }
     this._mountChildCards();
+    const confirmationFocusHandled = Boolean(this._pendingConfirmation || this._confirmationReturnFocus);
     this._syncConfirmationFocus(confirmationFocusAction);
+    if (!confirmationFocusHandled) this._restoreRenderFocus(renderFocus);
+    this._restoreEmbeddedRenderState(embeddedRenderState);
+  }
+
+  _captureEmbeddedRenderState() {
+    if (this._view !== "music") return null;
+    const stage = this.shadowRoot?.querySelector(".media-player-stage");
+    const child = this._childCards.get("music");
+    if (!stage || !child) return null;
+    const rootActive = this.shadowRoot.activeElement;
+    let focusedNode = rootActive === child || child.contains?.(rootActive) ? rootActive : null;
+    while (focusedNode?.shadowRoot?.activeElement) focusedNode = focusedNode.shadowRoot.activeElement;
+    return {
+      child,
+      focusedNode: focusedNode && focusedNode !== child ? focusedNode : null,
+      scrollLeft: stage.scrollLeft,
+      scrollTop: stage.scrollTop
+    };
+  }
+
+  _restoreEmbeddedRenderState(state) {
+    if (!state || this._view !== "music" || this._childCards.get("music") !== state.child) return;
+    const stage = this.shadowRoot?.querySelector(".media-player-stage");
+    if (stage) {
+      stage.scrollLeft = state.scrollLeft;
+      stage.scrollTop = state.scrollTop;
+    }
+    if (!state.focusedNode?.isConnected) return;
+    try {
+      state.focusedNode.focus({ preventScroll: true });
+    } catch {
+      state.focusedNode.focus?.();
+    }
+  }
+
+  _captureRenderFocus() {
+    if (this._pendingConfirmation) return null;
+    const active = this.shadowRoot?.activeElement;
+    if (!active?.matches?.('button, select, a[href], [role="button"][tabindex]')
+      || active.closest?.(".confirmation-dialog")) return null;
+    const currentView = active.closest?.(".hub-view")?.dataset?.currentView || null;
+    const scope = active.closest?.(".hub-navigation")
+      ? "navigation"
+      : active.closest?.(".hub-topbar")
+        ? "topbar"
+        : currentView
+          ? "view"
+          : "card";
+    const gameweekRole = active.matches?.("button[data-gameweek]")
+      ? active.getAttribute("aria-label")
+      : null;
+    const dataset = Object.fromEntries(Object.entries(active.dataset || {})
+      .filter(([key]) => key !== "confirmAction" && (key !== "gameweek" || !gameweekRole)));
+    const markerClass = ["hub-nav-button", "hub-brand", "segment", "room-hotspot", "choreops-link"]
+      .find((className) => active.classList?.contains(className)) || null;
+    if (!gameweekRole && !Object.keys(dataset).length) return null;
+    return {
+      scope,
+      currentView,
+      tagName: active.tagName,
+      markerClass,
+      gameweekRole,
+      dataset
+    };
+  }
+
+  _restoreRenderFocus(descriptor) {
+    if (!descriptor || this._pendingConfirmation) return;
+    let scope = this.shadowRoot;
+    if (descriptor.scope === "navigation") scope = this.shadowRoot.querySelector(".hub-navigation");
+    else if (descriptor.scope === "topbar") scope = this.shadowRoot.querySelector(".hub-topbar");
+    else if (descriptor.scope === "view") {
+      scope = [...this.shadowRoot.querySelectorAll(".hub-view")]
+        .find((view) => view.dataset.currentView === descriptor.currentView);
+    }
+    if (!scope) return;
+    const control = [...scope.querySelectorAll('button, select, a[href], [role="button"][tabindex]')]
+      .find((candidate) => (
+        candidate.tagName === descriptor.tagName
+        && (!descriptor.markerClass || candidate.classList.contains(descriptor.markerClass))
+        && (!descriptor.gameweekRole || candidate.getAttribute("aria-label") === descriptor.gameweekRole)
+        && Object.entries(descriptor.dataset).every(([key, value]) => candidate.dataset?.[key] === value)
+      ));
+    if (!control || control.disabled || control.getAttribute("aria-disabled") === "true") return;
+    try {
+      control.focus({ preventScroll: true });
+    } catch {
+      control.focus();
+    }
   }
 
   _syncConfirmationFocus(confirmationFocusAction = null) {
@@ -989,17 +2014,17 @@ export class FamilyHubCard extends HTMLElementBase {
     const coreIds = new Set(["today", "calendar", "rooms", "family", "entry"]);
     const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
     const renderButtons = (views) => views.map((view) => `
-      <button class="nav-button ${this._view === view.id ? "is-active" : ""}" type="button" data-view="${view.id}" aria-label="${escapeHtml(view.label)}" aria-current="${this._view === view.id ? "page" : "false"}">
+      <button class="hub-nav-button ${this._view === view.id ? "is-active" : ""}" type="button" data-view="${view.id}" aria-label="${escapeHtml(view.label)}" aria-current="${this._view === view.id ? "page" : "false"}">
         <ha-icon icon="${view.icon}" aria-hidden="true"></ha-icon>
         <span>${escapeHtml(view.label)}</span>
       </button>
     `).join("");
     const views = this._enabledViews();
     return `
-      <nav class="navigation" aria-label="Family Dashboard views"${confirmationGuard}>
-        <button class="brand" type="button" data-view="today" aria-label="Open Today"><ha-icon icon="mdi:home-heart" aria-hidden="true"></ha-icon><span>Family</span></button>
-        <div class="nav-items nav-core">${renderButtons(views.filter((view) => coreIds.has(view.id)))}</div>
-        <div class="nav-items nav-utility" aria-label="More"><span class="nav-divider" aria-hidden="true"></span>${renderButtons(views.filter((view) => !coreIds.has(view.id)))}</div>
+      <nav class="hub-navigation" aria-label="Family Dashboard views"${confirmationGuard}>
+        <button class="hub-brand" type="button" data-view="today" aria-label="Open Today"><ha-icon icon="mdi:home-heart" aria-hidden="true"></ha-icon><span>Family</span></button>
+        <div class="hub-nav-items hub-nav-core">${renderButtons(views.filter((view) => coreIds.has(view.id)))}</div>
+        <div class="hub-nav-items hub-nav-utility" aria-label="More"><span class="hub-nav-divider" aria-hidden="true"></span>${renderButtons(views.filter((view) => !coreIds.has(view.id)))}</div>
       </nav>
     `;
   }
@@ -1009,7 +2034,8 @@ export class FamilyHubCard extends HTMLElementBase {
     const locale = this._config.product.locale;
     const date = new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", timeZone: this._config.product.timezone }).format(now);
     const time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", timeZone: this._config.product.timezone }).format(now);
-    const weather = this._hass?.states?.[this._config.weather.entity_id];
+    const weatherEnabled = this._config.features.weather === true;
+    const weather = weatherEnabled ? this._hass?.states?.[this._config.weather.entity_id] : null;
     const temperature = weather?.attributes?.temperature;
     const weatherText = weather
       ? `${formatTemperature(temperature)} · ${weatherStateLabel(weather.state)}`
@@ -1017,17 +2043,17 @@ export class FamilyHubCard extends HTMLElementBase {
     const currentDefinition = VIEW_DEFINITIONS.find((view) => view.id === this._view) || VIEW_DEFINITIONS[0];
     const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
     return `
-      <header class="topbar"${confirmationGuard}>
-        <div class="page-title">
-          <p class="topbar-date">${escapeHtml(date)}</p>
+      <header class="hub-topbar"${confirmationGuard}>
+        <div class="hub-page-title">
+          <p class="hub-topbar-date">${escapeHtml(date)}</p>
           <h1>${escapeHtml(currentDefinition.label)}</h1>
         </div>
-        <div class="header-actions">
-          <button class="weather-pill" type="button" data-more-info="${escapeHtml(this._config.weather.entity_id)}" ${this._config.display.read_only ? 'aria-disabled="true"' : ""}>
+        <div class="hub-header-actions">
+          ${weatherEnabled ? `<button class="hub-weather-pill" type="button" data-more-info="${escapeHtml(this._config.weather.entity_id)}" ${this._config.display.read_only ? 'aria-disabled="true"' : ""}>
             <ha-icon icon="mdi:weather-partly-cloudy" aria-hidden="true"></ha-icon>
             <span>${escapeHtml(weatherText)}</span>
-          </button>
-          <time class="topbar-time">${escapeHtml(time)}</time>
+          </button>` : ""}
+          <time class="hub-topbar-time">${escapeHtml(time)}</time>
         </div>
       </header>
     `;
@@ -1040,6 +2066,7 @@ export class FamilyHubCard extends HTMLElementBase {
       case "family": return this._renderFamily();
       case "entry": return this._renderSecurity();
       case "music": return this._renderMusic();
+      case "energy": return this._renderEnergy();
       case "football": return this._renderFootball();
       default: return this._renderToday();
     }
@@ -1047,67 +2074,54 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _renderToday() {
     const states = this._hass?.states || {};
-    const rooms = this._config.rooms.map((room) => ({ room, summary: deriveRoomState(room, states, this._config.theme.accent) }));
-    const lightsOn = rooms.reduce((total, entry) => total + entry.summary.lightsOn, 0);
-    const temperatures = rooms.map((entry) => entry.summary.temperature).filter(Number.isFinite);
-    const averageTemperature = temperatures.length
-      ? temperatures.reduce((total, value) => total + value, 0) / temperatures.length
-      : NaN;
-    const nextCalendar = (this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents())
-      .filter((event) => isCurrentOrFutureCalendarEvent(event, new Date(), this._config.product.timezone))
-      .sort((a, b) => new Date(calendarEventStart(a)) - new Date(calendarEventStart(b)))[0];
-    const playing = firstPlayingPlayer(this._config, states);
-    const featuredFixtures = this._featuredFixtures();
-    const weather = states[this._config.weather.entity_id];
-    const alarm = states[this._config.entry?.alarm_entity];
-    const garage = states[this._config.entry?.garage?.cover_entity];
-    const entrySignals = (this._config.entry?.cameras || []).flatMap((camera) => [
-      camera.ringing_entity,
-      camera.person_entity,
-      camera.motion_entity
-    ]).filter(Boolean).map((entityId) => states[entityId]);
-    const securitySummary = todaySecurityPresentation(alarm, garage, entrySignals);
-    return `
-      <section class="today-grid" aria-label="Today at a glance">
-        <article class="surface hero-panel today-hero">
-          <div class="today-hero-copy">
-            <p class="eyebrow">${escapeHtml(new Intl.DateTimeFormat(this._config.product.locale, { weekday: "long", timeZone: this._config.product.timezone }).format(new Date()))}</p>
-            <h2>${escapeHtml(greetingForTime(new Date(), this._config.product.timezone))}</h2>
-            <p>${nextCalendar ? `${escapeHtml(nextCalendar.summary || nextCalendar._calendar?.label || "Family event")} is next at ${escapeHtml(formatTime(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}.` : "The day is clear and the house is ready."}</p>
-          </div>
-          <div class="today-weather" aria-label="Current weather">
-            <ha-icon icon="mdi:weather-partly-cloudy" aria-hidden="true"></ha-icon>
-            <strong>${escapeHtml(formatTemperature(weather?.attributes?.temperature))}</strong>
-            <span>${escapeHtml(weatherStateLabel(weather?.state || "Home"))}</span>
-          </div>
-          <div class="hero-metrics">
-            <button type="button" data-view="rooms"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${formatTemperature(averageTemperature)}</strong><small>Home average</small></span></button>
-            <button type="button" data-view="rooms"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${lightsOn || "All off"}</strong><small>${lightsOn ? `light${lightsOn === 1 ? "" : "s"} on` : "Lights"}</small></span></button>
-            <button type="button" data-view="entry"><ha-icon icon="${securitySummary.icon}"></ha-icon><span><strong>${securitySummary.title}</strong><small>${securitySummary.detail}</small></span></button>
-          </div>
-        </article>
-        <article class="surface next-panel today-next">
-          <div class="today-card-icon is-amber"><ha-icon icon="mdi:calendar-clock"></ha-icon></div>
-          <p class="eyebrow">Coming up</p>
-          ${nextCalendar ? `
-            <h2>${escapeHtml(nextCalendar.summary || nextCalendar._calendar?.label || "Family event")}</h2>
-            <p class="supporting">${escapeHtml(formatDay(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}${isAllDayCalendarEvent(nextCalendar) ? " · All day" : ` at ${escapeHtml(formatTime(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}`}</p>
-            <button class="text-action" type="button" data-view="calendar">See the day <ha-icon icon="mdi:arrow-right"></ha-icon></button>
-          ` : `
-            <h2>No plans yet</h2>
-            <p class="supporting">The next family event will appear here.</p>
-            <button class="text-action" type="button" data-view="calendar">Open calendar <ha-icon icon="mdi:arrow-right"></ha-icon></button>
-          `}
-        </article>
-        <article class="surface children-panel today-family">
-          <div class="section-heading"><div><p class="eyebrow">Family</p><h2>Today’s rhythm</h2></div><button type="button" data-view="family">Open</button></div>
+    const features = this._config.features;
+    const homeSummary = features.rooms ? homeSummaryPresentation(this._config, states) : null;
+    const nextCalendar = features.calendar
+      ? (this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents())
+        .filter((event) => isCurrentOrFutureCalendarEvent(event, new Date(), this._config.product.timezone))
+        .sort((a, b) => new Date(calendarEventStart(a)) - new Date(calendarEventStart(b)))[0]
+      : null;
+    const playing = features.music ? firstPlayingPlayer(this._config, states) : null;
+    const footballSummary = features.football ? this._featuredFixtures() : null;
+    const weather = features.weather ? states[this._config.weather.entity_id] : null;
+    const alarm = features.entry ? states[this._config.entry?.alarm_entity] : null;
+    const garage = features.entry ? states[this._config.entry?.garage?.cover_entity] : null;
+    const entrySignals = features.entry
+      ? (this._config.entry?.cameras || []).flatMap((camera) => [
+        camera.ringing_entity,
+        camera.person_entity,
+        camera.motion_entity
+      ]).filter(Boolean).map((entityId) => states[entityId])
+      : [];
+    const securitySummary = features.entry ? todaySecurityPresentation(alarm, garage, entrySignals) : null;
+    const energySummary = this._energyPresentation();
+    const energyCompact = energyCompactPresentation(energySummary);
+    const lightingCompact = homeLightingCompactPresentation(homeSummary || {});
+    const heatingCompact = homeHeatingCompactPresentation(homeSummary || {});
+    const heroMetrics = [
+      ...(features.rooms ? [
+        `<button type="button" data-home-target="heating"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${escapeHtml(heatingCompact.value)}</strong><small>${escapeHtml(heatingCompact.detail)}</small></span></button>`,
+        `<button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${escapeHtml(lightingCompact.value)}</strong><small>${escapeHtml(lightingCompact.detail)}</small></span></button>`
+      ] : []),
+      ...(securitySummary ? [`<button type="button" data-view="entry"><ha-icon icon="${securitySummary.icon}"></ha-icon><span><strong>${escapeHtml(securitySummary.title)}</strong><small>${escapeHtml(securitySummary.detail)}</small></span></button>`] : []),
+      ...(energyCompact ? [`<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energyCompact.value)}</strong><small>${escapeHtml(energyCompact.detail)}</small></span></button>`] : [])
+    ];
+    const familyHeading = features.chores ? "Jobs & rewards" : features.school ? "School" : "Family overview";
+    const secondaryCards = [
+      ...(features.family ? [`
+        <article class="surface children-panel today-family today-secondary">
+          <div class="section-heading"><div><p class="eyebrow">Family</p><h2>${familyHeading}</h2></div><button type="button" data-view="family">Open</button></div>
           <div class="person-summary-list">${this._renderChildSummaries()}</div>
         </article>
-        <article class="surface football-panel today-football">
-          <div class="section-heading"><div><p class="eyebrow">Football</p><h2>Spurs & Villa</h2></div><button type="button" data-view="football">Open</button></div>
-          <div class="featured-fixtures">${featuredFixtures || '<p class="empty-state">No fixtures yet. We’ll show the next Spurs or Villa match here.</p>'}</div>
+      `] : []),
+      ...(footballSummary ? [`
+        <article class="surface football-panel today-football today-secondary">
+          <div class="section-heading"><div><p class="eyebrow">Football</p><h2>${escapeHtml(footballSummary.title)}</h2></div><button type="button" data-view="football">Open</button></div>
+          <div class="featured-fixtures">${footballSummary.html}</div>
         </article>
-        <article class="surface now-playing-panel today-music">
+      `] : []),
+      ...(features.music ? [`
+        <article class="surface now-playing-panel today-music today-secondary">
           <div class="section-heading"><div><p class="eyebrow">Music</p><h2>${playing ? "Now playing" : "House sound"}</h2></div><button type="button" data-view="music">Open</button></div>
           ${playing ? `
             <div class="now-playing">
@@ -1119,29 +2133,148 @@ export class FamilyHubCard extends HTMLElementBase {
             <div class="quiet-music"><div class="today-card-icon is-coral"><ha-icon icon="mdi:music-note"></ha-icon></div><div><strong>The house is quiet</strong><span>Choose a room in Music</span></div></div>
           `}
         </article>
+      `] : [])
+    ];
+    return `
+      <section class="today-grid" data-calendar="${features.calendar}" data-secondary-count="${secondaryCards.length}" aria-label="Today at a glance">
+        <article class="surface hero-panel today-hero ${features.weather ? "" : "is-weatherless"}">
+          <div class="today-hero-copy">
+            <p class="eyebrow">${escapeHtml(new Intl.DateTimeFormat(this._config.product.locale, { weekday: "long", timeZone: this._config.product.timezone }).format(new Date()))}</p>
+            <h2>${escapeHtml(greetingForTime(new Date(), this._config.product.timezone))}</h2>
+            <p>${features.calendar ? nextCalendar ? `${escapeHtml(nextCalendar.summary || nextCalendar._calendar?.label || "Family event")} is next at ${escapeHtml(formatTime(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}.` : "The day is clear and the house is ready." : "Home is ready when you are."}</p>
+          </div>
+          ${features.weather ? `<div class="today-weather" aria-label="Current weather">
+            <ha-icon icon="mdi:weather-partly-cloudy" aria-hidden="true"></ha-icon>
+            <strong>${escapeHtml(formatTemperature(weather?.attributes?.temperature))}</strong>
+            <span>${escapeHtml(weatherStateLabel(weather?.state || "Home"))}</span>
+          </div>` : ""}
+          ${heroMetrics.length ? `<div class="hero-metrics ${energySummary ? "has-energy" : ""}" data-metric-count="${heroMetrics.length}">${heroMetrics.join("")}</div>` : ""}
+        </article>
+        ${features.calendar ? `<article class="surface next-panel today-next">
+          <div class="today-card-icon is-amber"><ha-icon icon="mdi:calendar-clock"></ha-icon></div>
+          <p class="eyebrow">Coming up</p>
+          ${nextCalendar ? `
+            <h2>${escapeHtml(nextCalendar.summary || nextCalendar._calendar?.label || "Family event")}</h2>
+            <p class="supporting">${escapeHtml(formatDay(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}${isAllDayCalendarEvent(nextCalendar) ? " · All day" : ` at ${escapeHtml(formatTime(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}`}</p>
+            <button class="text-action" type="button" data-view="calendar">See the day <ha-icon icon="mdi:arrow-right"></ha-icon></button>
+          ` : `
+            <h2>No plans yet</h2>
+            <p class="supporting">The next family event will appear here.</p>
+            <button class="text-action" type="button" data-view="calendar">Open calendar <ha-icon icon="mdi:arrow-right"></ha-icon></button>
+          `}
+        </article>` : ""}
+        ${secondaryCards.join("")}
+      </section>
+    `;
+  }
+
+  _energyPresentation() {
+    if (!this._config.features.energy || !this._config.energy) return null;
+    return energyOverviewPresentation(this._config.energy, this._hass?.states || {}, {
+      locale: this._config.product.locale,
+      timeZone: this._config.product.timezone,
+      now: new Date()
+    });
+  }
+
+  _renderEnergy() {
+    const summary = this._energyPresentation();
+    if (!summary) return '<p class="hub-empty-state large">Energy is not configured.</p>';
+    const statusLabels = {
+      current: ["Latest readings", "mdi:check-circle-outline"],
+      stale: ["Update delayed", "mdi:clock-alert-outline"],
+      partial: ["Partial readings", "mdi:alert-circle-outline"],
+      unverified: ["Update time unknown", "mdi:clock-question-outline"],
+      unavailable: ["Waiting for meters", "mdi:progress-clock"]
+    };
+    const renderFuel = (id, label, icon, fuel) => {
+      const [statusLabel, statusIcon] = statusLabels[fuel.status] || statusLabels.unavailable;
+      return `
+        <article class="surface energy-meter is-${id} is-${escapeHtml(fuel.status)}" data-energy-fuel="${id}">
+          <header class="energy-meter-heading">
+            <span class="energy-meter-icon"><ha-icon icon="${icon}" aria-hidden="true"></ha-icon></span>
+            <div><p class="eyebrow">Smart meter</p><h2>${label}</h2></div>
+            <span class="energy-status"><ha-icon icon="${statusIcon}" aria-hidden="true"></ha-icon>${escapeHtml(statusLabel)}</span>
+          </header>
+          <div class="energy-primary-metrics">
+            <span><small>Cost today</small><strong>${escapeHtml(fuel.cost)}</strong></span>
+            <span><small>Used today</small><strong>${escapeHtml(fuel.usage)}</strong></span>
+          </div>
+          <div class="energy-tariff">
+            <span><small>Unit rate</small><strong>${escapeHtml(fuel.rate)}</strong></span>
+            <span><small>Standing charge</small><strong>${escapeHtml(fuel.standingCharge)}</strong></span>
+          </div>
+          <p class="energy-freshness"><ha-icon icon="mdi:clock-outline" aria-hidden="true"></ha-icon>${escapeHtml(fuel.freshness)}</p>
+        </article>
+      `;
+    };
+    const [heroLabel, heroIcon] = statusLabels[summary.status] || statusLabels.unavailable;
+    return `
+      <section class="energy-view" aria-label="Household energy today">
+        <article class="surface energy-hero is-${escapeHtml(summary.status)}">
+          <div>
+            <p class="eyebrow">Today so far</p>
+            <h2>${escapeHtml(summary.totalCost === "—" ? "Meter data pending" : summary.totalCost)}</h2>
+            <p>${escapeHtml(summary.detail)}</p>
+          </div>
+          <span class="energy-hero-status"><ha-icon icon="${heroIcon}" aria-hidden="true"></ha-icon><strong>${escapeHtml(heroLabel)}</strong><small>Readings can arrive at different times</small></span>
+        </article>
+        <div class="energy-meter-grid">
+          ${renderFuel("electricity", "Electricity", "mdi:lightning-bolt", summary.electricity)}
+          ${renderFuel("gas", "Gas", "mdi:fire", summary.gas)}
+        </div>
+        <article class="surface energy-truth-note">
+          <ha-icon icon="mdi:information-outline" aria-hidden="true"></ha-icon>
+          <div><strong>Smart-meter totals, not live power</strong><span>These figures show today so far. Gas and electricity may refresh on different schedules.</span></div>
+        </article>
       </section>
     `;
   }
 
   _renderChildSummaries() {
     const states = this._hass?.states || {};
+    const choresEnabled = this._config.features.chores === true;
+    const schoolEnabled = this._config.features.school === true;
     return this._config.people.filter((person) => person.role === "child").map((person) => {
-      const chore = this._config.chores.users.find((entry) => entry.person_id === person.id);
-      const classroom = this._config.school.classroom_students.find((entry) => entry.person_id === person.id);
+      const chore = choresEnabled ? this._config.chores.users.find((entry) => entry.person_id === person.id) : null;
       const choreState = chore ? states[chore.chores_entity] : null;
       const pointsState = chore ? states[chore.points_entity] : null;
-      const classroomState = classroom ? states[classroom.assignments_entity] : null;
-      const due = safeNumber(choreState?.attributes?.chore_stat_current_due_today, 0);
-      const assignments = classroomState?.attributes?.assignments || [];
-      const nextChore = chore?.status_entities
-        ?.map((entityId) => ({ entityId, state: states[entityId] }))
+      const choreStateAvailable = isEntityAvailable(choreState);
+      const pointsStateAvailable = isEntityAvailable(pointsState);
+      const due = choreStateAvailable
+        ? safeNumber(choreState?.attributes?.chore_stat_current_due_today, 0)
+        : NaN;
+      const choreStatuses = (chore?.status_entities || [])
+        .map((entityId) => ({ entityId, state: states[entityId] }));
+      const hasUnavailableChore = choreStatuses.some(({ state }) => !isEntityAvailable(state));
+      const nextChore = choreStatuses
+        .filter(({ state }) => isEntityAvailable(state))
         .find(({ state }) => !["approved", "completed", "completed_by_other"].includes(String(state?.state || "").toLowerCase()));
-      const nextChoreName = nextChore ? normaliseChoreStatus(nextChore.state, nextChore.entityId).name : "Routines complete";
+      const nextChoreName = nextChore ? normaliseChoreStatus(nextChore.state, nextChore.entityId).name : "Jobs complete";
+      const classroom = schoolEnabled
+        ? this._config.school.classroom_students.find((entry) => entry.person_id === person.id)
+        : null;
+      const classroomState = classroom ? states[classroom.assignments_entity] : null;
+      const classroomData = classroomAssignmentPresentation(classroomState);
+      const assignmentCount = classroomData.available ? classroomData.count : NaN;
+      const detail = choresEnabled
+        ? !chore
+          ? "ChoreOps not connected"
+          : !choreStateAvailable || !pointsStateAvailable
+            ? "ChoreOps unavailable"
+            : hasUnavailableChore
+              ? `${due} due · Job status incomplete`
+              : `${due} due · ${nextChoreName}`
+        : schoolEnabled
+          ? Number.isFinite(assignmentCount)
+            ? `${assignmentCount} open assignment${assignmentCount === 1 ? "" : "s"}${classroomData.stale ? " · Update delayed" : ""}`
+            : "Classroom unavailable"
+          : "Family overview";
       return `
         <button type="button" class="person-summary" data-view="family" style="--person-colour:${escapeHtml(person.colour)}">
           <span class="person-initial">${escapeHtml(person.name.slice(0, 1))}</span>
-          <span><strong>${escapeHtml(person.name)}</strong><small>${due} due · ${escapeHtml(nextChoreName)}</small></span>
-          <span class="points">${escapeHtml(formatPoints(pointsState?.state, this._config.product.locale))} pts</span>
+          <span><strong>${escapeHtml(person.name)}</strong><small>${escapeHtml(detail)}</small></span>
+          ${choresEnabled && chore ? `<span class="points">${pointsStateAvailable ? `${escapeHtml(formatPoints(pointsState.state, this._config.product.locale))} pts` : "— pts"}</span>` : ""}
         </button>
       `;
     }).join("");
@@ -1154,11 +2287,11 @@ export class FamilyHubCard extends HTMLElementBase {
       { id: "month", label: "Month", icon: "mdi:calendar-month" },
       { id: "agenda", label: "Agenda", icon: "mdi:format-list-bulleted" }
     ];
-    const modeButtons = modes.map((mode) => `<button type="button" class="segment ${mode.id === this._calendarMode ? "is-selected" : ""}" data-calendar-mode="${mode.id}"><ha-icon icon="${mode.icon}" aria-hidden="true"></ha-icon>${mode.label}</button>`).join("");
+    const modeButtons = modes.map((mode) => `<button type="button" class="segment ${mode.id === this._calendarMode ? "is-selected" : ""}" data-calendar-mode="${mode.id}" aria-pressed="${mode.id === this._calendarMode}"><ha-icon icon="${mode.icon}" aria-hidden="true"></ha-icon>${mode.label}</button>`).join("");
     return `
       <section class="single-surface surface calendar-view">
-        <div class="section-heading calendar-heading">
-          <div><p class="eyebrow">Read-only family calendar</p><h2>Everyone’s time, together</h2></div>
+        <div class="calendar-toolbar">
+          <div class="calendar-context"><ha-icon icon="mdi:calendar-heart" aria-hidden="true"></ha-icon><span><strong>Family schedule</strong><small>Read only</small></span></div>
           <div class="segments calendar-modes" role="group" aria-label="Choose calendar view">${modeButtons}</div>
         </div>
         <div id="calendar-card-slot" class="child-card-slot calendar-card-slot">${this._renderCalendarFallback()}</div>
@@ -1174,20 +2307,20 @@ export class FamilyHubCard extends HTMLElementBase {
     const columns = days.map((day) => {
       const dayEvents = events.filter((event) => dateKey(calendarEventStart(event), timeZone) === day.key);
       return `
-        <section class="agenda-day ${day.isToday ? "is-today" : ""}">
+        <section class="hub-agenda-day ${day.isToday ? "is-today" : ""}">
           <header><span>${escapeHtml(day.weekday)}</span><strong>${escapeHtml(day.day)}</strong><small>${escapeHtml(day.month)}</small></header>
-          <div class="agenda-events">
+          <div class="hub-agenda-events">
             ${dayEvents.slice(0, 5).map((event) => {
               const calendar = event._calendar || this._config.calendar.entities[0];
               return `
-                <article class="agenda-event" style="--calendar-colour:${escapeHtml(calendar.colour)}">
+                <article class="hub-agenda-event" style="--calendar-colour:${escapeHtml(calendar.colour)}">
                   <span class="event-time">${isAllDayCalendarEvent(event) ? "All day" : escapeHtml(formatTime(calendarEventStart(event), locale, timeZone))}</span>
                   <strong>${escapeHtml(event.summary || calendar.label)}</strong>
                   ${event.location ? `<small><ha-icon icon="mdi:map-marker-outline" aria-hidden="true"></ha-icon>${escapeHtml(event.location)}</small>` : ""}
                 </article>
               `;
-            }).join("") || '<p class="agenda-empty">Nothing planned</p>'}
-            ${dayEvents.length > 5 ? `<span class="agenda-more">+${dayEvents.length - 5} more</span>` : ""}
+            }).join("") || '<p class="hub-agenda-empty">Nothing planned</p>'}
+            ${dayEvents.length > 5 ? `<span class="hub-agenda-more">+${dayEvents.length - 5} more</span>` : ""}
           </div>
         </section>
       `;
@@ -1196,7 +2329,7 @@ export class FamilyHubCard extends HTMLElementBase {
       <div class="calendar-fallback" aria-label="Built-in calendar fallback">
         ${this._calendarLoading ? '<div class="calendar-loading"><span></span>Refreshing the family week…</div>' : ""}
         ${this._calendarError ? '<p class="calendar-warning">Daylight is unavailable, so this safe built-in agenda is being shown.</p>' : ""}
-        <div class="agenda-board">${columns}</div>
+        <div class="hub-agenda-board">${columns}</div>
       </div>
     `;
   }
@@ -1210,15 +2343,31 @@ export class FamilyHubCard extends HTMLElementBase {
       ...(this._config.features.cleaning ? [{ id: "cleaning", label: "Cleaning", icon: "mdi:robot-vacuum" }] : [])
     ];
     if (!sectionDefinitions.some((entry) => entry.id === this._homeSection)) this._homeSection = "rooms";
+    const summary = homeSummaryPresentation(this._config, this._hass?.states || {});
+    const cleaningState = titleCase(this._hass?.states?.[this._config.cleaning?.vacuum_entity]?.state || "unavailable");
+    const lightingUnavailable = summary.lightCount > 0 && summary.availableLights === 0;
+    const lightingPartial = summary.availableLights > 0 && summary.availableLights < summary.lightCount;
+    const heatingUnavailable = summary.heatingZones > 0 && summary.availableHeatingZones === 0;
+    const heatingPartial = summary.availableHeatingZones > 0 && summary.availableHeatingZones < summary.heatingZones;
+    const coversUnavailable = summary.coverCount > 0 && summary.availableCovers === 0;
+    const coversPartial = summary.availableCovers > 0 && summary.availableCovers < summary.coverCount;
+    const headings = {
+      rooms: ["Home overview", "The whole house, at a glance"],
+      lights: [lightingUnavailable ? "Lighting status unavailable" : lightingPartial ? "Lighting status incomplete" : summary.lightCount === 0 ? "No lights configured" : summary.roomsLit ? `${summary.roomsLit} of ${summary.lightingRooms} rooms lit` : "All lights are off", lightingPartial ? `${summary.availableLights} of ${summary.lightCount} lights reporting` : summary.lightCount === 0 ? "Add room lighting mappings" : "Lighting, room by room"],
+      heating: [heatingUnavailable ? "Heating status unavailable" : heatingPartial ? "Heating status incomplete" : summary.heatingZones ? `${summary.zonesHeating} of ${summary.heatingZones} zones heating` : "No heating zones configured", heatingPartial ? `${summary.availableHeatingZones} of ${summary.heatingZones} zones reporting` : summary.heatingZones ? "Comfort across every zone" : "Add room climate mappings"],
+      covers: [coversUnavailable ? "Cover status unavailable" : coversPartial ? "Cover status incomplete" : summary.coverCount === 0 ? "No blinds or doors configured" : summary.openCovers ? `${summary.openCovers} open` : "Everything closed", coversPartial ? `${summary.availableCovers} of ${summary.coverCount} blinds and doors reporting` : summary.coverCount === 0 ? "Add room cover mappings" : "Blinds and doors"],
+      cleaning: [cleaningState, "Whole-home cleaning"]
+    };
+    const [eyebrow, title] = headings[this._homeSection] || headings.rooms;
     const sectionButtons = sectionDefinitions.map((entry) => `
-      <button type="button" class="segment ${entry.id === this._homeSection ? "is-selected" : ""}" data-home-section="${entry.id}">
+      <button type="button" class="segment ${entry.id === this._homeSection ? "is-selected" : ""}" data-home-section="${entry.id}" aria-pressed="${entry.id === this._homeSection}">
         <ha-icon icon="${entry.icon}" aria-hidden="true"></ha-icon>${escapeHtml(entry.label)}
       </button>
     `).join("");
     return `
       <section class="home-surface">
         <div class="home-toolbar">
-          <div><p class="eyebrow">At a glance</p><h2>Your home, room by room</h2></div>
+          <div><p class="eyebrow">${escapeHtml(eyebrow)}</p><h2>${escapeHtml(title)}</h2></div>
           <div class="segments home-segments" role="group" aria-label="Choose Home section">${sectionButtons}</div>
         </div>
         <div class="home-section" data-home-section-current="${escapeHtml(this._homeSection)}">${this._renderHomeSection()}</div>
@@ -1237,23 +2386,41 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderRoomExplorer() {
+    const states = this._hass?.states || {};
     const floor = this._config.floorplan.floors.find((entry) => entry.id === this._floor) || this._config.floorplan.floors[0];
     const selectedRoom = this._config.rooms.find((room) => room.id === this._room)
       || this._config.rooms.find((room) => room.floor_id === floor.id)
       || this._config.rooms[0];
     const floorButtons = this._config.floorplan.floors.map((entry) => `
-      <button type="button" class="segment ${entry.id === floor.id ? "is-selected" : ""}" data-floor="${entry.id}">${escapeHtml(entry.name)}</button>
+      <button type="button" class="segment ${entry.id === floor.id ? "is-selected" : ""}" data-floor="${entry.id}" aria-pressed="${entry.id === floor.id}">${escapeHtml(entry.name)}</button>
     `).join("");
+    const summary = homeSummaryPresentation(this._config, states);
+    const energy = this._energyPresentation();
+    const energyCompact = energyCompactPresentation(energy);
+    const lightingCompact = homeLightingCompactPresentation(summary);
+    const heatingCompact = homeHeatingCompactPresentation(summary);
+    const lightingUnavailable = summary.lightCount > 0 && summary.availableLights === 0;
+    const lightingPartial = summary.availableLights > 0 && summary.availableLights < summary.lightCount;
+    const heatingUnavailable = summary.heatingZones > 0 && summary.availableHeatingZones === 0;
+    const heatingPartial = summary.availableHeatingZones > 0 && summary.availableHeatingZones < summary.heatingZones;
+    const summaryLinks = [
+      `<button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(lightingCompact.value)}</strong><small>${escapeHtml(lightingCompact.detail)}</small></span><ha-icon icon="mdi:chevron-right" aria-hidden="true"></ha-icon></button>`,
+      `<button type="button" data-home-target="heating"><ha-icon icon="mdi:radiator" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(heatingCompact.value)}</strong><small>${escapeHtml(heatingCompact.detail)}</small></span><ha-icon icon="mdi:chevron-right" aria-hidden="true"></ha-icon></button>`,
+      ...(energyCompact ? [`<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(energyCompact.value)}</strong><small>${escapeHtml(energyCompact.detail)}</small></span><ha-icon icon="mdi:chevron-right" aria-hidden="true"></ha-icon></button>`] : [])
+    ].join("");
     return `
-      <section class="rooms-layout">
-        <article class="surface floorplan-panel">
-          <div class="section-heading floorplan-heading">
-            <div><p class="eyebrow">${escapeHtml(floor.name)}</p><h2>${this._config.display.read_only ? "Choose a room to explore" : "Choose a room"}</h2></div>
-            <div class="segments" role="group" aria-label="Choose floor">${floorButtons}</div>
-          </div>
-          ${this._renderFloorplan(floor, selectedRoom)}
-        </article>
-        <aside class="surface room-detail home-drawer" aria-label="Selected room controls">${this._renderRoomDetail(selectedRoom)}</aside>
+      <section class="home-overview">
+        <div class="home-summary-links" data-summary-count="${energy ? 3 : 2}" aria-label="Home summaries">${summaryLinks}</div>
+        <section class="rooms-layout">
+          <article class="surface floorplan-panel">
+            <div class="section-heading floorplan-heading">
+              <div><p class="eyebrow">${escapeHtml(floor.name)}</p><h2>${this._config.display.read_only ? "Choose a room to explore" : "Choose a room"}</h2></div>
+              <div class="segments" role="group" aria-label="Choose floor">${floorButtons}</div>
+            </div>
+            ${this._renderFloorplan(floor, selectedRoom)}
+          </article>
+          <aside class="surface room-detail home-drawer" aria-label="Selected room controls">${this._renderRoomDetail(selectedRoom)}</aside>
+        </section>
       </section>
     `;
   }
@@ -1261,19 +2428,31 @@ export class FamilyHubCard extends HTMLElementBase {
   _renderAllLights() {
     const states = this._hass?.states || {};
     const readOnly = this._config.display.read_only === true;
-    const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
     const rooms = this._config.rooms.filter((room) => room.lights.length).map((room) => {
       const lightStates = room.lights.map((entityId) => states[entityId]);
       const onCount = lightStates.filter((state) => state?.state === "on").length;
+      const availableCount = lightStates.filter(isEntityAvailable).length;
       const controls = room.lights.map((entityId) => {
         const state = states[entityId];
+        const available = isEntityAvailable(state);
         const isOn = state?.state === "on";
-        const brightness = isOn ? `${Math.round(safeNumber(state?.attributes?.brightness, 255) / 2.55)}%` : titleCase(state?.state || "off");
-        return `<button type="button" class="whole-home-control ${isOn ? "is-on" : ""}" data-toggle="${escapeHtml(entityId)}"${disabled}><ha-icon icon="${ICONS.light}"></ha-icon><span><strong>${escapeHtml(entityName(state, titleCase(entityId.split(".")[1])))}</strong><small>${escapeHtml(brightness)}</small></span></button>`;
+        const name = entityName(state, titleCase(entityId.split(".")[1]));
+        const reportedBrightness = safeNumber(state?.attributes?.brightness, NaN);
+        const brightness = isOn
+          ? Number.isFinite(reportedBrightness) ? `${Math.round(reportedBrightness / 2.55)}%` : "On"
+          : titleCase(state?.state || "unavailable");
+        const unavailable = readOnly || !available ? ' disabled aria-disabled="true"' : "";
+        const actionLabel = available ? `Turn ${name} ${isOn ? "off" : "on"}` : `${name} unavailable`;
+        return `<button type="button" class="whole-home-control ${isOn ? "is-on" : ""}" data-toggle="${escapeHtml(entityId)}" aria-label="${escapeHtml(actionLabel)}" aria-pressed="${isOn}"${unavailable}><ha-icon icon="${ICONS.light}" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(brightness)}</small></span></button>`;
       }).join("");
-      return `<article class="surface whole-home-card"><div class="whole-home-heading"><span><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><h3>${escapeHtml(room.name)}</h3><p>${onCount} of ${room.lights.length} on</p></div></div><div class="whole-home-controls">${controls}</div></article>`;
+      const status = availableCount === 0
+        ? "Status unavailable"
+        : availableCount < room.lights.length
+          ? `${onCount} on · ${availableCount} of ${room.lights.length} reporting`
+          : `${onCount} of ${room.lights.length} on`;
+      return `<article class="surface whole-home-card"><div class="whole-home-heading"><span><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><h3>${escapeHtml(room.name)}</h3><p>${status}</p></div></div><div class="whole-home-controls">${controls}</div></article>`;
     }).join("");
-    return `<div class="whole-home-grid">${rooms || '<p class="empty-state">No room lights are available yet.</p>'}</div>`;
+    return `<div class="whole-home-grid">${rooms || '<p class="hub-empty-state">No room lights are available yet.</p>'}</div>`;
   }
 
   _renderAllHeating() {
@@ -1283,7 +2462,9 @@ export class FamilyHubCard extends HTMLElementBase {
     const zones = heatingRooms.map((room) => {
       const state = states[room.climate];
       const current = roomTemperature(room, states);
-      const target = safeNumber(state?.attributes?.temperature, NaN);
+      const target = isEntityAvailable(state)
+        ? safeNumber(state?.attributes?.temperature, NaN)
+        : NaN;
       const presentation = heatingPresentation(state);
       const targetLabel = formatTemperature(target);
       const powerService = presentation.isOn ? "turn_off" : "turn_on";
@@ -1317,21 +2498,26 @@ export class FamilyHubCard extends HTMLElementBase {
         </article>
       `;
     }).join("");
-    return `<div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="empty-state">No heating controls are available yet.</p>'}</div>`;
+    return `<div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="hub-empty-state">No heating controls are available yet.</p>'}</div>`;
   }
 
   _renderAllCovers() {
     const states = this._hass?.states || {};
     const readOnly = this._config.display.read_only === true;
-    const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
-    const covers = this._config.rooms.flatMap((room) => room.covers.map((entityId) => ({ room, entityId })));
+    const secureCover = this._controlPolicy.secureCover;
+    const covers = this._config.rooms.flatMap((room) => room.covers
+      .filter((entityId) => entityId !== secureCover)
+      .map((entityId) => ({ room, entityId })));
     const cards = covers.map(({ room, entityId }) => {
       const state = states[entityId];
+      const available = isEntityAvailable(state);
+      const name = entityName(state, "Blind");
+      const disabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
       const position = safeNumber(state?.attributes?.current_position, NaN);
       return `
         <article class="surface cover-card">
-          <div class="cover-card-heading"><span><ha-icon icon="${ICONS.cover}"></ha-icon></span><div><h3>${escapeHtml(entityName(state, "Blind"))}</h3><p>${escapeHtml(room.name)} · ${escapeHtml(titleCase(state?.state || "unavailable"))}${Number.isFinite(position) ? ` · ${position}%` : ""}</p></div></div>
-          <div class="cover-actions"><button type="button" data-cover-action="open_cover" data-entity="${escapeHtml(entityId)}" aria-label="Open"${disabled}><ha-icon icon="mdi:arrow-up"></ha-icon>Open</button><button type="button" data-cover-action="stop_cover" data-entity="${escapeHtml(entityId)}" aria-label="Stop"${disabled}><ha-icon icon="mdi:stop"></ha-icon>Stop</button><button type="button" data-cover-action="close_cover" data-entity="${escapeHtml(entityId)}" aria-label="Close"${disabled}><ha-icon icon="mdi:arrow-down"></ha-icon>Close</button></div>
+          <div class="cover-card-heading"><span><ha-icon icon="${ICONS.cover}"></ha-icon></span><div><h3>${escapeHtml(name)}</h3><p>${escapeHtml(room.name)} · ${escapeHtml(titleCase(state?.state || "unavailable"))}${Number.isFinite(position) ? ` · ${position}%` : ""}</p></div></div>
+          <div class="cover-actions"><button type="button" data-cover-action="open_cover" data-entity="${escapeHtml(entityId)}" aria-label="Open ${escapeHtml(name)}"${disabled}><ha-icon icon="mdi:arrow-up"></ha-icon>Open</button><button type="button" data-cover-action="stop_cover" data-entity="${escapeHtml(entityId)}" aria-label="Stop ${escapeHtml(name)}"${disabled}><ha-icon icon="mdi:stop"></ha-icon>Stop</button><button type="button" data-cover-action="close_cover" data-entity="${escapeHtml(entityId)}" aria-label="Close ${escapeHtml(name)}"${disabled}><ha-icon icon="mdi:arrow-down"></ha-icon>Close</button></div>
         </article>
       `;
     }).join("");
@@ -1342,7 +2528,7 @@ export class FamilyHubCard extends HTMLElementBase {
         <div class="cover-actions is-single"><button type="button" data-view="entry"><ha-icon icon="mdi:shield-home-outline"></ha-icon>Open Security</button></div>
       </article>
     ` : "";
-    return `<div class="cover-grid">${cards}${garageCard || (!cards ? '<p class="empty-state">No blinds or door controls are available yet.</p>' : "")}</div>`;
+    return `<div class="cover-grid">${cards}${garageCard || (!cards ? '<p class="hub-empty-state">No blinds or door controls are available yet.</p>' : "")}</div>`;
   }
 
   _renderCleaning() {
@@ -1350,7 +2536,8 @@ export class FamilyHubCard extends HTMLElementBase {
     const config = this._config.cleaning;
     const vacuum = states[config.vacuum_entity];
     const readOnly = this._config.display.read_only === true;
-    const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
+    const available = isEntityAvailable(vacuum);
+    const disabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
     const battery = config.battery_entity ? states[config.battery_entity]?.state : vacuum?.attributes?.battery_level;
     const task = config.task_entity ? states[config.task_entity]?.state : vacuum?.state;
     const dock = config.dock_entity ? states[config.dock_entity]?.state : null;
@@ -1385,8 +2572,15 @@ export class FamilyHubCard extends HTMLElementBase {
       if (!room) return "";
       const summary = deriveRoomState(room, states, this._config.theme.accent);
       const points = hotspot.points.map(([x, y]) => `${x},${(y * viewHeight / 100).toFixed(4)}`).join(" ");
+      const lightStatus = summary.totalLights === 0
+        ? null
+        : summary.availableLights === 0
+          ? "Lighting unavailable"
+          : summary.availableLights < summary.totalLights
+            ? `${summary.lightsOn} on · ${summary.availableLights} of ${summary.totalLights} lights reporting`
+            : `${summary.lightsOn}/${summary.totalLights} lights`;
       const status = [
-        summary.totalLights ? `${summary.lightsOn}/${summary.totalLights} lights` : null,
+        lightStatus,
         Number.isFinite(summary.temperature) ? formatTemperature(summary.temperature) : null
       ].filter(Boolean).join(" · ") || "Open room";
       return `
@@ -1409,59 +2603,95 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderRoomDetail(room) {
-    if (!room) return '<p class="empty-state">Choose a room.</p>';
+    if (!room) return '<p class="hub-empty-state">Choose a room.</p>';
     const states = this._hass?.states || {};
     const summary = deriveRoomState(room, states, this._config.theme.accent);
     const readOnly = this._config.display.read_only === true;
     const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
     const lights = room.lights.map((entityId) => {
       const state = states[entityId];
+      const available = isEntityAvailable(state);
       const isOn = state?.state === "on";
+      const name = entityName(state, entityId.split(".")[1]);
+      const reportedBrightness = safeNumber(state?.attributes?.brightness, NaN);
+      const lightDetail = isOn
+        ? Number.isFinite(reportedBrightness) ? `${Math.round(reportedBrightness / 2.55)}%` : "On"
+        : titleCase(state?.state || "unavailable");
+      const toggleDisabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
+      const actionLabel = available ? `Turn ${name} ${isOn ? "off" : "on"}` : `${name} unavailable`;
       return `
         <div class="control-row">
-          <button type="button" class="control-main ${isOn ? "is-on" : ""}" data-toggle="${escapeHtml(entityId)}"${disabled}>
-            <ha-icon icon="${ICONS.light}" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(entityName(state, entityId.split(".")[1]))}</strong><small>${isOn ? `${Math.round(safeNumber(state.attributes?.brightness, 255) / 2.55)}%` : titleCase(state?.state || "unavailable")}</small></span>
+          <button type="button" class="control-main ${isOn ? "is-on" : ""}" data-toggle="${escapeHtml(entityId)}" aria-label="${escapeHtml(actionLabel)}" aria-pressed="${isOn}"${toggleDisabled}>
+            <ha-icon icon="${ICONS.light}" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(lightDetail)}</small></span>
           </button>
           <button type="button" class="icon-action" data-more-info="${escapeHtml(entityId)}" aria-label="Open light details"${disabled}><ha-icon icon="mdi:tune"></ha-icon></button>
         </div>
       `;
     }).join("");
     const climate = room.climate ? states[room.climate] : null;
+    const climateAvailable = isEntityAvailable(climate) && Number.isFinite(summary.targetTemperature);
+    const climateDisabled = readOnly || !climateAvailable ? ' disabled aria-disabled="true"' : "";
     const climateControl = room.climate ? `
       <div class="climate-control">
         <div><span>Temperature</span><strong>${formatTemperature(summary.temperature)}</strong><small>Target ${formatTemperature(summary.targetTemperature)}</small></div>
         <div class="stepper">
-          <button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower target temperature"${disabled}>−</button>
-          <button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Raise target temperature"${disabled}>+</button>
+          <button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="${climateAvailable ? "Lower target temperature" : "Temperature control unavailable"}"${climateDisabled}>−</button>
+          <button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="${climateAvailable ? "Raise target temperature" : "Temperature control unavailable"}"${climateDisabled}>+</button>
         </div>
       </div>
     ` : "";
-    const covers = room.covers.map((entityId) => {
+    const covers = room.covers.flatMap((entityId) => {
       const state = states[entityId];
-      return `
-        <div class="cover-control"><span><ha-icon icon="${ICONS.cover}"></ha-icon><strong>${escapeHtml(entityName(state, "Blind"))}</strong><small>${escapeHtml(titleCase(state?.state || "unavailable"))}</small></span><div>
-          <button type="button" data-cover-action="open_cover" data-entity="${escapeHtml(entityId)}" aria-label="Open"${disabled}><ha-icon icon="mdi:arrow-up"></ha-icon></button>
-          <button type="button" data-cover-action="stop_cover" data-entity="${escapeHtml(entityId)}" aria-label="Stop"${disabled}><ha-icon icon="mdi:stop"></ha-icon></button>
-          <button type="button" data-cover-action="close_cover" data-entity="${escapeHtml(entityId)}" aria-label="Close"${disabled}><ha-icon icon="mdi:arrow-down"></ha-icon></button>
+      const available = isEntityAvailable(state);
+      const name = entityName(state, entityId === this._controlPolicy.secureCover ? "Garage door" : "Blind");
+      if (entityId === this._controlPolicy.secureCover) {
+        return this._config.features.entry ? [`
+          <div class="cover-control is-protected"><span><ha-icon icon="mdi:garage-variant" aria-hidden="true"></ha-icon><strong>${escapeHtml(name)}</strong><small>${escapeHtml(titleCase(state?.state || "unavailable"))} · protected action</small></span><div>
+            <button type="button" data-view="entry" aria-label="Open Security for ${escapeHtml(name)}"><ha-icon icon="mdi:shield-home-outline" aria-hidden="true"></ha-icon></button>
+          </div></div>
+        `] : [];
+      }
+      const coverDisabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
+      return [`
+        <div class="cover-control"><span><ha-icon icon="${ICONS.cover}" aria-hidden="true"></ha-icon><strong>${escapeHtml(name)}</strong><small>${escapeHtml(titleCase(state?.state || "unavailable"))}</small></span><div>
+          <button type="button" data-cover-action="open_cover" data-entity="${escapeHtml(entityId)}" aria-label="Open ${escapeHtml(name)}"${coverDisabled}><ha-icon icon="mdi:arrow-up" aria-hidden="true"></ha-icon></button>
+          <button type="button" data-cover-action="stop_cover" data-entity="${escapeHtml(entityId)}" aria-label="Stop ${escapeHtml(name)}"${coverDisabled}><ha-icon icon="mdi:stop" aria-hidden="true"></ha-icon></button>
+          <button type="button" data-cover-action="close_cover" data-entity="${escapeHtml(entityId)}" aria-label="Close ${escapeHtml(name)}"${coverDisabled}><ha-icon icon="mdi:arrow-down" aria-hidden="true"></ha-icon></button>
         </div></div>
-      `;
+      `];
     }).join("");
-    const scenes = room.scenes.map((entityId) => `
-      <button type="button" class="scene-button" data-scene="${escapeHtml(entityId)}"${disabled}><ha-icon icon="${ICONS.scene}"></ha-icon>${escapeHtml(entityName(states[entityId], titleCase(entityId.split(".")[1])))}</button>
-    `).join("");
-    const media = room.media_players.map((entityId) => {
+    const scenes = room.scenes.map((entityId) => {
       const state = states[entityId];
+      const available = isEntityAvailable(state);
+      const sceneDisabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
+      const name = entityName(state, titleCase(entityId.split(".")[1]));
+      return `<button type="button" class="scene-button" data-scene="${escapeHtml(entityId)}" aria-label="${escapeHtml(available ? `Activate ${name}` : `${name} unavailable`)}"${sceneDisabled}><ha-icon icon="${ICONS.scene}"></ha-icon>${escapeHtml(name)}</button>`;
+    }).join("");
+    const media = (this._config.features.music ? room.media_players : []).map((entityId) => {
+      const state = states[entityId];
+      const available = isEntityAvailable(state);
+      const playing = state?.state === "playing";
+      const name = entityName(state, "Speaker");
+      const mediaDisabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
+      const actionLabel = available ? `${playing ? "Pause" : "Play"} ${name}` : `${name} unavailable`;
       return `
-        <button type="button" class="media-room-control" data-media-toggle="${escapeHtml(entityId)}"${disabled}><ha-icon icon="${state?.state === "playing" ? "mdi:pause-circle" : "mdi:play-circle"}"></ha-icon><span><strong>${escapeHtml(entityName(state, "Speaker"))}</strong><small>${escapeHtml(state?.attributes?.media_title || titleCase(state?.state || "idle"))}</small></span></button>
+        <button type="button" class="media-room-control" data-media-toggle="${escapeHtml(entityId)}" aria-label="${escapeHtml(actionLabel)}" aria-pressed="${playing}"${mediaDisabled}><ha-icon icon="${playing ? "mdi:pause-circle" : "mdi:play-circle"}" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(state?.attributes?.media_title || titleCase(state?.state || "unavailable"))}</small></span></button>
       `;
     }).join("");
+    const lightStatus = summary.totalLights === 0
+      ? "No lights"
+      : summary.availableLights === 0
+        ? "Lighting unavailable"
+        : summary.availableLights < summary.totalLights
+          ? `${summary.lightsOn} on · ${summary.availableLights} of ${summary.totalLights} lights reporting`
+          : `${summary.lightsOn} light${summary.lightsOn === 1 ? "" : "s"} on`;
     return `
-      <div class="room-title"><span class="room-icon"><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><p class="eyebrow">${readOnly ? "Read-only room" : "Room controls"}</p><h2>${escapeHtml(room.name)}</h2><p>${summary.lightsOn} light${summary.lightsOn === 1 ? "" : "s"} on${Number.isFinite(summary.temperature) ? ` · ${formatTemperature(summary.temperature)}` : ""}</p></div></div>
+      <div class="room-title"><span class="room-icon"><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><p class="eyebrow">${readOnly ? "Read-only room" : "Room controls"}</p><h2>${escapeHtml(room.name)}</h2><p>${escapeHtml(lightStatus)}${Number.isFinite(summary.temperature) ? ` · ${formatTemperature(summary.temperature)}` : ""}</p></div></div>
       ${readOnly ? '<p class="read-only-note"><ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon>Controls are disabled while this version is being checked.</p>' : ""}
       <div class="room-control-list">${climateControl}${lights}${covers}</div>
       ${scenes ? `<div class="scene-list"><p class="eyebrow">Scenes</p>${scenes}</div>` : ""}
       ${media ? `<div class="room-media"><p class="eyebrow">Music</p>${media}</div>` : ""}
-      ${!climate && !lights && !covers && !scenes && !media ? '<p class="empty-state">No controls are available for this room yet.</p>' : ""}
+      ${!climate && !lights && !covers && !scenes && !media ? '<p class="hub-empty-state">No controls are available for this room yet.</p>' : ""}
     `;
   }
 
@@ -1526,7 +2756,8 @@ export class FamilyHubCard extends HTMLElementBase {
       const isBuffering = session?.phase === "buffering";
       const isViewing = session?.phase === "viewing";
       const isStopping = session?.phase === "stopping";
-      const isWaiting = !session && (cameraOperationPending || hasBlockedCamera);
+      const retryBlockedCamera = this._canRetryBlockedCamera(camera.id);
+      const isWaiting = !session && (cameraOperationPending || hasBlockedCamera && !retryBlockedCamera);
       const cameraError = this._cameraError?.id === camera.id ? this._cameraError.message : "";
       const cameraReady = ["idle", "preparing", "streaming"].includes(phase);
       const readOnlyStartBlocked = readOnly && cameraAvailable && cameraReady && phase !== "streaming";
@@ -1534,7 +2765,7 @@ export class FamilyHubCard extends HTMLElementBase {
         && cameraReady
         && !session
         && !cameraOperationPending
-        && !hasBlockedCamera
+        && (!hasBlockedCamera || retryBlockedCamera)
         && (!readOnly || phase === "streaming");
       const hasMountedStream = (isBuffering || isViewing) && phase === "streaming" && cameraAvailable;
       const cameraStatus = cameraError
@@ -1630,14 +2861,19 @@ export class FamilyHubCard extends HTMLElementBase {
               : "mdi:camera-off-outline";
       return `
         <article class="surface security-camera ${item.camera.id === selected?.camera.id ? "is-selected" : ""}">
-          <div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(item.camera.role))}</p><h2>${escapeHtml(item.camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${item.badgeIcon}"></ha-icon>${item.badgeLabel}</span></div>
-          ${item.signals ? `<div class="security-signals">${item.signals}</div>` : ""}
-          <button type="button" class="camera-select-action" data-camera-open="${escapeHtml(item.camera.id)}" aria-label="${actionLabel}" ${item.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="${actionIcon}"></ha-icon>${actionText}</button>
+          <div class="camera-tile-media">
+            <div id="camera-poster-tile-${escapeHtml(item.camera.id)}" class="camera-poster-slot camera-tile-poster"><span class="camera-poster-fallback"><ha-icon icon="${item.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon>Still unavailable</span></div>
+            <button type="button" class="camera-poster-action" data-camera-open="${escapeHtml(item.camera.id)}" aria-label="${actionLabel}" ${item.canOpen ? "" : 'disabled aria-disabled="true"'}><span><ha-icon icon="${actionIcon}"></ha-icon>${actionText}</span></button>
+          </div>
+          <div class="camera-tile-details">
+            <div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(item.camera.role))}</p><h2>${escapeHtml(item.camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${item.badgeIcon}"></ha-icon>${item.badgeLabel}</span></div>
+            ${item.signals ? `<div class="security-signals">${item.signals}</div>` : ""}
+          </div>
         </article>
       `;
     }).join("");
     const bufferingMessage = selected?.session?.slow
-      ? "Still loading—this camera can take around 20 seconds."
+      ? "Still loading—this camera is taking longer than usual. Keep this screen open."
       : "The secure stream is ready; waiting for the first picture.";
     const stageActionText = selected?.cameraError
       ? selected.canOpen ? "Retry" : "Unavailable"
@@ -1664,15 +2900,46 @@ export class FamilyHubCard extends HTMLElementBase {
     const stageActionIcon = selected?.readOnlyStartBlocked
       ? "mdi:lock-outline"
       : selected?.canOpen ? "mdi:play" : "mdi:camera-off-outline";
-    const selectedStream = selected?.hasMountedStream
-      ? `<div class="camera-stream ${selected.isBuffering ? "is-buffering" : "is-live"}" data-camera-phase="${selected.isBuffering ? "buffering" : "viewing"}"><slot id="camera-card-slot-${escapeHtml(selected.camera.id)}" name="camera-${escapeHtml(selected.camera.id)}" class="child-card-slot camera-card-slot"></slot>${selected.isBuffering ? `<div class="camera-stream-overlay camera-is-buffering" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="mdi:loading"></ha-icon><div><strong>Loading video…</strong><small>${escapeHtml(bufferingMessage)}</small></div></div>` : '<span class="camera-live-indicator" role="status"><span></span>Live</span>'}<button type="button" class="camera-close" data-camera-close="${escapeHtml(selected.camera.id)}"><ha-icon icon="mdi:close"></ha-icon>${selected.isBuffering ? "Cancel" : "Close live view"}</button></div>`
-      : selected?.isStarting
-        ? `<div class="camera-idle camera-is-starting" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:loading"></ha-icon></span><div><strong>Waking camera…</strong><small>${escapeHtml(selected.camera.name)} secure video will appear here when it is ready.</small></div><button type="button" data-camera-close="${escapeHtml(selected.camera.id)}"><ha-icon icon="mdi:close"></ha-icon>Cancel</button></div>`
+    const stageStatus = selected?.isStarting
+      ? { title: "Waking camera…", detail: `The latest ${selected.camera.name} still remains visible while the secure stream starts.`, icon: "mdi:loading" }
+      : selected?.isBuffering
+        ? { title: selected.session?.viewerRecoveryAttempted ? "Reconnecting video…" : "Loading video…", detail: bufferingMessage, icon: "mdi:loading" }
         : selected?.isStopping
-          ? `<div class="camera-idle camera-is-stopping" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:loading"></ha-icon></span><div><strong>Stopping live view…</strong><small>Closing the secure stream before another camera can open.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
+          ? { title: "Stopping live view…", detail: "Closing the secure stream before another camera can open.", icon: "mdi:loading" }
           : selected?.isWaiting
-            ? `<div class="camera-idle camera-is-waiting" role="status" aria-live="polite" aria-busy="true"><span class="camera-stage-icon"><ha-icon icon="mdi:shield-clock-outline"></ha-icon></span><div><strong>Waiting for camera…</strong><small>The previous secure stream must become idle before another camera can open.</small></div><button type="button" disabled aria-disabled="true"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Please wait</button></div>`
-          : `<div class="camera-idle security-stage-poster" ${selected?.cameraError || (selected?.camera?.entity_id && !selected?.cameraAvailable) ? 'role="alert"' : ""}><span class="camera-stage-icon"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon></span><div><strong>${selected?.cameraError ? "Live view unavailable" : !selected?.camera?.entity_id ? "Signals only" : !selected?.cameraAvailable ? "Camera unavailable" : !selected?.cameraReady ? "Camera not ready" : selected?.readOnlyStartBlocked ? "Stream off" : `${escapeHtml(selected?.camera.name || "Camera")} is ready`}</strong><small>${selected?.cameraError ? escapeHtml(selected.cameraError) : !selected?.camera?.entity_id ? "Live video is not configured for this entry camera." : selected?.cameraAvailable ? selected?.cameraReady ? selected?.readOnlyStartBlocked ? "Read-only mode will not start this camera." : "Video stays off until you choose View live." : "Live view cannot start while the camera is in its current state." : "This camera is currently unavailable."}</small></div><button type="button" data-camera-stage-open="${escapeHtml(selected?.camera.id || "")}" aria-label="${stageActionLabel}" ${selected?.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="${stageActionIcon}"></ha-icon>${stageActionText}</button></div>`;
+            ? { title: "Waiting for camera…", detail: "The previous secure stream must become idle before another camera can open.", icon: "mdi:shield-clock-outline" }
+            : null;
+    const idleStageTitle = selected?.cameraError
+      ? "Live view unavailable"
+      : !selected?.camera?.entity_id
+        ? "Signals only"
+        : !selected?.cameraAvailable
+          ? "Camera unavailable"
+          : !selected?.cameraReady
+            ? "Camera not ready"
+            : selected?.readOnlyStartBlocked
+              ? "Stream off"
+              : "Tap the picture for live video";
+    const idleStageDetail = selected?.cameraError
+      ? selected.cameraError
+      : !selected?.camera?.entity_id
+        ? "Live video is not configured for this entry camera."
+        : selected?.cameraAvailable
+          ? selected?.cameraReady
+            ? selected?.readOnlyStartBlocked
+              ? "Read-only mode will not start this camera."
+              : "This is the latest available still; live video starts only when you tap."
+            : "Live view cannot start while the camera is in its current state."
+          : "This camera is currently unavailable.";
+    const selectedStream = `
+      <div class="camera-stage-stack ${selected?.isViewing ? "is-live" : "is-poster"} ${!selected?.session ? "security-stage-poster" : ""}" data-camera-phase="${escapeHtml(selected?.session?.phase || "idle")}" ${!selected?.session && selected?.cameraError ? 'role="alert"' : ""}>
+        <div id="camera-poster-stage-${escapeHtml(selected?.camera.id || "")}" class="camera-poster-slot camera-stage-poster-slot"><span class="camera-poster-fallback"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon>Latest still unavailable</span></div>
+        ${selected?.hasMountedStream ? `<slot id="camera-card-slot-${escapeHtml(selected.camera.id)}" name="camera-${escapeHtml(selected.camera.id)}" class="child-card-slot camera-card-slot"></slot>` : ""}
+        ${selected?.isViewing ? '<span class="camera-live-indicator" role="status"><span></span>Live</span>' : ""}
+        ${stageStatus ? `<div class="camera-stream-overlay camera-is-${escapeHtml(selected.session?.phase || "waiting")}" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="${stageStatus.icon}"></ha-icon><div><strong>${escapeHtml(stageStatus.title)}</strong><small>${escapeHtml(stageStatus.detail)}</small></div></div>` : ""}
+        ${!selected?.session && !selected?.isWaiting ? `<button type="button" class="camera-stage-action" data-camera-stage-open="${escapeHtml(selected?.camera.id || "")}" aria-label="${stageActionLabel}" ${selected?.canOpen ? "" : 'disabled aria-disabled="true"'}><span><strong>${escapeHtml(idleStageTitle)}</strong><small>${escapeHtml(idleStageDetail)}</small></span><b><ha-icon icon="${stageActionIcon}"></ha-icon>${stageActionText}</b></button>` : ""}
+        ${selected?.session && !selected?.isStopping ? `<button type="button" class="camera-close" data-camera-close="${escapeHtml(selected.camera.id)}"><ha-icon icon="mdi:close"></ha-icon>${selected.isViewing ? "Close live view" : "Cancel"}</button>` : ""}
+      </div>`;
     return `
       <section class="security-layout">
         <div class="security-main"${confirmationGuard}>
@@ -1693,7 +2960,7 @@ export class FamilyHubCard extends HTMLElementBase {
             ${garageMotion ? `<p class="garage-motion ${garageMotion.active ? "is-active" : ""} ${garageMotion.available ? "" : "is-unavailable"}"><ha-icon icon="mdi:motion-sensor"></ha-icon>${garageMotion.available ? garageMotion.active ? "Motion detected" : "No motion detected" : "Motion unavailable"}</p>` : ""}
             <button type="button" class="garage-action"${garageActionAttributes}${garageDisabled}><ha-icon icon="${garageAction === "open_cover" ? "mdi:garage-open-variant" : garageAction === "close_cover" ? "mdi:garage-alert-variant" : "mdi:garage-clock"}"></ha-icon>${garageButtonLabel}</button>
           </article>
-          <p class="security-privacy-note"><ha-icon icon="mdi:shield-account-outline"></ha-icon>Entry cameras only. The viewer opens only when you choose it. Streams started here stop when you close the view or leave Security.</p>
+          <p class="security-privacy-note"><ha-icon icon="mdi:shield-account-outline"></ha-icon>Entry cameras only. The viewer opens only when you choose it. A stream started here stops when you close the view, leave Security or after two minutes.</p>
         </aside>
         ${this._renderConfirmation()}
       </section>
@@ -1717,18 +2984,13 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _renderFamily() {
     const locationEnabled = this._config.features.location_map;
+    const choresEnabled = this._config.features.chores === true;
+    const familyTitle = choresEnabled ? "Jobs & rewards" : this._config.features.school ? "School" : "Family overview";
     const children = this._config.people.filter((person) => person.role === "child");
-    const states = this._hass?.states || {};
-    const allChoreStates = this._config.chores.users.flatMap((user) => (user.status_entities || []).map((entityId) => states[entityId]));
-    const completed = allChoreStates.filter((state) => ["approved", "completed", "completed_by_other"].includes(String(state?.state || "").toLowerCase())).length;
-    const due = this._config.chores.users.reduce((total, user) => total + safeNumber(states[user.chores_entity]?.attributes?.chore_stat_current_due_today, 0), 0);
     if (!locationEnabled) {
       return `
         <section class="family-dashboard">
-          <article class="surface family-rhythm">
-            <div><p class="eyebrow">Today together</p><h2>Small routines, visible progress</h2><p>Chores, points and school work stay together without sharing anyone’s location.</p><span class="location-off-badge"><ha-icon icon="mdi:map-marker-off-outline" aria-hidden="true"></ha-icon>Location sharing off</span></div>
-            <div class="rhythm-stats"><span><strong>${due}</strong> due today</span><span><strong>${completed}</strong> completed</span><span><strong>${allChoreStates.length}</strong> routines</span></div>
-          </article>
+          <header class="family-dashboard-heading"><div><p class="eyebrow">Family</p><h2>${familyTitle}</h2></div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
           <div class="family-people-grid">${children.map((person) => this._renderFamilyPerson(person)).join("")}</div>
         </section>
       `;
@@ -1737,32 +2999,100 @@ export class FamilyHubCard extends HTMLElementBase {
       <section class="family-layout">
         <article class="surface map-panel">
           <div class="section-heading"><div><p class="eyebrow">${locationEnabled ? "Family map" : "Family overview"}</p><h2>${locationEnabled ? "Presence & location" : "Private family summary"}</h2></div><span>${locationEnabled ? "Private to Home Assistant" : "Location sharing off"}</span></div>
-          ${locationEnabled ? '<div id="map-card-slot" class="child-card-slot map-slot"></div>' : '<p class="empty-state">Location sharing is disabled.</p>'}
+          ${locationEnabled ? '<div id="map-card-slot" class="child-card-slot map-slot"></div>' : '<p class="hub-empty-state">Location sharing is disabled.</p>'}
         </article>
-        <aside class="family-sidebar" aria-label="Family routines">
-          <div class="family-scroll-cue"><strong>Family routines</strong><span><ha-icon icon="mdi:swap-vertical" aria-hidden="true"></ha-icon>Swipe for everyone</span></div>
+        <aside class="family-sidebar" aria-label="${choresEnabled ? "Family jobs and rewards" : "Family details"}">
+          <div class="family-scroll-cue"><strong>${familyTitle}</strong><span><ha-icon icon="mdi:swap-vertical" aria-hidden="true"></ha-icon>Swipe for everyone</span></div>
+          ${choresEnabled ? this._renderChoreOpsLink("family-sidebar-link") : ""}
           ${children.map((person) => this._renderFamilyPerson(person)).join("")}
         </aside>
       </section>
     `;
   }
 
+  _renderChoreOpsLink(extraClass = "") {
+    if (this._config.display.read_only || !this._config.features.chores) return "";
+    const path = safeInternalDashboardPath(this._config.chores?.dashboard_path);
+    if (!path) return "";
+    return `<a class="choreops-link ${extraClass}" href="${escapeHtml(path)}" data-choreops-link="native"><ha-icon icon="mdi:arrow-right" aria-hidden="true"></ha-icon>Open ChoreOps</a>`;
+  }
+
+  _renderChoreOpsSummary(chore) {
+    if (!chore) return "";
+    const states = this._hass?.states || {};
+    const firstSummary = (entityIds, kind) => {
+      const entityId = entityIds?.[0];
+      return entityId ? normaliseChoreOpsSummary(states[entityId], entityId, kind) : null;
+    };
+    const items = [
+      firstSummary(chore.reward_status_entities, "reward"),
+      firstSummary(chore.badge_progress_entities, "badge"),
+      firstSummary(chore.achievement_progress_entities, "achievement")
+    ].filter(Boolean);
+    if (!items.length) return "";
+    const labels = { reward: "Reward", badge: "Badge", achievement: "Achievement" };
+    const rows = items.map((item) => `
+      <div class="family-summary-item is-${escapeHtml(item.tone)}">
+        <span><ha-icon icon="${escapeHtml(item.icon)}" aria-hidden="true"></ha-icon></span>
+        <div><p>${labels[item.kind]}</p><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.label)}</small></div>
+      </div>
+    `).join("");
+    return `<section class="family-summary-grid" aria-label="Rewards and progress">${rows}</section>`;
+  }
+
   _renderFamilyPerson(person) {
     const states = this._hass?.states || {};
-    const chore = this._config.chores.users.find((entry) => entry.person_id === person.id);
-    const classroom = this._config.school.classroom_students.find((entry) => entry.person_id === person.id);
-    const assignments = classroom ? (states[classroom.assignments_entity]?.attributes?.assignments || []) : [];
-    const points = chore ? states[chore.points_entity]?.state : "0";
-    const due = chore ? safeNumber(states[chore.chores_entity]?.attributes?.chore_stat_current_due_today, 0) : 0;
-    const nextAssignment = [...assignments].sort((a, b) => new Date(a.due_at || 0) - new Date(b.due_at || 0))[0];
-    const classroomStatus = nextAssignment
-      ? `<div class="assignment"><ha-icon icon="${ICONS.school}"></ha-icon><div><strong>${escapeHtml(nextAssignment.title || "Assignment")}</strong><small>${escapeHtml(nextAssignment.course || "Google Classroom")} · ${escapeHtml(formatDay(nextAssignment.due_at, this._config.product.locale, this._config.product.timezone))}</small></div></div>`
+    const choresEnabled = this._config.features.chores === true;
+    const chore = choresEnabled ? this._config.chores.users.find((entry) => entry.person_id === person.id) : null;
+    const classroom = this._config.features.school
+      ? this._config.school.classroom_students.find((entry) => entry.person_id === person.id)
+      : null;
+    const classroomState = classroom ? states[classroom.assignments_entity] : null;
+    const classroomData = classroomAssignmentPresentation(classroomState);
+    const assignments = classroomData.assignments;
+    const assignmentCount = classroomData.available ? classroomData.count : NaN;
+    const assignmentsTruncated = classroomData.truncated;
+    const classroomStale = classroomState?.attributes?.data_stale === true;
+    const pointsState = chore ? states[chore.points_entity] : null;
+    const choresState = chore ? states[chore.chores_entity] : null;
+    const pointsAvailable = isEntityAvailable(pointsState);
+    const choresSummaryAvailable = isEntityAvailable(choresState);
+    const points = pointsAvailable ? pointsState.state : null;
+    const due = choresSummaryAvailable
+      ? safeNumber(choresState.attributes?.chore_stat_current_due_today, 0)
+      : NaN;
+    const nextAssignment = assignments[0];
+    const classroomLink = safeClassroomLink(nextAssignment?.alternate_link);
+    const assignmentTitle = classroomLink
+      ? `<a href="${escapeHtml(classroomLink)}" target="_blank" rel="noopener noreferrer" data-classroom-person="${escapeHtml(person.id)}">${escapeHtml(nextAssignment.title || "Assignment")}</a>`
+      : `<strong>${escapeHtml(nextAssignment?.title || "Assignment")}</strong>`;
+    const assignmentDue = nextAssignment?.due_at
+      ? formatClassroomDueDay(nextAssignment.due_at, this._config.product.locale, this._config.product.timezone)
+      : "No due date";
+    const lastSuccessfulUpdate = classroomState?.attributes?.last_successful_update;
+    const lastSuccessfulLabel = lastSuccessfulUpdate
+      ? `${formatDay(lastSuccessfulUpdate, this._config.product.locale, this._config.product.timezone)} at ${formatTime(lastSuccessfulUpdate, this._config.product.locale, this._config.product.timezone)}`
+      : null;
+    const classroomError = String(classroomState?.attributes?.last_error || "Classroom update delayed").slice(0, 160);
+    const classroomHealth = classroomStale
+      ? `<span class="classroom-health is-stale"><ha-icon icon="mdi:cloud-alert-outline" aria-hidden="true"></ha-icon>${escapeHtml(classroomError)}${lastSuccessfulLabel ? ` · Last updated ${escapeHtml(lastSuccessfulLabel)}` : ""}</span>`
+      : assignmentsTruncated
+        ? `<span class="classroom-health"><ha-icon icon="mdi:format-list-numbered" aria-hidden="true"></ha-icon>Showing the next ${assignments.length} of ${assignmentCount} assignments</span>`
+        : "";
+    const classroomStatus = classroom && !classroomData.available
+      ? '<div class="assignment is-stale"><ha-icon icon="mdi:school-outline"></ha-icon><div><strong>Classroom unavailable</strong><small>The last update could not be read. Home Assistant will retry.</small></div></div>'
+      : nextAssignment
+      ? `<div class="assignment ${classroomStale ? "is-stale" : ""}"><ha-icon icon="${ICONS.school}"></ha-icon><div>${assignmentTitle}<small>${escapeHtml(nextAssignment.course || "Google Classroom")} · ${escapeHtml(assignmentDue)}</small>${classroomHealth}</div></div>`
+      : classroomStale
+        ? `<div class="assignment is-stale"><ha-icon icon="mdi:cloud-alert-outline"></ha-icon><div><strong>Classroom update delayed</strong><small>${escapeHtml(classroomError)}${lastSuccessfulLabel ? ` · Last updated ${escapeHtml(lastSuccessfulLabel)}` : ""}</small></div></div>`
       : !this._config.features.school
         ? '<div class="assignment classroom-locked"><ha-icon icon="mdi:school-outline"></ha-icon><div><strong>Classroom ready after consent</strong><small>Read-only access will be connected separately for each child. No password belongs in this dashboard.</small></div></div>'
-        : "";
+        : !classroom
+          ? '<div class="assignment is-stale"><ha-icon icon="mdi:school-alert-outline"></ha-icon><div><strong>Classroom not connected</strong><small>This child still needs a separate read-only connection.</small></div></div>'
+        : '<div class="assignment"><ha-icon icon="mdi:school-check-outline"></ha-icon><div><strong>No open assignments</strong><small>Google Classroom is up to date.</small></div></div>';
     const presence = this._config.features.location_map && person.location_entity
       ? titleCase(states[person.location_entity]?.state || "Location unavailable")
-      : "Family member";
+      : choresEnabled ? "Today’s jobs" : this._config.features.school ? "School" : "Family overview";
     const choreRows = (chore?.status_entities || []).map((entityId) => {
       const state = states[entityId];
       const presentation = normaliseChoreStatus(state, entityId);
@@ -1774,12 +3104,22 @@ export class FamilyHubCard extends HTMLElementBase {
         </li>
       `;
     }).join("");
+    const choreOpsSummary = choresEnabled ? this._renderChoreOpsSummary(chore) : "";
+    const choreHeading = choresEnabled && this._config.features.location_map
+      ? `<div class="chore-heading"><p class="eyebrow">Today’s jobs</p><span>${choreRows ? `${(chore?.status_entities || []).length} jobs` : "None yet"}</span></div>`
+      : "";
+    const factItems = [
+      ...(choresEnabled && chore ? [`<span><strong>${pointsAvailable ? escapeHtml(formatPoints(points, this._config.product.locale)) : "—"}</strong> points</span>`, `<span><strong>${Number.isFinite(due) ? due : "—"}</strong> due today</span>`] : []),
+      ...(this._config.features.school ? [`<span><strong>${Number.isFinite(assignmentCount) ? assignmentCount : "—"}</strong> assignments</span>`] : [])
+    ].join("");
     return `
       <article class="surface family-person" style="--person-colour:${escapeHtml(person.colour)}">
         <div class="family-person-heading"><span>${escapeHtml(person.name.slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person.name)}</p><h2>${escapeHtml(presence)}</h2></div></div>
-        <div class="family-facts"><span><strong>${escapeHtml(points || "0")}</strong> chore points</span><span><strong>${due}</strong> due today</span><span><strong>${assignments.length}</strong> assignments</span></div>
-        <div class="chore-heading"><p class="eyebrow">Today’s routines</p><span>${choreRows ? `${(chore?.status_entities || []).length} available` : "None yet"}</span></div>
-        ${choreRows ? `<ul class="chore-list">${choreRows}</ul>` : '<p class="empty-state compact">No individual routines are available yet.</p>'}
+        ${factItems ? `<div class="family-facts">${factItems}</div>` : ""}
+        ${choresEnabled && !chore ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps is not connected for this child.</p>' : choresEnabled && (!pointsAvailable || !choresSummaryAvailable) ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps data is currently unavailable.</p>' : ""}
+        ${choreHeading}
+        ${choresEnabled && chore ? choreRows ? `<ul class="chore-list" aria-label="Today’s jobs">${choreRows}</ul>` : '<p class="hub-empty-state compact">No jobs are due yet.</p>' : ""}
+        ${choreOpsSummary}
         ${classroomStatus}
       </article>
     `;
@@ -1810,20 +3150,63 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _featuredFixtures() {
-    const { gameweekState } = this._footballState();
+    const { index, gameweekState, table } = this._footballState();
+    if (!isEntityAvailable(index) || !isEntityAvailable(gameweekState)) {
+      return {
+        title: "Spurs & Villa",
+        html: this._config.football.spotlight_team_codes
+          .map((code) => this._renderCompactUnavailableFavourite(code))
+          .join("")
+      };
+    }
     const fixtures = gameweekState?.attributes?.events || [];
-    return fixtures.filter((fixture) => fixture.spotlight).slice(0, 2).map((fixture) => this._renderCompactFixture(fixture)).join("");
+    const models = buildFavouriteClubModels(
+      fixtures,
+      this._config.football.spotlight_team_codes,
+      isEntityAvailable(table) ? table.attributes?.rows || [] : []
+    );
+    const derby = favouriteDerbyFixture(models);
+    const html = derby
+      ? this._renderCompactFixture(derby, { derby: true })
+      : models.map((model) => this._renderCompactFavourite(model)).join("");
+    return {
+      title: this._favouriteTitle(models),
+      html: html || '<p class="hub-empty-state">No favourite clubs are configured yet.</p>'
+    };
   }
 
-  _renderCompactFixture(fixture) {
+  _renderCompactFixture(fixture, { favouriteCode = "", derby = false } = {}) {
     const status = normaliseFixtureStatus(fixture);
     const score = status === "upcoming"
       ? formatTime(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)
       : `${fixture.home_score ?? "–"}–${fixture.away_score ?? "–"}`;
+    const favouriteAttribute = derby
+      ? this._config.football.spotlight_team_codes.join(" ")
+      : favouriteCode;
     return `
-      <button type="button" class="compact-fixture" data-view="football">
+      <button type="button" class="compact-fixture ${derby ? "is-derby" : ""}" data-view="football" data-fixture-id="${escapeHtml(fixture.id ?? "")}"${favouriteAttribute ? ` data-favourite-code="${escapeHtml(favouriteAttribute)}"` : ""}>
         <span title="${escapeHtml(fixture.home?.name || "Home")}">${escapeHtml(compactClubName(fixture.home))}</span><strong>${escapeHtml(score)}</strong><span title="${escapeHtml(fixture.away?.name || "Away")}">${escapeHtml(compactClubName(fixture.away))}</span>
-        <small>${escapeHtml(status === "live" ? `LIVE · ${fixture.minutes || 0}'` : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone))}</small>
+        <small>${escapeHtml(derby ? `Family derby · ${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)}` : status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone))}</small>
+      </button>
+    `;
+  }
+
+  _renderCompactFavourite(model) {
+    if (model.fixture) return this._renderCompactFixture(model.fixture, { favouriteCode: model.code });
+    return `
+      <button type="button" class="compact-fixture is-empty" data-view="football" data-favourite-code="${escapeHtml(model.code)}">
+        <span class="compact-favourite-name">${escapeHtml(compactClubName(model.team))}</span><strong>—</strong><span>No match</span>
+        <small>No fixture this matchweek</small>
+      </button>
+    `;
+  }
+
+  _renderCompactUnavailableFavourite(code) {
+    const presentation = this._clubPresentation(code);
+    return `
+      <button type="button" class="compact-fixture is-empty is-unavailable" data-view="football" data-favourite-code="${escapeHtml(code)}">
+        <span class="compact-favourite-name">${escapeHtml(presentation.label)}</span><strong>—</strong><span>Waiting</span>
+        <small>Fixture data unavailable</small>
       </button>
     `;
   }
@@ -1834,42 +3217,130 @@ export class FamilyHubCard extends HTMLElementBase {
     return `<span class="team-mark is-${escapeHtml(size)}"><strong aria-hidden="${crest ? "true" : "false"}">${escapeHtml(code)}</strong>${crest ? `<img data-team-crest src="${escapeHtml(crest)}" alt="${escapeHtml(`${team?.name || code} crest`)}">` : ""}</span>`;
   }
 
+  _favouriteTitle(models) {
+    return models.map((model) => (
+      FOOTBALL_CLUB_PRESENTATION[model.code]?.label || compactClubName(model.team)
+    )).join(" & ") || "Family football";
+  }
+
+  _footballMatchValue(fixture, status) {
+    if (!fixture) return "—";
+    return status === "upcoming"
+      ? formatTime(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)
+      : `${fixture.home_score ?? "–"} — ${fixture.away_score ?? "–"}`;
+  }
+
+  _footballMatchDetail(fixture, status) {
+    if (!fixture) return "No fixture this matchweek";
+    if (status === "live") return `LIVE · ${fixture.minutes || 0}'`;
+    if (status === "finished") return "Full time";
+    return formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone);
+  }
+
+  _clubPresentation(code) {
+    return FOOTBALL_CLUB_PRESENTATION[code] || { label: code, primary: "#0C315D", accent: "#8FD8CB" };
+  }
+
+  _renderFavouriteHero(model) {
+    const presentation = this._clubPresentation(model.code);
+    const statusLabel = model.status === "live" ? `LIVE · ${model.fixture?.minutes || 0}'` : model.status === "finished" ? "FULL TIME" : model.status === "upcoming" ? "UP NEXT" : "NO MATCH";
+    const venue = model.fixture ? model.is_home ? "Home against" : "Away at" : "This matchweek";
+    return `
+      <article class="favourite-hero-card is-${escapeHtml(model.status)}" data-favourite-code="${escapeHtml(model.code)}" data-fixture-id="${escapeHtml(model.fixture?.id ?? "")}" style="--club-primary:${presentation.primary};--club-accent:${presentation.accent}">
+        <header class="favourite-club-heading">
+          <div class="favourite-club-identity">${this._renderTeamMark(model.team, "favourite")}<div><small>Family favourite</small><strong>${escapeHtml(presentation.label)}</strong></div></div>
+          <span class="favourite-match-status">${escapeHtml(statusLabel)}</span>
+        </header>
+        ${model.fixture ? `<div class="favourite-fixture-summary">
+          <div class="favourite-opponent"><small>${escapeHtml(venue)}</small><strong>${escapeHtml(compactClubName(model.opponent))}</strong></div>
+          ${this._renderTeamMark(model.opponent, "small")}
+          <div class="favourite-result"><strong>${escapeHtml(this._footballMatchValue(model.fixture, model.status))}</strong><small>${escapeHtml(this._footballMatchDetail(model.fixture, model.status))}</small></div>
+        </div>` : `<div class="favourite-fixture-summary is-empty"><ha-icon icon="mdi:calendar-blank-outline" aria-hidden="true"></ha-icon><div><strong>No fixture this matchweek</strong><small>${escapeHtml(`${presentation.label} remain pinned here.`)}</small></div></div>`}
+      </article>
+    `;
+  }
+
+  _renderUnavailableFavourite(code) {
+    const presentation = this._clubPresentation(code);
+    const team = { short_name: code, code, name: FOOTBALL_CLUB_NAMES[code] || code };
+    return `
+      <article class="favourite-hero-card is-unavailable" data-favourite-code="${escapeHtml(code)}" style="--club-primary:${presentation.primary};--club-accent:${presentation.accent}">
+        <header class="favourite-club-heading">
+          <div class="favourite-club-identity">${this._renderTeamMark(team, "favourite")}<div><small>Family favourite</small><strong>${escapeHtml(presentation.label)}</strong></div></div>
+          <span class="favourite-match-status">WAITING</span>
+        </header>
+        <div class="favourite-fixture-summary is-empty"><ha-icon icon="mdi:cloud-alert-outline" aria-hidden="true"></ha-icon><div><strong>Fixture data unavailable</strong><small>Home Assistant will retry automatically.</small></div></div>
+      </article>
+    `;
+  }
+
+  _renderDerbyHero(models, fixture) {
+    const status = normaliseFixtureStatus(fixture);
+    const statusLabel = status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "FULL TIME" : "UP NEXT";
+    return `
+      <article class="favourite-hero-card is-derby is-${escapeHtml(status)}" data-favourite-code="${escapeHtml(models.map((model) => model.code).join(" "))}" data-fixture-id="${escapeHtml(fixture.id ?? "")}">
+        <header class="derby-heading"><div><small>Family derby</small><strong>${escapeHtml(this._favouriteTitle(models))}</strong></div><span class="favourite-match-status">${escapeHtml(statusLabel)}</span></header>
+        <div class="derby-fixture">
+          <div class="derby-team">${this._renderTeamMark(fixture.home, "favourite")}<strong>${escapeHtml(compactClubName(fixture.home))}</strong></div>
+          <div class="favourite-result"><strong>${escapeHtml(this._footballMatchValue(fixture, status))}</strong><small>${escapeHtml(this._footballMatchDetail(fixture, status))}</small></div>
+          <div class="derby-team is-away">${this._renderTeamMark(fixture.away, "favourite")}<strong>${escapeHtml(compactClubName(fixture.away))}</strong></div>
+        </div>
+      </article>
+    `;
+  }
+
+  _renderFavouriteStandings(models) {
+    return `
+      <article class="surface favourite-standings">
+        <div><p class="eyebrow">Where they stand</p><h2>Premier League</h2></div>
+        <div class="favourite-standing-list">${models.map((model) => {
+          const presentation = this._clubPresentation(model.code);
+          const position = safeNumber(model.standing?.position, NaN);
+          const points = safeNumber(model.standing?.points, NaN);
+          const goalDifference = safeNumber(model.standing?.goal_difference, NaN);
+          const detail = Number.isFinite(points) && Number.isFinite(goalDifference)
+            ? `${formatPoints(points, this._config.product.locale)} pts · ${goalDifference > 0 ? "+" : ""}${goalDifference} GD`
+            : "Table position pending";
+          return `<div class="favourite-standing" data-favourite-code="${escapeHtml(model.code)}" style="--club-primary:${presentation.primary};--club-accent:${presentation.accent}">${this._renderTeamMark(model.team)}<div><strong>${escapeHtml(presentation.label)}</strong><small>${escapeHtml(detail)}</small></div><b>${Number.isFinite(position) ? `#${position}` : "—"}</b></div>`;
+        }).join("")}</div>
+      </article>
+    `;
+  }
+
   _renderFootball() {
     const { index, gameweek, gameweekState, table } = this._footballState();
     const events = gameweekState?.attributes?.events || [];
     const available = index?.attributes?.available_gameweeks || Array.from({ length: 38 }, (_, position) => position + 1);
-    const heroFixture = events.find((fixture) => fixture.spotlight && normaliseFixtureStatus(fixture) === "live")
-      || events.find((fixture) => fixture.spotlight && normaliseFixtureStatus(fixture) === "upcoming")
-      || events.find((fixture) => fixture.spotlight)
-      || events[0];
-    const heroStatus = heroFixture ? normaliseFixtureStatus(heroFixture) : "upcoming";
-    const freshness = footballFreshness(index);
-    const heroScore = !heroFixture
-      ? "—"
-      : heroStatus === "upcoming"
-        ? formatTime(heroFixture.kickoff_time, this._config.product.locale, this._config.product.timezone)
-        : `${heroFixture.home_score ?? "–"} — ${heroFixture.away_score ?? "–"}`;
-    const heroLabel = !heroFixture
-      ? "Next fixture coming soon"
-      : heroStatus === "live"
-        ? `LIVE · ${heroFixture.minutes || 0}'`
-        : heroStatus === "finished"
-          ? "Full time"
-          : formatDay(heroFixture.kickoff_time, this._config.product.locale, this._config.product.timezone);
+    const fixtureDataAvailable = isEntityAvailable(index) && isEntityAvailable(gameweekState);
+    const favouriteModels = buildFavouriteClubModels(
+      events,
+      this._config.football.spotlight_team_codes,
+      isEntityAvailable(table) ? table.attributes?.rows || [] : []
+    );
+    const derbyFixture = favouriteDerbyFixture(favouriteModels);
+    const hasLiveFavourite = favouriteModels.some((model) => model.status === "live");
+    const indexFreshness = footballFreshness(index);
+    const freshness = !isEntityAvailable(index)
+      ? indexFreshness
+      : !isEntityAvailable(gameweekState)
+        ? {
+          status: "waiting",
+          title: "Waiting for fixtures",
+          detail: "The selected matchweek has not arrived yet."
+        }
+        : indexFreshness;
     const checkedLabel = index?.attributes?.last_checked
       ? `Checked ${formatTime(index.attributes.last_checked, this._config.product.locale, this._config.product.timezone)}`
       : "Awaiting first check";
     this._gameweek = gameweek;
     return `
       <section class="football-experience">
-        <article class="football-hero ${heroStatus === "live" ? "is-live" : ""}">
-          <div class="football-hero-heading"><div><p class="eyebrow">Premier League · Matchweek ${gameweek}</p><h2>${heroStatus === "live" ? "Live now" : heroStatus === "finished" ? "Latest result" : "Up next"}</h2></div><span class="football-freshness is-${freshness.status}"><i></i><span><strong>${escapeHtml(freshness.title)}</strong><small>${escapeHtml(freshness.status === "live" ? `${freshness.detail} ${checkedLabel}.` : `${checkedLabel}.`)}</small></span></span></div>
+        <article class="football-favourites-stage ${hasLiveFavourite ? "is-live" : ""}">
+          <div class="football-hero-heading"><div><p class="eyebrow">Premier League · Matchweek ${gameweek}</p><h2>${escapeHtml(this._favouriteTitle(favouriteModels))}</h2></div><span class="football-freshness is-${freshness.status}"><i></i><span><strong>${escapeHtml(freshness.title)}</strong><small>${escapeHtml(freshness.status === "live" ? `${freshness.detail} ${checkedLabel}.` : `${checkedLabel}.`)}</small></span></span></div>
           ${freshness.status === "live" ? "" : `<p class="football-health-note is-${freshness.status}" role="status">${escapeHtml(freshness.detail)}</p>`}
-          ${heroFixture ? `<div class="hero-match">
-            <div class="hero-team">${this._renderTeamMark(heroFixture.home, "hero")}<strong>${escapeHtml(compactClubName(heroFixture.home))}</strong></div>
-            <div class="hero-score"><span>${escapeHtml(heroScore)}</span><small>${escapeHtml(heroLabel)}</small></div>
-            <div class="hero-team is-away">${this._renderTeamMark(heroFixture.away, "hero")}<strong>${escapeHtml(compactClubName(heroFixture.away))}</strong></div>
-          </div>` : '<div class="hero-match is-empty"><ha-icon icon="mdi:soccer"></ha-icon><strong>The next featured match will appear here.</strong></div>'}
+          <div class="favourite-hero-grid">${fixtureDataAvailable
+            ? derbyFixture ? this._renderDerbyHero(favouriteModels, derbyFixture) : favouriteModels.map((model) => this._renderFavouriteHero(model)).join("")
+            : this._config.football.spotlight_team_codes.map((code) => this._renderUnavailableFavourite(code)).join("")}</div>
         </article>
         <div class="football-layout">
           <article class="surface football-main">
@@ -1881,21 +3352,22 @@ export class FamilyHubCard extends HTMLElementBase {
               <button type="button" data-gameweek="${Math.min(38, gameweek + 1)}" ${gameweek >= 38 ? "disabled" : ""} aria-label="Next matchweek"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
             </div>
             <div class="segments football-tabs" role="group" aria-label="Football view">
-              <button type="button" class="segment ${this._footballTab === "fixtures" ? "is-selected" : ""}" data-football-tab="fixtures">Fixtures</button>
-              <button type="button" class="segment ${this._footballTab === "table" ? "is-selected" : ""}" data-football-tab="table">Table</button>
+              <button type="button" class="segment ${this._footballTab === "fixtures" ? "is-selected" : ""}" data-football-tab="fixtures" aria-pressed="${this._footballTab === "fixtures"}">Fixtures</button>
+              <button type="button" class="segment ${this._footballTab === "table" ? "is-selected" : ""}" data-football-tab="table" aria-pressed="${this._footballTab === "table"}">Table</button>
             </div>
           </div>
-          ${this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(events)}
+          ${this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(events, fixtureDataAvailable)}
           </article>
           <aside class="football-sidebar">
-            <article class="surface spotlight-panel"><p class="eyebrow">Family favourites</p><h2>Tottenham & Aston Villa</h2>${this._renderSpotlightClubs(events)}</article>
+            ${this._renderFavouriteStandings(favouriteModels)}
           </aside>
         </div>
       </section>
     `;
   }
 
-  _renderFixtures(events) {
+  _renderFixtures(events, available = true) {
+    if (!available) return '<p class="hub-empty-state large">Fixture data is unavailable. Home Assistant will retry.</p>';
     if (!events.length) return `
       <div class="football-empty">
         <span class="football-orbit"><ha-icon icon="mdi:soccer" aria-hidden="true"></ha-icon></span>
@@ -1923,8 +3395,9 @@ export class FamilyHubCard extends HTMLElementBase {
       ...(fixture.home_scorers || []).map((name) => `${name} (H)`),
       ...(fixture.away_scorers || []).map((name) => `${name} (A)`)
     ];
+    const favouriteCodes = this._config.football.spotlight_team_codes.filter((code) => fixtureIncludesTeam(fixture, code));
     return `
-      <div class="fixture ${fixture.spotlight ? "is-spotlight" : ""} ${status === "live" ? "is-live" : ""}">
+      <div class="fixture ${fixture.spotlight ? "is-spotlight" : ""} ${status === "live" ? "is-live" : ""}"${favouriteCodes.length ? ` data-favourite-code="${escapeHtml(favouriteCodes.join(" "))}"` : ""}>
         <span class="team home-team">${this._renderTeamMark(fixture.home)}<span>${escapeHtml(fixture.home?.name || "Home")}</span></span>
         <strong class="fixture-score">${escapeHtml(score)}<small>${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "FT" : ""}</small></strong>
         <span class="team away-team"><span>${escapeHtml(fixture.away?.name || "Away")}</span>${this._renderTeamMark(fixture.away)}</span>
@@ -1934,8 +3407,9 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderLeagueTable(tableState) {
+    if (!isEntityAvailable(tableState)) return '<p class="hub-empty-state large">League table data is unavailable. Home Assistant will retry.</p>';
     const rows = tableState?.attributes?.rows || [];
-    if (!rows.length) return '<p class="empty-state large">The league table will appear after the first results.</p>';
+    if (!rows.length) return '<p class="hub-empty-state large">The league table will appear after the first results.</p>';
     return `
       <div class="league-table-wrap"><table class="league-table"><thead><tr><th>#</th><th>Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody>
         ${rows.map((row) => `<tr class="${row.spotlight ? "is-spotlight" : ""}"><td>${row.position}</td><td><strong>${escapeHtml(row.name)}</strong></td><td>${row.played}</td><td>${row.won}</td><td>${row.drawn}</td><td>${row.lost}</td><td>${row.goal_difference > 0 ? "+" : ""}${row.goal_difference}</td><td><strong>${row.points}</strong></td></tr>`).join("")}
@@ -1943,31 +3417,59 @@ export class FamilyHubCard extends HTMLElementBase {
     `;
   }
 
-  _renderSpotlightClubs(events) {
-    const renderedFixtures = new Set();
-    return this._config.football.spotlight_team_codes.map((code) => {
-      const fixture = events.find((entry) => entry.home?.short_name === code || entry.away?.short_name === code);
-      const name = fixture?.home?.short_name === code ? fixture.home.name : fixture?.away?.name;
-      const fixtureKey = fixture && String(fixture.id || `${fixture.kickoff_time}:${fixture.home?.short_name}:${fixture.away?.short_name}`);
-      if (fixtureKey && renderedFixtures.has(fixtureKey)) return "";
-      if (fixtureKey) renderedFixtures.add(fixtureKey);
-      const bothFavourites = fixture && this._config.football.spotlight_team_codes.every((teamCode) => (
-        fixture.home?.short_name === teamCode || fixture.away?.short_name === teamCode
-      ));
-      const status = fixture ? normaliseFixtureStatus(fixture) : "upcoming";
-      const fixtureDetail = !fixture
-        ? "No fixture this matchweek"
-        : bothFavourites
-          ? `Both favourites · ${status === "live" ? `Live ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)}`
-          : `${compactClubName(fixture.home)} v ${compactClubName(fixture.away)}`;
-      return `
-        <div class="spotlight-club">${this._renderTeamMark(fixture?.home?.short_name === code ? fixture.home : fixture?.away?.short_name === code ? fixture.away : { short_name: code, name })}<div><strong>${escapeHtml(bothFavourites ? `${compactClubName(fixture.home)} v ${compactClubName(fixture.away)}` : name || (code === "TOT" ? "Tottenham Hotspur" : code === "AVL" ? "Aston Villa" : code))}</strong><small>${escapeHtml(fixtureDetail)}</small></div></div>
-      `;
-    }).join("");
+  _activeChildCardKeys() {
+    const keys = new Set();
+    if (!this._config) return keys;
+    if (this._view === "calendar" && this._config.features?.calendar !== false) {
+      keys.add(`calendar:${this._calendarMode}`);
+    }
+    if (this._view === "family" && this._config.features?.location_map) keys.add("map");
+    if (this._view === "music" && this._config.features?.music !== false) keys.add("music");
+    if (this._view === "rooms"
+      && this._homeSection === "cleaning"
+      && this._config.features?.cleaning
+      && this._config.cleaning?.map_entity) keys.add("vacuum-map");
+    if (this._view === "entry" && this._config.features?.entry !== false) {
+      const cameras = this._config.entry?.cameras || [];
+      for (const camera of cameras) {
+        if (camera.entity_id) keys.add(`camera-poster:tile:${camera.id}`);
+      }
+      const selectedId = this._cameraSession?.id
+        || this._securityCameraId
+        || this._config.entry?.primary_camera_id
+        || cameras[0]?.id;
+      if (cameras.some((camera) => camera.id === selectedId && camera.entity_id)) {
+        keys.add(`camera-poster:stage:${selectedId}`);
+      }
+      const liveCamera = cameras.find((camera) => camera.id === this._activeCameraId);
+      if (liveCamera?.entity_id
+        && ["buffering", "viewing"].includes(this._cameraSession?.phase)
+        && cameraStreamPhase(this._hass?.states?.[liveCamera.entity_id]) === "streaming") {
+        keys.add(`camera:${liveCamera.id}`);
+      }
+    }
+    return keys;
+  }
+
+  _removeChildCard(key) {
+    const child = this._childCards?.get?.(key);
+    this._invalidateChildHass(key);
+    child?.__familyCameraObserverCleanup?.();
+    child?.remove?.();
+    this._childCards?.delete?.(key);
+  }
+
+  _pruneInactiveChildCards() {
+    if (!(this._childCards instanceof Map)) return;
+    const activeKeys = this._activeChildCardKeys();
+    for (const key of [...this._childCards.keys()]) {
+      if (!activeKeys.has(key)) this._removeChildCard(key);
+    }
   }
 
   _mountChildCards() {
     if (!this._hass || !globalThis.loadCardHelpers) return;
+    this._pruneInactiveChildCards();
     if (this._view === "calendar") {
       const viewMap = {
         day: "schedule",
@@ -2035,14 +3537,13 @@ export class FamilyHubCard extends HTMLElementBase {
         type: this._config.media.card_type,
         size: "large",
         mode: "in-card",
-        height: "100%",
         entity_id: this._config.media.initial_player,
         media_players: mediaPlayers,
         options: {
           player_is_active_when: "playing_or_paused",
           show_volume_step_buttons: true,
           default_tab: "massive",
-          transparent_background_on_home: true
+          transparent_background_on_home: false
         }
       }, "music-card-slot");
     }
@@ -2054,6 +3555,40 @@ export class FamilyHubCard extends HTMLElementBase {
         show_name: false,
         show_state: false
       }, "vacuum-map-card-slot");
+    }
+    if (this._view === "entry") {
+      const posterConfig = (camera) => ({
+        type: "picture-entity",
+        entity: camera.entity_id,
+        camera_view: "auto",
+        aspect_ratio: "16:9",
+        fit_mode: "cover",
+        show_name: false,
+        show_state: false,
+        tap_action: { action: "none" },
+        hold_action: { action: "none" },
+        double_tap_action: { action: "none" }
+      });
+      for (const camera of this._config.entry.cameras || []) {
+        if (!camera.entity_id) continue;
+        this._ensureChildCard(
+          `camera-poster:tile:${camera.id}`,
+          posterConfig(camera),
+          `camera-poster-tile-${camera.id}`
+        );
+      }
+      const selectedId = this._cameraSession?.id
+        || this._securityCameraId
+        || this._config.entry.primary_camera_id
+        || this._config.entry.cameras?.[0]?.id;
+      const selected = this._config.entry.cameras.find((camera) => camera.id === selectedId);
+      if (selected?.entity_id) {
+        this._ensureChildCard(
+          `camera-poster:stage:${selected.id}`,
+          posterConfig(selected),
+          `camera-poster-stage-${selected.id}`
+        );
+      }
     }
     if (this._view === "entry"
       && ["buffering", "viewing"].includes(this._cameraSession?.phase)
@@ -2078,21 +3613,33 @@ export class FamilyHubCard extends HTMLElementBase {
 
   async _ensureChildCard(key, cardConfig, slotId) {
     const slot = this.shadowRoot.getElementById(slotId);
-    if (!slot) return;
+    const mountGeneration = this._childMountGeneration;
+    if (!slot || !this.isConnected || !this._activeChildCardKeys().has(key)) return;
     let child = this._childCards.get(key);
     if (!child) {
       try {
         const helpers = await globalThis.loadCardHelpers();
-        if (!this._isCurrentCameraSlot(key, slotId, slot)) return;
+        if (!this.isConnected
+          || this._childMountGeneration !== mountGeneration
+          || !this._activeChildCardKeys().has(key)
+          || !this._isCurrentCameraSlot(key, slotId, slot)) return;
         child = helpers.createCardElement(cardConfig);
         child.classList.add("embedded-card");
         this._childCards.set(key, child);
       } catch (error) {
-        slot.innerHTML = `<p class="empty-state">${key.startsWith("camera:") ? "The secure live view could not load. Please try again." : `This Home Assistant card could not load: ${escapeHtml(error?.message || error)}`}</p>`;
+        const message = key.startsWith("camera:")
+          ? "The secure live view could not load. Please try again."
+          : key.startsWith("camera-poster:")
+            ? "The latest camera still is unavailable."
+            : `This Home Assistant card could not load: ${escapeHtml(error?.message || error)}`;
+        slot.innerHTML = `<p class="hub-empty-state">${message}</p>`;
         return;
       }
     }
-    if (!this._isCurrentCameraSlot(key, slotId, slot)) return;
+    if (!this.isConnected
+      || this._childMountGeneration !== mountGeneration
+      || !this._activeChildCardKeys().has(key)
+      || !this._isCurrentCameraSlot(key, slotId, slot)) return;
     if (key === "music") {
       const readOnly = this._config.display.read_only === true;
       child.inert = false;
@@ -2104,10 +3651,11 @@ export class FamilyHubCard extends HTMLElementBase {
         delete child.dataset.readOnlyGuard;
       }
     }
-    if (key.startsWith("calendar:") || key === "vacuum-map") {
+    if (key.startsWith("calendar:") || key.startsWith("camera-poster:") || key === "vacuum-map") {
       child.inert = false;
       child.setAttribute("data-read-only-guard", "service-boundary");
-      child.setAttribute("aria-label", key.startsWith("calendar:") ? "Read-only family calendar" : "Read-only camera view");
+      child.setAttribute("aria-label", key.startsWith("calendar:") ? "Read-only family calendar" : "Latest camera still");
+      if (key.startsWith("camera-poster:")) child.inert = true;
     }
     if (key.startsWith("camera:")) {
       const buffering = this._cameraSession?.phase === "buffering";
@@ -2133,6 +3681,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _isCurrentCameraSlot(key, slotId, slot) {
+    if (this.shadowRoot.getElementById(slotId) !== slot) return false;
     if (!key.startsWith("camera:")) return true;
     const cameraId = key.slice("camera:".length);
     return this._view === "entry"
@@ -2143,17 +3692,18 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _observeCameraMedia(child, cameraId, sessionToken) {
-    let settled = false;
+    let closed = false;
+    let frameReady = false;
+    let readyMediaElement = null;
     let scanTimer = null;
     const observedRoots = new Map();
     const mediaReady = (media) => {
-      if (media?.tagName === "IMG") return media.complete && media.naturalWidth > 0;
       if (media?.tagName === "VIDEO") return media.readyState >= 2;
       return false;
     };
     const cleanup = () => {
-      if (settled) return;
-      settled = true;
+      if (closed) return;
+      closed = true;
       if (scanTimer !== null) clearTimeout(scanTimer);
       for (const [root, observer] of observedRoots) {
         observer?.disconnect();
@@ -2161,17 +3711,33 @@ export class FamilyHubCard extends HTMLElementBase {
         root.removeEventListener("loadeddata", markReady, true);
         root.removeEventListener("playing", markReady, true);
         root.removeEventListener("canplay", markReady, true);
+        root.removeEventListener("stalled", markLost, true);
+        root.removeEventListener("waiting", markLost, true);
+        root.removeEventListener("ended", markLost, true);
+        root.removeEventListener("emptied", markLost, true);
+        root.removeEventListener("error", markLost, true);
       }
       observedRoots.clear();
     };
     const markReady = (event) => {
       const media = event?.target;
       if (!mediaReady(media)) return;
-      cleanup();
+      frameReady = true;
+      readyMediaElement = media;
       this._markCameraFrameReady(cameraId, sessionToken, child);
     };
+    const reportLost = (terminal = false) => {
+      if (!frameReady) return;
+      frameReady = false;
+      readyMediaElement = null;
+      this._markCameraMediaLost(cameraId, sessionToken, child, { terminal });
+    };
+    const markLost = (event) => {
+      if (event?.target?.tagName !== "VIDEO") return;
+      reportLost(["ended", "emptied", "error"].includes(event.type));
+    };
     const scheduleScan = (delay = 100) => {
-      if (settled) return;
+      if (closed) return;
       if (scanTimer !== null) clearTimeout(scanTimer);
       scanTimer = setTimeout(() => {
         scanTimer = null;
@@ -2184,6 +3750,11 @@ export class FamilyHubCard extends HTMLElementBase {
       root.addEventListener("loadeddata", markReady, true);
       root.addEventListener("playing", markReady, true);
       root.addEventListener("canplay", markReady, true);
+      root.addEventListener("stalled", markLost, true);
+      root.addEventListener("waiting", markLost, true);
+      root.addEventListener("ended", markLost, true);
+      root.addEventListener("emptied", markLost, true);
+      root.addEventListener("error", markLost, true);
       const observer = typeof MutationObserver === "function"
         ? new MutationObserver(() => scheduleScan(0))
         : null;
@@ -2191,7 +3762,7 @@ export class FamilyHubCard extends HTMLElementBase {
       observedRoots.set(root, observer);
     };
     const inspectRoot = (root) => {
-      if (!root || settled) return null;
+      if (!root || closed) return null;
       observeRoot(root);
       if (root.shadowRoot) {
         const readyInOwnShadow = inspectRoot(root.shadowRoot);
@@ -2207,12 +3778,13 @@ export class FamilyHubCard extends HTMLElementBase {
       return null;
     };
     const inspect = () => {
-      if (settled) return;
+      if (closed) return;
       const readyMedia = inspectRoot(child);
       if (readyMedia) {
         markReady({ target: readyMedia });
         return;
       }
+      if (frameReady && (!readyMediaElement?.isConnected || !mediaReady(readyMediaElement))) reportLost(false);
       scheduleScan();
     };
     child.__familyCameraObserverToken = sessionToken;
@@ -2220,55 +3792,127 @@ export class FamilyHubCard extends HTMLElementBase {
     inspect();
   }
 
+  _invalidateChildHass(key = null) {
+    if (!(this._childHassTokens instanceof Map)) this._childHassTokens = new Map();
+    if (key === null) {
+      for (const activeKey of [...this._childHassTokens.keys()]) this._invalidateChildHass(activeKey);
+      this._childHassTokens.clear();
+      this._readOnlyHassSource = null;
+      this._readOnlyHass = new Map();
+      this._musicHassSource = null;
+      this._musicHass = null;
+      return;
+    }
+    const token = this._childHassTokens.get(key);
+    if (token) {
+      token.active = false;
+      for (const cleanup of token.cleanups || []) {
+        try { cleanup(); } catch { /* Child subscriptions are best-effort cleanup. */ }
+      }
+      token.cleanups?.clear?.();
+    }
+    this._childHassTokens.delete(key);
+    this._readOnlyHass?.delete?.(key);
+    if (key === "music") {
+      this._musicHassSource = null;
+      this._musicHass = null;
+    }
+  }
+
+  _childHassGuard(key) {
+    if (!(this._childHassTokens instanceof Map)) this._childHassTokens = new Map();
+    const token = { active: true, cleanups: new Set() };
+    this._childHassTokens.set(key, token);
+    const guard = () => token.active && this._childHassTokens.get(key) === token;
+    guard.onRevoke = (cleanup) => {
+      if (typeof cleanup !== "function") return () => undefined;
+      if (!guard()) {
+        cleanup();
+        return () => undefined;
+      }
+      token.cleanups.add(cleanup);
+      return () => token.cleanups.delete(cleanup);
+    };
+    return guard;
+  }
+
   _hassForChild(key) {
-    const forceReadOnly = key.startsWith("calendar:") || key.startsWith("camera:") || key === "vacuum-map";
+    const forceReadOnly = key.startsWith("calendar:")
+      || key.startsWith("camera:")
+      || key.startsWith("camera-poster:")
+      || key === "map"
+      || key === "vacuum-map";
     if (!this._hass) return this._hass;
     if (key === "music" && !this._config?.display?.read_only) {
       if (this._musicHassSource !== this._hass || !this._musicHass) {
+        this._invalidateChildHass(key);
         this._musicHassSource = this._hass;
-        this._musicHass = createControlledMediaHass(this._hass, this._controlPolicy);
+        this._musicHass = createControlledMediaHass(
+          this._hass,
+          this._controlPolicy,
+          this._childHassGuard(key)
+        );
       }
       return this._musicHass;
     }
     if (!forceReadOnly && key !== "music") return this._hass;
-    if (this._readOnlyHassSource === this._hass && this._readOnlyHass) return this._readOnlyHass;
+    if (this._readOnlyHassSource !== this._hass) {
+      for (const cachedKey of this._readOnlyHass?.keys?.() || []) this._invalidateChildHass(cachedKey);
+      this._readOnlyHassSource = this._hass;
+      this._readOnlyHass = new Map();
+    }
+    if (this._readOnlyHass.has(key)) return this._readOnlyHass.get(key);
+    this._invalidateChildHass(key);
     const source = this._hass;
-    const connection = source.connection && new Proxy(source.connection, {
-      get(target, property) {
-        if (property === "sendMessagePromise") {
-          return (message, ...args) => message?.type === "call_service"
-            ? Promise.resolve(undefined)
-            : target.sendMessagePromise?.(message, ...args);
-        }
-        if (property === "sendMessage") {
-          return (message, ...args) => message?.type === "call_service"
-            ? undefined
-            : target.sendMessage?.(message, ...args);
-        }
-        const value = Reflect.get(target, property, target);
-        return typeof value === "function" ? value.bind(target) : value;
-      }
+    const isActive = this._childHassGuard(key);
+    const cameraId = key.startsWith("camera:")
+      ? key.slice("camera:".length)
+      : key.startsWith("camera-poster:")
+        ? key.split(":").at(-1)
+        : null;
+    const cameraEntity = key === "vacuum-map"
+      ? this._config.cleaning.map_entity || null
+      : cameraId ? this._controlPolicy.cameras.get(cameraId)?.entity || null : null;
+    const calendarEntities = new Set(key.startsWith("calendar:")
+      ? this._config.calendar.entities.map((entry) => entry.entity_id)
+      : []);
+    const allowMessage = (message) => isReadOnlyChildMessageAllowed(message, {
+      cameraEntity,
+      allowCameraStream: key.startsWith("camera:"),
+      calendarEntities
     });
-    this._readOnlyHassSource = source;
-    this._readOnlyHass = new Proxy(source, {
-      get(target, property) {
-        if (property === "callService") return () => undefined;
-        if (property === "callApi") {
-          return (method, ...args) => String(method || "GET").toUpperCase() === "GET"
-            ? target.callApi?.(method, ...args)
-            : Promise.resolve(undefined);
-        }
-        if (property === "callWS") {
-          return (message, ...args) => message?.type === "call_service"
-            ? Promise.resolve(undefined)
-            : target.callWS?.(message, ...args);
-        }
-        if (property === "connection" && connection) return connection;
-        const value = Reflect.get(target, property, target);
-        return typeof value === "function" ? value.bind(target) : value;
-      }
-    });
-    return this._readOnlyHass;
+    const scopedEntityIds = key.startsWith("calendar:")
+      ? this._config.calendar.entities.map((entry) => entry.entity_id)
+      : key === "map"
+        ? [
+            ...(this._config.location?.entities || []),
+            ...Object.keys(source.states || {}).filter((entityId) => entityId.startsWith("zone."))
+          ]
+        : cameraEntity ? [cameraEntity] : [];
+    const scopedStates = Object.freeze(Object.fromEntries(
+      [...new Set(scopedEntityIds)]
+        .filter((entityId) => source.states?.[entityId])
+        .map((entityId) => [entityId, source.states[entityId]])
+    ));
+    const connection = guardedChildConnection(source.connection, allowMessage, isActive);
+    const readOnlyHass = guardedChildHass(source, {
+      states: scopedStates,
+      callService: () => Promise.resolve(undefined),
+      // Native read-only cards use the guarded websocket protocol. Do not
+      // expose a generic REST GET bridge that could fetch another camera.
+      callApi: (method, path, ...args) => isActive() && isAllowedCalendarApiRequest(method, path, calendarEntities)
+        ? guardedChildResult(source.callApi?.(String(method || "GET").toUpperCase(), String(path), ...args), isActive)
+        : Promise.resolve(undefined),
+      callWS: (message, ...args) => {
+        const snapshot = snapshotChildObject(message);
+        return isActive() && snapshot && allowMessage(snapshot)
+          ? guardedChildResult(source.callWS?.(snapshot, ...args), isActive)
+          : Promise.resolve(undefined);
+      },
+      ...(connection ? { connection } : {})
+    }, isActive);
+    this._readOnlyHass.set(key, readOnlyHass);
+    return readOnlyHass;
   }
 
   _handleKeydown(event) {
@@ -2312,20 +3956,43 @@ export class FamilyHubCard extends HTMLElementBase {
     const target = event.target.closest?.("button, [data-room]");
     if (!target) return;
     if (this._pendingConfirmation && !target.dataset.confirmAction) return;
+    if (target.dataset.homeTarget) {
+      if (!this._enabledViews().some((view) => view.id === "rooms")) return;
+      this._view = "rooms";
+      this._homeSection = target.dataset.homeTarget;
+      this._childMountGeneration += 1;
+      this._pruneInactiveChildCards();
+      this._scheduleRender(true);
+      return;
+    }
     if (target.dataset.view) {
       if (!this._enabledViews().some((view) => view.id === target.dataset.view)) return;
       if (this._view === "entry" && target.dataset.view !== "entry") this._closeActiveCamera({ render: false, invalidate: true });
       this._view = target.dataset.view;
+      this._childMountGeneration += 1;
+      this._pruneInactiveChildCards();
       this._scheduleRender(true);
       return;
     }
     if (target.dataset.homeSection) {
+      const allowedHomeSections = new Set([
+        "rooms",
+        "lights",
+        "heating",
+        "covers",
+        ...(this._config.features.cleaning ? ["cleaning"] : [])
+      ]);
+      if (!this._config.features.rooms || !allowedHomeSections.has(target.dataset.homeSection)) return;
       this._homeSection = target.dataset.homeSection;
+      this._childMountGeneration += 1;
+      this._pruneInactiveChildCards();
       this._scheduleRender(true);
       return;
     }
     if (target.dataset.calendarMode) {
       this._calendarMode = target.dataset.calendarMode;
+      this._childMountGeneration += 1;
+      this._pruneInactiveChildCards();
       this._scheduleRender(true);
       return;
     }
@@ -2365,12 +4032,14 @@ export class FamilyHubCard extends HTMLElementBase {
       if (target.dataset.confirmAction === "confirm" && this._pendingConfirmation && !this._config.display.read_only) {
         const action = this._pendingConfirmation;
         const currentState = this._hass?.states?.[action.entity];
-        const stateUnchanged = entityStateValue(currentState) === action.expectedState;
+        const stateUnchanged = isConfirmationStillValid(action, currentState);
         const approved = action.domain === "alarm_control_panel"
-          ? action.entity === this._controlPolicy.alarm
+          ? this._config.features.entry
+            && action.entity === this._controlPolicy.alarm
             && stateUnchanged
             && isAlarmActionSupported(currentState, action.service)
           : action.domain === "cover"
+            && this._config.features.entry
             && action.entity === this._controlPolicy.secureCover
             && stateUnchanged
             && isSecureCoverActionAllowed(currentState, action.service);
@@ -2382,13 +4051,18 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     if (this._config.display.read_only && (isControlAction(target.dataset) || target.dataset.moreInfo)) return;
     if (target.dataset.alarmAction && target.dataset.entity) {
-      if (target.dataset.entity !== this._controlPolicy.alarm
+      if (!this._config.features.entry
+        || target.dataset.entity !== this._controlPolicy.alarm
         || !isAlarmActionSupported(this._hass?.states?.[target.dataset.entity], target.dataset.alarmAction)) return;
+      const expectedStateObject = this._hass?.states?.[target.dataset.entity];
       this._pendingConfirmation = {
         domain: "alarm_control_panel",
         service: target.dataset.alarmAction,
         entity: target.dataset.entity,
-        expectedState: entityStateValue(this._hass?.states?.[target.dataset.entity]),
+        expectedState: entityStateValue(expectedStateObject),
+        expectedStateObject,
+        expectedLastChanged: expectedStateObject?.last_changed || null,
+        createdAt: Date.now(),
         label: ALARM_ACTION_LABELS[target.dataset.alarmAction]
       };
       this._confirmationReturnFocus = {
@@ -2400,13 +4074,18 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     if (target.dataset.secureCoverAction && target.dataset.entity) {
-      if (target.dataset.entity !== this._controlPolicy.secureCover
+      if (!this._config.features.entry
+        || target.dataset.entity !== this._controlPolicy.secureCover
         || !isSecureCoverActionAllowed(this._hass?.states?.[target.dataset.entity], target.dataset.secureCoverAction)) return;
+      const expectedStateObject = this._hass?.states?.[target.dataset.entity];
       this._pendingConfirmation = {
         domain: "cover",
         service: target.dataset.secureCoverAction,
         entity: target.dataset.entity,
-        expectedState: entityStateValue(this._hass?.states?.[target.dataset.entity]),
+        expectedState: entityStateValue(expectedStateObject),
+        expectedStateObject,
+        expectedLastChanged: expectedStateObject?.last_changed || null,
+        createdAt: Date.now(),
         label: target.dataset.secureCoverAction === "open_cover" ? "Open garage door" : target.dataset.secureCoverAction === "close_cover" ? "Close garage door" : "Stop garage door"
       };
       this._confirmationReturnFocus = {
@@ -2422,28 +4101,40 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     if (target.dataset.toggle) {
-      if (this._controlPolicy.lights.has(target.dataset.toggle)) this._hass?.callService?.("light", "toggle", { entity_id: target.dataset.toggle });
+      if (this._controlPolicy.lights.has(target.dataset.toggle)
+        && isEntityAvailable(this._hass?.states?.[target.dataset.toggle])) {
+        this._hass?.callService?.("light", "toggle", { entity_id: target.dataset.toggle });
+      }
       return;
     }
     if (target.dataset.scene) {
-      if (this._controlPolicy.scenes.has(target.dataset.scene)) this._hass?.callService?.("scene", "turn_on", { entity_id: target.dataset.scene });
+      if (this._controlPolicy.scenes.has(target.dataset.scene)
+        && isEntityAvailable(this._hass?.states?.[target.dataset.scene])) {
+        this._hass?.callService?.("scene", "turn_on", { entity_id: target.dataset.scene });
+      }
       return;
     }
     if (target.dataset.mediaToggle) {
-      if (this._controlPolicy.mediaPlayers.has(target.dataset.mediaToggle)) this._hass?.callService?.("media_player", "media_play_pause", { entity_id: target.dataset.mediaToggle });
+      if (this._controlPolicy.mediaPlayers.has(target.dataset.mediaToggle)
+        && isEntityAvailable(this._hass?.states?.[target.dataset.mediaToggle])) {
+        this._hass?.callService?.("media_player", "media_play_pause", { entity_id: target.dataset.mediaToggle });
+      }
       return;
     }
     if (target.dataset.coverAction && target.dataset.entity) {
       if (this._controlPolicy.covers.has(target.dataset.entity)
         && target.dataset.entity !== this._controlPolicy.secureCover
-        && COVER_SERVICES.has(target.dataset.coverAction)) {
+        && COVER_SERVICES.has(target.dataset.coverAction)
+        && isEntityAvailable(this._hass?.states?.[target.dataset.entity])) {
         this._hass?.callService?.("cover", target.dataset.coverAction, { entity_id: target.dataset.entity });
       }
       return;
     }
     if (target.dataset.vacuumAction && target.dataset.entity) {
       if (target.dataset.entity === this._controlPolicy.vacuum && VACUUM_SERVICES.has(target.dataset.vacuumAction)) {
-        this._hass?.callService?.("vacuum", target.dataset.vacuumAction, { entity_id: target.dataset.entity });
+        if (isEntityAvailable(this._hass?.states?.[target.dataset.entity])) {
+          this._hass?.callService?.("vacuum", target.dataset.vacuumAction, { entity_id: target.dataset.entity });
+        }
       }
       return;
     }
@@ -2478,18 +4169,24 @@ export class FamilyHubCard extends HTMLElementBase {
     let camera = this._controlPolicy?.cameras?.get(cameraId);
     let route = cameraControlRoute(camera, this._hass?.states || {});
     let phase = cameraStreamPhase(this._hass?.states?.[camera?.entity]);
-    if (!route || this._view !== "entry" || this._cameraBlockedIds.size > 0) return;
+    let retryBlockedCamera = this._canRetryBlockedCamera(cameraId);
+    if (!route || this._view !== "entry" || this._cameraBlockedIds.size > 0 && !retryBlockedCamera) return;
     if (this._config?.display?.read_only && phase !== "streaming") return;
     if (!["idle", "preparing", "streaming"].includes(phase)) {
       this._cameraError = { id: cameraId, message: "The camera is not ready to start a live view." };
       this._scheduleRender(true);
       return;
     }
+    if (retryBlockedCamera) {
+      this._cameraBlockedIds.delete(cameraId);
+      this._armCameraBlockRetryNotice();
+    }
 
     this._securityCameraId = cameraId;
 
     const token = ++this._cameraOperationToken;
     this._clearCameraStartTimer();
+    this._clearCameraExpiryTimer();
     this._cameraError = null;
 
     if (this._cameraSession) {
@@ -2506,12 +4203,17 @@ export class FamilyHubCard extends HTMLElementBase {
     camera = this._controlPolicy?.cameras?.get(cameraId);
     route = cameraControlRoute(camera, this._hass?.states || {});
     phase = cameraStreamPhase(this._hass?.states?.[camera?.entity]);
-    if (!route || this._view !== "entry" || this._cameraBlockedIds.size > 0) return;
+    retryBlockedCamera = this._canRetryBlockedCamera(cameraId);
+    if (!route || this._view !== "entry" || this._cameraBlockedIds.size > 0 && !retryBlockedCamera) return;
     if (this._config?.display?.read_only && phase !== "streaming") return;
     if (!["idle", "preparing", "streaming"].includes(phase)) {
       this._cameraError = { id: cameraId, message: "The camera is not ready to start a live view." };
       this._scheduleRender(true);
       return;
+    }
+    if (retryBlockedCamera) {
+      this._cameraBlockedIds.delete(cameraId);
+      this._armCameraBlockRetryNotice();
     }
 
     this._evictCameraChild(cameraId);
@@ -2523,10 +4225,14 @@ export class FamilyHubCard extends HTMLElementBase {
       camera: { ...camera },
       writable: !this._config?.display?.read_only,
       startIssued: false,
-      startPromise: null
+      startPromise: null,
+      startRawPromise: null,
+      startRawPending: false,
+      viewerRecoveryAttempted: false
     };
     this._cameraSession = session;
     this._activeCameraId = null;
+    this._armCameraExpiry(session);
 
     if (phase === "streaming") {
       this._bufferCameraSession(session);
@@ -2543,7 +4249,13 @@ export class FamilyHubCard extends HTMLElementBase {
       "start",
       route.start,
       this._cameraStartTimeoutMs,
-      session.camera
+      session.camera,
+      (rawPromise) => {
+        session.startRawPromise = rawPromise;
+        session.startRawPending = true;
+        const settled = () => { session.startRawPending = false; };
+        Promise.resolve(rawPromise).then(settled, settled);
+      }
     );
     const started = await session.startPromise;
     if (token !== this._cameraOperationToken || this._cameraSession !== session || session.phase !== "starting") return;
@@ -2587,14 +4299,62 @@ export class FamilyHubCard extends HTMLElementBase {
     this._scheduleRender(true);
   }
 
+  _markCameraMediaLost(cameraId, token, child, { terminal = false } = {}) {
+    const session = this._cameraSession;
+    if (!child
+      || !session
+      || session.id !== cameraId
+      || session.token !== token
+      || session.token !== this._cameraOperationToken
+      || !["buffering", "viewing"].includes(session.phase)
+      || this._view !== "entry"
+      || this._childCards.get(`camera:${cameraId}`) !== child) return;
+    const camera = this._controlPolicy?.cameras?.get(cameraId);
+    if (cameraStreamPhase(this._hass?.states?.[camera?.entity]) !== "streaming") return;
+    this._clearCameraFrameTimers();
+    session.phase = "buffering";
+    session.slow = true;
+    this._cameraError = null;
+    if (terminal) {
+      if (!this._recoverCameraViewer(session)) {
+        void this._recoverCameraSession(session, "The live video ended. Please try again.");
+      }
+      return;
+    }
+    this._armCameraFrameTimers(session);
+    this._scheduleRender(true);
+  }
+
   _reconcileCameraSession(states) {
     const session = this._cameraSession;
+    let blocksChanged = false;
     for (const [cameraId, block] of this._cameraBlockedIds) {
       const state = states[block.entity];
+      if (block.pendingStart) {
+        const tombstone = this._pendingCameraStarts.get(cameraId);
+        const blockedPhase = cameraStreamPhase(state);
+        if (tombstone
+          && tombstone.settled
+          && tombstone.stopIssued
+          && blockedPhase === "idle"
+          && state !== tombstone.lastStopState) {
+          this._pendingCameraStarts.delete(cameraId);
+          this._cameraBlockedIds.delete(cameraId);
+          if (this._cameraError?.id === cameraId) this._cameraError = null;
+          blocksChanged = true;
+        } else if (tombstone && ["preparing", "streaming"].includes(blockedPhase)) {
+          void this._finalizePendingCameraStart(cameraId, tombstone);
+        }
+        continue;
+      }
       if (cameraStreamPhase(state) === "idle" && state !== block.baseline) {
         this._cameraBlockedIds.delete(cameraId);
-        this._scheduleRender(true);
+        blocksChanged = true;
       }
+    }
+    if (blocksChanged) {
+      this._armCameraBlockRetryNotice();
+      this._scheduleRender(true);
     }
     if (!session || session.phase === "stopping") return;
     const camera = this._controlPolicy?.cameras?.get(session.id);
@@ -2624,6 +4384,125 @@ export class FamilyHubCard extends HTMLElementBase {
     this._cameraStartTimer = null;
   }
 
+  _recordCameraBlock(cameraId, entity, baseline) {
+    if (this._cameraBlockedIds.get(cameraId)?.pendingStart) return;
+    this._cameraBlockedIds.set(cameraId, {
+      entity,
+      baseline,
+      pendingStart: false,
+      retryAt: Date.now() + this._cameraBlockRetryMs
+    });
+    this._armCameraBlockRetryNotice();
+  }
+
+  _canRetryBlockedCamera(cameraId, now = Date.now()) {
+    const block = this._cameraBlockedIds.get(cameraId);
+    if (!block || block.pendingStart || this._cameraBlockedIds.size !== 1 || now < block.retryAt) return false;
+    return cameraStreamPhase(this._hass?.states?.[block.entity]) === "idle";
+  }
+
+  _registerPendingCameraStart(session, camera, baseline) {
+    if (!session?.startRawPromise || this._pendingCameraStarts.has(session.id)) {
+      return this._pendingCameraStarts.get(session?.id) || null;
+    }
+    const tombstone = {
+      id: session.id,
+      raw: session.startRawPromise,
+      camera: { ...camera },
+      stopCommand: { ...session.route.stop },
+      baseline,
+      settled: false,
+      stopping: false,
+      rerunAfterStop: false,
+      stopBeganSettled: null,
+      stopIssued: false,
+      lastStopState: null
+    };
+    this._pendingCameraStarts.set(session.id, tombstone);
+    this._cameraBlockedIds.set(session.id, {
+      entity: camera.entity,
+      baseline,
+      pendingStart: true,
+      retryAt: Infinity
+    });
+    const settle = () => {
+      tombstone.settled = true;
+      if (tombstone.stopping) {
+        if (tombstone.stopBeganSettled === false) tombstone.rerunAfterStop = true;
+        return;
+      }
+      void this._finalizePendingCameraStart(session.id, tombstone);
+    };
+    Promise.resolve(tombstone.raw).then(settle, settle);
+    return tombstone;
+  }
+
+  async _finalizePendingCameraStart(cameraId, tombstone) {
+    if (!tombstone
+      || this._pendingCameraStarts.get(cameraId) !== tombstone) return false;
+    if (tombstone.stopping) return false;
+    tombstone.stopping = true;
+    const settledBeforeStop = tombstone.settled;
+    tombstone.stopBeganSettled = settledBeforeStop;
+    const before = this._hass?.states?.[tombstone.camera.entity];
+    tombstone.stopIssued = true;
+    tombstone.lastStopState = before;
+    const stopped = await this._callCameraCommand(
+      cameraId,
+      "stop",
+      tombstone.stopCommand,
+      this._cameraStopTimeoutMs,
+      tombstone.camera
+    );
+    const idle = stopped && await this._waitForCameraStopped(
+      tombstone.camera.entity,
+      this._cameraStopTimeoutMs,
+      cameraStreamPhase(before) === "idle" ? before : null
+    );
+    tombstone.stopping = false;
+    tombstone.stopBeganSettled = null;
+    if (this._pendingCameraStarts.get(cameraId) !== tombstone) return idle;
+    if (tombstone.rerunAfterStop || (!settledBeforeStop && tombstone.settled)) {
+      tombstone.rerunAfterStop = false;
+      return this._finalizePendingCameraStart(cameraId, tombstone);
+    }
+    if (idle && tombstone.settled) {
+      this._pendingCameraStarts.delete(cameraId);
+      if (this._cameraBlockedIds.get(cameraId)?.pendingStart) this._cameraBlockedIds.delete(cameraId);
+      if (this._cameraError?.id === cameraId) this._cameraError = null;
+      this._armCameraBlockRetryNotice();
+      this._scheduleRender(true);
+      return true;
+    }
+    if (tombstone.settled) {
+      this._cameraError = {
+        id: cameraId,
+        message: "The camera still needs to confirm it has stopped. Live views remain locked for safety."
+      };
+      this._scheduleRender(true);
+    }
+    return false;
+  }
+
+  _armCameraBlockRetryNotice() {
+    this._clearCameraBlockTimer();
+    const now = Date.now();
+    const nextRetryAt = Math.min(...[...this._cameraBlockedIds.values()]
+      .map((block) => block.retryAt)
+      .filter((retryAt) => Number.isFinite(retryAt) && retryAt > now));
+    if (!Number.isFinite(nextRetryAt)) return;
+    this._cameraBlockTimer = setTimeout(() => {
+      this._cameraBlockTimer = null;
+      this._scheduleRender();
+      this._armCameraBlockRetryNotice();
+    }, Math.max(0, nextRetryAt - now));
+  }
+
+  _clearCameraBlockTimer() {
+    if (this._cameraBlockTimer !== null) clearTimeout(this._cameraBlockTimer);
+    this._cameraBlockTimer = null;
+  }
+
   _armCameraFrameTimers(session) {
     this._cameraSlowTimer = setTimeout(() => {
       if (this._cameraSession !== session
@@ -2636,7 +4515,8 @@ export class FamilyHubCard extends HTMLElementBase {
       if (this._cameraSession !== session
         || session.token !== this._cameraOperationToken
         || session.phase !== "buffering") return;
-      void this._recoverCameraSession(session, "The video took too long to load. Please try again.");
+      if (this._recoverCameraViewer(session)) return;
+      void this._recoverCameraSession(session, "The video could not connect after one retry. Please try again.");
     }, this._cameraFrameTimeoutMs);
   }
 
@@ -2647,8 +4527,40 @@ export class FamilyHubCard extends HTMLElementBase {
     this._cameraSlowTimer = null;
   }
 
+  _recoverCameraViewer(session) {
+    if (!session
+      || this._cameraSession !== session
+      || session.token !== this._cameraOperationToken
+      || session.phase !== "buffering"
+      || session.viewerRecoveryAttempted
+      || this._view !== "entry") return false;
+    const camera = this._controlPolicy?.cameras?.get(session.id);
+    if (cameraStreamPhase(this._hass?.states?.[camera?.entity]) !== "streaming") return false;
+    session.viewerRecoveryAttempted = true;
+    session.slow = false;
+    this._clearCameraFrameTimers();
+    this._evictCameraChild(session.id);
+    this._armCameraFrameTimers(session);
+    this._scheduleRender(true);
+    return true;
+  }
+
+  _armCameraExpiry(session) {
+    this._clearCameraExpiryTimer();
+    this._cameraExpiryTimer = setTimeout(() => {
+      if (this._cameraSession !== session || session.token !== this._cameraOperationToken) return;
+      this._closeActiveCamera({ message: "Live view closed automatically after two minutes." });
+    }, this._cameraExpiryMs);
+  }
+
+  _clearCameraExpiryTimer() {
+    if (this._cameraExpiryTimer !== null) clearTimeout(this._cameraExpiryTimer);
+    this._cameraExpiryTimer = null;
+  }
+
   async _recoverCameraSession(session, message) {
     if (!session || this._cameraSession !== session) return false;
+    this._clearCameraExpiryTimer();
     const token = ++this._cameraOperationToken;
     const recovery = this._stopCameraSession(session, token, { render: true, message });
     this._cameraRecoveryPromise = recovery;
@@ -2671,6 +4583,7 @@ export class FamilyHubCard extends HTMLElementBase {
     ++this._cameraOperationToken;
     this._clearCameraStartTimer();
     this._clearCameraFrameTimers();
+    this._clearCameraExpiryTimer();
     if (!session) {
       if (this._activeCameraId) this._evictCameraChild(this._activeCameraId);
       this._activeCameraId = null;
@@ -2695,23 +4608,27 @@ export class FamilyHubCard extends HTMLElementBase {
     this._evictCameraChild(session.id);
     if (render) this._scheduleRender(true);
 
-    if (session.startPromise) await session.startPromise;
     const camera = session.camera || this._controlPolicy?.cameras?.get(session.id);
     const phase = cameraStreamPhase(this._hass?.states?.[camera?.entity]);
     const preStopState = this._hass?.states?.[camera?.entity];
     const shouldStop = session.writable
       && Boolean(session.route?.stop)
       && (session.startIssued || ["buffering", "viewing"].includes(previousPhase) || ["preparing", "streaming"].includes(phase));
+    const pendingTombstone = shouldStop && session.startRawPromise && session.startRawPending
+      ? this._registerPendingCameraStart(session, camera, preStopState)
+      : null;
     const currentRoute = cameraControlRoute(camera, this._hass?.states || {});
     const stopCommand = currentRoute?.stop || session.route.stop;
-    const stopped = !shouldStop
-      || await this._callCameraCommand(
-        session.id,
-        "stop",
-        stopCommand,
-        this._cameraStopTimeoutMs,
-        camera
-      );
+    let stopped = !shouldStop
+      || (pendingTombstone
+        ? await this._finalizePendingCameraStart(session.id, pendingTombstone)
+        : await this._callCameraCommand(
+          session.id,
+          "stop",
+          stopCommand,
+          this._cameraStopTimeoutMs,
+          camera
+        ));
 
     if (!shouldStop) {
       if (this._cameraSession === session) this._cameraSession = null;
@@ -2720,18 +4637,16 @@ export class FamilyHubCard extends HTMLElementBase {
       return true;
     }
     const requireFreshIdle = session.startIssued && previousPhase === "starting" && phase === "idle";
-    const stateStopped = stopped && await this._waitForCameraStopped(
+    const initialStateStopped = stopped && await this._waitForCameraStopped(
       camera.entity,
       this._cameraStopTimeoutMs,
       requireFreshIdle ? preStopState : null
     );
+    const stateStopped = initialStateStopped && !this._pendingCameraStarts.has(session.id);
     if (token !== this._cameraOperationToken) {
       if (this._cameraSession === session) this._cameraSession = null;
       if (!stateStopped && (session.startIssued || cameraStreamPhase(this._hass?.states?.[camera.entity]) !== "idle")) {
-        this._cameraBlockedIds.set(session.id, {
-          entity: camera.entity,
-          baseline: this._hass?.states?.[camera.entity]
-        });
+        this._recordCameraBlock(session.id, camera.entity, this._hass?.states?.[camera.entity]);
       }
       return stateStopped;
     }
@@ -2741,10 +4656,7 @@ export class FamilyHubCard extends HTMLElementBase {
       if (message) this._cameraError = { id: session.id, message };
       else if (!stateStopped) this._cameraError = { id: session.id, message: "The live view could not be stopped safely. Please wait for the camera to become idle." };
       if (!stateStopped && (session.startIssued || cameraStreamPhase(this._hass?.states?.[camera.entity]) !== "idle")) {
-        this._cameraBlockedIds.set(session.id, {
-          entity: camera.entity,
-          baseline: this._hass?.states?.[camera.entity]
-        });
+        this._recordCameraBlock(session.id, camera.entity, this._hass?.states?.[camera.entity]);
       }
     }
     if (render && isCurrentSession) this._scheduleRender(true);
@@ -2755,15 +4667,15 @@ export class FamilyHubCard extends HTMLElementBase {
     const deadline = Date.now() + timeoutMs;
     while (true) {
       const state = this._hass?.states?.[entityId];
-      const isFreshIdle = cameraStreamPhase(state) === "idle"
-        && (!staleIdleState || state !== staleIdleState);
-      if (isFreshIdle) return true;
+      if (cameraStreamPhase(state) === "idle") {
+        if (!staleIdleState || state !== staleIdleState) return true;
+      }
       if (Date.now() >= deadline) return false;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
 
-  async _callCameraCommand(cameraId, direction, command, timeoutMs, authorizedCamera = null) {
+  async _callCameraCommand(cameraId, direction, command, timeoutMs, authorizedCamera = null, onDispatched = null) {
     const camera = authorizedCamera || this._controlPolicy?.cameras?.get(cameraId);
     if (!camera || !camera.startButton || !camera.stopButton || !command) return false;
     const expectedButton = direction === "start" ? camera.startButton : camera.stopButton;
@@ -2778,6 +4690,7 @@ export class FamilyHubCard extends HTMLElementBase {
     let timeout;
     try {
       const call = Promise.resolve(this._hass.callService(command.domain, command.service, { entity_id: command.entity }));
+      if (typeof onDispatched === "function") onDispatched(call);
       await Promise.race([
         call,
         new Promise((_, reject) => {
@@ -2794,11 +4707,7 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _evictCameraChild(cameraId) {
     if (!cameraId) return;
-    const key = `camera:${cameraId}`;
-    const child = this._childCards.get(key);
-    child?.__familyCameraObserverCleanup?.();
-    child?.remove?.();
-    this._childCards.delete(key);
+    this._removeChildCard(`camera:${cameraId}`);
   }
 
   _selectRoom(roomId) {
@@ -2821,29 +4730,29 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _styles() {
     return `
-      :host { --family-ha-header-offset:var(--header-height,56px); display:block; width:100%; min-width:0; min-height:664px; height:calc(100vh - var(--family-ha-header-offset)); margin-top:var(--family-ha-header-offset); color:var(--primary-text-color); font-family:var(--family-font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif); }
+      :host { --family-ha-header-offset:var(--header-height,56px); --hub-focus:#0B57C7; display:block; width:100%; min-width:0; min-height:664px; height:calc(100vh - var(--family-ha-header-offset)); margin-top:var(--family-ha-header-offset); color:var(--primary-text-color); font-family:var(--family-font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif); }
       *, *::before, *::after { box-sizing:border-box; }
       button, select { font:inherit; }
       button { -webkit-tap-highlight-color:transparent; }
       .hub-card { overflow:hidden; border:0; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); color:var(--hub-text); min-height:100%; height:100%; }
-      .shell { display:grid; grid-template-columns:86px minmax(0,1fr); min-height:100%; height:100%; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); }
-      .navigation { padding:14px 9px; background:linear-gradient(180deg,color-mix(in srgb,var(--hub-nav) 96%,transparent),color-mix(in srgb,var(--hub-nav) 86%,var(--hub-accent))); border-right:1px solid rgba(255,255,255,.1); display:flex; flex-direction:column; gap:14px; min-height:0; }
-      .brand { width:54px; height:54px; margin:0 auto; border-radius:50%; border:1px solid rgba(255,255,255,.45); background:rgba(255,255,255,.12); color:#fff; font-size:24px; font-weight:700; cursor:pointer; }
-      .nav-items { display:flex; min-height:0; flex:1; flex-direction:column; justify-content:center; gap:8px; }
-      .nav-button { min-height:64px; border:1px solid transparent; border-radius:20px; background:transparent; color:rgba(255,255,255,.72); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; cursor:pointer; }
-      .nav-button ha-icon { --mdc-icon-size:22px; }
-      .nav-button span { font-size:10px; font-weight:600; }
-      .nav-button.is-active { color:#fff; background:linear-gradient(145deg,var(--hub-backdrop-end),var(--hub-accent)); border-color:rgba(255,255,255,.35); box-shadow:0 10px 24px rgba(13,18,34,.28); }
-      .content { min-width:0; min-height:0; padding:12px 18px 16px; display:grid; grid-template-rows:56px minmax(0,1fr); gap:10px; background:linear-gradient(135deg,rgba(17,28,51,.18),rgba(183,101,98,.12)); }
-      .topbar { min-width:0; display:flex; justify-content:space-between; align-items:center; color:#fff; padding:0 4px; }
-      .topbar h1 { margin:2px 0 0; font-size:30px; line-height:1; font-weight:700; }
+      .hub-shell { display:grid; grid-template-columns:86px minmax(0,1fr); min-height:100%; height:100%; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); }
+      .hub-navigation { padding:14px 9px; background:linear-gradient(180deg,color-mix(in srgb,var(--hub-nav) 96%,transparent),color-mix(in srgb,var(--hub-nav) 86%,var(--hub-accent))); border-right:1px solid rgba(255,255,255,.1); display:flex; flex-direction:column; gap:14px; min-height:0; }
+      .hub-brand { width:54px; height:54px; margin:0 auto; border-radius:50%; border:1px solid rgba(255,255,255,.45); background:rgba(255,255,255,.12); color:#fff; font-size:24px; font-weight:700; cursor:pointer; }
+      .hub-nav-items { display:flex; min-height:0; flex:1; flex-direction:column; justify-content:center; gap:8px; }
+      .hub-nav-button { min-height:64px; border:1px solid transparent; border-radius:20px; background:transparent; color:rgba(255,255,255,.72); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; cursor:pointer; }
+      .hub-nav-button ha-icon { --mdc-icon-size:22px; }
+      .hub-nav-button span { font-size:10px; font-weight:600; }
+      .hub-nav-button.is-active { color:#fff; background:linear-gradient(145deg,var(--hub-backdrop-end),var(--hub-accent)); border-color:rgba(255,255,255,.35); box-shadow:0 10px 24px rgba(13,18,34,.28); }
+      .hub-content { min-width:0; min-height:0; padding:12px 18px 16px; display:grid; grid-template-rows:56px minmax(0,1fr); gap:10px; background:linear-gradient(135deg,rgba(17,28,51,.18),rgba(183,101,98,.12)); }
+      .hub-topbar { min-width:0; display:flex; justify-content:space-between; align-items:center; color:#fff; padding:0 4px; }
+      .hub-topbar h1 { margin:2px 0 0; font-size:30px; line-height:1; font-weight:700; }
       .eyebrow { margin:0; font-size:10px; line-height:1.2; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--hub-muted); }
-      .topbar .eyebrow { color:rgba(255,255,255,.72); }
-      .header-actions { display:flex; align-items:center; gap:9px; }
+      .hub-topbar .eyebrow { color:rgba(255,255,255,.72); }
+      .hub-header-actions { display:flex; align-items:center; gap:9px; }
       .preview-pill { min-height:36px; padding:0 12px; border:1px solid rgba(255,255,255,.34); border-radius:14px; display:flex; align-items:center; gap:7px; background:rgba(255,255,255,.13); color:#fff; font-size:11px; font-weight:700; }
       .preview-pill ha-icon { --mdc-icon-size:18px; }
-      .weather-pill { min-height:48px; padding:0 16px; border:1px solid rgba(255,255,255,.28); border-radius:18px; background:rgba(255,255,255,.14); color:#fff; display:flex; align-items:center; gap:9px; cursor:pointer; }
-      .view { min-height:0; min-width:0; }
+      .hub-weather-pill { min-height:48px; padding:0 16px; border:1px solid rgba(255,255,255,.28); border-radius:18px; background:rgba(255,255,255,.14); color:#fff; display:flex; align-items:center; gap:9px; cursor:pointer; }
+      .hub-view { min-height:0; min-width:0; }
       .surface { color:var(--hub-text); background:linear-gradient(145deg,color-mix(in srgb,var(--hub-surface) 82%,transparent),color-mix(in srgb,var(--hub-backdrop-mid) 72%,transparent)); border:1px solid rgba(255,255,255,.16); border-radius:var(--hub-radius); box-shadow:0 20px 52px rgba(3,8,24,.3),inset 0 1px 0 rgba(255,255,255,.1); -webkit-backdrop-filter:blur(22px) saturate(1.18); backdrop-filter:blur(22px) saturate(1.18); }
       .today-grid { height:100%; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(245px,.9fr) minmax(240px,.85fr); grid-template-rows:minmax(190px,.82fr) minmax(210px,1.18fr); gap:14px; }
       .today-grid article { padding:20px; min-width:0; overflow:hidden; }
@@ -2853,13 +4762,17 @@ export class FamilyHubCard extends HTMLElementBase {
       .hero-panel .eyebrow { color:rgba(255,255,255,.7); }
       .hero-panel h2 { font-size:30px; }
       .hero-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:22px; }
+      .hero-metrics.has-energy { grid-template-columns:repeat(4,minmax(0,1fr)); }
+      .hero-metrics[data-metric-count="1"] { grid-template-columns:minmax(0,1fr); }
+      .hero-metrics[data-metric-count="2"] { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .hero-metrics[data-metric-count="3"] { grid-template-columns:repeat(3,minmax(0,1fr)); }
       .hero-metrics button { text-align:left; min-height:74px; padding:12px 14px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.12); color:#fff; border-radius:16px; cursor:pointer; }
       .hero-metrics strong,.hero-metrics span { display:block; }
       .hero-metrics strong { font-size:18px; }
       .hero-metrics span { margin-top:4px; font-size:10px; opacity:.74; }
       .next-panel { display:flex; flex-direction:column; }
       .next-panel .text-action { margin-top:auto; }
-      .text-action,.section-heading button { width:max-content; border:0; padding:5px 0; background:transparent; color:var(--hub-accent); font-size:12px; font-weight:700; cursor:pointer; }
+      .text-action,.section-heading > button { width:max-content; border:0; padding:5px 0; background:transparent; color:var(--hub-accent); font-size:12px; font-weight:700; cursor:pointer; }
       .children-panel { grid-row:2; display:flex; flex-direction:column; justify-content:center; }
       .football-panel { grid-row:2; display:flex; flex-direction:column; justify-content:center; }
       .now-playing-panel { grid-row:2; display:flex; flex-direction:column; justify-content:center; }
@@ -2897,6 +4810,15 @@ export class FamilyHubCard extends HTMLElementBase {
       .home-segments { max-width:70%; overflow-x:auto; }
       .home-segments .segment,.calendar-modes .segment { display:flex; align-items:center; gap:5px; }
       .home-segments ha-icon,.calendar-modes ha-icon { --mdc-icon-size:15px; }
+      .home-overview { height:100%; min-height:0; display:grid; grid-template-rows:66px minmax(0,1fr); gap:10px; }
+      .home-summary-links { min-width:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+      .home-summary-links[data-summary-count="2"] { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .home-summary-links button { min-width:0; min-height:58px; padding:8px 12px; display:grid; grid-template-columns:30px minmax(0,1fr) 18px; align-items:center; gap:9px; border:1px solid rgba(255,255,255,.12); border-radius:15px; background:rgba(8,15,31,.46); color:var(--hub-text); text-align:left; cursor:pointer; }
+      .home-summary-links button > ha-icon:first-child { --mdc-icon-size:21px; color:#bcaeff; }
+      .home-summary-links button > ha-icon:last-child { --mdc-icon-size:17px; color:var(--hub-muted); }
+      .home-summary-links strong,.home-summary-links small { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .home-summary-links strong { font-size:14px; }
+      .home-summary-links small { margin-top:2px; color:var(--hub-muted); font-size:10px; }
       .whole-home-grid { height:100%; min-height:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; overflow:auto; align-content:start; padding:1px 3px 4px 1px; }
       .whole-home-card { min-width:0; padding:15px; }
       .whole-home-heading,.heating-card-heading,.cover-card-heading { min-width:0; display:flex; align-items:center; gap:10px; }
@@ -2968,6 +4890,39 @@ export class FamilyHubCard extends HTMLElementBase {
       .vacuum-map-slot .embedded-card { height:100%; }
       .vacuum-map-placeholder { display:grid; place-items:center; align-content:center; gap:10px; padding:28px; color:var(--hub-muted); text-align:center; font-size:11px; }
       .vacuum-map-placeholder ha-icon { --mdc-icon-size:44px; color:#a999ff; }
+      .energy-view { height:100%; min-height:0; display:grid; grid-template-rows:146px minmax(0,1fr) 74px; gap:14px; }
+      .energy-hero { min-width:0; padding:22px 26px; display:flex; align-items:center; justify-content:space-between; gap:24px; overflow:hidden; border:0; background:radial-gradient(circle at 88% 18%,rgba(0,168,135,.25),transparent 32%),linear-gradient(135deg,#061B3A,#0C315D); color:#fff; }
+      .energy-hero .eyebrow { color:#8FD8CB; }
+      .energy-hero h2 { margin:6px 0 0; color:#fff; font-size:40px; line-height:1; letter-spacing:-.04em; }
+      .energy-hero p:last-child { margin:8px 0 0; color:#C7D4E4; font-size:13px; }
+      .energy-hero-status { flex:0 0 auto; min-width:214px; padding:12px 14px; display:grid; grid-template-columns:24px minmax(0,1fr); gap:2px 9px; align-items:center; border:1px solid rgba(255,255,255,.14); border-radius:16px; background:rgba(255,255,255,.075); }
+      .energy-hero-status ha-icon { grid-row:1/3; --mdc-icon-size:22px; color:#8FD8CB; }
+      .energy-hero-status strong,.energy-hero-status small { display:block; }
+      .energy-hero-status strong { font-size:12px; }
+      .energy-hero-status small { color:#AFC0D5; font-size:10px; }
+      .energy-meter-grid { min-height:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+      .energy-meter { min-width:0; min-height:0; padding:20px; display:grid; grid-template-rows:auto minmax(92px,1fr) auto auto; gap:14px; overflow:hidden; }
+      .energy-meter-heading { min-width:0; display:grid; grid-template-columns:48px minmax(0,1fr) auto; align-items:center; gap:11px; }
+      .energy-meter-icon { width:48px; height:48px; display:grid; place-items:center; border-radius:15px; background:color-mix(in srgb,var(--hub-accent) 15%,rgba(8,15,31,.64)); color:#c8bcff; }
+      .energy-meter-icon ha-icon { --mdc-icon-size:25px; }
+      .energy-meter-heading h2 { margin:3px 0 0; font-size:20px; }
+      .energy-status { min-height:34px; padding:0 10px; display:flex; align-items:center; gap:6px; border:1px solid rgba(255,255,255,.11); border-radius:12px; color:var(--hub-muted); font-size:10px; font-weight:750; }
+      .energy-status ha-icon { --mdc-icon-size:16px; }
+      .energy-meter.is-stale .energy-status,.energy-meter.is-partial .energy-status,.energy-meter.is-unverified .energy-status { color:#ffd789; }
+      .energy-primary-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+      .energy-primary-metrics > span { min-width:0; padding:14px; border:1px solid rgba(255,255,255,.1); border-radius:15px; background:rgba(8,15,31,.42); }
+      .energy-primary-metrics small,.energy-primary-metrics strong,.energy-tariff small,.energy-tariff strong { display:block; }
+      .energy-primary-metrics small,.energy-tariff small { color:var(--hub-muted); font-size:10px; }
+      .energy-primary-metrics strong { margin-top:7px; font-size:27px; line-height:1; letter-spacing:-.035em; }
+      .energy-tariff { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding-top:12px; border-top:1px solid rgba(255,255,255,.1); }
+      .energy-tariff strong { margin-top:4px; font-size:13px; }
+      .energy-freshness { margin:0; display:flex; align-items:center; gap:6px; color:var(--hub-muted); font-size:10px; }
+      .energy-freshness ha-icon { --mdc-icon-size:15px; }
+      .energy-truth-note { min-width:0; padding:13px 18px; display:grid; grid-template-columns:34px minmax(0,1fr); align-items:center; gap:11px; }
+      .energy-truth-note > ha-icon { --mdc-icon-size:24px; color:#8FD8CB; }
+      .energy-truth-note strong,.energy-truth-note span { display:block; }
+      .energy-truth-note strong { font-size:12px; }
+      .energy-truth-note span { margin-top:3px; color:var(--hub-muted); font-size:10px; }
       .rooms-layout { height:100%; display:grid; grid-template-columns:minmax(0,3.2fr) minmax(232px,1fr); gap:12px; }
       .floorplan-panel { min-width:0; min-height:0; padding:14px; display:grid; grid-template-rows:48px minmax(0,1fr); gap:7px; }
       .floorplan-heading { align-items:center; }
@@ -2984,7 +4939,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .room-hotspot.has-light polygon { fill:color-mix(in srgb,var(--room-colour) 12%,transparent); filter:drop-shadow(0 0 4px var(--room-colour)); }
       .room-hotspot.is-selected polygon,.room-hotspot:focus polygon { fill:color-mix(in srgb,var(--hub-accent) 8%,transparent); stroke:#b9aaff; stroke-width:.72; filter:drop-shadow(0 0 4px var(--hub-accent)); }
       .room-detail { padding:16px; min-height:0; overflow:auto; }
-      .read-only-note { display:flex; align-items:center; gap:7px; margin:14px 0 0; padding:10px 12px; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); color:var(--hub-muted); font-size:11px; }
+      .read-only-note { display:flex; align-items:center; gap:7px; margin:14px 0 0; padding:10px 12px; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); color:var(--hub-muted); font-size:12px; }
       .read-only-note ha-icon { --mdc-icon-size:17px; color:var(--hub-accent); }
       .read-only-music { display:grid; place-items:center; grid-template-columns:minmax(0,1fr) 130px; padding:42px; }
       .read-only-music h2 { margin:7px 0 0; font-size:30px; }
@@ -3029,8 +4984,13 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-facts span { padding:8px; border-radius:12px; background:color-mix(in srgb,var(--person-colour) 8%,var(--hub-surface)); color:var(--hub-muted); font-size:9px; }
       .family-facts strong { display:block; color:var(--hub-text); font-size:16px; }
       .assignment { display:flex; gap:8px; margin-top:13px; padding-top:12px; border-top:1px solid color-mix(in srgb,var(--hub-muted) 16%,transparent); }
-      .assignment strong,.assignment small { display:block; }
+      .assignment > div { min-width:0; }
+      .assignment strong,.assignment small,.assignment a { display:block; }
+      .assignment a { color:var(--hub-accent); font-weight:800; text-decoration-thickness:1px; text-underline-offset:3px; overflow-wrap:anywhere; }
       .assignment small { margin-top:3px; color:var(--hub-muted); font-size:9px; }
+      .classroom-health { margin-top:7px; display:flex; align-items:center; gap:5px; color:var(--hub-muted); font-size:10px; font-weight:700; line-height:1.3; }
+      .classroom-health ha-icon { flex:0 0 auto; --mdc-icon-size:15px; }
+      .classroom-health.is-stale { color:#9b6400; }
       .classroom-locked { opacity:.82; }
       .security-layout { position:relative; height:100%; min-height:0; display:grid; grid-template-columns:minmax(0,1.7fr) minmax(260px,.72fr); gap:14px; }
       .security-main { min-height:0; display:grid; grid-template-rows:repeat(2,minmax(0,1fr)); gap:14px; }
@@ -3059,7 +5019,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .camera-card-slot .embedded-card { height:100%; }
       .camera-card-slot::slotted(.embedded-card) { display:block; height:100%; min-height:130px; }
       .camera-stream.is-buffering .camera-card-slot { opacity:.24; }
-      .camera-stream-overlay { position:absolute; z-index:3; inset:0; display:flex; align-items:center; justify-content:center; gap:13px; padding:20px 80px 20px 20px; background:radial-gradient(circle at 18% 50%,rgba(123,104,211,.32),transparent 36%),linear-gradient(135deg,rgba(5,10,21,.96),rgba(12,20,39,.91)); color:#fff; }
+      .camera-stream-overlay { position:absolute; z-index:3; inset:0; display:flex; align-items:center; justify-content:center; gap:13px; padding:20px 80px 20px 20px; background:radial-gradient(circle at 18% 50%,rgba(123,104,211,.28),transparent 36%),linear-gradient(135deg,rgba(5,10,21,.76),rgba(12,20,39,.68)); color:#fff; backdrop-filter:blur(1.5px); }
       .camera-stream-overlay > ha-icon { flex:0 0 auto; --mdc-icon-size:34px; color:#b9adff; animation:camera-spin 1.4s linear infinite; }
       .camera-stream-overlay strong,.camera-stream-overlay small { display:block; }
       .camera-stream-overlay strong { font-size:15px; }
@@ -3119,21 +5079,27 @@ export class FamilyHubCard extends HTMLElementBase {
       .fixture-score small { display:block; margin-top:2px; color:var(--hub-muted); font-size:8px; }
       .fixture.is-live .fixture-score small { color:#d94848; }
       .scorers { grid-column:1/-1; text-align:center; color:var(--hub-muted); font-size:8px; }
-      .football-sidebar { min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto; gap:14px; }
-      .spotlight-panel,.provider-panel { padding:18px; overflow:hidden; }
-      .spotlight-panel h2,.provider-panel h2 { margin:5px 0 0; font-size:18px; }
-      .spotlight-club { display:flex; align-items:center; gap:10px; margin-top:14px; padding-top:13px; border-top:1px solid color-mix(in srgb,var(--hub-muted) 14%,transparent); }
-      .club-badge { width:42px; height:42px; display:grid; place-items:center; border-radius:13px; background:var(--hub-nav); color:#fff; font-size:11px; font-weight:700; }
-      .spotlight-club strong,.spotlight-club small { display:block; }
-      .spotlight-club small { margin-top:3px; color:var(--hub-muted); font-size:9px; }
-      .provider-panel p:last-child { margin:8px 0 0; color:var(--hub-muted); font-size:10px; line-height:1.4; }
+      .football-sidebar { min-height:0; }
+      .favourite-standings { min-height:0; padding:18px; overflow:hidden; }
+      .favourite-standings h2 { margin:5px 0 0; font-size:18px; }
+      .favourite-standing-list { display:grid; gap:10px; margin-top:16px; }
+      .favourite-standing { position:relative; min-width:0; min-height:64px; padding:9px 10px; display:grid; grid-template-columns:34px minmax(0,1fr) auto; gap:9px; align-items:center; overflow:hidden; border:1px solid color-mix(in srgb,var(--club-accent) 34%,transparent); border-radius:14px; background:color-mix(in srgb,var(--club-primary) 7%,var(--hub-surface)); }
+      .favourite-standing::before { content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--club-primary); }
+      .favourite-standing strong,.favourite-standing small { display:block; }
+      .favourite-standing small { margin-top:3px; color:var(--hub-muted); font-size:9px; }
+      .favourite-standing b { color:var(--club-primary); font-size:17px; }
       .league-table-wrap { min-height:0; overflow:auto; margin-top:10px; }
       .league-table { width:100%; border-collapse:collapse; font-size:11px; }
       .league-table th,.league-table td { padding:7px 8px; text-align:right; border-bottom:1px solid color-mix(in srgb,var(--hub-muted) 12%,transparent); }
       .league-table th:nth-child(2),.league-table td:nth-child(2) { text-align:left; }
       .league-table tr.is-spotlight { background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); }
-      .calendar-view { position:relative; display:grid; grid-template-rows:52px minmax(0,1fr); gap:10px; background:linear-gradient(155deg,rgba(250,246,245,.94),rgba(235,230,242,.91)); }
-      .calendar-heading { align-items:center; }
+      .calendar-view { position:relative; display:grid; grid-template-rows:58px minmax(0,1fr); gap:10px; background:linear-gradient(155deg,rgba(250,246,245,.94),rgba(235,230,242,.91)); }
+      .calendar-toolbar { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:14px; }
+      .calendar-context { min-width:max-content; display:flex; align-items:center; gap:9px; color:#0B1830; }
+      .calendar-context > ha-icon { --mdc-icon-size:22px; color:#1463E8; }
+      .calendar-context > span,.calendar-context strong,.calendar-context small { display:block; }
+      .calendar-context strong { font-size:15px; }
+      .calendar-context small { margin-top:2px; color:#5E6B80; font-size:12px; font-weight:650; }
       .calendar-modes { flex-wrap:nowrap; }
       .calendar-card-slot { height:100%; min-height:0; overflow:hidden; border:1px solid rgba(255,255,255,.1); background:rgba(7,14,29,.62); --ha-card-background:transparent; --card-background-color:transparent; --ha-card-border-width:0; --ha-card-box-shadow:none; --primary-text-color:#f7f8fc; --secondary-text-color:#b6bdce; }
       .calendar-card-slot .embedded-card { height:100%; min-height:0; overflow:auto; }
@@ -3144,37 +5110,35 @@ export class FamilyHubCard extends HTMLElementBase {
       .calendar-loading { position:absolute; top:14px; right:18px; z-index:2; display:flex; align-items:center; gap:7px; padding:7px 10px; border-radius:999px; background:#fff; color:#4d5568; font-size:9px; box-shadow:0 7px 20px rgba(27,34,53,.12); }
       .calendar-loading span { width:8px; height:8px; border-radius:50%; background:var(--hub-accent); animation:pulse 1.2s ease-in-out infinite; }
       .calendar-warning { position:absolute; z-index:2; bottom:12px; left:50%; transform:translateX(-50%); margin:0; padding:8px 12px; border-radius:12px; background:#fff3d9; color:#704b0d; font-size:9px; box-shadow:0 7px 18px rgba(45,35,14,.14); }
-      .agenda-board { min-width:0; min-height:0; display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:7px; overflow:hidden; }
-      .agenda-day { min-width:0; min-height:0; display:grid; grid-template-rows:58px minmax(0,1fr); border:1px solid rgba(81,78,99,.12); border-radius:17px; background:rgba(255,255,255,.62); overflow:hidden; }
-      .agenda-day.is-today { border-color:color-mix(in srgb,var(--hub-accent) 45%,transparent); background:color-mix(in srgb,var(--hub-accent) 8%,#fff); box-shadow:inset 0 3px 0 var(--hub-accent); }
-      .agenda-day > header { padding:9px 8px 7px; display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; align-items:end; border-bottom:1px solid rgba(81,78,99,.1); color:#242a3a; }
-      .agenda-day > header span { align-self:start; color:#656c7f; font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
-      .agenda-day > header strong { grid-row:1/3; font-size:25px; line-height:1; }
-      .agenda-day > header small { color:#7a8090; font-size:9px; }
-      .agenda-events { min-height:0; padding:7px; display:flex; flex-direction:column; gap:6px; overflow:auto; }
-      .agenda-event { position:relative; min-width:0; padding:8px 7px 8px 10px; border-radius:11px; background:color-mix(in srgb,var(--calendar-colour) 10%,#fff); color:#222838; box-shadow:0 4px 12px rgba(30,35,54,.07); }
-      .agenda-event::before { content:""; position:absolute; inset:5px auto 5px 0; width:3px; border-radius:3px; background:var(--calendar-colour); }
-      .agenda-event .event-time { display:block; color:var(--calendar-colour); font-size:8px; font-weight:850; letter-spacing:.04em; }
-      .agenda-event strong { display:-webkit-box; margin-top:3px; overflow:hidden; color:#1d2333; font-size:10px; line-height:1.25; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
-      .agenda-event small { display:flex; align-items:center; gap:2px; margin-top:5px; overflow:hidden; color:#656c7f; font-size:8px; white-space:nowrap; text-overflow:ellipsis; }
-      .agenda-event small ha-icon { --mdc-icon-size:11px; }
-      .agenda-empty { margin:12px 4px; color:#8a8f9d; font-size:9px; line-height:1.4; }
-      .agenda-more { margin:auto 4px 2px; color:var(--hub-accent); font-size:9px; font-weight:750; }
-      .family-dashboard { height:100%; display:grid; grid-template-rows:148px minmax(0,1fr); gap:14px; }
-      .family-rhythm { padding:20px 22px; display:flex; align-items:center; justify-content:space-between; gap:18px; background:linear-gradient(125deg,color-mix(in srgb,var(--hub-accent) 86%,#1b2342),color-mix(in srgb,var(--hub-backdrop-end) 82%,#db8e72)); color:#fff; }
-      .family-rhythm .eyebrow { color:rgba(255,255,255,.7); }
-      .family-rhythm h2 { margin:5px 0 0; font-size:22px; }
-      .family-rhythm p:last-child { margin:5px 0 0; color:rgba(255,255,255,.72); font-size:11px; }
-      .location-off-badge { width:max-content; min-height:28px; margin-top:9px; padding:0 9px; display:flex; align-items:center; gap:5px; border:1px solid rgba(255,255,255,.22); border-radius:999px; background:rgba(255,255,255,.11); color:#fff; font-size:10px; font-weight:750; }
-      .location-off-badge ha-icon { --mdc-icon-size:15px; }
-      .rhythm-stats { display:grid; grid-template-columns:repeat(3,88px); gap:8px; }
-      .rhythm-stats span { min-height:70px; padding:10px; border:1px solid rgba(255,255,255,.2); border-radius:15px; background:rgba(255,255,255,.12); color:rgba(255,255,255,.72); font-size:9px; }
-      .rhythm-stats strong { display:block; margin-bottom:3px; color:#fff; font-size:22px; }
+      .hub-agenda-board { min-width:0; min-height:0; display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:7px; overflow:hidden; }
+      .hub-agenda-day { min-width:0; min-height:0; display:grid; grid-template-rows:58px minmax(0,1fr); border:1px solid rgba(81,78,99,.12); border-radius:17px; background:rgba(255,255,255,.62); overflow:hidden; }
+      .hub-agenda-day.is-today { border-color:color-mix(in srgb,var(--hub-accent) 45%,transparent); background:color-mix(in srgb,var(--hub-accent) 8%,#fff); box-shadow:inset 0 3px 0 var(--hub-accent); }
+      .hub-agenda-day > header { padding:9px 8px 7px; display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; align-items:end; border-bottom:1px solid rgba(81,78,99,.1); color:#242a3a; }
+      .hub-agenda-day > header span { align-self:start; color:#656c7f; font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+      .hub-agenda-day > header strong { grid-row:1/3; font-size:25px; line-height:1; }
+      .hub-agenda-day > header small { color:#7a8090; font-size:9px; }
+      .hub-agenda-events { min-height:0; padding:7px; display:flex; flex-direction:column; gap:6px; overflow:auto; }
+      .hub-agenda-event { position:relative; min-width:0; padding:8px 7px 8px 10px; border-radius:11px; background:color-mix(in srgb,var(--calendar-colour) 10%,#fff); color:#222838; box-shadow:0 4px 12px rgba(30,35,54,.07); }
+      .hub-agenda-event::before { content:""; position:absolute; inset:5px auto 5px 0; width:3px; border-radius:3px; background:var(--calendar-colour); }
+      .hub-agenda-event .event-time { display:block; color:var(--calendar-colour); font-size:8px; font-weight:850; letter-spacing:.04em; }
+      .hub-agenda-event strong { display:-webkit-box; margin-top:3px; overflow:hidden; color:#1d2333; font-size:10px; line-height:1.25; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
+      .hub-agenda-event small { display:flex; align-items:center; gap:2px; margin-top:5px; overflow:hidden; color:#656c7f; font-size:8px; white-space:nowrap; text-overflow:ellipsis; }
+      .hub-agenda-event small ha-icon { --mdc-icon-size:11px; }
+      .hub-agenda-empty { margin:12px 4px; color:#8a8f9d; font-size:9px; line-height:1.4; }
+      .hub-agenda-more { margin:auto 4px 2px; color:var(--hub-accent); font-size:9px; font-weight:750; }
+      .family-dashboard { height:100%; min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr); gap:10px; }
+      .family-dashboard-heading { min-height:48px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 2px; }
+      .family-dashboard-heading h2 { margin:3px 0 0; color:var(--hub-text); font-size:22px; }
+      .choreops-link { min-height:48px; padding:0 14px; display:inline-flex; align-items:center; justify-content:center; gap:7px; border:1px solid color-mix(in srgb,var(--hub-accent) 24%,transparent); border-radius:14px; background:color-mix(in srgb,var(--hub-accent) 8%,var(--hub-surface)); color:var(--hub-accent); font-size:12px; font-weight:800; text-decoration:none; }
+      .choreops-link ha-icon { --mdc-icon-size:18px; }
+      .family-sidebar-link { flex:0 0 auto; align-self:flex-end; }
       .family-people-grid { min-height:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
       .family-people-grid .family-person { padding:15px 20px; }
       .family-people-grid .chore-list { grid-template-columns:1fr; }
       .chore-heading { display:flex; align-items:center; justify-content:space-between; margin-top:14px; }
       .chore-heading span { color:var(--hub-muted); font-size:9px; }
+      .family-connection-warning { margin:13px 0 0; padding:10px 12px; display:flex; align-items:center; gap:7px; border:1px solid #e8d29d; border-radius:12px; background:#fff9e8; color:#704b0d; font-size:12px; line-height:1.35; }
+      .family-connection-warning ha-icon { flex:0 0 auto; --mdc-icon-size:17px; }
       .chore-list { margin:8px 0 0; padding:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; list-style:none; }
       .chore-row { min-width:0; min-height:54px; display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:7px; align-items:center; padding:7px 9px; border:1px solid color-mix(in srgb,var(--person-colour) 16%,transparent); border-radius:13px; background:color-mix(in srgb,var(--person-colour) 7%,rgba(255,255,255,.72)); }
       .chore-check { width:26px; height:26px; display:grid; place-items:center; border-radius:9px; background:color-mix(in srgb,var(--person-colour) 14%,#fff); color:var(--person-colour); }
@@ -3188,17 +5152,28 @@ export class FamilyHubCard extends HTMLElementBase {
       .chore-row.is-overdue { border-color:#e9978f; background:#fff0ef; }
       .chore-row.is-overdue .chore-check { background:#f9d5d1; color:#a9362d; }
       .chore-row.is-waiting .chore-check { background:#fff0cf; color:#8b5b00; }
+      .family-summary-grid { min-width:0; margin-top:12px; display:grid; grid-template-columns:repeat(auto-fit,minmax(105px,1fr)); gap:7px; }
+      .family-summary-item { min-width:0; min-height:72px; padding:8px; display:grid; grid-template-columns:26px minmax(0,1fr); gap:6px; align-items:center; border:1px solid color-mix(in srgb,var(--person-colour) 16%,transparent); border-radius:13px; background:color-mix(in srgb,var(--person-colour) 4%,var(--hub-surface)); }
+      .family-summary-item > span { width:26px; height:26px; display:grid; place-items:center; border-radius:8px; background:color-mix(in srgb,var(--person-colour) 11%,var(--hub-surface)); color:var(--person-colour); }
+      .family-summary-item ha-icon { --mdc-icon-size:17px; }
+      .family-summary-item p,.family-summary-item strong,.family-summary-item small { display:block; margin:0; overflow-wrap:anywhere; }
+      .family-summary-item p { color:var(--hub-text); font-size:12px; font-weight:800; line-height:1.15; }
+      .family-summary-item strong { color:var(--hub-text); font-size:12px; line-height:1.2; }
+      .family-summary-item small { margin-top:2px; color:var(--hub-muted); font-size:12px; line-height:1.2; }
+      .family-summary-item.is-done > span { background:#dff3e8; color:#18794e; }
+      .family-summary-item.is-unavailable { opacity:.7; }
+      .family-summary-item.is-unavailable > span { background:color-mix(in srgb,var(--hub-muted) 10%,var(--hub-surface)); color:var(--hub-muted); }
       .football-empty { min-height:0; height:100%; display:grid; grid-template-columns:90px minmax(0,1fr) auto; gap:20px; align-items:center; padding:26px; border:1px dashed color-mix(in srgb,var(--hub-accent) 32%,transparent); border-radius:18px; background:linear-gradient(145deg,color-mix(in srgb,var(--hub-accent) 7%,#fff),rgba(255,255,255,.5)); }
       .football-orbit { width:82px; height:82px; display:grid; place-items:center; border-radius:50%; background:radial-gradient(circle,#fff 34%,color-mix(in srgb,var(--hub-accent) 18%,#fff) 35% 58%,transparent 59%); color:var(--hub-accent); box-shadow:0 12px 28px rgba(31,36,57,.12); }
       .football-orbit ha-icon { --mdc-icon-size:34px; }
       .football-empty h3 { margin:5px 0 0; color:var(--hub-text); font-size:19px; }
-      .football-empty p:last-child { max-width:440px; margin:7px 0 0; color:var(--hub-muted); font-size:11px; line-height:1.45; }
+      .football-empty p:last-child { max-width:440px; margin:7px 0 0; color:var(--hub-muted); font-size:12px; line-height:1.45; }
       .empty-clubs { display:flex; align-items:center; gap:8px; }
-      .empty-clubs span { width:42px; height:42px; display:grid; place-items:center; border-radius:12px; background:var(--hub-nav); color:#fff; font-size:10px; font-weight:800; }
+      .empty-clubs span { width:42px; height:42px; display:grid; place-items:center; border-radius:12px; background:var(--hub-nav); color:#fff; font-size:12px; font-weight:800; }
       .empty-clubs i { width:16px; height:1px; background:color-mix(in srgb,var(--hub-muted) 32%,transparent); }
-      .empty-state { color:var(--hub-muted); font-size:12px; line-height:1.45; }
-      .empty-state.compact { margin:14px 0 0; font-size:10px; }
-      .empty-state.large { display:grid; place-items:center; min-height:260px; text-align:center; }
+      .hub-empty-state { color:var(--hub-muted); font-size:12px; line-height:1.45; }
+      .hub-empty-state.compact { margin:14px 0 0; font-size:12px; }
+      .hub-empty-state.large { display:grid; place-items:center; min-height:260px; text-align:center; }
       .surface .eyebrow { color:rgba(223,228,241,.64); }
       .surface h2,.surface h3,.surface strong { color:var(--hub-text); }
       .next-panel { background:linear-gradient(155deg,rgba(24,34,62,.9),rgba(55,43,73,.76)); }
@@ -3212,74 +5187,83 @@ export class FamilyHubCard extends HTMLElementBase {
       .stepper button,.cover-control button { background:rgba(255,255,255,.09); color:#bcaeff; }
       .calendar-view { background:linear-gradient(155deg,rgba(18,27,49,.94),rgba(48,38,67,.9)); }
       .calendar-legend { color:#dce1ef; }
-      .agenda-day { border-color:rgba(255,255,255,.11); background:rgba(8,16,33,.52); }
-      .agenda-day.is-today { border-color:color-mix(in srgb,var(--hub-accent) 72%,#fff); background:color-mix(in srgb,var(--hub-accent) 16%,rgba(8,16,33,.72)); box-shadow:inset 0 3px 0 #a999ff; }
-      .agenda-day > header { border-color:rgba(255,255,255,.09); color:#fff; }
-      .agenda-day > header span,.agenda-day > header small { color:#aeb7ca; }
-      .agenda-event { border:1px solid color-mix(in srgb,var(--calendar-colour) 32%,rgba(255,255,255,.08)); background:color-mix(in srgb,var(--calendar-colour) 19%,rgba(13,21,40,.92)); color:#fff; box-shadow:0 7px 18px rgba(1,5,16,.22); }
-      .agenda-event strong { color:#f7f8fc; }
-      .agenda-event small { color:#b7bfd0; }
-      .agenda-empty { color:#8f99ad; }
+      .hub-agenda-day { border-color:rgba(255,255,255,.11); background:rgba(8,16,33,.52); }
+      .hub-agenda-day.is-today { border-color:color-mix(in srgb,var(--hub-accent) 72%,#fff); background:color-mix(in srgb,var(--hub-accent) 16%,rgba(8,16,33,.72)); box-shadow:inset 0 3px 0 #a999ff; }
+      .hub-agenda-day > header { border-color:rgba(255,255,255,.09); color:#fff; }
+      .hub-agenda-day > header span,.hub-agenda-day > header small { color:#aeb7ca; }
+      .hub-agenda-event { border:1px solid color-mix(in srgb,var(--calendar-colour) 32%,rgba(255,255,255,.08)); background:color-mix(in srgb,var(--calendar-colour) 19%,rgba(13,21,40,.92)); color:#fff; box-shadow:0 7px 18px rgba(1,5,16,.22); }
+      .hub-agenda-event strong { color:#f7f8fc; }
+      .hub-agenda-event small { color:#b7bfd0; }
+      .hub-agenda-empty { color:#8f99ad; }
       .family-person { background:linear-gradient(155deg,color-mix(in srgb,var(--person-colour) 13%,rgba(20,29,51,.94)),rgba(32,29,52,.88)); }
       .family-facts span { border:1px solid color-mix(in srgb,var(--person-colour) 17%,transparent); background:color-mix(in srgb,var(--person-colour) 10%,rgba(8,15,31,.55)); }
       .chore-row { border-color:color-mix(in srgb,var(--person-colour) 25%,transparent); background:color-mix(in srgb,var(--person-colour) 11%,rgba(8,15,31,.62)); }
       .chore-check { background:color-mix(in srgb,var(--person-colour) 22%,rgba(8,15,31,.72)); }
       .chore-row.is-overdue { border-color:#d56e69; background:rgba(112,38,42,.42); }
       .chore-row.is-overdue .chore-check { background:rgba(202,74,69,.34); color:#ffaaa3; }
-      .football-main,.spotlight-panel,.provider-panel { background:linear-gradient(155deg,rgba(18,30,48,.93),rgba(47,38,61,.88)); }
+      .football-main,.favourite-standings { background:linear-gradient(155deg,rgba(18,30,48,.93),rgba(47,38,61,.88)); }
       .football-empty { border-color:rgba(255,255,255,.12); background:radial-gradient(circle at 10% 50%,rgba(123,104,211,.22),transparent 28%),linear-gradient(145deg,rgba(11,20,40,.86),rgba(39,32,57,.78)); }
       .football-orbit { background:radial-gradient(circle,rgba(169,153,255,.95) 0 34%,rgba(123,104,211,.3) 35% 58%,transparent 59%); color:#fff; box-shadow:0 12px 28px rgba(1,5,16,.34); }
       .football-empty p:last-child { color:#aeb7ca; }
       .fixture { border-color:rgba(255,255,255,.09); }
       .fixture.is-spotlight { border-color:color-mix(in srgb,var(--hub-accent) 52%,transparent); background:color-mix(in srgb,var(--hub-accent) 13%,rgba(9,17,34,.72)); }
-      .club-badge { background:linear-gradient(145deg,#111c35,#473b70); border:1px solid rgba(255,255,255,.12); }
       .league-table th,.league-table td { border-color:rgba(255,255,255,.08); }
       .league-table tr.is-spotlight { background:color-mix(in srgb,var(--hub-accent) 15%,rgba(8,15,31,.62)); }
       .matchweek-controls select { border-color:rgba(255,255,255,.12); background:rgba(8,15,31,.66); }
-      .music-experience { height:100%; }
-      .media-player-panel { height:100%; min-height:0; padding:20px; display:grid; grid-template-rows:58px minmax(0,1fr); gap:12px; overflow:hidden; background:radial-gradient(circle at 85% 10%,rgba(123,104,211,.32),transparent 35%),linear-gradient(145deg,rgba(16,25,48,.96),rgba(52,38,70,.9)); }
+      .music-experience { height:100%; min-height:0; }
+      .media-player-panel { height:100%; min-height:0; padding:20px; display:grid; grid-template-rows:58px minmax(0,1fr); gap:12px; overflow:visible; background:radial-gradient(circle at 85% 10%,rgba(123,104,211,.32),transparent 35%),linear-gradient(145deg,rgba(16,25,48,.96),rgba(52,38,70,.9)); }
       .music-heading { align-items:center; }
       .music-heading h2 { font-size:24px; }
       .music-meta { display:flex; align-items:center; gap:4px; white-space:nowrap; }
       .music-meta ha-icon { --mdc-icon-size:14px; color:#b7a8ff; }
-      .media-player-stage { position:relative; min-height:0; overflow:hidden; overscroll-behavior:contain; border:1px solid rgba(255,255,255,.12); border-radius:18px; background:rgba(6,12,27,.62); }
-      .media-player-stage .child-card-slot { height:100%; overflow:hidden; touch-action:pan-x pan-y; border-radius:0; --ha-card-background:transparent; --card-background-color:transparent; --primary-background-color:transparent; --secondary-background-color:rgba(255,255,255,.06); --primary-text-color:#f7f8fc; --secondary-text-color:#b6bdce; --mmpc-card:transparent; --mmpc-on-card:#f7f8fc; --mmpc-on-card-muted:#b6bdce; --mmpc-on-card-divider:rgba(255,255,255,.12); --mmpc-chip-background:rgba(38,47,76,.96); --mmpc-chip-foreground:#f7f8fc; --mmpc-chip-border:rgba(255,255,255,.18); }
-      .media-player-stage .embedded-card { height:100%; min-height:0; overflow:hidden; --ha-card-border-width:0; --ha-card-box-shadow:none; }
+      .media-player-stage { position:relative; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; border:1px solid rgba(255,255,255,.12); border-radius:18px; background:#07182F; }
+      .media-player-stage .child-card-slot { min-height:100%; overflow:visible; touch-action:pan-x pan-y; border-radius:0; --ha-card-background:#07182F; --card-background-color:#07182F; --primary-background-color:#07182F; --secondary-background-color:#102A4A; --primary-text-color:#f7f8fc; --secondary-text-color:#b6bdce; --mmpc-card:#07182F; --mmpc-on-card:#f7f8fc; --mmpc-on-card-muted:#b6bdce; --mmpc-on-card-divider:rgba(255,255,255,.12); --mmpc-chip-background:#263251; --mmpc-chip-foreground:#f7f8fc; --mmpc-chip-border:rgba(255,255,255,.18); }
+      .media-player-stage .embedded-card { min-height:100%; overflow:visible; --ha-card-border-width:0; --ha-card-box-shadow:none; }
+      .media-player-stage #mmpc-group-chips-controller { width:auto !important; max-width:100%; display:flex !important; flex-wrap:wrap !important; gap:8px; overflow:visible !important; padding:4px 2px; }
+      .media-player-stage #mmpc-group-chips-controller > * { margin:0 !important; }
       @keyframes pulse { 0%,100% { opacity:.45; transform:scale(.8); } 50% { opacity:1; transform:scale(1); } }
       .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
-      button:focus-visible,select:focus-visible,.room-hotspot:focus-visible,.alarm-panel:focus-visible,.garage-panel:focus-visible { outline:3px solid color-mix(in srgb,var(--hub-accent) 60%,#fff); outline-offset:2px; }
+      button:focus-visible,select:focus-visible,a[href]:focus-visible,.room-hotspot:focus-visible,.alarm-panel:focus-visible,.garage-panel:focus-visible { outline:3px solid var(--hub-focus); outline-offset:2px; box-shadow:0 0 0 2px #fff; }
       @media (max-width:1030px) {
-        .shell { grid-template-columns:74px minmax(0,1fr); }
-        .navigation { padding-inline:7px; }
-        .brand { width:50px; height:50px; }
-        .nav-button { min-height:60px; }
-        .content { padding-inline:14px; }
+        .hub-shell { grid-template-columns:74px minmax(0,1fr); }
+        .hub-navigation { padding-inline:7px; }
+        .hub-brand { width:50px; height:50px; }
+        .hub-nav-button { min-height:60px; }
+        .hub-content { padding-inline:14px; }
         .today-grid { grid-template-columns:minmax(0,1.25fr) minmax(225px,.88fr) minmax(220px,.82fr); }
         .today-grid article { padding:17px; }
         .rooms-layout { grid-template-columns:minmax(0,2.9fr) minmax(224px,1fr); }
-        .whole-home-grid,.heating-grid,.cover-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .whole-home-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+        .heating-grid,.cover-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
         .security-layout { grid-template-columns:minmax(0,1.55fr) 246px; }
         .football-layout { grid-template-columns:minmax(0,1.6fr) 250px; }
       }
       @media (max-width:760px) {
         :host { height:auto; min-height:calc(100vh - var(--family-ha-header-offset)); }
         .hub-card { height:auto; min-height:calc(100vh - var(--family-ha-header-offset)); }
-        .shell { display:block; }
-        .navigation { position:sticky; top:0; z-index:20; flex-direction:row; padding:7px; overflow-x:auto; }
-        .brand { flex:0 0 44px; width:44px; height:44px; }
-        .nav-items { flex-direction:row; justify-content:flex-start; }
-        .nav-button { flex:0 0 64px; min-height:48px; }
-        .nav-button span { display:none; }
-        .content { display:block; padding:10px; }
-        .topbar { min-height:64px; }
-        .view { min-height:620px; }
+        .hub-shell { display:block; }
+        .hub-navigation { position:sticky; top:0; z-index:20; flex-direction:row; padding:7px; overflow-x:auto; }
+        .hub-brand { flex:0 0 44px; width:44px; height:44px; }
+        .hub-nav-items { flex-direction:row; justify-content:flex-start; }
+        .hub-nav-button { flex:0 0 64px; min-height:48px; }
+        .hub-nav-button span { display:none; }
+        .hub-content { display:block; padding:10px; }
+        .hub-topbar { min-height:64px; }
+        .hub-view { min-height:620px; }
         .today-grid,.rooms-layout,.family-layout,.security-layout,.football-layout { display:flex; flex-direction:column; height:auto; }
         .home-surface { height:auto; grid-template-rows:auto auto; }
         .home-toolbar { align-items:flex-start; flex-direction:column; }
         .home-segments { max-width:100%; }
+        .home-overview { height:auto; grid-template-rows:auto auto; }
+        .home-summary-links { grid-template-columns:1fr; }
+        .home-summary-links[data-summary-count="2"] { grid-template-columns:1fr; }
+        .hero-metrics.has-energy { grid-template-columns:repeat(2,minmax(0,1fr)); }
         .whole-home-grid,.heating-grid,.cover-grid { grid-template-columns:1fr; height:auto; }
         .cleaning-panel { height:auto; display:flex; flex-direction:column; }
         .vacuum-map-slot,.vacuum-map-placeholder { min-height:320px; }
+        .energy-view { height:auto; grid-template-rows:auto auto auto; }
+        .energy-hero { align-items:flex-start; flex-direction:column; }
+        .energy-meter-grid { grid-template-columns:1fr; }
         .security-main { display:flex; flex-direction:column; }
         .security-camera { min-height:300px; }
         .hero-panel { grid-column:auto; }
@@ -3288,41 +5272,41 @@ export class FamilyHubCard extends HTMLElementBase {
         .football-main { min-height:620px; }
       }
 
-      /* v0.8 design approval: warm, light Family OS. These rules intentionally
+      /* v0.9 design system: warm, light Family OS. These rules intentionally
          sit after the production styles so the prototype is exercised through
          the real component and interaction boundaries. */
       .hub-card { --hub-accent:#1463E8 !important; --hub-background:#F4F7FA !important; --hub-surface:#FFFFFF !important; --hub-text:#0B1830 !important; --hub-muted:#5E6B80 !important; --hub-nav:#061B3A !important; --hub-backdrop-start:#F4F7FA !important; --hub-backdrop-mid:#EEF3F8 !important; --hub-backdrop-end:#E6EEF7 !important; }
-      .hub-card,.shell { background:#F4F7FA; color:#0B1830; }
-      .shell { grid-template-columns:108px minmax(0,1fr); }
-      .navigation { padding:18px 12px; gap:18px; background:#061B3A; border:0; box-shadow:12px 0 34px rgba(6,27,58,.08); }
-      .brand { width:68px; height:68px; margin:0 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; border:1px solid rgba(255,255,255,.16); border-radius:22px; background:rgba(255,255,255,.09); box-shadow:none; }
-      .brand ha-icon { --mdc-icon-size:25px; }
-      .brand span { font-size:12px; font-weight:750; letter-spacing:.01em; }
-      .nav-items { flex:0 0 auto; justify-content:flex-start; gap:6px; }
-      .nav-core { flex:1; }
-      .nav-utility { margin-top:auto; }
-      .nav-divider { display:block; height:1px; margin:2px 10px 8px; background:rgba(255,255,255,.13); }
-      .nav-button { min-height:58px; gap:5px; border:0; border-radius:17px; color:#A8B7CB; }
-      .nav-button ha-icon { --mdc-icon-size:23px; }
-      .nav-button span { font-size:12px; font-weight:700; }
-      .nav-button.is-active { color:#061B3A; background:#fff; border:0; box-shadow:0 8px 24px rgba(0,0,0,.18); }
-      .content { padding:16px 26px 24px; grid-template-rows:70px minmax(0,1fr); gap:14px; background:#F4F7FA; }
-      .topbar { color:#0B1830; padding:0; }
-      .page-title { display:flex; align-items:baseline; gap:14px; }
-      .topbar h1 { margin:0; font-size:34px; line-height:1; letter-spacing:-.035em; font-weight:800; }
-      .topbar-date { order:2; margin:0; color:#5E6B80; font-size:14px; font-weight:650; }
-      .header-actions { gap:10px; }
-      .weather-pill { min-height:48px; padding:0 15px; border:1px solid #DCE4EE; border-radius:16px; background:#fff; color:#0B1830; box-shadow:0 5px 18px rgba(11,24,48,.05); font-size:14px; font-weight:700; }
-      .weather-pill ha-icon { color:#E7A93D; }
-      .topbar-time { min-width:82px; color:#0B1830; font-size:26px; line-height:1; font-weight:800; letter-spacing:-.03em; text-align:right; }
+      .hub-card,.hub-shell { background:#F4F7FA; color:#0B1830; }
+      .hub-shell { grid-template-columns:108px minmax(0,1fr); }
+      .hub-navigation { padding:18px 12px; gap:18px; background:#061B3A; border:0; box-shadow:12px 0 34px rgba(6,27,58,.08); }
+      .hub-brand { width:68px; height:68px; margin:0 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; border:1px solid rgba(255,255,255,.16); border-radius:22px; background:rgba(255,255,255,.09); box-shadow:none; }
+      .hub-brand ha-icon { --mdc-icon-size:25px; }
+      .hub-brand span { font-size:12px; font-weight:750; letter-spacing:.01em; }
+      .hub-nav-items { flex:0 0 auto; justify-content:flex-start; gap:6px; }
+      .hub-nav-core { flex:1; }
+      .hub-nav-utility { margin-top:auto; }
+      .hub-nav-divider { display:block; height:1px; margin:2px 10px 8px; background:rgba(255,255,255,.13); }
+      .hub-nav-button { min-height:58px; gap:5px; border:0; border-radius:17px; color:#A8B7CB; }
+      .hub-nav-button ha-icon { --mdc-icon-size:23px; }
+      .hub-nav-button span { font-size:12px; font-weight:700; }
+      .hub-nav-button.is-active { color:#061B3A; background:#fff; border:0; box-shadow:0 8px 24px rgba(0,0,0,.18); }
+      .hub-content { padding:16px 26px 24px; grid-template-rows:70px minmax(0,1fr); gap:14px; background:#F4F7FA; }
+      .hub-topbar { color:#0B1830; padding:0; }
+      .hub-page-title { display:flex; align-items:baseline; gap:14px; }
+      .hub-topbar h1 { margin:0; font-size:34px; line-height:1; letter-spacing:-.035em; font-weight:800; }
+      .hub-topbar-date { order:2; margin:0; color:#5E6B80; font-size:14px; font-weight:650; }
+      .hub-header-actions { gap:10px; }
+      .hub-weather-pill { min-height:48px; padding:0 15px; border:1px solid #DCE4EE; border-radius:16px; background:#fff; color:#0B1830; box-shadow:0 5px 18px rgba(11,24,48,.05); font-size:14px; font-weight:700; }
+      .hub-weather-pill ha-icon { color:#E7A93D; }
+      .hub-topbar-time { min-width:82px; color:#0B1830; font-size:26px; line-height:1; font-weight:800; letter-spacing:-.03em; text-align:right; }
       .eyebrow { color:#5E6B80; font-size:12px; line-height:1.2; font-weight:800; letter-spacing:.1em; }
       .surface { color:#0B1830; border:1px solid #DCE4EE; background:#fff; border-radius:24px; box-shadow:0 12px 32px rgba(21,43,75,.065); -webkit-backdrop-filter:none; backdrop-filter:none; }
       .surface .eyebrow { color:#5E6B80; }
       .surface h2,.surface h3,.surface strong { color:#0B1830; }
       .section-heading h2 { font-size:20px; }
       .section-heading > span { font-size:12px; }
-      .section-heading button,.text-action { min-width:48px; min-height:48px; padding:0 4px; display:flex; align-items:center; gap:4px; color:#1463E8; font-size:14px; }
-      .section-heading button { margin-top:-8px; }
+      .section-heading > button,.text-action { min-width:48px; min-height:48px; padding:0 4px; display:flex; align-items:center; gap:4px; color:#1463E8; font-size:14px; }
+      .section-heading > button { margin-top:-8px; }
       .text-action ha-icon { --mdc-icon-size:17px; }
       .supporting { color:#5E6B80; font-size:15px; line-height:1.45; }
       .icon-action { width:48px; height:48px; background:#EAF2FF; color:#1463E8; }
@@ -3341,6 +5325,10 @@ export class FamilyHubCard extends HTMLElementBase {
       .today-weather strong { margin-top:8px; color:#fff; font-size:42px; line-height:1; letter-spacing:-.05em; }
       .today-weather span { margin-top:6px; color:#B7C6DA; font-size:13px; font-weight:650; }
       .hero-metrics { position:relative; z-index:1; grid-column:1/-1; margin:0; gap:10px; }
+      .hero-metrics.has-energy { grid-template-columns:repeat(4,minmax(0,1fr)); }
+      .hero-metrics[data-metric-count="1"] { grid-template-columns:minmax(0,1fr); }
+      .hero-metrics[data-metric-count="2"] { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .hero-metrics[data-metric-count="3"] { grid-template-columns:repeat(3,minmax(0,1fr)); }
       .hero-metrics button { min-height:70px; padding:11px 14px; display:flex; align-items:center; gap:11px; border:1px solid rgba(255,255,255,.14); border-radius:16px; background:rgba(255,255,255,.075); }
       .hero-metrics button > ha-icon { flex:0 0 auto; --mdc-icon-size:22px; color:#8FD8CB; }
       .hero-metrics button > span { min-width:0; }
@@ -3355,6 +5343,12 @@ export class FamilyHubCard extends HTMLElementBase {
       .today-family { grid-column:1/3; }
       .today-football { grid-column:3/5; }
       .today-music { grid-column:5/7; }
+      .today-grid[data-calendar="false"] .today-hero { grid-column:1/7; }
+      .today-grid[data-secondary-count="0"] .today-hero { grid-row:1/3; }
+      .today-grid[data-secondary-count="0"] .today-next { grid-row:1/3; }
+      .today-grid[data-secondary-count="1"] .today-secondary { grid-column:1/7 !important; }
+      .today-grid[data-secondary-count="2"] .today-secondary { grid-column:span 3 !important; }
+      .today-hero.is-weatherless { grid-template-columns:minmax(0,1fr); }
       .person-summary-list { gap:9px; margin-top:10px; }
       .person-summary { min-height:60px; padding:10px 12px; border:1px solid color-mix(in srgb,var(--person-colour) 16%,#DCE4EE); background:color-mix(in srgb,var(--person-colour) 5%,#fff); border-radius:16px; }
       .person-initial { width:38px; height:38px; border:3px solid color-mix(in srgb,var(--person-colour) 72%,#fff); background:#0B1830; color:#fff; font-size:15px; }
@@ -3363,6 +5357,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .points { color:#33445C; font-size:12px; }
       .featured-fixtures { gap:8px; margin-top:10px; }
       .compact-fixture { min-height:62px; border-color:#DCE4EE; background:#F7F9FC; border-radius:16px; }
+      .compact-fixture[data-favourite-code~="TOT"] { border-left:4px solid #132257; }
+      .compact-fixture[data-favourite-code~="AVL"] { box-shadow:inset 4px 0 #670E36; }
+      .compact-fixture.is-derby { border-left-color:#132257; background:linear-gradient(90deg,rgba(19,34,87,.055),rgba(103,14,54,.065)); box-shadow:inset -4px 0 #670E36; }
       .compact-fixture > span { font-size:12px; }
       .compact-fixture strong { font-size:15px; }
       .compact-fixture small { color:#5E6B80; font-size:12px; }
@@ -3384,6 +5381,11 @@ export class FamilyHubCard extends HTMLElementBase {
       .segment { min-height:48px; padding:0 15px; border-radius:12px; color:#5E6B80; font-size:13px; }
       .segment.is-selected { color:#fff; background:#1463E8; box-shadow:0 5px 14px rgba(20,99,232,.2); }
       .home-segments ha-icon,.calendar-modes ha-icon { --mdc-icon-size:18px; }
+      .home-summary-links button { border-color:#DCE4EE; background:#fff; color:#0B1830; box-shadow:0 8px 20px rgba(21,43,75,.05); }
+      .home-summary-links button > ha-icon:first-child { color:#1463E8; }
+      .home-summary-links button > ha-icon:last-child,.home-summary-links small { color:#5E6B80; }
+      .home-summary-links strong { font-size:15px; }
+      .home-summary-links small { font-size:12px; }
       .rooms-layout { grid-template-columns:minmax(0,1fr) clamp(340px,31vw,390px); gap:16px; }
       .floorplan-panel { padding:20px; grid-template-rows:58px minmax(0,1fr); gap:12px; }
       .floorplan-heading h2 { font-size:24px; }
@@ -3413,7 +5415,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .whole-home-heading > span,.heating-card-heading > span,.cover-card-heading > span { width:48px; height:48px; flex-basis:48px; border-radius:15px; background:#EAF2FF; color:#1463E8; }
       .whole-home-heading h3,.heating-card-heading h3,.cover-card-heading h3 { color:#0B1830; font-size:16px; }
       .whole-home-heading p,.heating-card-heading p,.cover-card-heading p { color:#5E6B80; font-size:12px; }
-      .whole-home-grid { grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); }
+      .whole-home-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
       .heating-grid { grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); }
       .heating-grid[data-zone-count="6"] { grid-template-columns:repeat(3,minmax(0,1fr)); }
       .cover-grid { grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); }
@@ -3447,6 +5449,26 @@ export class FamilyHubCard extends HTMLElementBase {
       .vacuum-map-slot,.vacuum-map-placeholder { border-color:#DCE4EE; background:#F1F5F9; color:#5E6B80; }
       .vacuum-map-placeholder { font-size:13px; }
 
+      .energy-hero { border:0; border-radius:24px; background:radial-gradient(circle at 88% 18%,rgba(0,168,135,.25),transparent 32%),linear-gradient(135deg,#061B3A,#0C315D); color:#fff; box-shadow:0 18px 42px rgba(6,27,58,.2); }
+      .energy-hero .eyebrow { color:#8FD8CB; }
+      .energy-hero h2,.energy-hero-status strong { color:#fff; }
+      .energy-hero-status small { color:#AFC0D5; font-size:12px; }
+      .energy-meter { border-color:#DCE4EE; background:#fff; color:#0B1830; }
+      .energy-meter-icon { background:#EAF2FF; color:#1463E8; }
+      .energy-meter.is-gas .energy-meter-icon { background:#FFEAE6; color:#C94F3C; }
+      .energy-meter-heading h2 { color:#0B1830; font-size:22px; }
+      .energy-status { border-color:#DCE4EE; background:#F7F9FC; color:#5E6B80; font-size:12px; }
+      .energy-meter.is-stale .energy-status,.energy-meter.is-partial .energy-status,.energy-meter.is-unverified .energy-status { border-color:#E8C67E; background:#FFF7E5; color:#765000; }
+      .energy-primary-metrics > span { border-color:#DCE4EE; background:#F7F9FC; }
+      .energy-primary-metrics small,.energy-tariff small,.energy-freshness { color:#5E6B80; font-size:12px; }
+      .energy-primary-metrics strong { color:#0B1830; font-size:30px; }
+      .energy-tariff { border-color:#E1E8F0; }
+      .energy-tariff strong { color:#0B1830; font-size:14px; }
+      .energy-truth-note { border-color:#DCE4EE; background:#F1F6FF; color:#0B1830; }
+      .energy-truth-note > ha-icon { color:#1463E8; }
+      .energy-truth-note strong { font-size:14px; }
+      .energy-truth-note span { color:#5E6B80; font-size:12px; }
+
       .security-layout { grid-template-columns:minmax(0,1fr) clamp(286px,27vw,334px); gap:18px; }
       .security-main { display:grid; grid-template-rows:minmax(0,1fr) auto; gap:14px; }
       .security-stage { min-height:0; padding:18px; display:grid; grid-template-rows:56px minmax(0,1fr); border:0; border-radius:24px; background:#061B3A; color:#fff; box-shadow:0 18px 42px rgba(6,27,58,.2); overflow:hidden; }
@@ -3456,6 +5478,22 @@ export class FamilyHubCard extends HTMLElementBase {
       .stage-privacy { min-height:38px; padding:0 12px; display:flex; align-items:center; gap:6px; border:1px solid rgba(255,255,255,.15); border-radius:13px; background:rgba(255,255,255,.07); color:#C5D2E2; font-size:12px; font-weight:700; }
       .stage-privacy ha-icon { --mdc-icon-size:17px; color:#8FD8CB; }
       .security-stage-media { width:100%; max-width:780px; min-height:0; aspect-ratio:16/9; place-self:center; overflow:hidden; border-radius:18px; background:radial-gradient(circle at 50% 46%,#102F54,#041225 72%); }
+      .camera-stage-stack { position:relative; width:100%; height:100%; min-height:0; overflow:hidden; border-radius:18px; background:#041225; }
+      .camera-poster-slot { position:relative; min-width:0; min-height:0; overflow:hidden; background:radial-gradient(circle at 50% 46%,#16385f,#041225 72%); color:#c5d2e2; }
+      .camera-poster-slot > .embedded-card { display:block; width:100%; height:100%; min-height:100%; border:0; }
+      .camera-stage-poster-slot { position:absolute; inset:0; }
+      .camera-poster-fallback { position:absolute; inset:0; display:grid; place-items:center; align-content:center; gap:8px; color:#c5d2e2; font-size:12px; font-weight:750; }
+      .camera-poster-fallback ha-icon { --mdc-icon-size:32px; color:#8fd8cb; }
+      .camera-stage-stack .camera-card-slot { position:absolute; z-index:1; inset:0; opacity:0; transition:opacity .18s ease; }
+      .camera-stage-stack.is-live .camera-card-slot { opacity:1; }
+      .camera-stage-action { position:absolute; z-index:2; inset:0; width:100%; padding:18px; border:0; background:linear-gradient(180deg,transparent 40%,rgba(4,18,37,.88)); color:#fff; display:flex; align-items:flex-end; justify-content:space-between; gap:16px; text-align:left; cursor:pointer; }
+      .camera-stage-action > span { min-width:0; }
+      .camera-stage-action strong,.camera-stage-action small { display:block; }
+      .camera-stage-action strong { font-size:17px; }
+      .camera-stage-action small { max-width:430px; margin-top:4px; color:#d7e0eb; font-size:12px; line-height:1.4; }
+      .camera-stage-action b { flex:0 0 auto; min-height:48px; padding:0 16px; border-radius:14px; background:#1463e8; display:flex; align-items:center; gap:7px; font-size:13px; }
+      .camera-stage-action:disabled { cursor:default; }
+      .camera-stage-action:disabled b { background:#53657b; }
       .camera-idle { height:100%; min-height:0; grid-template-columns:70px minmax(0,1fr) auto; gap:18px; padding:24px; border:0; border-radius:18px; background:radial-gradient(circle at 12% 50%,rgba(20,99,232,.25),transparent 34%); }
       .camera-stage-icon { width:64px; height:64px; display:grid; place-items:center; border-radius:20px; background:rgba(255,255,255,.09); color:#8FD8CB; }
       .camera-stage-icon ha-icon { --mdc-icon-size:34px; }
@@ -3469,8 +5507,14 @@ export class FamilyHubCard extends HTMLElementBase {
       .camera-live-chip span { width:8px; height:8px; border-radius:50%; background:#E86E5A; box-shadow:0 0 0 4px rgba(232,110,90,.2); }
       .camera-close { right:12px; bottom:12px; background:rgba(4,18,37,.86); }
       .security-camera-picker { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
-      .security-camera { min-height:174px; padding:15px; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(46px,auto) 48px; gap:9px; border-radius:20px; background:#fff; overflow:hidden; }
-      .security-camera .security-card-heading { grid-column:1; }
+      .security-camera { min-height:174px; padding:0; display:grid; grid-template-columns:minmax(118px,.86fr) minmax(0,1.14fr); grid-template-rows:minmax(174px,1fr); gap:0; border-radius:20px; background:#fff; overflow:hidden; }
+      .camera-tile-media { position:relative; min-width:0; min-height:174px; overflow:hidden; background:#061b3a; }
+      .camera-tile-poster { position:absolute; inset:0; }
+      .camera-poster-action { position:absolute; z-index:2; inset:0; width:100%; padding:10px; border:0; background:linear-gradient(180deg,transparent 46%,rgba(4,18,37,.82)); color:#fff; display:flex; align-items:flex-end; justify-content:flex-start; text-align:left; cursor:pointer; }
+      .camera-poster-action > span { min-height:38px; padding:0 10px; border:1px solid rgba(255,255,255,.24); border-radius:11px; background:rgba(4,18,37,.78); display:flex; align-items:center; gap:6px; font-size:12px; font-weight:800; }
+      .camera-poster-action:disabled { cursor:default; }
+      .camera-tile-details { min-width:0; padding:13px; display:grid; grid-template-rows:auto minmax(0,1fr); align-content:start; gap:9px; }
+      .security-camera .security-card-heading { min-width:0; display:grid; align-content:start; justify-content:stretch; gap:7px; }
       .security-camera.is-selected { border-color:#8DB7F8; box-shadow:0 0 0 2px rgba(20,99,232,.09),0 10px 26px rgba(21,43,75,.06); }
       .security-card-heading { min-width:0; align-items:flex-start; flex-wrap:wrap; }
       .security-card-heading > div { min-width:0; }
@@ -3478,7 +5522,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .privacy-badge { flex:0 1 auto; max-width:100%; min-height:34px; padding:7px 9px; border:1px solid #DCE4EE; background:#F7F9FC; color:#5E6B80; font-size:12px; line-height:1.25; white-space:normal; overflow-wrap:anywhere; }
       .privacy-badge ha-icon { --mdc-icon-size:16px; color:#1463E8; }
       .security-signals { gap:6px; }
-      .security-camera .security-signals { min-width:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); }
+      .security-camera .security-signals { min-width:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-content:start; }
       .security-signal { min-height:48px; grid-template-columns:22px minmax(0,1fr); padding:6px 7px; border:1px solid #E1E8F0; background:#F7F9FC; }
       .security-signal ha-icon { --mdc-icon-size:18px; color:#79869A; }
       .security-signal strong,.security-signal small { overflow:visible; white-space:normal; text-overflow:clip; overflow-wrap:anywhere; }
@@ -3511,29 +5555,24 @@ export class FamilyHubCard extends HTMLElementBase {
       .confirmation-dialog button.confirm-primary { border-color:#1463E8; background:#1463E8; color:#fff; }
 
       .calendar-view { border-color:#DCE4EE; background:#fff; }
-      .calendar-heading h2 { color:#0B1830; }
+      .calendar-context strong { color:#0B1830; }
       .calendar-legends { color:#0B1830; }
       .calendar-legend { color:#3E4D63; font-size:12px; }
       .calendar-card-slot { border-color:#DCE4EE; background:#fff; --ha-card-background:#fff; --card-background-color:#fff; --primary-text-color:#0B1830; --secondary-text-color:#5E6B80; }
       .calendar-loading { color:#33445C; font-size:12px; }
       .calendar-warning { color:#704B0D; font-size:12px; }
-      .agenda-day { border-color:#DCE4EE; background:#fff; }
-      .agenda-day.is-today { border-color:#8DB7F8; background:#F1F6FF; }
-      .agenda-day > header { border-color:#DCE4EE; color:#0B1830; }
-      .agenda-day > header span,.agenda-day > header small { color:#5E6B80; font-size:12px; }
-      .agenda-event { border:1px solid color-mix(in srgb,var(--calendar-colour) 30%,#DCE4EE); background:color-mix(in srgb,var(--calendar-colour) 8%,#fff); color:#0B1830; }
-      .agenda-event .event-time,.agenda-event strong,.agenda-event small,.agenda-empty,.agenda-more { font-size:12px; }
-      .agenda-event strong { color:#0B1830; }
-      .agenda-event small,.agenda-empty { color:#5E6B80; }
+      .hub-agenda-day { border-color:#DCE4EE; background:#fff; }
+      .hub-agenda-day.is-today { border-color:#8DB7F8; background:#F1F6FF; }
+      .hub-agenda-day > header { border-color:#DCE4EE; color:#0B1830; }
+      .hub-agenda-day > header span,.hub-agenda-day > header small { color:#5E6B80; font-size:12px; }
+      .hub-agenda-event { border:1px solid color-mix(in srgb,var(--calendar-colour) 30%,#DCE4EE); background:color-mix(in srgb,var(--calendar-colour) 8%,#fff); color:#0B1830; }
+      .hub-agenda-event .event-time,.hub-agenda-event strong,.hub-agenda-event small,.hub-agenda-empty,.hub-agenda-more { font-size:12px; }
+      .hub-agenda-event strong { color:#0B1830; }
+      .hub-agenda-event small,.hub-agenda-empty { color:#5E6B80; }
 
-      .family-rhythm { border:0; background:linear-gradient(125deg,#0C315D,#1463E8); }
       .family-layout { grid-template-columns:minmax(0,1.45fr) minmax(350px,.8fr); }
-      .family-rhythm .eyebrow { color:#9BE1D5; }
-      .family-rhythm h2 { color:#fff; }
-      .family-rhythm p:last-child { color:#D4E1F0; font-size:13px; }
-      .location-off-badge { color:#fff; font-size:12px; }
-      .rhythm-stats span { min-height:74px; color:#D4E1F0; font-size:12px; }
-      .rhythm-stats strong { color:#fff; }
+      .family-dashboard-heading h2 { color:#0B1830; }
+      .choreops-link { border-color:#B9D1F8; background:#EAF2FF; color:#0B57C7; }
       .family-person { border-color:#DCE4EE; background:#fff; color:#0B1830; }
       .family-sidebar { display:flex; flex-direction:column; align-items:stretch; overflow-y:auto; overscroll-behavior:contain; padding-right:4px; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:#9FB0C5 transparent; }
       .family-scroll-cue { position:sticky; top:0; z-index:3; flex:0 0 auto; min-height:38px; padding:0 8px; display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid #DCE4EE; background:rgba(244,247,250,.96); color:#33445C; font-size:12px; }
@@ -3561,8 +5600,18 @@ export class FamilyHubCard extends HTMLElementBase {
       .chore-row.is-waiting { border-color:#E8D29D; background:#FFF9E8; }
       .chore-row.is-waiting .chore-check { background:#FFF0CF; color:#8B5B00; }
       .chore-row.is-unavailable { border-style:dashed; background:#F7F9FC; }
+      .family-summary-item { border-color:color-mix(in srgb,var(--person-colour) 20%,#DCE4EE); background:color-mix(in srgb,var(--person-colour) 4%,#fff); }
+      .family-summary-item > span { background:#EEF2F6; color:#33445C; }
+      .family-summary-item p { color:#33445C; }
+      .family-summary-item strong { color:#0B1830; }
+      .family-summary-item small { color:#5E6B80; }
+      .family-summary-item.is-done > span { background:#DFF3E8; color:#18794E; }
+      .family-summary-item.is-unavailable > span { background:#EEF2F6; color:#718097; }
       .assignment { border-color:#DCE4EE; color:#0B1830; }
+      .assignment a { color:#0B57C7; }
       .assignment small { color:#5E6B80; font-size:12px; }
+      .classroom-health { color:#5E6B80; font-size:12px; }
+      .classroom-health.is-stale { color:#8A5700; }
 
       .media-player-panel { border:0; background:radial-gradient(circle at 85% 10%,rgba(20,99,232,.28),transparent 35%),linear-gradient(145deg,#061B3A,#0C315D); }
       .music-heading .eyebrow { color:#8FD8CB; }
@@ -3572,18 +5621,16 @@ export class FamilyHubCard extends HTMLElementBase {
 
       .compact-fixture,.compact-fixture > span,.compact-fixture > strong { color:#0B1830; }
 
-      .view button:not([disabled]),.view select:not([disabled]) { min-width:48px; min-height:48px; }
-      .view small { font-size:12px; }
-
-      .football-experience { height:100%; min-height:0; display:grid; grid-template-rows:214px minmax(0,1fr); gap:16px; }
-      .football-hero { position:relative; padding:22px 28px; overflow:hidden; border-radius:24px; background:radial-gradient(circle at 12% 105%,rgba(0,168,135,.28),transparent 36%),radial-gradient(circle at 88% 0,rgba(20,99,232,.34),transparent 36%),#061B3A; color:#fff; box-shadow:0 18px 42px rgba(6,27,58,.2); }
-      .football-hero::after { content:""; position:absolute; right:50%; bottom:-120px; width:300px; height:300px; transform:translateX(50%); border:1px solid rgba(255,255,255,.07); border-radius:50%; box-shadow:0 0 0 34px rgba(255,255,255,.018),0 0 0 72px rgba(255,255,255,.012); }
+      .football-experience { height:100%; min-height:0; display:grid; grid-template-rows:250px minmax(0,1fr); gap:16px; }
+      .football-favourites-stage { position:relative; min-height:0; padding:18px 22px; display:flex; flex-direction:column; overflow:hidden; border-radius:24px; background:radial-gradient(circle at 12% 105%,rgba(0,168,135,.24),transparent 34%),radial-gradient(circle at 88% 0,rgba(20,99,232,.3),transparent 34%),#061B3A; color:#fff; box-shadow:0 18px 42px rgba(6,27,58,.2); }
+      .football-favourites-stage::after { content:""; position:absolute; right:50%; bottom:-160px; width:340px; height:340px; transform:translateX(50%); border:1px solid rgba(255,255,255,.055); border-radius:50%; box-shadow:0 0 0 34px rgba(255,255,255,.014),0 0 0 72px rgba(255,255,255,.01); pointer-events:none; }
       .football-hero-heading { position:relative; z-index:1; display:flex; justify-content:space-between; align-items:flex-start; }
-      .football-hero .eyebrow { color:#8FD8CB; }
-      .football-hero h2 { margin:4px 0 0; color:#fff; font-size:27px; }
+      .football-favourites-stage .eyebrow { color:#8FD8CB; }
+      .football-favourites-stage h2 { margin:4px 0 0; color:#fff; font-size:25px; }
       .football-freshness { max-width:370px; min-height:42px; padding:7px 12px; display:flex; align-items:center; gap:9px; border:1px solid rgba(255,255,255,.14); border-radius:14px; background:rgba(255,255,255,.07); }
       .football-freshness > span { min-width:0; }
       .football-freshness > i { width:9px; height:9px; border-radius:50%; background:#00C69D; box-shadow:0 0 0 4px rgba(0,198,157,.16); }
+      .football-freshness.is-waiting > i { background:#E7A93D; box-shadow:0 0 0 4px rgba(231,169,61,.16); }
       .football-freshness.is-cached > i { background:#E7A93D; box-shadow:0 0 0 4px rgba(231,169,61,.16); }
       .football-freshness.is-stale > i { background:#E86E5A; box-shadow:0 0 0 4px rgba(232,110,90,.16); }
       .football-freshness strong,.football-freshness small { display:block; color:#fff; }
@@ -3592,24 +5639,44 @@ export class FamilyHubCard extends HTMLElementBase {
       .football-health-note { position:relative; z-index:1; width:max-content; max-width:min(430px,62%); margin:7px 0 0 auto; padding:7px 10px; border:1px solid rgba(255,255,255,.14); border-radius:11px; background:rgba(255,255,255,.07); color:#E7F0FA; font-size:12px; line-height:1.3; }
       .football-health-note.is-cached { border-color:rgba(231,169,61,.45); }
       .football-health-note.is-stale { border-color:rgba(232,110,90,.5); }
-      .hero-match { position:relative; z-index:1; max-width:680px; margin:14px auto 0; display:grid; grid-template-columns:minmax(0,1fr) 150px minmax(0,1fr); align-items:center; gap:24px; }
-      .football-health-note + .hero-match { margin-top:7px; }
-      .hero-team { display:flex; align-items:center; justify-content:flex-end; gap:15px; }
-      .hero-team.is-away { flex-direction:row-reverse; }
-      .hero-team > strong { color:#fff; font-size:19px; }
+      .favourite-hero-grid { position:relative; z-index:1; flex:1; min-height:0; margin-top:10px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+      .football-health-note + .favourite-hero-grid { margin-top:7px; }
+      .favourite-hero-card { min-width:0; min-height:0; height:100%; padding:12px 14px; display:flex; flex-direction:column; justify-content:space-between; overflow:hidden; border:1px solid color-mix(in srgb,var(--club-accent) 40%,rgba(255,255,255,.18)); border-radius:18px; background:radial-gradient(circle at 92% 8%,color-mix(in srgb,var(--club-accent) 22%,transparent),transparent 42%),linear-gradient(135deg,color-mix(in srgb,var(--club-primary) 92%,#061B3A),color-mix(in srgb,var(--club-primary) 66%,#061B3A)); color:#fff; box-shadow:0 10px 26px rgba(0,0,0,.18); }
+      .favourite-hero-card.is-live { box-shadow:inset 0 0 0 1px rgba(232,110,90,.72),0 10px 26px rgba(0,0,0,.18); }
+      .favourite-club-heading,.derby-heading { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+      .favourite-club-identity { min-width:0; display:flex; align-items:center; gap:10px; }
+      .favourite-club-identity > div,.derby-heading > div { min-width:0; }
+      .favourite-club-identity small,.derby-heading small { display:block; color:color-mix(in srgb,var(--club-accent,#8FD8CB) 78%,#fff); font-size:12px; font-weight:750; }
+      .favourite-club-identity strong,.derby-heading strong { display:block; margin-top:2px; overflow:hidden; color:#fff; font-size:18px; line-height:1.1; white-space:nowrap; text-overflow:ellipsis; }
+      .favourite-match-status { flex:0 0 auto; min-height:28px; padding:0 9px; display:flex; align-items:center; border:1px solid rgba(255,255,255,.2); border-radius:999px; background:rgba(255,255,255,.1); color:#fff; font-size:12px; font-weight:850; letter-spacing:.05em; }
+      .favourite-hero-card.is-live .favourite-match-status { border-color:rgba(255,139,125,.56); background:rgba(180,40,43,.34); }
+      .favourite-fixture-summary { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) 30px auto; align-items:end; gap:9px; }
+      .favourite-opponent { min-width:0; }
+      .favourite-opponent small,.favourite-result small { display:block; color:#C9D6E5; font-size:12px; line-height:1.2; }
+      .favourite-opponent strong { display:block; margin-top:3px; overflow:hidden; color:#fff; font-size:15px; line-height:1.15; white-space:nowrap; text-overflow:ellipsis; }
+      .favourite-result { min-width:74px; text-align:right; }
+      .favourite-result strong { display:block; color:#fff; font-size:22px; line-height:1; letter-spacing:-.025em; }
+      .favourite-result small { margin-top:4px; color:var(--club-accent,#8FD8CB); font-weight:750; }
+      .favourite-fixture-summary.is-empty { grid-template-columns:24px minmax(0,1fr); align-items:center; color:#fff; }
+      .favourite-fixture-summary.is-empty ha-icon { --mdc-icon-size:21px; color:var(--club-accent,#8FD8CB); }
+      .favourite-fixture-summary.is-empty strong,.favourite-fixture-summary.is-empty small { display:block; color:#fff; font-size:13px; }
+      .favourite-fixture-summary.is-empty small { margin-top:3px; color:#C9D6E5; font-size:12px; }
+      .favourite-hero-card.is-derby { --club-accent:#8FD8CB; grid-column:1/-1; background:radial-gradient(circle at 12% 20%,rgba(255,255,255,.13),transparent 27%),radial-gradient(circle at 88% 20%,rgba(149,191,229,.22),transparent 28%),linear-gradient(115deg,#132257 0 49.5%,#670E36 50.5% 100%); }
+      .derby-heading { align-items:flex-start; }
+      .derby-fixture { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) 130px minmax(0,1fr); align-items:center; gap:14px; }
+      .derby-team { min-width:0; display:flex; align-items:center; justify-content:flex-end; gap:10px; }
+      .derby-team.is-away { flex-direction:row-reverse; }
+      .derby-team > strong { overflow:hidden; color:#fff; font-size:17px; white-space:nowrap; text-overflow:ellipsis; }
+      .derby-team.is-away > strong { text-align:right; }
       .team-mark { position:relative; flex:0 0 auto; display:grid; place-items:center; overflow:hidden; border-radius:50%; background:#fff; color:#061B3A; box-shadow:0 5px 16px rgba(3,12,28,.18); }
       .team-mark img { position:absolute; inset:11%; width:78%; height:78%; object-fit:contain; background:#fff; }
       .team-mark img[hidden] { display:none; }
-      .team-mark.is-hero { width:70px; height:70px; }
-      .team-mark.is-hero strong { font-size:14px; }
+      .team-mark.is-favourite { width:48px; height:48px; }
+      .team-mark.is-favourite strong { font-size:13px; }
       .team-mark.is-small { width:30px; height:30px; }
       .team-mark.is-small strong { font-size:12px; }
-      .hero-score { text-align:center; }
-      .hero-score > span { display:block; color:#fff; font-size:30px; font-weight:850; letter-spacing:-.035em; }
-      .hero-score small { display:block; margin-top:6px; color:#8FD8CB; font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
-      .hero-match.is-empty { display:flex; justify-content:center; color:#fff; font-size:16px; }
       .football-layout { grid-template-columns:minmax(0,1fr) clamp(260px,25vw,320px); gap:16px; }
-      .football-main,.spotlight-panel { border-color:#DCE4EE; background:#fff; }
+      .football-main,.favourite-standings { border-color:#DCE4EE; background:#fff; }
       .football-main { padding:18px 20px; grid-template-rows:58px minmax(0,1fr); }
       .football-toolbar h2 { font-size:21px; }
       .matchweek-controls { gap:5px; }
@@ -3620,31 +5687,36 @@ export class FamilyHubCard extends HTMLElementBase {
       .fixture-day h3 { margin:12px 0 7px; color:#5E6B80; font-size:12px; }
       .fixture { min-height:58px; grid-template-columns:minmax(0,1fr) 92px minmax(0,1fr); gap:10px; padding:8px 10px; border-color:#E1E8F0; }
       .fixture.is-spotlight { border-color:#BFD3F2; background:#F4F8FF; }
+      .fixture[data-favourite-code~="TOT"] { border-left:4px solid #132257; }
+      .fixture[data-favourite-code~="AVL"] { box-shadow:inset 4px 0 #670E36; }
+      .fixture[data-favourite-code~="TOT"][data-favourite-code~="AVL"] { border-left-color:#132257; box-shadow:inset 4px 0 #670E36; }
       .fixture.is-live { border-color:#E86E5A; }
       .team { display:flex; align-items:center; gap:8px; color:#0B1830; font-size:13px; }
       .away-team { justify-content:flex-end; }
       .fixture-score { font-size:16px; }
       .fixture-score small,.scorers { color:#5E6B80; font-size:12px; }
-      .spotlight-panel { padding:20px; }
-      .spotlight-panel h2 { font-size:20px; }
-      .spotlight-club { gap:12px; margin-top:12px; padding-top:12px; border-color:#E1E8F0; }
-      .spotlight-club strong { font-size:14px; }
-      .spotlight-club small { color:#5E6B80; font-size:12px; line-height:1.35; }
+      .favourite-standings { padding:20px; }
+      .favourite-standings h2 { font-size:20px; }
+      .favourite-standing-list { gap:12px; margin-top:14px; }
+      .favourite-standing { min-height:70px; border-color:#DCE4EE; background:color-mix(in srgb,var(--club-accent) 8%,#F7F9FC); }
+      .favourite-standing strong { color:#0B1830; font-size:14px; }
+      .favourite-standing small { color:#5E6B80; font-size:12px; line-height:1.3; }
+      .favourite-standing b { color:var(--club-primary); font-size:19px; }
       .league-table { font-size:13px; }
       .league-table th,.league-table td { padding:9px 8px; border-color:#E1E8F0; }
       .league-table tr.is-spotlight { background:#F1F6FF; }
 
       @keyframes spin { to { transform:rotate(360deg); } }
       @media (max-width:1030px) {
-        .shell { grid-template-columns:92px minmax(0,1fr); }
-        .navigation { padding-inline:10px; }
-        .brand { width:62px; height:62px; }
-        .content { padding-inline:18px; }
+        .hub-shell { grid-template-columns:92px minmax(0,1fr); }
+        .hub-navigation { padding-inline:10px; }
+        .hub-brand { width:62px; height:62px; }
+        .hub-content { padding-inline:18px; }
         .rooms-layout { grid-template-columns:minmax(0,1fr) 330px; }
         .security-layout { grid-template-columns:minmax(0,1fr) 274px; }
         .football-layout { grid-template-columns:minmax(0,1fr) 270px; }
-        .nav-button { min-height:55px; }
-        .whole-home-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .hub-nav-button { min-height:55px; }
+        .whole-home-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
         .cover-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
       }
       @media (max-width:1279px) {
@@ -3673,42 +5745,50 @@ export class FamilyHubCard extends HTMLElementBase {
       @media (max-width:760px) {
         :host { height:auto; min-height:calc(100vh - var(--family-ha-header-offset)); }
         .hub-card { height:auto; min-height:calc(100vh - var(--family-ha-header-offset)); }
-        .shell { display:block; height:auto; }
-        .navigation { position:sticky; top:0; z-index:20; flex-direction:row; align-items:center; gap:6px; padding:7px; overflow-x:auto; overscroll-behavior-x:contain; box-shadow:0 6px 20px rgba(6,27,58,.16); }
-        .brand { flex:0 0 48px; width:48px; height:48px; margin:0; border-radius:15px; }
-        .brand span,.nav-button span,.nav-divider { display:none; }
-        .nav-items { display:contents; }
-        .nav-utility { margin:0; }
-        .nav-button { flex:0 0 56px; min-height:48px; border-radius:14px; }
-        .content { display:block; padding:10px; }
-        .topbar { min-height:auto; padding:10px 2px 14px; gap:10px; flex-wrap:wrap; }
-        .page-title { flex:1 1 250px; flex-wrap:wrap; gap:5px 10px; }
-        .topbar-date { font-size:12px; }
-        .header-actions { flex:1 1 auto; justify-content:flex-end; flex-wrap:wrap; }
-        .weather-pill { min-height:48px; }
-        .topbar-time { min-width:70px; font-size:24px; }
-        .view { min-height:620px; }
+        .hub-shell { display:block; height:auto; }
+        .hub-navigation { position:sticky; top:0; z-index:20; flex-direction:row; align-items:center; gap:6px; padding:7px; overflow-x:auto; overscroll-behavior-x:contain; box-shadow:0 6px 20px rgba(6,27,58,.16); }
+        .hub-brand { flex:0 0 48px; width:48px; height:48px; margin:0; border-radius:15px; }
+        .hub-brand span,.hub-nav-button span,.hub-nav-divider { display:none; }
+        .hub-nav-items { display:contents; }
+        .hub-nav-utility { margin:0; }
+        .hub-nav-button { flex:0 0 56px; min-height:48px; border-radius:14px; }
+        .hub-content { display:block; padding:10px; }
+        .hub-topbar { min-height:auto; padding:10px 2px 14px; gap:10px; flex-wrap:wrap; }
+        .hub-page-title { flex:1 1 250px; flex-wrap:wrap; gap:5px 10px; }
+        .hub-topbar-date { font-size:12px; }
+        .hub-header-actions { flex:1 1 auto; justify-content:flex-end; flex-wrap:wrap; }
+        .hub-weather-pill { min-height:48px; }
+        .hub-topbar-time { min-width:70px; font-size:24px; }
+        .hub-view { min-height:620px; }
         .today-grid,.rooms-layout,.family-layout,.security-layout,.football-layout { display:flex; flex-direction:column; height:auto; }
         .today-grid { gap:12px; }
         .today-grid article { min-height:210px; }
         .hero-panel.today-hero { min-height:360px; grid-template-columns:minmax(0,1fr) 110px; }
         .today-hero h2 { font-size:38px; }
+        .hero-metrics.has-energy { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .hero-metrics[data-metric-count="1"] { grid-template-columns:minmax(0,1fr); }
         .home-surface { height:auto; grid-template-rows:auto auto; }
         .home-toolbar { align-items:flex-start; flex-direction:column; }
         .home-segments { width:100%; max-width:100%; overflow-x:auto; }
+        .home-overview { height:auto; grid-template-rows:auto auto; }
+        .home-summary-links,.home-summary-links[data-summary-count="2"] { grid-template-columns:1fr; }
         .calendar-view { grid-template-rows:auto minmax(0,1fr); }
-        .calendar-heading { align-items:stretch; flex-direction:column; }
+        .calendar-toolbar { align-items:stretch; flex-direction:column; }
         .calendar-modes { width:100%; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
         .calendar-modes .segment { justify-content:center; }
         .whole-home-grid,.heating-grid,.cover-grid { grid-template-columns:1fr; height:auto; }
         .heating-grid,.heating-grid[data-zone-count="6"] { grid-template-columns:1fr; }
         .cleaning-panel { height:auto; display:flex; flex-direction:column; }
         .vacuum-map-slot,.vacuum-map-placeholder { min-height:320px; }
+        .energy-view { height:auto; grid-template-rows:auto auto auto; }
+        .energy-hero { align-items:flex-start; flex-direction:column; }
+        .energy-meter-grid { grid-template-columns:1fr; }
         .family-dashboard { height:auto; grid-template-rows:auto auto; }
+        .family-dashboard-heading { align-items:flex-start; flex-wrap:wrap; }
         .family-people-grid { grid-template-columns:1fr; }
         .family-sidebar { display:flex; flex-direction:column; overflow:visible; padding-right:0; scrollbar-gutter:auto; }
         .family-scroll-cue { position:static; }
-        .family-rhythm { align-items:flex-start; flex-direction:column; }
+        .family-summary-grid { grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); }
         .security-main { display:flex; flex-direction:column; }
         .security-stage { min-height:0; }
         .security-stage-media { width:100%; height:auto; min-height:280px; place-self:auto; }
@@ -3716,15 +5796,17 @@ export class FamilyHubCard extends HTMLElementBase {
         .floorplan-canvas { min-height:420px; }
         .music-experience,.media-player-panel { height:auto; min-height:620px; }
         .football-experience { height:auto; grid-template-rows:auto auto; }
-        .football-hero { min-height:230px; padding:18px 16px; }
+        .football-favourites-stage { min-height:410px; padding:18px 16px; overflow:visible; }
         .football-hero-heading { gap:10px; flex-wrap:wrap; }
         .football-freshness { margin-left:auto; }
-        .hero-match { grid-template-columns:minmax(0,1fr) 88px minmax(0,1fr); gap:6px; margin-top:18px; }
-        .hero-team { min-width:0; gap:6px; }
-        .hero-team > strong { min-width:0; font-size:14px; line-height:1.15; text-align:right; overflow-wrap:anywhere; }
-        .hero-team.is-away > strong { text-align:left; }
-        .team-mark.is-hero { width:50px; height:50px; }
-        .hero-score > span { font-size:24px; }
+        .football-health-note { max-width:100%; margin-left:0; }
+        .favourite-hero-grid { grid-template-columns:1fr; grid-auto-rows:minmax(142px,auto); }
+        .favourite-hero-card.is-derby { grid-column:auto; }
+        .derby-fixture { grid-template-columns:minmax(0,1fr) 82px minmax(0,1fr); gap:6px; }
+        .derby-team { gap:6px; }
+        .derby-team > strong { font-size:14px; }
+        .favourite-result { min-width:68px; }
+        .favourite-result strong { font-size:20px; }
         .football-main { min-height:620px; grid-template-rows:auto minmax(0,1fr); }
         .football-toolbar { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; gap:8px 10px; }
         .football-tabs { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr; }

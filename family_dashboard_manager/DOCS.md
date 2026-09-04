@@ -1,6 +1,6 @@
 # Family Dashboard Manager
 
-Version 0.8.0 upgrades the existing Family Dashboard Manager in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
+Version 0.9.0 upgrades the existing Family Dashboard Manager in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
 
 The accepted schema-v6 dashboard can now run in controlled live mode. First-party actions are restricted to exact validated household entities and fixed services. The configured Sonos/Music Assistant card receives a separate bounded media proxy. Calendar, Classroom, camera presentation cards and the vacuum map remain read-only, while every alarm and garage change still asks for a second confirmation.
 
@@ -10,9 +10,9 @@ This release requires Home Assistant OS 2026.8.0 or newer.
 
 1. Create a Home Assistant backup.
 2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
-3. Update the installed **Family Dashboard Manager** to v0.8.0; do not uninstall it.
+3. Update the installed **Family Dashboard Manager** to v0.9.0; do not uninstall it.
 4. Keep the existing Secure MCP Tunnel options unchanged and restart the app.
-5. Confirm the manager reconnects through the existing tunnel and reports v0.8.0.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.9.0.
 
 The app exposes no host port. Its manager endpoint remains on the private loopback interface inside the same app container.
 
@@ -35,7 +35,7 @@ lovelace:
 Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.8.0
+/local/family-dashboard/family-hub-card.js?v=0.9.0
 ```
 
 The stock Home Assistant Overview remains available to administrators.
@@ -69,7 +69,35 @@ The schema-v6 household configuration retains the existing panel path and explic
 
 Run `validate_household_config` first. Validation is read-only and returns the exact configuration hash required by `deploy_household_config` with `confirm=true`. Deployment writes only the existing Family Dashboard configuration and fixed frontend allow-list after creating a raw, hash-verified snapshot. Private floorplans are preserved separately.
 
-Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.8.0, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
+Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.9.0, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
+
+## v0.9 household mappings
+
+Enable Energy only after mapping the real Home Assistant sensors for both fuels:
+`usage_today_entity`, `cost_today_entity`, `rate_entity` and
+`standing_charge_entity` under both `energy.electricity` and `energy.gas`.
+Every mapping must be a unique `sensor.*` entity. These are smart-meter totals
+for **today so far**, not instantaneous power; leave `features.energy` false if
+either fuel does not have the complete mapping.
+
+For each room, map either a Home Assistant aggregate light group or its member
+lights, never both. The dashboard cannot safely infer group membership; mapping
+both would duplicate counts and could offer the same physical light twice.
+
+ChoreOps remains the source of truth. For every configured child, map the
+ChoreOps dashboard helper, points, chores summary and the individual
+`status_entities` used for Today’s jobs. Family may additionally feature at most
+one entry in each of `reward_status_entities`, `badge_progress_entities` and
+`achievement_progress_entities` per child. `chores.dashboard_path` is optional and
+must be the exact generated native ChoreOps dashboard path verified in that Home
+Assistant instance; do not guess it. Creating, editing, claiming and approving
+work stays in native ChoreOps.
+
+After Classroom consent, map each generated child-owned
+`sensor.*_classroom_open_assignments` to that same child under
+`school.classroom_students`, then enable `features.school`. School validation
+requires one unique sensor mapping for every child and will reject shared or
+partial mappings.
 
 ## Live action boundary
 
@@ -77,8 +105,8 @@ Call `reload_dashboard` after deployment, refresh the existing Lovelace resource
 - Music permits playback, volume, grouping, browsing, search and queue operations only for configured primary and Music Assistant player entities.
 - Alarm actions accept only the configured alarm entity and the three presented arm-home, arm-away and disarm services. Unavailable entities and unsupported arm modes remain disabled, and confirmation expires if the alarm state changes.
 - Garage actions accept only the configured garage cover, require its advertised open/close feature, and still require confirmation. A moving or unavailable garage never offers an enabled action, and confirmation expires if its state changes.
-- Camera start/stop requires an exact configured Start/Stop pair belonging to an explicitly configured, available exterior camera. When both Eufy diagnostic buttons are present in Home Assistant, that exact pair is used; when either mapped button is missing or unavailable at runtime, the dashboard may use only the paired `camera.turn_on`/`camera.turn_off` services for that same configured exterior camera. An unpaired configuration still fails closed. An idle camera starts once and waits for Home Assistant to report `streaming`; an already-streaming camera is adopted without another Start command. The native viewer then remains behind a buffering surface until an image or video reports positive readiness. If no first frame arrives, the bounded timeout uses the existing safe Stop-and-Retry recovery path; there is no manual promotion to **Live**. Switching and recovery disable every camera-open control and require a fresh `idle` state after the previous Stop; timeout, Retry and failed-session eviction remain bounded. A signals-only or unavailable camera causes no camera write.
-- Calendar event management and Classroom remain read-only. Embedded camera views and the vacuum map receive a read-only Home Assistant proxy.
+- Security opens on authenticated Home Assistant stills and never starts a stream merely by opening the view. Tapping a still starts the exact configured exterior-camera Start route and mounts Home Assistant's native live `picture-entity` for that same camera. The Home Assistant object supplied directly to that card is a least-privilege facade: its ordinary calls accept only the same camera's signed snapshot path and current/legacy camera protocol messages, and deliberately provide no generic signed go2rtc socket. Home Assistant cards share the page and may consume framework connection context, so this facade prevents accidental or unsupported calls but is not a browser sandbox; only trusted, administrator-installed native/custom cards are supported. **Live** appears only after a ready video frame and returns to loading if playback stalls. Start/Stop controls must be configured as an exact pair. The native camera-service fallback is used only when that configured button pair exists but is unavailable; garage RTSP buttons remain preferred where proven, while the existing front-door P2P pair remains a physical-acceptance risk until an RTSP-capable route is verified. Only one viewer may exist at once. Close, camera switching, leaving Security, page hiding and the hard two-minute expiry tear down the viewer and issue the bounded Stop route immediately, even if Start has not returned. One viewer recreation is allowed without restarting Eufy; failure returns to the still with an explicit retry. A signals-only or unavailable camera causes no camera write.
+- Calendar event management and Classroom remain read-only. Embedded camera views and the vacuum map receive a least-privilege facade for normal card API use; this is an accidental-operation guard, not isolation from same-page component code.
 - Exterior-camera validation continues to reject child, nursery and bedroom hints. Sanitised inventory still omits all camera entities.
 
 ## Physical acceptance
@@ -86,13 +114,16 @@ Call `reload_dashboard` after deployment, refresh the existing Lovelace resource
 On the target iPad, confirm:
 
 - the existing Family Dashboard and stock Home Assistant Overview both remain available;
-- the dashboard shows **Controlled live** and has no horizontal overflow at the supported landscape size;
+- the dashboard opens without a missing-card error and has no horizontal overflow at the supported landscape size;
 - Calendar switches among Day, Week, Month and Agenda and offers no event creation or editing;
 - both private floors retain the accepted Hall-to-Hall U-return stair and no stair enters Bedroom 4;
 - each mapped light, scene, heating zone, blind and vacuum action controls only its labelled device;
 - Sonos playback, volume and grouping operate only across the five configured zones;
 - Security exposes no child or bedroom camera, opens no stream automatically, and asks for confirmation before every alarm or garage change;
-- Classroom stays at the per-child read-only consent boundary and location remains disabled unless separately opted in.
+- each exterior camera opens successfully from its current still five consecutive times; a real frame—not a timer—changes the viewer to **Live**, and close, camera switch and iPad backgrounding each stop the session;
+- Classroom shows only each authorised child's bounded assignment sensor, and location remains disabled unless separately opted in;
+- electricity and gas are labelled **today so far**, report delayed/unavailable readings honestly, and never imply live power without a configured source;
+- Tottenham and Aston Villa each receive equal favourite treatment, with one shared card for a head-to-head fixture.
 
 Test alarm and garage actions deliberately with an adult present. Home Assistant permissions and any configured alarm PIN remain authoritative; no PIN belongs in dashboard configuration.
 
@@ -101,11 +132,11 @@ Test alarm and garage actions deliberately with an adult present. Home Assistant
 - Asset and configuration deployment each require `confirm=true` plus the exact hash returned by validation.
 - The manager retains the existing app slug, paths, published image identity and tunnel.
 - The manager cannot run arbitrary commands, read arbitrary files or call arbitrary Home Assistant services.
-- Rollback verifies raw snapshot hashes and can restore the accepted v0.6 configuration without reinterpreting it as a newer schema.
+- Rollback verifies raw snapshot hashes and can restore the immediately preceding accepted deployment snapshot without reinterpreting it as a newer schema.
 - Sanitised inventory excludes camera entities, people, trackers, states, history, addresses, credentials and arbitrary attributes.
 
 ## Google Classroom and football
 
-Classroom stays disabled until each child completes Google's own read-only authorization flow. No child password or OAuth token may be written to household configuration, generated YAML, snapshots or logs.
+Classroom stays disabled until the bundled first-party custom integration is installed at its fixed path and each child completes a separate Google read-only authorization flow. It requests exactly `classroom.courses.readonly` and `classroom.coursework.me.readonly`, polls every 15 minutes and caps assignment attributes at 20 while retaining the complete open count. No child password or OAuth token may be written to household configuration, generated YAML, snapshots or logs. See [app/docs/classroom-integration.md](./app/docs/classroom-integration.md) for hash-guarded installation, rollback and one-consent-entry-per-child setup.
 
 The browser does not call Fantasy Premier League directly. The manager provides a server-side, last-good-cache feed covering all 38 Premier League matchweeks with Tottenham and Aston Villa spotlights. Team objects include fixed-origin official Premier League crest URLs derived only from FPL's numeric club code; the UI retains the three-letter code as its fallback. The feed refreshes immediately after startup, then every three minutes around live fixtures, every 15 minutes on a fixture day and hourly between matchdays. When neither the source nor the last-good cache can provide an update, the existing football index reports a bounded stale state without replacing Manager deployment or rollback errors.

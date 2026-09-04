@@ -6,16 +6,18 @@ const paths = {
   config: `${appRoot}/config.yaml`,
   dockerfile: `${appRoot}/Dockerfile`,
   package: `${appRoot}/app/package.json`,
+  classroomStore: `${appRoot}/app/src/classroom-integration-store.mjs`,
   server: `${appRoot}/app/src/server.mjs`,
   managerRun: `${appRoot}/rootfs/etc/services.d/family-dashboard-manager/run`,
   tunnelRun: `${appRoot}/rootfs/etc/services.d/family-dashboard-tunnel/run`
 };
 
-const [appArmor, config, dockerfile, packageJson, server] = await Promise.all([
+const [appArmor, config, dockerfile, packageJson, classroomStore, server] = await Promise.all([
   readFile(paths.appArmor, "utf8"),
   readFile(paths.config, "utf8"),
   readFile(paths.dockerfile, "utf8"),
   readFile(paths.package, "utf8"),
+  readFile(paths.classroomStore, "utf8"),
   readFile(paths.server, "utf8")
 ]);
 
@@ -36,6 +38,18 @@ if (!/^profile family_dashboard_manager\b/m.test(appArmor)) {
 }
 if (!/\/config\/www\/family-dashboard\/\*\*\s+rwk,/.test(appArmor)) {
   failures.push("AppArmor is missing the dedicated Family Hub frontend write rule");
+}
+for (const classroomPath of [
+  "family_dashboard_classroom",
+  ".family_dashboard_classroom-staging",
+  ".family_dashboard_classroom-previous"
+]) {
+  if (!appArmor.includes(`/config/custom_components/${classroomPath}/** rwk,`)) {
+    failures.push(`AppArmor is missing the fixed Classroom path rule for ${classroomPath}`);
+  }
+}
+if (/\/config\/\.storage(?:\/|\\s)/.test(appArmor)) {
+  failures.push("AppArmor must not grant Manager access to Home Assistant OAuth storage");
 }
 
 for (const runScript of [paths.managerRun, paths.tunnelRun]) {
@@ -68,8 +82,14 @@ if (!dockerfile.includes("MANAGER_CONFIG_DIR=/config/family-dashboard")) {
 if (!dockerfile.includes("MANAGER_RESOURCE_DIR=/config/www/family-dashboard")) {
   failures.push("Dockerfile does not retain the existing manager frontend directory");
 }
+if (!classroomStore.includes('const DEFAULT_TARGET_DIR = "/config/custom_components/family_dashboard_classroom";')) {
+  failures.push("Classroom integration store does not retain its fixed installation target");
+}
+if (classroomStore.includes("MANAGER_CLASSROOM_TARGET_DIR")) {
+  failures.push("Classroom integration target must not be configurable through the environment");
+}
 if (!dockerfile.includes("MANAGER_REQUIRE_READ_ONLY=false")) {
-  failures.push("Dockerfile does not enable the v0.7 controlled-live rollout boundary");
+  failures.push("Dockerfile does not enable the bounded live-control rollout boundary");
 }
 for (const label of ["io.hass.version", "io.hass.type", "io.hass.arch"]) {
   if (!dockerfile.includes(label)) failures.push(`Dockerfile is missing required local-build label ${label}`);
@@ -82,6 +102,9 @@ if (!dockerfile.includes("COPY app/frontend ./frontend")) {
 }
 if (!dockerfile.includes("COPY app/config ./config")) {
   failures.push("Dockerfile does not package the schema-v6 runtime validator");
+}
+if (!dockerfile.includes("COPY app/integrations/family_dashboard_classroom ./integrations/family_dashboard_classroom")) {
+  failures.push("Dockerfile does not package the first-party Classroom integration");
 }
 
 if (failures.length) {

@@ -58,12 +58,13 @@
     "music": true,
     "chores": true,
     "football": true,
-    "lists": true,
+    "lists": false,
     "weather": true,
     "school": true,
     "location_map": true,
     "cleaning": true,
-    "entry": true
+    "entry": true,
+    "energy": true
   },
   "calendar": {
     "card_type": "custom:daylight-calendar-card",
@@ -92,12 +93,28 @@
   "weather": {
     "entity_id": "weather.home"
   },
+  "energy": {
+    "stale_after_minutes": 180,
+    "electricity": {
+      "usage_today_entity": "sensor.example_electricity_usage_today",
+      "cost_today_entity": "sensor.example_electricity_cost_today",
+      "rate_entity": "sensor.example_electricity_rate",
+      "standing_charge_entity": "sensor.example_electricity_standing_charge"
+    },
+    "gas": {
+      "usage_today_entity": "sensor.example_gas_usage_today",
+      "cost_today_entity": "sensor.example_gas_cost_today",
+      "rate_entity": "sensor.example_gas_rate",
+      "standing_charge_entity": "sensor.example_gas_standing_charge"
+    }
+  },
   "lists": {
     "reminders_entity": "todo.reminders",
     "shopping_entity": "todo.shopping_list"
   },
   "home": {
-    "default_section": "rooms"
+    "default_section": "rooms",
+    "default_room": "living_room"
   },
   "floorplan": {
     "default_floor": "ground",
@@ -228,6 +245,7 @@
   },
   "chores": {
     "profile": "choreops-status",
+    "dashboard_path": "/choreops",
     "users": [
       {
         "person_id": "child_one",
@@ -238,7 +256,10 @@
           "sensor.child_one_choreops_chore_status_brush_teeth",
           "sensor.child_one_choreops_chore_status_get_dressed",
           "sensor.child_one_choreops_chore_status_go_to_bed_at_bedtime"
-        ]
+        ],
+        "reward_status_entities": ["sensor.child_one_choreops_reward_status_weekend_movie"],
+        "badge_progress_entities": ["sensor.child_one_choreops_badge_progress_starlight"],
+        "achievement_progress_entities": ["sensor.child_one_choreops_achievement_progress_stayed_in_bed"]
       },
       {
         "person_id": "child_two",
@@ -249,7 +270,10 @@
           "sensor.child_two_choreops_chore_status_brush_teeth",
           "sensor.child_two_choreops_chore_status_get_dressed",
           "sensor.child_two_choreops_chore_status_go_to_bed_at_bedtime"
-        ]
+        ],
+        "reward_status_entities": ["sensor.child_two_choreops_reward_status_weekend_movie"],
+        "badge_progress_entities": ["sensor.child_two_choreops_badge_progress_starlight"],
+        "achievement_progress_entities": ["sensor.child_two_choreops_achievement_progress_stayed_in_bed"]
       }
     ]
   },
@@ -264,11 +288,11 @@
     "classroom_students": [
       {
         "person_id": "child_one",
-        "assignments_entity": "sensor.family_dashboard_classroom_child_one"
+        "assignments_entity": "sensor.child_one_classroom_open_assignments"
       },
       {
         "person_id": "child_two",
-        "assignments_entity": "sensor.family_dashboard_classroom_child_two"
+        "assignments_entity": "sensor.child_two_classroom_open_assignments"
       }
     ],
     "calendar_entities": ["calendar.school"],

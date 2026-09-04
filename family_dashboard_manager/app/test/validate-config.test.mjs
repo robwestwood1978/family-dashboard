@@ -36,6 +36,38 @@ test("accepts the public schema-v6 configuration", () => {
   );
 });
 
+test("keeps Energy and the preferred Home room optional for existing schema-v6 households", () => {
+  const config = structuredClone(example);
+  delete config.features.energy;
+  delete config.energy;
+  delete config.home.default_room;
+  assert.equal(validateConfig(config).schema_version, CURRENT_SCHEMA_VERSION);
+});
+
+test("requires a complete, unique sensor mapping only when Energy is configured", () => {
+  const missing = structuredClone(example);
+  delete missing.energy;
+  assert.throws(() => validateConfig(missing), /config\.energy: must be configured when Energy is enabled/);
+
+  const wrongDomain = structuredClone(example);
+  wrongDomain.energy.gas.usage_today_entity = "binary_sensor.example_gas_usage";
+  assert.throws(() => validateConfig(wrongDomain), /must use the sensor domain/);
+
+  const duplicate = structuredClone(example);
+  duplicate.energy.gas.cost_today_entity = duplicate.energy.electricity.cost_today_entity;
+  assert.throws(() => validateConfig(duplicate), /config\.energy meter entities: must be unique/);
+});
+
+test("requires the preferred Home room to exist on the default floor", () => {
+  const missing = structuredClone(example);
+  missing.home.default_room = "missing_room";
+  assert.throws(() => validateConfig(missing), /must match one configured room/);
+
+  const wrongFloor = structuredClone(example);
+  wrongFloor.home.default_room = "child_one_room";
+  assert.throws(() => validateConfig(wrongFloor), /must be on the configured default floor/);
+});
+
 test("requires read-only mode to be explicit", () => {
   const config = structuredClone(example);
   delete config.display.read_only;
@@ -89,7 +121,27 @@ test("requires the default internal view to be enabled", () => {
   config.display.default_view = "family";
   config.features.family = false;
   config.features.location_map = false;
+  config.features.chores = false;
+  config.features.school = false;
   assert.throws(() => validateConfig(config), /must be enabled in config.features/);
+});
+
+test("requires nested Family and Cleaning features to keep their parent view enabled", () => {
+  for (const [feature, parent, message] of [
+    ["chores", "family", /features\.chores.*requires the Family view/],
+    ["school", "family", /features\.school.*requires the Family view/],
+    ["location_map", "family", /features\.location_map.*requires the Family view/],
+    ["cleaning", "rooms", /features\.cleaning.*requires the Home view/]
+  ]) {
+    const config = structuredClone(example);
+    config.features[parent] = false;
+    if (parent === "family") {
+      config.features.chores = feature === "chores";
+      config.features.school = feature === "school";
+      config.features.location_map = feature === "location_map";
+    }
+    assert.throws(() => validateConfig(config), message);
+  }
 });
 
 test("requires controls to use the expected entity domain", () => {
@@ -116,6 +168,51 @@ test("requires individual ChoreOps status sensors for every configured child", (
   const wrongDomain = structuredClone(example);
   wrongDomain.chores.users[0].status_entities[0] = "binary_sensor.not_a_chore_status";
   assert.throws(() => validateConfig(wrongDomain), /must use the sensor domain/);
+
+  const missingChild = structuredClone(example);
+  missingChild.chores.users.pop();
+  assert.throws(() => validateConfig(missingChild), /must map every child.*missing child_two/);
+
+  const sharedSensor = structuredClone(example);
+  sharedSensor.chores.users[1].points_entity = sharedSensor.chores.users[0].points_entity;
+  assert.throws(() => validateConfig(sharedSensor), /entity mappings.*must be unique/);
+});
+
+test("keeps ChoreOps rewards, progress and native dashboard routing optional", () => {
+  const extended = structuredClone(example);
+  assert.equal(validateConfig(extended).chores.dashboard_path, "/choreops");
+  assert.equal(extended.chores.users[0].reward_status_entities.length, 1);
+  assert.equal(extended.chores.users[0].badge_progress_entities.length, 1);
+  assert.equal(extended.chores.users[0].achievement_progress_entities.length, 1);
+
+  const legacy = structuredClone(example);
+  delete legacy.chores.dashboard_path;
+  for (const user of legacy.chores.users) {
+    delete user.reward_status_entities;
+    delete user.badge_progress_entities;
+    delete user.achievement_progress_entities;
+  }
+  assert.equal(validateConfig(legacy).chores.dashboard_path, undefined);
+});
+
+test("rejects unsafe ChoreOps dashboard paths and malformed progress arrays", () => {
+  for (const dashboardPath of ["https://example.invalid/choreops", "/choreops/../config", "/choreops?admin=1", "//choreops"]) {
+    const config = structuredClone(example);
+    config.chores.dashboard_path = dashboardPath;
+    assert.throws(() => validateConfig(config), /dashboard_path/);
+  }
+
+  const wrongDomain = structuredClone(example);
+  wrongDomain.chores.users[0].badge_progress_entities = ["binary_sensor.not_progress"];
+  assert.throws(() => validateConfig(wrongDomain), /must use the sensor domain/);
+
+  const duplicate = structuredClone(example);
+  duplicate.chores.users[0].reward_status_entities.push(duplicate.chores.users[0].reward_status_entities[0]);
+  assert.throws(() => validateConfig(duplicate), /must be unique/);
+
+  const multipleFeatured = structuredClone(example);
+  multipleFeatured.chores.users[0].achievement_progress_entities.push("sensor.child_one_choreops_achievement_progress_second");
+  assert.throws(() => validateConfig(multipleFeatured), /at most one featured sensor/);
 });
 
 test("rejects unsafe panel and floorplan asset paths", () => {
@@ -150,6 +247,7 @@ test("validates the dashboard timezone without ICU locale data", () => {
 
 test("requires every room and light overlay to match its configured floor", () => {
   const room = structuredClone(example);
+  delete room.home.default_room;
   room.rooms[0].floor_id = "first";
   assert.throws(() => validateConfig(room), /hotspot for living_room is on the wrong floor/);
 
@@ -200,12 +298,24 @@ test("requires the requested Premier League spotlights to be unique team codes",
   const missingVilla = structuredClone(example);
   missingVilla.football.spotlight_team_codes = ["TOT", "ARS"];
   assert.throws(() => validateConfig(missingVilla), /must include AVL/);
+
+  const extraClub = structuredClone(example);
+  extraClub.football.spotlight_team_codes = ["TOT", "AVL", "ARS"];
+  assert.throws(() => validateConfig(extraClub), /must contain exactly the two family spotlight clubs/);
 });
 
-test("requires configured Classroom children while School is enabled", () => {
+test("requires one unique Classroom sensor for every child while School is enabled", () => {
   const config = structuredClone(example);
   config.school.classroom_students = [];
-  assert.throws(() => validateConfig(config), /must not be empty when School is enabled/);
+  assert.throws(() => validateConfig(config), /must map every child when School is enabled/);
+
+  const missingChild = structuredClone(example);
+  missingChild.school.classroom_students.pop();
+  assert.throws(() => validateConfig(missingChild), /must map every child.*missing child_two/);
+
+  const sharedSensor = structuredClone(example);
+  sharedSensor.school.classroom_students[1].assignments_entity = sharedSensor.school.classroom_students[0].assignments_entity;
+  assert.throws(() => validateConfig(sharedSensor), /assignments_entity.*must be unique/);
 });
 
 test("accepts a signals-only household camera while its private stream entity is deferred", () => {

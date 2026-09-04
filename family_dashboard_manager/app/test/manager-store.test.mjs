@@ -23,8 +23,8 @@ test("validates without writing live files", async (context) => {
   context.after(() => rm(root, { recursive: true, force: true }));
   const prepared = store.validate(structuredClone(example));
   assert.match(prepared.config_hash, /^[a-f0-9]{64}$/);
-  assert.deepEqual(prepared.enabled_views, ["today", "calendar", "rooms", "family", "entry", "music", "football"]);
-  assert.equal(prepared.resource_url, "/local/family-dashboard/family-hub-card.js?v=0.8.0");
+  assert.deepEqual(prepared.enabled_views, ["today", "calendar", "rooms", "family", "entry", "music", "energy", "football"]);
+  assert.equal(prepared.resource_url, "/local/family-dashboard/family-hub-card.js?v=0.9.0");
   assert.equal((await store.getStatus()).installed, false);
   assert.equal((await store.getStatus()).read_only_required, false);
 });

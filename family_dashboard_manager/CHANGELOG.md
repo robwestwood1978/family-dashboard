@@ -1,3 +1,13 @@
+## 0.9.0
+
+- Rebuild Security around immediate latest-image camera tiles and deliberate WebRTC live viewing, with one bounded player recovery, a hard session expiry and complete teardown.
+- Isolate dashboard navigation styles from third-party Calendar light-DOM CSS and simplify Calendar's control hierarchy.
+- Turn Home into a useful control overview, correct grouped-light counting and add an honest electricity/gas **Today so far** Energy view.
+- Replace the Family “routines” presentation with **Jobs & rewards**, surface ChoreOps reward/progress data and retain the native ChoreOps dashboard as the detailed action layer.
+- Give Tottenham and Aston Villa equal favourite treatment, including a single shared Family derby state.
+- Remove Music's transparent-background, forced-height and hidden-overflow traps while retaining the existing five-room Sonos/Music Assistant boundary.
+- Bundle a first-party, per-child Google Classroom OAuth integration using exactly two read-only scopes, a 15-minute bounded sensor and fixed-file hash-guarded installation/rollback; School remains disabled until both real child sensors and consent are present.
+
 ## 0.8.0
 
 - Introduce the Family OS tablet hierarchy across Today, Calendar, Home, Family, Security, Music and Football while retaining the existing dashboard, app, image and tunnel identities.

@@ -11,11 +11,12 @@ const roots = [
   "family_dashboard_manager/app/browser-test",
   "family_dashboard_manager/app/docs",
   "family_dashboard_manager/app/frontend",
+  "family_dashboard_manager/app/integrations",
   "family_dashboard_manager/app/generated",
   "family_dashboard_manager/app/preview",
   "family_dashboard_manager/app/src"
 ];
-const textExtensions = new Set([".js", ".md", ".mjs", ".json", ".svg", ".yaml", ".yml"]);
+const textExtensions = new Set([".js", ".md", ".mjs", ".json", ".py", ".svg", ".yaml", ".yml"]);
 const forbidden = [
   { label: "private IPv4 address", pattern: /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b/ },
   { label: "email address", pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i },

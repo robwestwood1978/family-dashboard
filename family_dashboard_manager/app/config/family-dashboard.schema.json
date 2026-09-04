@@ -57,7 +57,7 @@
         "legacy_ios": { "type": "boolean" },
         "read_only": { "type": "boolean" },
         "default_view": {
-          "enum": ["today", "calendar", "rooms", "family", "entry", "music", "football"]
+          "enum": ["today", "calendar", "rooms", "family", "entry", "music", "energy", "football"]
         },
         "panel_path": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
         "target_width": { "type": "integer", "minimum": 768, "maximum": 2560 },
@@ -132,12 +132,16 @@
         "music": { "type": "boolean" },
         "chores": { "type": "boolean" },
         "football": { "type": "boolean" },
-        "lists": { "type": "boolean" },
+        "lists": {
+          "type": "boolean",
+          "description": "Reserved legacy switch retained for schema-v6 compatibility; v0.9 does not render a Lists surface."
+        },
         "weather": { "type": "boolean" },
         "school": { "type": "boolean" },
         "location_map": { "type": "boolean" },
         "cleaning": { "type": "boolean" },
-        "entry": { "type": "boolean" }
+        "entry": { "type": "boolean" },
+        "energy": { "type": "boolean" }
       }
     },
     "calendar": {
@@ -183,6 +187,16 @@
         "entity_id": { "$ref": "#/$defs/weatherEntityId" }
       }
     },
+    "energy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["electricity", "gas"],
+      "properties": {
+        "stale_after_minutes": { "type": "integer", "minimum": 15, "maximum": 1440 },
+        "electricity": { "$ref": "#/$defs/energyFuel" },
+        "gas": { "$ref": "#/$defs/energyFuel" }
+      }
+    },
     "lists": {
       "type": "object",
       "additionalProperties": false,
@@ -199,7 +213,8 @@
       "properties": {
         "default_section": {
           "enum": ["rooms", "lights", "heating", "covers", "cleaning"]
-        }
+        },
+        "default_room": { "$ref": "#/$defs/id" }
       }
     },
     "floorplan": {
@@ -351,6 +366,11 @@
       "required": ["profile", "users"],
       "properties": {
         "profile": { "const": "choreops-status" },
+        "dashboard_path": {
+          "type": "string",
+          "maxLength": 160,
+          "pattern": "^/[a-z0-9][a-z0-9_-]*(?:/[a-z0-9][a-z0-9_-]*)*$"
+        },
         "users": {
           "type": "array",
           "items": {
@@ -365,6 +385,27 @@
               "status_entities": {
                 "type": "array",
                 "minItems": 1,
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/sensorEntityId" }
+              },
+              "reward_status_entities": {
+                "type": "array",
+                "description": "Optional reward status sensor featured in the compact Family overview.",
+                "maxItems": 1,
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/sensorEntityId" }
+              },
+              "badge_progress_entities": {
+                "type": "array",
+                "description": "Optional badge progress sensor featured in the compact Family overview.",
+                "maxItems": 1,
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/sensorEntityId" }
+              },
+              "achievement_progress_entities": {
+                "type": "array",
+                "description": "Optional achievement progress sensor featured in the compact Family overview.",
+                "maxItems": 1,
                 "uniqueItems": true,
                 "items": { "$ref": "#/$defs/sensorEntityId" }
               }
@@ -388,6 +429,7 @@
         "spotlight_team_codes": {
           "type": "array",
           "minItems": 2,
+          "maxItems": 2,
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[A-Z]{3}$" },
           "allOf": [
@@ -505,6 +547,17 @@
     "personEntityId": { "type": "string", "pattern": "^person\\.[a-z0-9_]+$" },
     "binarySensorEntityId": { "type": "string", "pattern": "^binary_sensor\\.[a-z0-9_]+$" },
     "buttonEntityId": { "type": "string", "pattern": "^button\\.[a-z0-9_]+$" },
+    "energyFuel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usage_today_entity", "cost_today_entity", "rate_entity", "standing_charge_entity"],
+      "properties": {
+        "usage_today_entity": { "$ref": "#/$defs/sensorEntityId" },
+        "cost_today_entity": { "$ref": "#/$defs/sensorEntityId" },
+        "rate_entity": { "$ref": "#/$defs/sensorEntityId" },
+        "standing_charge_entity": { "$ref": "#/$defs/sensorEntityId" }
+      }
+    },
     "colour": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
     "localAssetUrl": {
       "type": "string",

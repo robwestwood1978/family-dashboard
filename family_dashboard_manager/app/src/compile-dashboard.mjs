@@ -1,6 +1,6 @@
 import { validateConfig } from "./validate-config.mjs";
 
-const VIEW_ORDER = ["today", "calendar", "rooms", "family", "entry", "music", "football"];
+const VIEW_ORDER = ["today", "calendar", "rooms", "family", "entry", "music", "energy", "football"];
 
 function sortValue(value) {
   if (Array.isArray(value)) return value.map(sortValue);
@@ -32,7 +32,7 @@ function yamlBlock(value, indent) {
 }
 
 /**
- * Compile the one-card Home Assistant panel used by the v0.7 Family Hub.
+ * Compile the one-card Home Assistant panel used by the v0.9 Family Hub.
  * Navigation and presentation live inside the first-party card so the tablet
  * does not have to construct a large tree of third-party Lovelace cards.
  */
