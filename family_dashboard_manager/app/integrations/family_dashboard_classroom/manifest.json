@@ -1,0 +1,12 @@
+{
+  "domain": "family_dashboard_classroom",
+  "name": "Family Dashboard Classroom",
+  "codeowners": ["@robwestwood1978"],
+  "config_flow": true,
+  "dependencies": ["application_credentials"],
+  "documentation": "https://github.com/robwestwood1978/family-dashboard/tree/main/family_dashboard_manager/app/integrations/family_dashboard_classroom",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.9.0"
+}

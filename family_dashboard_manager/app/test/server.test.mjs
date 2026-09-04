@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { ClassroomIntegrationStore } from "../src/classroom-integration-store.mjs";
 import { DashboardStore } from "../src/manager-store.mjs";
 import { createManagerApp } from "../src/server.mjs";
 
@@ -16,8 +17,13 @@ test("serves health and the bounded MCP tool surface", async (context) => {
     dataDir: join(root, "data"),
     resourceDir: join(root, "www", "family-dashboard")
   });
+  const classroomStore = new ClassroomIntegrationStore({
+    targetDir: join(root, "config", "custom_components", "family_dashboard_classroom"),
+    dataDir: join(root, "data")
+  });
   const app = createManagerApp({
     store,
+    classroomStore,
     inventory: async () => ({ schema_version: 1, generated_at: "2026-08-07T12:00:00.000Z", areas: [], entities: [] }),
     reload: async () => ({ performed: true })
   });
@@ -31,7 +37,7 @@ test("serves health and the bounded MCP tool surface", async (context) => {
 
   const health = await fetch(`http://127.0.0.1:${port}/healthz`);
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: "ok", version: "0.8.0" });
+  assert.deepEqual(await health.json(), { status: "ok", version: "0.9.0" });
 
   const client = new Client({ name: "family-dashboard-test", version: "1.0.0" });
   const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
@@ -45,11 +51,14 @@ test("serves health and the bounded MCP tool surface", async (context) => {
       "deploy_floorplan_assets",
       "deploy_household_config",
       "get_classroom_authorization_plan",
+      "get_classroom_integration_status",
       "get_dashboard_errors",
       "get_dashboard_status",
       "get_sanitised_inventory",
+      "install_classroom_integration",
       "read_household_config",
       "reload_dashboard",
+      "rollback_classroom_integration",
       "rollback_dashboard",
       "validate_floorplan_assets",
       "validate_household_config"
@@ -60,8 +69,17 @@ test("serves health and the bounded MCP tool surface", async (context) => {
 
   const classroom = await client.callTool({ name: "get_classroom_authorization_plan", arguments: {} });
   assert.equal(classroom.structuredContent.phase, "authorization_proof");
-  assert.equal(classroom.structuredContent.required_scopes.length, 3);
+  assert.deepEqual(classroom.structuredContent.required_scopes, [
+    "https://www.googleapis.com/auth/classroom.courses.readonly",
+    "https://www.googleapis.com/auth/classroom.coursework.me.readonly"
+  ]);
+  assert.equal(classroom.structuredContent.output_contract.maximum_assignment_attributes, 20);
+  assert.equal(classroom.structuredContent.output_contract.attributes.data_stale, "boolean");
   assert.doesNotMatch(JSON.stringify(classroom.structuredContent), /child.*password.*value|access_token|refresh_token/i);
+
+  const classroomIntegration = await client.callTool({ name: "get_classroom_integration_status", arguments: {} });
+  assert.equal(classroomIntegration.structuredContent.installed_state, "not_installed");
+  assert.match(classroomIntegration.structuredContent.bundled_set_hash, /^[a-f0-9]{64}$/);
 
   const assets = [
     { filename: "ground-floor.svg", content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10H0z"/></svg>' },

@@ -10,7 +10,7 @@ import {
   APPROVAL_VIEW_NAMES,
   APPROVAL_ZOOM_PROJECTS,
   APPROVAL_ZOOM_VIEW_NAMES
-} from "./v080-approval-manifest.mjs";
+} from "./v090-approval-manifest.mjs";
 
 const config = JSON.parse(await readFile(new URL("../config/example.json", import.meta.url), "utf8"));
 const cardSource = await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8");
@@ -46,6 +46,14 @@ function state(entityId, value, attributes = {}) {
   };
 }
 
+function freshMeterState(entityId, value, attributes = {}) {
+  return {
+    ...state(entityId, value, attributes),
+    last_changed: "2026-08-24T15:04:00.000Z",
+    last_updated: "2026-08-24T15:04:00.000Z"
+  };
+}
+
 function fixtureStates() {
   const states = {
     "weather.home": state("weather.home", "partlycloudy", { temperature: 19.5 }),
@@ -54,9 +62,10 @@ function fixtureStates() {
     "person.example_parent": state("person.example_parent", "home"),
     "person.example_child_one": state("person.example_child_one", "school"),
     "person.example_child_two": state("person.example_child_two", "home"),
+    "person.private": state("person.private", "home"),
     "camera.example_vacuum_map": state("camera.example_vacuum_map", "idle", { entity_picture: "/api/camera_proxy/camera.example_vacuum_map?token=browser-fixture" }),
-    "camera.example_doorbell": state("camera.example_doorbell", "streaming"),
-    "camera.example_garage": state("camera.example_garage", "idle"),
+    "camera.example_doorbell": state("camera.example_doorbell", "streaming", { entity_picture: "/api/camera_proxy/camera.example_doorbell?token=doorbell-still" }),
+    "camera.example_garage": state("camera.example_garage", "idle", { entity_picture: "/api/camera_proxy/camera.example_garage?token=garage-still" }),
     "button.example_doorbell_start_stream": state("button.example_doorbell_start_stream", "unknown"),
     "button.example_doorbell_stop_stream": state("button.example_doorbell_stop_stream", "unknown"),
     "button.example_garage_start_stream": state("button.example_garage_start_stream", "unknown"),
@@ -77,6 +86,10 @@ function fixtureStates() {
     "light.hallway": state("light.hallway", "off", { friendly_name: "Hallway" }),
     "light.child_one_room": state("light.child_one_room", "off", { friendly_name: "Child one room" }),
     "light.child_two_room": state("light.child_two_room", "on", { friendly_name: "Child two room", brightness: 90 }),
+    "scene.living_room_relax": state("scene.living_room_relax", "scening", { friendly_name: "Relax" }),
+    "scene.kitchen_bright": state("scene.kitchen_bright", "scening", { friendly_name: "Kitchen bright" }),
+    "scene.child_one_bedtime": state("scene.child_one_bedtime", "scening", { friendly_name: "Bedtime" }),
+    "scene.child_two_bedtime": state("scene.child_two_bedtime", "scening", { friendly_name: "Bedtime" }),
     "cover.living_room": state("cover.living_room", "open", { friendly_name: "Living room blind", current_position: 60 }),
     "cover.child_one_room": state("cover.child_one_room", "closed", { friendly_name: "Child one blind", current_position: 0 }),
     "cover.child_two_room": state("cover.child_two_room", "closed", { friendly_name: "Child two blind", current_position: 0 }),
@@ -86,6 +99,14 @@ function fixtureStates() {
     "climate.child_two_room": state("climate.child_two_room", "off", { temperature: 19.5 }),
     "sensor.living_room_temperature": state("sensor.living_room_temperature", "20.4"),
     "sensor.kitchen_temperature": state("sensor.kitchen_temperature", "19.2"),
+    "sensor.example_electricity_usage_today": freshMeterState("sensor.example_electricity_usage_today", "8.4", { unit_of_measurement: "kWh" }),
+    "sensor.example_electricity_cost_today": freshMeterState("sensor.example_electricity_cost_today", "2.16", { unit_of_measurement: "GBP" }),
+    "sensor.example_electricity_rate": freshMeterState("sensor.example_electricity_rate", "0.257", { unit_of_measurement: "GBP/kWh" }),
+    "sensor.example_electricity_standing_charge": freshMeterState("sensor.example_electricity_standing_charge", "0.49", { unit_of_measurement: "GBP/day" }),
+    "sensor.example_gas_usage_today": freshMeterState("sensor.example_gas_usage_today", "13.7", { unit_of_measurement: "kWh" }),
+    "sensor.example_gas_cost_today": freshMeterState("sensor.example_gas_cost_today", "0.91", { unit_of_measurement: "GBP" }),
+    "sensor.example_gas_rate": freshMeterState("sensor.example_gas_rate", "0.067", { unit_of_measurement: "GBP/kWh" }),
+    "sensor.example_gas_standing_charge": freshMeterState("sensor.example_gas_standing_charge", "0.32", { unit_of_measurement: "GBP/day" }),
     "media_player.living_room": state("media_player.living_room", "playing", { friendly_name: "Living room", media_title: "Dashboard test song", media_artist: "Test artist" }),
     "media_player.kitchen": state("media_player.kitchen", "idle", { friendly_name: "Kitchen" }),
     "sensor.child_one_choreops_points": state("sensor.child_one_choreops_points", "42"),
@@ -98,8 +119,14 @@ function fixtureStates() {
     "sensor.child_two_choreops_chore_status_brush_teeth": state("sensor.child_two_choreops_chore_status_brush_teeth", "overdue", { chore_name: "Brush teeth", default_points: 3 }),
     "sensor.child_two_choreops_chore_status_get_dressed": state("sensor.child_two_choreops_chore_status_get_dressed", "pending", { chore_name: "Get dressed", default_points: 4 }),
     "sensor.child_two_choreops_chore_status_go_to_bed_at_bedtime": state("sensor.child_two_choreops_chore_status_go_to_bed_at_bedtime", "completed", { chore_name: "Bedtime", default_points: 5 }),
-    "sensor.family_dashboard_classroom_child_one": state("sensor.family_dashboard_classroom_child_one", "1", { assignments: [{ title: "Science revision", course: "Science", due_at: "2026-08-12T15:00:00Z" }] }),
-    "sensor.family_dashboard_classroom_child_two": state("sensor.family_dashboard_classroom_child_two", "1", { assignments: [{ title: "Read chapter four", course: "English", due_at: "2026-08-13T15:00:00Z" }] }),
+    "sensor.child_one_choreops_reward_status_weekend_movie": state("sensor.child_one_choreops_reward_status_weekend_movie", "available", { reward_name: "Weekend movie", cost: 50 }),
+    "sensor.child_one_choreops_badge_progress_starlight": state("sensor.child_one_choreops_badge_progress_starlight", "65", { badge_name: "Starlight", status: "active", unit_of_measurement: "%", overall_progress: 0.65 }),
+    "sensor.child_one_choreops_achievement_progress_stayed_in_bed": state("sensor.child_one_choreops_achievement_progress_stayed_in_bed", "43", { achievement_name: "Stayed in bed", unit_of_measurement: "%", raw_progress: 3, target_value: 7 }),
+    "sensor.child_two_choreops_reward_status_weekend_movie": state("sensor.child_two_choreops_reward_status_weekend_movie", "claimed", { reward_name: "Weekend movie", points_required: 50 }),
+    "sensor.child_two_choreops_badge_progress_starlight": state("sensor.child_two_choreops_badge_progress_starlight", "100", { badge_name: "Starlight", status: "earned", unit_of_measurement: "%", overall_progress: 1 }),
+    "sensor.child_two_choreops_achievement_progress_stayed_in_bed": state("sensor.child_two_choreops_achievement_progress_stayed_in_bed", "71", { achievement_name: "Stayed in bed", unit_of_measurement: "%", raw_progress: 5, target_value: 7 }),
+    "sensor.child_one_classroom_open_assignments": state("sensor.child_one_classroom_open_assignments", "1", { assignments: [{ title: "Science revision", course: "Science", due_at: "2026-08-12T15:00:00Z" }] }),
+    "sensor.child_two_classroom_open_assignments": state("sensor.child_two_classroom_open_assignments", "1", { assignments: [{ title: "Read chapter four", course: "English", due_at: "2026-08-13T15:00:00Z" }] }),
     "sensor.family_dashboard_premier_league": state("sensor.family_dashboard_premier_league", "1", { current_gameweek: 1, available_gameweeks: Array.from({ length: 38 }, (_, index) => index + 1), last_updated: "2026-08-10T08:00:00Z" })
   };
   states["sensor.family_dashboard_premier_league_gw_1"] = state("sensor.family_dashboard_premier_league_gw_1", "10", {
@@ -149,6 +176,22 @@ function sixZoneStateOverrides() {
     "climate.utility_test": state("climate.utility_test", "heat", { current_temperature: 20.5, temperature: 19.5, hvac_action: "idle" }),
     "climate.upstairs_test": state("climate.upstairs_test", "unavailable", { temperature: 18 })
   };
+}
+
+function sixLightRoomConfig() {
+  const familyConfig = structuredClone(config);
+  familyConfig.rooms.push({
+    id: "utility_test",
+    name: "Utility",
+    floor_id: "ground",
+    area_id: "utility_test",
+    icon: "mdi:washing-machine",
+    lights: ["light.utility_test"],
+    covers: [],
+    scenes: [],
+    media_players: []
+  });
+  return familyConfig;
 }
 
 function locationDisabledConfig() {
@@ -227,29 +270,29 @@ function approvalFootballStates(mode = "live") {
         finished_provisional: false,
         minutes: 67,
         team_h: 1,
-        team_a: 2,
+        team_a: 3,
         team_h_score: 2,
         team_a_score: 1,
-        stats: fixtureStats(101, 102)
+        stats: fixtureStats(101, null)
       },
       {
         id: 102,
         event: 1,
-        kickoff_time: "2026-08-24T11:30:00.000Z",
-        started: true,
+        kickoff_time: "2026-08-24T18:45:00.000Z",
+        started: false,
         finished: false,
-        finished_provisional: true,
-        minutes: 90,
-        team_h: 3,
+        finished_provisional: false,
+        minutes: 0,
+        team_h: 2,
         team_a: 4,
-        team_h_score: 1,
-        team_a_score: 1,
+        team_h_score: null,
+        team_a_score: null,
         stats: fixtureStats(null, null)
       },
       {
         id: 103,
         event: 1,
-        kickoff_time: "2026-08-25T18:45:00.000Z",
+        kickoff_time: "2026-08-25T19:00:00.000Z",
         started: false,
         finished: false,
         finished_provisional: false,
@@ -409,7 +452,9 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     class MockChildCard extends HTMLElement {
       set hass(value) {
         this._hass = value;
+        this.dataset.hassConnected = String(value?.connected === true);
         this._renderMockState?.();
+        this._exerciseMockProtocol?.(value);
       }
       connectedCallback() {
         if (this._eventsBound) return;
@@ -463,6 +508,9 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
         element.dataset.tapAction = cardConfig.tap_action?.action || "";
         element.dataset.holdAction = cardConfig.hold_action?.action || "";
         element.dataset.entity = cardConfig.entity || cardConfig.entity_id || "";
+        element.dataset.poster = cardConfig.poster || "";
+        element.dataset.muted = String(cardConfig.muted ?? "");
+        element.dataset.ui = String(cardConfig.ui ?? "");
         if (cardConfig.type === "custom:mediocre-multi-media-player-card") {
           const playerEntries = Array.isArray(cardConfig.media_players) ? cardConfig.media_players : [];
           const initialPlayer = playerEntries.find((entry) => entry.entity_id === cardConfig.entity_id) || playerEntries[0] || {};
@@ -473,28 +521,29 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           const playerRows = playerEntries.map((entry) => `<div class="mock-player-row" data-mock-player-row="${entry.entity_id}"><span><strong>${entry.name || "Room"}</strong><small>${entry.entity_id === initialEntity ? "Playing" : "Ready to join"}</small></span><b>${entry.entity_id === initialEntity ? "Now" : "+"}</b></div>`).join("");
           element.dataset.playerCount = String(playerEntries.length);
           element.dataset.mediaBrowserCount = String(playerEntries.filter((entry) => Array.isArray(entry.media_browser) && entry.media_browser.length).length);
-          element.style.height = cardConfig.height || "754px";
-          const mediaRoot = element.attachShadow({ mode: "open" });
+          element.dataset.transparentBackground = String(cardConfig.options?.transparent_background_on_home ?? "");
+          if (cardConfig.height) element.style.height = cardConfig.height;
+          const mediaRoot = element;
           mediaRoot.innerHTML = `<style>
-            :host{display:block;height:100%;min-height:0;color:var(--mmpc-on-card);font-family:inherit}
+            mock-child-card[data-card-type="custom:mediocre-multi-media-player-card"]{display:block;min-height:100%;color:var(--mmpc-on-card);font-family:inherit}
             *{box-sizing:border-box}button{font:inherit}
-            .mock-media-player{height:100%;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;padding:18px;background:var(--mmpc-card);color:var(--mmpc-on-card);overflow:hidden}
-            .mock-massive,.mock-speaker-scroll{min-width:0;min-height:0;overflow:auto;padding:8px;scrollbar-color:rgba(255,255,255,.24) transparent}
+            .mock-media-player{min-height:100%;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;padding:18px;background:var(--mmpc-card);color:var(--mmpc-on-card);overflow:visible}
+            .mock-massive,.mock-speaker-scroll{min-width:0;min-height:0;overflow:visible;padding:8px}
             .mock-massive{display:flex;flex-direction:column}.mock-kicker{color:var(--mmpc-on-card-muted);font-size:12px;font-weight:750;letter-spacing:.08em;text-transform:uppercase}
             .mock-now-playing{margin-top:10px}.mock-now-playing strong{display:block;color:var(--mmpc-on-card);font-size:22px}.mock-now-playing small{display:block;margin-top:5px;color:var(--mmpc-on-card-muted);font-size:13px}
             .mock-feature-tabs,.mock-transport{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mock-feature-tabs{margin-top:12px}.mock-feature-tabs button,.mock-transport button{min-width:48px;min-height:48px;padding:0 14px;border:1px solid rgba(255,255,255,.14);border-radius:13px;background:rgba(255,255,255,.08);color:var(--mmpc-on-card);font-weight:800}.mock-feature-tabs button:first-child{border-color:#8fd8cb;color:#8fd8cb}
             .mock-artwork{min-height:142px;margin:12px 0;display:grid;place-items:center;border:1px solid rgba(255,255,255,.1);border-radius:20px;background:radial-gradient(circle at 32% 28%,rgba(143,216,203,.52),transparent 32%),linear-gradient(145deg,#1463e8,#061b3a);font-size:54px;color:#fff}
             [data-mock-service]{min-width:48px;min-height:48px;align-self:flex-start;padding:0 18px;border:0;border-radius:14px;background:#1463e8;color:#fff;font-weight:800;cursor:pointer}
             .mock-speaker-scroll>strong,.mock-speaker-scroll>h3{display:block;margin:0;color:var(--mmpc-on-card)}.mock-speaker-scroll>h3{margin-top:22px;font-size:15px}
-            .mock-chip-scroll{max-width:100%;margin-top:14px;overflow-x:auto}.mock-chip-row{display:flex;width:max-content;gap:8px;padding-bottom:4px}
+            .mock-chip-scroll{max-width:100%;margin-top:14px;overflow:visible}#mmpc-group-chips-controller{display:flex;flex-wrap:nowrap;width:max-content;gap:8px;padding-bottom:4px;overflow:hidden}
             .mock-chip{display:inline-block;min-height:48px;padding:9px 18px;border:1px solid var(--mmpc-chip-border);border-radius:999px;background:var(--mmpc-chip-background);color:var(--mmpc-chip-foreground);white-space:nowrap}.mock-chip.is-active{border-color:#8fd8cb}
             .mock-player-row,.mock-queue-row{min-height:64px;margin-top:9px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.055)}
             .mock-player-row strong,.mock-player-row small{display:block;color:var(--mmpc-on-card)}.mock-player-row small{margin-top:3px;color:var(--mmpc-on-card-muted);font-size:12px}.mock-player-row b{color:#8fd8cb}
             .mock-queue-row{min-height:54px;color:var(--mmpc-on-card-muted);font-size:13px}.mock-queue-row strong{color:var(--mmpc-on-card)}
-            @media(max-width:620px){.mock-media-player{grid-template-columns:1fr;overflow:auto}.mock-massive,.mock-speaker-scroll{overflow:visible}}
+            @media(max-width:620px){.mock-media-player{grid-template-columns:1fr}.mock-massive,.mock-speaker-scroll{overflow:visible}}
           </style><div class="mock-media-player">
             <section class="mock-massive"><span class="mock-kicker">Spotify · Sonos</span><div class="mock-feature-tabs"><button type="button" data-mock-music-tab="search">Search</button><button type="button" data-mock-music-tab="browse">Browse</button><button type="button" data-mock-music-tab="queue">Queue</button></div><div class="mock-now-playing"><strong data-mock-state-name>${initialName}</strong><small data-mock-state-track>Dashboard test song · Test artist</small></div><div class="mock-artwork" aria-hidden="true">♫</div><div class="mock-transport"><button type="button" aria-label="Previous track">‹</button><button type="button" data-mock-service data-mock-entity="${serviceEntity}">Play / pause</button><button type="button" aria-label="Next track">›</button><button type="button" aria-label="Volume down">−</button><button type="button" aria-label="Volume up">+</button></div></section>
-            <section class="mock-speaker-scroll"><strong>Join media players</strong><div class="mock-chip-scroll"><div class="mock-chip-row">${playerChips}</div></div><h3>Player focus</h3>${playerRows}<h3>Up next</h3>${["Family favourites", "Kitchen radio", "Evening mix", "Recently played"].map((name, index) => `<div class="mock-queue-row"><span><strong>${name}</strong><br>Queue item ${index + 1}</span><b>${index + 1}</b></div>`).join("")}</section>
+            <section class="mock-speaker-scroll"><strong>Join media players</strong><div class="mock-chip-scroll"><div id="mmpc-group-chips-controller">${playerChips}</div></div><h3>Player focus</h3>${playerRows}<h3>Up next</h3>${["Family favourites", "Kitchen radio", "Evening mix", "Recently played"].map((name, index) => `<div class="mock-queue-row"><span><strong>${name}</strong><br>Queue item ${index + 1}</span><b>${index + 1}</b></div>`).join("")}</section>
           </div>`;
           element._renderMockState = () => {
             const playerState = element._hass?.states?.[initialEntity];
@@ -506,20 +555,22 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
               : "Ready to play";
           };
         } else if (["custom:daylight-calendar-card", "custom:skylight-calendar-card"].includes(cardConfig.type)) {
-          const calendarRoot = element.attachShadow({ mode: "open" });
+          const calendarRoot = element;
           const calendarEntries = Object.entries(cardConfig.calendar_names || {});
           const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
           element.dataset.showHeaderControls = String(cardConfig.show_header_controls ?? "");
           element.dataset.hideNavigationButtons = String(cardConfig.hide_navigation_buttons ?? "");
           element.dataset.hideCalendars = String(cardConfig.hide_calendars ?? "");
           calendarRoot.innerHTML = `<style>
-            :host{display:block;height:100%;min-height:0;color:#0b1830;font-family:inherit}*{box-sizing:border-box}
+            mock-child-card[data-card-type*="calendar"]{display:block;height:100%;min-height:0;color:#0b1830;font-family:inherit}*{box-sizing:border-box}
+            .nav-button{width:36px;height:36px;color:inherit}
+            .shell,.navigation,.brand,.content,.topbar{display:none!important}
             button{font:inherit}.mock-calendar{height:100%;min-height:0;padding:14px;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:10px;background:${cardConfig.color_scheme === "light" ? "#fff" : "#111a2d"};color:${cardConfig.color_scheme === "light" ? "#0b1830" : "#fff"}}
             .mock-calendar-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.mock-calendar-nav,.mock-calendar-sources{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mock-calendar-nav button,.mock-calendar-source{min-width:48px;min-height:48px;border:1px solid #dce4ee;border-radius:12px;background:#f7f9fc;color:#1463e8;font-weight:800}.mock-calendar-nav button[data-calendar-nav=today]{padding:0 14px}.mock-calendar-nav strong{margin-left:4px;color:#0b1830;font-size:14px}.mock-calendar-sources{justify-content:flex-end}.mock-calendar-source{padding:0 14px;display:flex;align-items:center;gap:7px;color:#33445c}.mock-calendar-source i{width:9px;height:9px;border-radius:50%;background:#1463e8}.mock-calendar-source:nth-child(2) i{background:#e76f51}.mock-calendar-source[aria-pressed=false]{opacity:.55;text-decoration:line-through}
             .mock-week{min-height:0;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}.mock-day{min-width:0;padding:10px 8px;border:1px solid #dce4ee;border-radius:14px;background:#f8fafc}.mock-day.is-today{border-color:#8db7f8;background:#f1f6ff;box-shadow:inset 0 3px 0 #1463e8}.mock-day header{display:grid;gap:3px;padding-bottom:9px;border-bottom:1px solid #dce4ee}.mock-day header span{color:#5e6b80;font-size:12px;font-weight:800;text-transform:uppercase}.mock-day header strong{font-size:19px}.mock-event{margin-top:9px;padding:8px;border-left:4px solid #1463e8;border-radius:9px;background:#eaf2ff;color:#0b1830;line-height:1.3}.mock-event strong,.mock-event small{display:block;font-size:12px}.mock-event small{margin-top:3px;color:#5e6b80}.mock-event.is-school{border-color:#e76f51;background:#fff0ed}.mock-empty{margin-top:11px;color:#7a8799;font-size:12px}
             [data-mock-calendar-write]{display:none}
             @media(max-width:620px){.mock-calendar{overflow:auto}.mock-week{min-width:760px}}
-          </style><div class="mock-calendar"><div class="mock-calendar-head"><div class="mock-calendar-nav" role="group" aria-label="Calendar navigation"><button type="button" data-calendar-nav="previous" aria-label="Previous period">‹</button><button type="button" data-calendar-nav="today">Today</button><button type="button" data-calendar-nav="next" aria-label="Next period">›</button><strong data-calendar-range>24–30 August 2026</strong></div><button type="button" data-mock-calendar-write aria-hidden="true" tabindex="-1">Add event</button></div><div class="mock-calendar-sources" role="group" aria-label="Calendar sources">${calendarEntries.map(([entityId, label]) => `<button type="button" class="mock-calendar-source" data-calendar-source="${entityId}" aria-pressed="true"><i aria-hidden="true"></i>${label}</button>`).join("")}</div><div class="mock-week">${weekdays.map((day, index) => `<section class="mock-day ${index === 0 ? "is-today" : ""}"><header><span>${day.slice(0, 3)}</span><strong>${24 + index}</strong></header>${index === 0 ? '<div class="mock-event" data-calendar-event="calendar.family"><strong>Family dinner</strong><small>16:08</small></div>' : index === 1 ? '<div class="mock-event is-school" data-calendar-event="calendar.school"><strong>School assembly</strong><small>17:08</small></div>' : '<div class="mock-empty">Nothing planned</div>'}</section>`).join("")}</div></div>`;
+          </style><div class="mock-calendar"><div class="mock-calendar-head"><div class="mock-calendar-nav" role="group" aria-label="Calendar navigation"><button type="button" class="nav-button" data-calendar-nav="previous" aria-label="Previous period">‹</button><button type="button" data-calendar-nav="today">Today</button><button type="button" class="nav-button" data-calendar-nav="next" aria-label="Next period">›</button><strong data-calendar-range>24–30 August 2026</strong></div><button type="button" data-mock-calendar-write aria-hidden="true" tabindex="-1">Add event</button></div><div class="mock-calendar-sources" role="group" aria-label="Calendar sources">${calendarEntries.map(([entityId, label]) => `<button type="button" class="mock-calendar-source" data-calendar-source="${entityId}" aria-pressed="true"><i aria-hidden="true"></i>${label}</button>`).join("")}</div><div class="mock-week">${weekdays.map((day, index) => `<section class="mock-day ${index === 0 ? "is-today" : ""}"><header><span>${day.slice(0, 3)}</span><strong>${24 + index}</strong></header>${index === 0 ? '<div class="mock-event" data-calendar-event="calendar.family"><strong>Family dinner</strong><small>16:08</small></div>' : index === 1 ? '<div class="mock-event is-school" data-calendar-event="calendar.school"><strong>School assembly</strong><small>17:08</small></div>' : '<div class="mock-empty">Nothing planned</div>'}</section>`).join("")}</div></div>`;
           const range = calendarRoot.querySelector("[data-calendar-range]");
           const ranges = { previous: "17–23 August 2026", today: "24–30 August 2026", next: "31 August–6 September 2026" };
           for (const button of calendarRoot.querySelectorAll("[data-calendar-nav]")) {
@@ -538,6 +589,21 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           calendarRoot.querySelector("[data-mock-calendar-write]").addEventListener("click", () => {
             element._hass?.callService?.("calendar", "create_event", { entity_id: "calendar.family" });
           });
+          element._exerciseMockProtocol = async (hass) => {
+            if (element.dataset.calendarProtocolChecked === "true") return;
+            element.dataset.calendarProtocolChecked = "true";
+            const range = {
+              start_date_time: "2026-09-01T00:00:00Z",
+              end_date_time: "2026-10-01T00:00:00Z"
+            };
+            const results = await Promise.all(calendarEntries.map(([entityId]) => hass.callWS?.({
+              type: "calendar/events",
+              entity_id: entityId,
+              ...range
+            })));
+            await hass.callWS?.({ type: "calendar/events", entity_id: "calendar.private", ...range });
+            element.dataset.calendarProtocolReads = String(results.filter(Array.isArray).length);
+          };
         } else if (cardConfig.type === "map") {
           const mapRoot = element.attachShadow({ mode: "open" });
           const markerLabels = (cardConfig.entities || []).map((_, index) => index === 0 ? "P" : `C${index}`);
@@ -553,7 +619,9 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
               const pictureState = element._hass?.states?.[cardConfig.entity];
               const picture = pictureRoot.querySelector(".mock-picture");
               const status = pictureRoot.querySelector(".mock-picture-status");
-              const unavailable = !pictureState || ["unknown", "unavailable"].includes(String(pictureState.state).toLowerCase());
+              const unavailable = element._hass?.connected !== true
+                || !pictureState
+                || ["unknown", "unavailable"].includes(String(pictureState.state).toLowerCase());
               picture.hidden = unavailable;
               status.hidden = !unavailable;
               if (!unavailable) picture.src = pictureState.attributes?.entity_picture || `/api/camera_proxy/${encodeURIComponent(cardConfig.entity)}`;
@@ -575,6 +643,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     window.__pendingServiceCalls = [];
     window.__childCardCount = 0;
     window.__apiCalls = [];
+    window.__wsCalls = [];
     window.__cameraPlayerAutoLoad = true;
     window.__cameraPlayerLoadDelayMs = 0;
   });
@@ -588,10 +657,12 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     card._cameraStopTimeoutMs = runtimeOptions.cameraStopTimeoutMs ?? card._cameraStopTimeoutMs;
     card._cameraFrameTimeoutMs = runtimeOptions.cameraFrameTimeoutMs ?? card._cameraFrameTimeoutMs;
     card._cameraSlowMessageMs = runtimeOptions.cameraSlowMessageMs ?? card._cameraSlowMessageMs;
+    card._cameraExpiryMs = runtimeOptions.cameraExpiryMs ?? card._cameraExpiryMs;
     window.__cameraPlayerAutoLoad = runtimeOptions.cameraPlayerAutoLoad ?? true;
     window.__cameraPlayerLoadDelayMs = runtimeOptions.cameraPlayerLoadDelayMs ?? 0;
     window.__serviceBehaviors = runtimeOptions.serviceBehaviors || {};
     card.hass = {
+      connected: true,
       states,
       callService(domain, service, data) {
         window.__serviceCalls.push({ domain, service, data });
@@ -619,6 +690,11 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           start: { dateTime: new Date(Date.now() - 14_400_000).toISOString() },
           end: { dateTime: new Date(Date.now() - 10_800_000).toISOString() }
         }, upcoming];
+      },
+      async callWS(message) {
+        window.__wsCalls.push(message);
+        if (message?.type === "calendar/events") return [{ summary: "Protocol event" }];
+        return {};
       }
     };
   }, { familyConfig, states: { ...fixtureStates(), ...stateOverrides }, runtimeOptions });
@@ -646,7 +722,7 @@ async function updateEntityState(card, nextState) {
 }
 
 async function emitCameraLoad(card, entityId) {
-  await card.locator(`[data-card-type="picture-entity"][data-entity="${entityId}"]`).evaluate((player) => {
+  await card.locator(`[data-card-type="picture-entity"][data-camera-view="live"][data-entity="${entityId}"]`).evaluate((player) => {
     player.shadowRoot.querySelector("mock-camera-stream").emitReady();
   });
 }
@@ -655,10 +731,10 @@ async function expectNoRootOverflow(page) {
   const metrics = await page.locator("family-hub-card").evaluate((card) => {
     const root = card.shadowRoot;
     const hub = root.querySelector(".hub-card");
-    const navigation = root.querySelector(".navigation").getBoundingClientRect();
-    const content = root.querySelector(".content").getBoundingClientRect();
-    const topbar = root.querySelector(".topbar").getBoundingClientRect();
-    const view = root.querySelector(".view").getBoundingClientRect();
+    const navigation = root.querySelector(".hub-navigation").getBoundingClientRect();
+    const content = root.querySelector(".hub-content").getBoundingClientRect();
+    const topbar = root.querySelector(".hub-topbar").getBoundingClientRect();
+    const view = root.querySelector(".hub-view").getBoundingClientRect();
     const header = document.querySelector(".ha-header").getBoundingClientRect();
     const cardRect = card.getBoundingClientRect();
     return {
@@ -692,11 +768,11 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   const card = page.locator("family-hub-card");
   await expect(card.locator(".preview-pill")).toHaveCount(0);
   await expect(card).not.toContainText(/Controlled live|mapped rooms|fixtures loaded/i);
-  await expect(card.locator(".nav-button")).toHaveCount(7);
-  await expect(card.locator(".nav-button")).toContainText(["Today", "Calendar", "Home", "Family", "Security", "Music", "Football"]);
+  await expect(card.locator(".hub-nav-button")).toHaveCount(8);
+  await expect(card.locator(".hub-nav-button")).toContainText(["Today", "Calendar", "Home", "Family", "Security", "Music", "Energy", "Football"]);
   await expectNoRootOverflow(page);
 
-  for (const view of ["calendar", "rooms", "family", "entry", "music", "football", "today"]) {
+  for (const view of ["calendar", "rooms", "family", "entry", "music", "energy", "football", "today"]) {
     await card.locator(`[data-view="${view}"]`).first().click();
     await expect(card.locator(`[data-current-view="${view}"]`)).toBeVisible();
     await expectNoRootOverflow(page);
@@ -709,6 +785,15 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-show-header-controls", "true");
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-hide-navigation-buttons", "false");
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-hide-calendars", "false");
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-calendar-protocol-reads", "2");
+  // Leaving Calendar revokes and removes the child card. Returning deliberately
+  // creates one fresh child and therefore one new bounded read per calendar.
+  await expect.poll(() => page.evaluate(() => window.__wsCalls.filter((message) => message.type === "calendar/events").map((message) => message.entity_id))).toEqual([
+    "calendar.family",
+    "calendar.school",
+    "calendar.family",
+    "calendar.school"
+  ]);
   await expect(card.locator("[data-calendar-nav]")).toHaveCount(3);
   await card.locator('[data-calendar-nav="next"]').click();
   await expect(card.locator("[data-calendar-range]")).toHaveText("31 August–6 September 2026");
@@ -732,6 +817,187 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   await expect(card.locator(".next-panel")).toContainText("Family dinner");
   await expect(card.locator(".next-panel")).not.toContainText("Finished early appointment");
 
+  expect(pageErrors).toEqual([]);
+});
+
+test("isolates the dashboard rail and mode controls from Daylight light-DOM styles", async ({ page }) => {
+  const pageErrors = await mount(page);
+  const card = page.locator("family-hub-card");
+  const railButtons = card.locator(".hub-nav-button");
+  const railGeometry = () => railButtons.evaluateAll((buttons) => buttons.map((button) => {
+    const bounds = button.getBoundingClientRect();
+    const style = getComputedStyle(button);
+    return {
+      label: button.getAttribute("aria-label"),
+      width: Math.round(bounds.width * 100) / 100,
+      height: Math.round(bounds.height * 100) / 100,
+      minHeight: style.minHeight
+    };
+  }));
+
+  const before = await railGeometry();
+  const inactiveColourBefore = await card.locator('.hub-nav-button[data-view="rooms"]').evaluate((button) => getComputedStyle(button).color);
+  await card.locator('.hub-nav-button[data-view="calendar"]').click();
+  const calendar = card.locator('[data-card-type="custom:daylight-calendar-card"]');
+  await expect(calendar).toBeVisible();
+  expect(await calendar.evaluate((element) => element.shadowRoot)).toBe(null);
+  await expect(card.locator(".hub-navigation .nav-button")).toHaveCount(0);
+  await expect(calendar.locator(".nav-button")).toHaveCount(2);
+  await expect(card.locator(".hub-navigation")).toBeVisible();
+  await expect(card.locator(".hub-content")).toBeVisible();
+  await expect(card.locator(".hub-topbar")).toBeVisible();
+
+  const after = await railGeometry();
+  const inactiveColourAfter = await card.locator('.hub-nav-button[data-view="rooms"]').evaluate((button) => getComputedStyle(button).color);
+  expect(after).toEqual(before);
+  expect(inactiveColourAfter).toBe(inactiveColourBefore);
+
+  await expect(card.locator(".calendar-context")).toContainText("Family schedule");
+  await expect(card.locator(".calendar-context")).toContainText("Read only");
+  const modeStyles = await card.locator(".calendar-modes .segment").evaluateAll((buttons) => buttons.map((button) => {
+    const style = getComputedStyle(button);
+    return { minHeight: style.minHeight, marginTop: style.marginTop, paddingLeft: style.paddingLeft };
+  }));
+  expect(modeStyles).toHaveLength(4);
+  expect(modeStyles.every(({ minHeight, marginTop, paddingLeft }) => minHeight === "48px" && marginTop === "0px" && paddingLeft === "15px")).toBe(true);
+  expect(pageErrors).toEqual([]);
+});
+
+test("retains keyboard focus across equivalent full-card rerenders", async ({ page }) => {
+  const pageErrors = await mount(page);
+  const card = page.locator("family-hub-card");
+  const focusedControl = () => card.evaluate((element) => {
+    const active = element.shadowRoot.activeElement;
+    return active ? {
+      view: active.dataset.view || null,
+      calendarMode: active.dataset.calendarMode || null,
+      homeSection: active.dataset.homeSection || null,
+      floor: active.dataset.floor || null,
+      room: active.dataset.room || null,
+      footballTab: active.dataset.footballTab || null,
+      gameweekSelect: Object.prototype.hasOwnProperty.call(active.dataset, "gameweekSelect"),
+      ariaLabel: active.getAttribute("aria-label")
+    } : null;
+  });
+
+  const calendarNav = card.locator('.hub-nav-button[data-view="calendar"]');
+  await calendarNav.focus();
+  await calendarNav.press("Enter");
+  await expect(card.locator('[data-current-view="calendar"]')).toBeVisible();
+  await expect.poll(focusedControl).toMatchObject({ view: "calendar" });
+
+  const agendaMode = card.locator('[data-calendar-mode="day"]');
+  await agendaMode.focus();
+  await agendaMode.press("Enter");
+  await expect.poll(focusedControl).toMatchObject({ calendarMode: "day" });
+
+  const roomsNav = card.locator('.hub-nav-button[data-view="rooms"]');
+  await roomsNav.focus();
+  await roomsNav.press("Enter");
+  await expect.poll(focusedControl).toMatchObject({ view: "rooms" });
+
+  const lightsSection = card.locator('[data-home-section="lights"]');
+  await lightsSection.focus();
+  await lightsSection.press("Enter");
+  await expect(card.locator('[data-home-section-current="lights"]')).toBeVisible();
+  await expect.poll(focusedControl).toMatchObject({ homeSection: "lights" });
+
+  const roomsSection = card.locator('[data-home-section="rooms"]');
+  await roomsSection.focus();
+  await roomsSection.press("Enter");
+  const firstFloor = card.locator('[data-floor="first"]');
+  await firstFloor.focus();
+  await firstFloor.press("Enter");
+  await expect.poll(focusedControl).toMatchObject({ floor: "first" });
+
+  const room = card.locator('[data-room]').first();
+  const roomId = await room.getAttribute("data-room");
+  await room.focus();
+  await room.press("Enter");
+  await expect.poll(focusedControl).toMatchObject({ room: roomId });
+
+  const footballNav = card.locator('.hub-nav-button[data-view="football"]');
+  await footballNav.focus();
+  await footballNav.press("Enter");
+  const tableTab = card.locator('[data-football-tab="table"]');
+  await tableTab.focus();
+  await tableTab.press("Enter");
+  await expect.poll(focusedControl).toMatchObject({ footballTab: "table" });
+
+  const nextMatchweek = card.locator('button[data-gameweek][aria-label="Next matchweek"]');
+  await nextMatchweek.focus();
+  await nextMatchweek.press("Enter");
+  await expect.poll(focusedControl).toMatchObject({ ariaLabel: "Next matchweek" });
+
+  const gameweekSelect = card.locator("select[data-gameweek-select]");
+  await gameweekSelect.focus();
+  await gameweekSelect.selectOption("7");
+  await expect.poll(focusedControl).toMatchObject({ gameweekSelect: true });
+
+  await tableTab.focus();
+  await updateEntityState(card, state("light.living_room", "off", { friendly_name: "Living room" }));
+  await expect.poll(focusedControl).toMatchObject({ footballTab: "table" });
+
+  const focusColour = await card.evaluate((element) => getComputedStyle(element).getPropertyValue("--hub-focus").trim());
+  const channels = focusColour.match(/[\da-f]{2}/gi).map((channel) => Number.parseInt(channel, 16));
+  const luminance = channels.map((channel) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  }).reduce((total, channel, index) => total + channel * [0.2126, 0.7152, 0.0722][index], 0);
+  expect((1.05) / (luminance + 0.05)).toBeGreaterThanOrEqual(3);
+  expect(pageErrors).toEqual([]);
+});
+
+test("disabled features leave no dead Today cards or hidden write authority", async ({ page }) => {
+  const minimalConfig = structuredClone(config);
+  Object.assign(minimalConfig.features, {
+    calendar: false,
+    rooms: false,
+    family: false,
+    music: false,
+    chores: false,
+    football: false,
+    lists: false,
+    weather: false,
+    school: false,
+    location_map: false,
+    cleaning: false,
+    entry: false,
+    energy: false
+  });
+  minimalConfig.display.default_view = "today";
+  const pageErrors = await mount(page, minimalConfig);
+  const card = page.locator("family-hub-card");
+
+  await expect(card.locator(".hub-nav-button")).toHaveCount(1);
+  await expect(card.locator(".hub-weather-pill,.hero-metrics,.today-next,.today-secondary")).toHaveCount(0);
+  await expect(card.locator('.today-grid[data-calendar="false"][data-secondary-count="0"]')).toBeVisible();
+
+  await card.evaluate((element) => {
+    const container = document.createElement("div");
+    container.dataset.testTamperedControls = "";
+    container.innerHTML = `
+      <button data-view="entry">Hidden view</button>
+      <button data-home-section="cleaning">Hidden cleaning</button>
+      <button data-toggle="light.kitchen">Hidden light</button>
+      <button data-scene="scene.kitchen_bright">Hidden scene</button>
+      <button data-media-toggle="media_player.kitchen">Hidden media</button>
+      <button data-cover-action="open_cover" data-entity="cover.example_garage">Hidden cover</button>
+      <button data-vacuum-action="start" data-entity="vacuum.example">Hidden vacuum</button>
+      <button data-alarm-action="alarm_arm_away" data-entity="alarm_control_panel.example_home">Hidden alarm</button>
+      <button data-secure-cover-action="open_cover" data-entity="cover.example_garage">Hidden garage</button>
+      <button data-camera-open="garage">Hidden camera</button>
+    `;
+    element.shadowRoot.querySelector(".hub-view").append(container);
+  });
+  for (const button of await card.locator("[data-test-tampered-controls] button").all()) await button.click();
+
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  expect(await card.evaluate((element) => ({
+    view: element._view,
+    homeSection: element._homeSection,
+    pendingConfirmation: element._pendingConfirmation
+  }))).toEqual({ view: "today", homeSection: "rooms", pendingConfirmation: null });
   expect(pageErrors).toEqual([]);
 });
 
@@ -780,10 +1046,63 @@ test("reports Today Security from confirmed alerts before availability without g
   expect(pageErrors).toEqual([]);
 });
 
+test("opens precise Home summaries and presents honest energy totals and freshness", async ({ page }) => {
+  const familyConfig = structuredClone(config);
+  familyConfig.home.default_room = "kitchen";
+  const pageErrors = await mount(page, familyConfig);
+  const card = page.locator("family-hub-card");
+
+  await expect(card.locator('.hero-metrics button[data-home-target="lights"]')).toContainText("2");
+  await expect(card.locator('.hero-metrics button[data-home-target="lights"]')).toContainText("rooms lit");
+  await expect(card.locator('.hero-metrics button[data-view="energy"]')).toContainText("£3.07");
+
+  await card.locator('.hero-metrics button[data-home-target="heating"]').click();
+  await expect(card.locator('[data-current-view="rooms"]')).toBeVisible();
+  await expect(card.locator('[data-home-section-current="heating"]')).toBeVisible();
+  await expect(card.locator(".home-toolbar")).toContainText("Comfort across every zone");
+
+  await card.locator('[data-home-section="rooms"]').click();
+  await expect(card.locator(".room-detail h2")).toHaveText("Kitchen");
+  await expect(card.locator(".home-summary-links button")).toHaveCount(3);
+  await card.locator('.home-summary-links button[data-home-target="lights"]').click();
+  await expect(card.locator('[data-home-section-current="lights"]')).toBeVisible();
+  await expect(card.locator(".home-toolbar")).toContainText("2 of 5 rooms lit");
+
+  await card.locator('[data-home-section="rooms"]').click();
+  await card.locator('.home-summary-links button[data-view="energy"]').click();
+  await expect(card.locator('[data-current-view="energy"]')).toBeVisible();
+  await expect(card.locator(".energy-hero")).toContainText("Today so far");
+  await expect(card.locator(".energy-hero")).toContainText("£3.07");
+  await expect(card.locator('[data-energy-fuel="electricity"]')).toContainText("£2.16");
+  await expect(card.locator('[data-energy-fuel="electricity"]')).toContainText("8.4 kWh");
+  await expect(card.locator('[data-energy-fuel="gas"]')).toContainText("£0.91");
+  await expect(card.locator('[data-energy-fuel="gas"]')).toContainText("13.7 kWh");
+  await expect(card.locator(".energy-truth-note")).toContainText("Smart-meter totals, not live power");
+  await expect(card.locator(".energy-status")).toContainText(["Latest readings", "Latest readings"]);
+
+  await updateEntityState(card, {
+    ...freshMeterState("sensor.example_gas_usage_today", "13.7", { unit_of_measurement: "kWh" }),
+    last_changed: "2026-08-24T10:00:00.000Z",
+    last_updated: "2026-08-24T10:00:00.000Z"
+  });
+  await expect(card.locator('[data-energy-fuel="gas"] .energy-status')).toContainText("Update delayed");
+  await expect(card.locator('[data-energy-fuel="gas"] .energy-freshness')).toContainText("delayed");
+
+  await updateEntityStates(card, {
+    "sensor.example_gas_usage_today": freshMeterState("sensor.example_gas_usage_today", "13.7", { unit_of_measurement: "kWh" }),
+    "sensor.example_gas_cost_today": freshMeterState("sensor.example_gas_cost_today", "unavailable", { unit_of_measurement: "GBP" })
+  });
+  await expect(card.locator('[data-energy-fuel="gas"] .energy-status')).toContainText("Partial readings");
+  await expect(card.locator('[data-energy-fuel="gas"] .energy-primary-metrics')).toContainText("—");
+  await expect(card.locator(".energy-hero")).toContainText("Meter data pending");
+  await expectNoRootOverflow(page);
+  expect(pageErrors).toEqual([]);
+});
+
 test("renders the interactive floorplan and sends only configured room controls", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="rooms"]').click();
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
   await expect(card.locator(".floorplan-visual")).toHaveAttribute("viewBox", "1.5000 1.5000 97.0000 57.0000");
   await expect(card.locator(".floorplan-image")).toBeVisible();
   await expect(card.locator(".floorplan-image")).toHaveAttribute("href", /\/api\/camera_proxy\/camera\.example_vacuum_map/);
@@ -818,7 +1137,7 @@ test("renders the interactive floorplan and sends only configured room controls"
 test("curates lights, heating, blinds and cleaning inside Home", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="rooms"]').click();
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
   await expect(card.locator("[data-home-section]")).toHaveCount(5);
 
   await card.locator('[data-home-section="lights"]').click();
@@ -881,11 +1200,149 @@ test("curates lights, heating, blinds and cleaning inside Home", async ({ page }
   expect(pageErrors).toEqual([]);
 });
 
-test("v0.8 design approval keeps six accessible heating zones contained at every layout tier", async ({ page }, testInfo) => {
+test("balances six lighting rooms as a contained three-by-two tablet grid", async ({ page }) => {
+  const pageErrors = await mount(page, sixLightRoomConfig(), {
+    "light.utility_test": state("light.utility_test", "off", { friendly_name: "Utility" })
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
+  await card.locator('[data-home-section="lights"]').click();
+  await expect(card.locator(".whole-home-card")).toHaveCount(6);
+  const layout = await card.locator(".whole-home-grid").evaluate((grid) => {
+    const gridBounds = grid.getBoundingClientRect();
+    const cards = [...grid.querySelectorAll(".whole-home-card")].map((item) => item.getBoundingClientRect());
+    const rows = new Map();
+    for (const bounds of cards) {
+      const top = Math.round(bounds.top);
+      rows.set(top, (rows.get(top) || 0) + 1);
+    }
+    return {
+      columnCount: new Set(cards.map((bounds) => Math.round(bounds.left))).size,
+      rowCounts: [...rows.values()],
+      horizontalOverflow: grid.scrollWidth - grid.clientWidth,
+      cardsInsideHorizontalBounds: cards.every((bounds) => bounds.left >= gridBounds.left - 1 && bounds.right <= gridBounds.right + 1),
+      widthSpread: Math.max(...cards.map((bounds) => bounds.width)) - Math.min(...cards.map((bounds) => bounds.width))
+    };
+  });
+  expect(layout.columnCount).toBe(3);
+  expect(layout.rowCounts).toEqual([3, 3]);
+  expect(layout.horizontalOverflow).toBeLessThanOrEqual(1);
+  expect(layout.cardsInsideHorizontalBounds).toBe(true);
+  expect(layout.widthSpread).toBeLessThanOrEqual(1);
+  await expectNoRootOverflow(page);
+  expect(pageErrors).toEqual([]);
+});
+
+test("disables unavailable Home toggles and exposes switch state to assistive technology", async ({ page }) => {
+  const pageErrors = await mount(page, config, {
+    "light.living_room": state("light.living_room", "unavailable", { friendly_name: "Living room light" }),
+    "media_player.living_room": state("media_player.living_room", "unavailable", { friendly_name: "Living room speaker" }),
+    "climate.living_room": state("climate.living_room", "unavailable", { friendly_name: "Living room heating" }),
+    "scene.living_room_relax": state("scene.living_room_relax", "unavailable", { friendly_name: "Relax" }),
+    "cover.living_room": state("cover.living_room", "unavailable", { friendly_name: "Living room blind" }),
+    "vacuum.example_robovac": state("vacuum.example_robovac", "unavailable", { friendly_name: "Robot vacuum" })
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
+
+  const roomLight = card.locator('.control-main[data-toggle="light.living_room"]');
+  await expect(roomLight).toBeDisabled();
+  await expect(roomLight).toHaveAttribute("aria-disabled", "true");
+  await expect(roomLight).toHaveAttribute("aria-pressed", "false");
+  await expect(roomLight).toHaveAttribute("aria-label", "Living room light unavailable");
+  const roomMedia = card.locator('[data-media-toggle="media_player.living_room"]');
+  await expect(roomMedia).toBeDisabled();
+  await expect(roomMedia).toHaveAttribute("aria-label", "Living room speaker unavailable");
+  await expect(card.locator('[data-climate-adjust][data-entity="climate.living_room"]')).toHaveCount(2);
+  expect(await card.locator('[data-climate-adjust][data-entity="climate.living_room"]').evaluateAll((buttons) => buttons.every((button) => button.disabled))).toBe(true);
+  await expect(card.locator('[data-scene="scene.living_room_relax"]')).toBeDisabled();
+  expect(await card.locator('[data-cover-action][data-entity="cover.living_room"]').evaluateAll((buttons) => buttons.every((button) => button.disabled))).toBe(true);
+
+  await card.evaluate((element) => {
+    for (const button of element.shadowRoot.querySelectorAll([
+      '[data-toggle="light.living_room"]',
+      '[data-media-toggle="media_player.living_room"]',
+      '[data-climate-adjust][data-entity="climate.living_room"]',
+      '[data-scene="scene.living_room_relax"]',
+      '[data-cover-action][data-entity="cover.living_room"]'
+    ].join(","))) {
+      button.disabled = false;
+      button.removeAttribute("aria-disabled");
+      button.click();
+    }
+  });
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+
+  await card.locator('[data-home-section="lights"]').click();
+  const wholeHomeLight = card.locator('.whole-home-control[data-toggle="light.living_room"]');
+  await expect(wholeHomeLight).toBeDisabled();
+  await expect(wholeHomeLight).toHaveAttribute("aria-pressed", "false");
+  await expect(wholeHomeLight).toHaveAttribute("aria-label", "Living room light unavailable");
+
+  await card.locator('[data-home-section="cleaning"]').click();
+  const vacuumActions = card.locator('[data-vacuum-action][data-entity="vacuum.example_robovac"]');
+  expect(await vacuumActions.evaluateAll((buttons) => buttons.every((button) => button.disabled))).toBe(true);
+  await vacuumActions.first().evaluate((button) => {
+    button.disabled = false;
+    button.removeAttribute("aria-disabled");
+    button.click();
+  });
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  await expectNoRootOverflow(page);
+  expect(pageErrors).toEqual([]);
+});
+
+test("never describes unavailable Home entities as off, closed, or comfortable", async ({ page }) => {
+  const unavailableStates = {};
+  for (const room of config.rooms) {
+    for (const entityId of [...room.lights, ...room.covers, ...(room.climate ? [room.climate] : [])]) {
+      unavailableStates[entityId] = state(entityId, "unavailable");
+    }
+    if (room.temperature_sensor) unavailableStates[room.temperature_sensor] = state(room.temperature_sensor, "unavailable");
+  }
+  unavailableStates[config.entry.garage.cover_entity] = state(config.entry.garage.cover_entity, "unavailable");
+  const pageErrors = await mount(page, config, unavailableStates);
+  const card = page.locator("family-hub-card");
+
+  await expect(card.locator('.hero-metrics [data-home-target="lights"]')).toContainText("Status unavailable");
+  await expect(card.locator('.hero-metrics [data-home-target="heating"]')).toContainText("Status unavailable");
+  await expect(card.locator('.hero-metrics [data-home-target="lights"]')).not.toContainText("All off");
+
+  await card.locator('.hero-metrics [data-home-target="lights"]').click();
+  await expect(card.locator(".home-toolbar")).toContainText("Lighting status unavailable");
+  await card.locator('[data-home-section="rooms"]').click();
+  await expect(card.locator('.home-summary-links [data-home-target="lights"]')).toContainText("Status unavailable");
+  await expect(card.locator('.home-summary-links [data-home-target="heating"]')).toContainText("Status unavailable");
+  await card.locator('[data-home-section="covers"]').click();
+  await expect(card.locator(".home-toolbar")).toContainText("Cover status unavailable");
+  await expect(card.locator(".home-toolbar")).not.toContainText("Everything closed");
+  expect(pageErrors).toEqual([]);
+});
+
+test("routes a room-mapped garage door through the protected Security action", async ({ page }) => {
+  const garageRoomConfig = structuredClone(config);
+  const livingRoom = garageRoomConfig.rooms.find((room) => room.id === "living_room");
+  livingRoom.covers.push(garageRoomConfig.entry.garage.cover_entity);
+  const pageErrors = await mount(page, garageRoomConfig);
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
+
+  await expect(card.locator(`[data-cover-action][data-entity="${garageRoomConfig.entry.garage.cover_entity}"]`)).toHaveCount(0);
+  const protectedRoute = card.locator('.cover-control.is-protected [data-view="entry"]');
+  await expect(protectedRoute).toHaveCount(1);
+  await expect(protectedRoute).toHaveAttribute("aria-label", /Open Security/);
+
+  await card.locator('[data-home-section="covers"]').click();
+  await expect(card.locator(`[data-cover-action][data-entity="${garageRoomConfig.entry.garage.cover_entity}"]`)).toHaveCount(0);
+  await expect(card.locator('.cover-card').filter({ hasText: "Garage door" })).toContainText("protected action");
+  expect(pageErrors).toEqual([]);
+});
+
+test("v0.9 design approval keeps six accessible heating zones contained at every layout tier", async ({ page }, testInfo) => {
   const sixZoneConfig = sixZoneHouseholdConfig();
   const pageErrors = await mount(page, sixZoneConfig, sixZoneStateOverrides());
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="rooms"]').click();
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
   await card.locator('[data-home-section="heating"]').click();
   await expect(card.locator(".heating-card")).toHaveCount(6);
 
@@ -958,11 +1415,13 @@ test("v0.8 design approval keeps six accessible heating zones contained at every
 test("keeps the live music card working inside its configured media boundary", async ({ page }) => {
   const pageErrors = await mount(page, fiveRoomMusicConfig(), fiveRoomMusicStates());
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="music"]').click();
+  await card.locator('.hub-nav-button[data-view="music"]').click();
   const player = card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]');
   await expect(player).toBeVisible();
   await expect(player).toHaveAttribute("data-player-count", "5");
   await expect(player).toHaveAttribute("data-media-browser-count", "3");
+  await expect(player).toHaveAttribute("data-card-height", "");
+  await expect(player).toHaveAttribute("data-transparent-background", "false");
   await expect(card.locator("[data-mock-player]")).toHaveCount(5);
   await expect(card.locator("[data-mock-player-row]")).toHaveCount(5);
   await expect(card.locator("[data-mock-music-tab]")).toHaveCount(3);
@@ -974,24 +1433,41 @@ test("keeps the live music card working inside its configured media boundary", a
   await player.evaluate(async (child) => {
     await child._hass.callService("media_player", "media_play_pause", { entity_id: "media_player.unmapped" });
     await child._hass.callService("light", "toggle", { entity_id: "light.kitchen" });
+    window.__retainedMusicHass = child._hass;
   });
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toHaveLength(1);
+  await card.locator('.hub-nav-button[data-view="today"]').click();
+  await page.evaluate(async () => {
+    await window.__retainedMusicHass.callService(
+      "media_player",
+      "media_play_pause",
+      { entity_id: "media_player.kitchen" },
+      {}
+    );
+  });
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toHaveLength(1);
+  await expect.poll(() => card.evaluate((element) => element._childCards.has("music"))).toBe(false);
   expect(pageErrors).toEqual([]);
 });
 
 test("starts cameras deliberately and confirms garage and alarm actions", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await expect(card.locator(".security-camera")).toHaveCount(2);
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
   await expect(card.locator(".security-camera").filter({ hasText: /bedroom|child room/i })).toHaveCount(0);
   await expect(card.locator(".security-privacy-note")).toContainText("Entry cameras only");
   await expect(card.locator(".security-privacy-note")).toContainText("viewer opens only when you choose it");
-  await expect(card.locator(".security-privacy-note")).toContainText("Streams started here stop when you close the view or leave Security");
+  await expect(card.locator(".security-privacy-note")).toContainText("A stream started here stops when you close the view, leave Security or after two minutes");
+  const stillCards = card.locator('[data-card-type="picture-entity"][data-camera-view="auto"]');
+  await expect(stillCards).toHaveCount(3);
+  expect(await stillCards.evaluateAll((cards) => cards.every((child) => child.dataset.hassConnected === "true"))).toBe(true);
+  await expect(card.locator('.camera-stage-action[data-camera-stage-open="doorbell"]')).toContainText("Tap the picture for live video");
 
   await card.locator('button[data-camera-open="doorbell"]').click();
   await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]')).toBeVisible();
+  await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]')).toHaveAttribute("data-tap-action", "none");
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
   await card.locator('button[data-camera-open="garage"]').click();
   await updateEntityState(card, state("camera.example_doorbell", "idle"));
@@ -1010,12 +1486,12 @@ test("starts cameras deliberately and confirms garage and alarm actions", async 
 
   await card.locator('button[data-secure-cover-action="open_cover"]').click();
   await expect(card.locator(".confirmation-dialog")).toContainText("Open garage door");
-  for (const selector of [".navigation", ".topbar", ".security-main", ".security-sidebar"]) {
+  for (const selector of [".hub-navigation", ".hub-topbar", ".security-main", ".security-sidebar"]) {
     await expect(card.locator(selector)).toHaveAttribute("inert", "");
     await expect(card.locator(selector)).toHaveAttribute("aria-hidden", "true");
   }
   await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.dataset?.confirmAction)).toBe("cancel");
-  await card.locator('.nav-button[data-view="today"]').evaluate((button) => button.click());
+  await card.locator('.hub-nav-button[data-view="today"]').evaluate((button) => button.click());
   await expect(card.locator('[data-current-view="entry"]')).toBeVisible();
   await expect(card.locator(".confirmation-dialog")).toBeVisible();
   await page.keyboard.press("Shift+Tab");
@@ -1053,10 +1529,10 @@ test("separates camera wake-up, first-frame buffering, and live readiness withou
     "camera.example_doorbell": state("camera.example_doorbell", "idle")
   }, {
     cameraPlayerAutoLoad: false,
-    cameraFrameTimeoutMs: 1_000
+    cameraFrameTimeoutMs: 10_000
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="doorbell"]').evaluate((button) => {
     button.click();
     button.click();
@@ -1069,7 +1545,8 @@ test("separates camera wake-up, first-frame buffering, and live readiness withou
   ]);
 
   await updateEntityState(card, state("camera.example_doorbell", "streaming"));
-  const player = card.locator('[data-card-type="picture-entity"][data-entity="camera.example_doorbell"]');
+  const player = card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]');
+  await expect(card.locator('#camera-poster-stage-doorbell [data-card-type="picture-entity"]')).toBeVisible();
   await expect(player).toBeVisible();
   await expect(player).toHaveAttribute("aria-hidden", "true");
   await expect(player).toHaveJSProperty("inert", true);
@@ -1079,7 +1556,7 @@ test("separates camera wake-up, first-frame buffering, and live readiness withou
 
   await updateEntityState(card, state("binary_sensor.example_doorbell_motion", "on"));
   await expect(player).toHaveAttribute("data-instance-id", instance);
-  await player.evaluate((element) => {
+  await card.locator('[data-card-type="picture-entity"][data-entity="camera.example_doorbell"]').first().evaluate((element) => {
     element.shadowRoot.querySelector(".mock-picture").dispatchEvent(new Event("load", { bubbles: true }));
   });
   await expect(card.locator(".camera-is-buffering")).toBeVisible();
@@ -1100,18 +1577,18 @@ test("keeps a slow Garage player in buffering until a verified frame arrives", a
     cameraFrameTimeoutMs: 3_000
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="garage"]').click();
   await updateEntityState(card, state("camera.example_garage", "preparing"));
   await expect(card.locator(".camera-is-starting")).toContainText("Waking camera");
 
   await updateEntityState(card, state("camera.example_garage", "streaming"));
   await expect(card.locator(".camera-is-buffering")).toContainText("Loading video");
-  const player = card.locator('[data-entity="camera.example_garage"]');
+  const player = card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_garage"]');
   await expect(player).toBeVisible();
   const instance = await player.getAttribute("data-instance-id");
   await expect(card.locator('button[data-camera-reveal="garage"]')).toHaveCount(0);
-  await expect(card.locator(".camera-is-buffering")).toContainText("can take around 20 seconds", { timeout: 2_000 });
+  await expect(card.locator(".camera-is-buffering")).toContainText("taking longer than usual", { timeout: 2_000 });
   await expect(card.locator('button[data-camera-reveal="garage"]')).toHaveCount(0);
   await expect(card.locator(".camera-live-indicator")).toHaveCount(0);
   await emitCameraLoad(card, "camera.example_garage");
@@ -1123,6 +1600,32 @@ test("keeps a slow Garage player in buffering until a verified frame arrives", a
   expect(pageErrors).toEqual([]);
 });
 
+test("drops Live when the native camera video disappears and restores it only after a new ready frame", async ({ page }) => {
+  const pageErrors = await mount(page);
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
+  await card.locator('button[data-camera-open="doorbell"]').click();
+  await expect(card.locator(".camera-live-indicator")).toHaveText("Live");
+  const player = card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]');
+
+  await player.evaluate((element) => {
+    element.shadowRoot.querySelector("mock-camera-stream").shadowRoot.querySelector("video").remove();
+  });
+  await expect(card.locator(".camera-live-indicator")).toHaveCount(0);
+  await expect(card.locator(".camera-is-buffering")).toContainText("Loading video");
+
+  await player.evaluate((element) => {
+    const root = element.shadowRoot.querySelector("mock-camera-stream").shadowRoot;
+    const media = document.createElement("video");
+    media.className = "mock-camera-media";
+    Object.defineProperty(media, "readyState", { configurable: true, value: 2 });
+    root.prepend(media);
+    media.dispatchEvent(new Event("playing", { bubbles: true }));
+  });
+  await expect(card.locator(".camera-live-indicator")).toHaveText("Live");
+  expect(pageErrors).toEqual([]);
+});
+
 test("does not infer Live from a non-media load event", async ({ page }) => {
   const pageErrors = await mount(page, config, {
     "camera.example_doorbell": state("camera.example_doorbell", "idle")
@@ -1131,12 +1634,12 @@ test("does not infer Live from a non-media load event", async ({ page }) => {
     cameraFrameTimeoutMs: 10_000
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="doorbell"]').click();
   await updateEntityState(card, state("camera.example_doorbell", "streaming"));
-  const player = card.locator('[data-entity="camera.example_doorbell"]');
+  const player = card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]');
   await expect(player).toBeVisible();
-  await player.evaluate((element) => {
+  await card.locator('[data-card-type="picture-entity"][data-entity="camera.example_doorbell"]').first().evaluate((element) => {
     element.shadowRoot.querySelector(".mock-picture").dispatchEvent(new Event("load", { bubbles: true }));
   });
   await expect(card.locator(".camera-is-buffering")).toBeVisible();
@@ -1158,11 +1661,11 @@ test("cancels during buffering and ignores a late player load", async ({ page })
     cameraFrameTimeoutMs: 10_000
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="doorbell"]').click();
   await updateEntityState(card, state("camera.example_doorbell", "streaming"));
   await expect(card.locator(".camera-is-buffering")).toBeVisible();
-  await card.locator('[data-entity="camera.example_doorbell"]').evaluate((player) => {
+  await card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]').evaluate((player) => {
     window.__lateCameraPlayer = player;
   });
 
@@ -1183,7 +1686,7 @@ test("cancels during buffering and ignores a late player load", async ({ page })
 test("expires stale Security confirmations and never reverses a moving garage door", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
 
   await card.locator('button[data-secure-cover-action="open_cover"]').click();
   await expect(card.locator(".confirmation-dialog")).toContainText("Open garage door");
@@ -1216,7 +1719,7 @@ test("expires stale Security confirmations and never reverses a moving garage do
 test("stops an active exterior stream when the camera fails or configuration reloads", async ({ page }) => {
   const pageErrors = await mount(page, config, {}, { cameraStopTimeoutMs: 100 });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="doorbell"]').click();
   await expect(card.locator(".camera-card-slot")).toHaveCount(1);
 
@@ -1226,8 +1729,12 @@ test("stops an active exterior stream when the camera fails or configuration rel
   await updateEntityState(card, state("camera.example_doorbell", "idle"));
   await expect.poll(() => card.evaluate((element) => element._cameraBlockedIds.size)).toBe(0);
   await expect(card.locator('button[data-camera-open="doorbell"]')).toBeEnabled();
-  await updateEntityState(card, state("camera.example_doorbell", "streaming"));
   await card.locator('button[data-camera-open="doorbell"]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } }
+  ]);
+  await updateEntityState(card, state("camera.example_doorbell", "streaming"));
   await expect(card.locator(".camera-card-slot")).toHaveCount(1);
 
   await card.evaluate((element, familyConfig) => element.setConfig({ family_config: familyConfig }), config);
@@ -1235,6 +1742,7 @@ test("stops an active exterior stream when the camera fails or configuration rel
   await updateEntityState(card, state("camera.example_doorbell", "idle"));
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } }
   ]);
   expect(pageErrors).toEqual([]);
@@ -1246,7 +1754,7 @@ test("serializes repeated camera taps and preserves the live player across card 
     "camera.example_doorbell": state("camera.example_doorbell", "idle")
   }, { serviceBehaviors: { [startKey]: "pending" } });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="doorbell"]').evaluate((button) => {
     button.click();
     button.click();
@@ -1257,7 +1765,7 @@ test("serializes repeated camera taps and preserves the live player across card 
     { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } }
   ]);
   await updateEntityState(card, state("camera.example_doorbell", "streaming"));
-  const player = card.locator('[data-card-type="picture-entity"][data-entity="camera.example_doorbell"]');
+  const player = card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]');
   await expect(player).toHaveAttribute("data-aspect-ratio", "16:9");
   await expect(player).toHaveAttribute("data-fit-mode", "cover");
   await expect(player).toHaveAttribute("data-tap-action", "none");
@@ -1274,8 +1782,13 @@ test("serializes repeated camera taps and preserves the live player across card 
   await updateEntityState(card, state("camera.example_doorbell", "idle"));
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
   await expect(card.locator('[role="alert"]')).toContainText("stream ended");
-  await updateEntityState(card, state("camera.example_doorbell", "streaming"));
   await card.locator('button[data-camera-open="doorbell"]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } }
+  ]);
+  await updateEntityState(card, state("camera.example_doorbell", "streaming"));
   await expect(player).toBeVisible();
   expect(await player.getAttribute("data-instance-id")).not.toBe(firstInstance);
   expect(pageErrors).toEqual([]);
@@ -1289,7 +1802,7 @@ test("keeps switching gated behind Stop and recovers camera failures without raw
     serviceBehaviors: { [stopKey]: "pending" }
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="doorbell"]').click();
   await expect(card.locator(".camera-is-buffering")).toContainText("Loading video");
   await expect(card.locator('button[data-camera-open="garage"]')).toBeEnabled();
@@ -1313,7 +1826,7 @@ test("keeps switching gated behind Stop and recovers camera failures without raw
   await updateEntityState(card, state("camera.example_garage", "streaming"));
   await expect(card.locator(".camera-is-buffering")).toContainText("Loading video");
   await emitCameraLoad(card, "camera.example_garage");
-  await expect(card.locator('[data-entity="camera.example_garage"][data-camera-view="live"]')).toBeVisible();
+  await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_garage"]')).toBeVisible();
   await expect(card.locator(".camera-live-indicator")).toHaveText("Live");
   expect(pageErrors).toEqual([]);
 });
@@ -1325,7 +1838,7 @@ test("does not treat unavailable as stopped or start another camera before a fre
     cameraFrameTimeoutMs: 1_000
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="doorbell"]').click();
   await expect(card.locator(".camera-is-buffering")).toBeVisible();
   await card.locator('button[data-camera-open="garage"]').click();
@@ -1359,13 +1872,13 @@ test("falls back to paired native camera services for the exact configured exter
     "button.example_garage_stop_stream": state("button.example_garage_stop_stream", "unavailable")
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="garage"]').click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "camera", service: "turn_on", data: { entity_id: "camera.example_garage" } }
   ]);
   await updateEntityState(card, state("camera.example_garage", "streaming"));
-  await expect(card.locator('[data-entity="camera.example_garage"]')).toBeVisible();
+  await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_garage"]')).toBeVisible();
   await card.locator('button[data-camera-close="garage"]').click();
   await updateEntityState(card, state("camera.example_garage", "idle"));
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
@@ -1379,11 +1892,11 @@ test("bounds a failed camera start, performs recovery Stop, and enables a friend
   const startKey = "button.press:button.example_garage_start_stream";
   const pageErrors = await mount(page, config, {}, {
     cameraStartTimeoutMs: 50,
-    cameraStopTimeoutMs: 50,
+    cameraStopTimeoutMs: 500,
     serviceBehaviors: { [startKey]: "pending" }
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="garage"]').click();
   await expect(card.locator(".security-stage .camera-is-waiting")).toContainText("Waiting for camera", { timeout: 2_000 });
   await expect(card.locator('button[aria-label="Retry live view"]')).toHaveCount(0);
@@ -1393,7 +1906,16 @@ test("bounds a failed camera start, performs recovery Stop, and enables a friend
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } }
   ]);
   await updateEntityState(card, state("camera.example_garage", "idle"));
-  await expect(card.locator('[role="alert"]')).toContainText("too long to start", { timeout: 2_000 });
+  await expect(card.locator(".security-stage .camera-is-waiting")).toContainText("previous secure stream must become idle");
+  await expect(card.locator('button[aria-label="Retry live view"]')).toHaveCount(0);
+  await settlePendingService(page, startKey);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } }
+  ]);
+  await updateEntityState(card, state("camera.example_garage", "idle"));
+  await expect(card.locator('.security-stage-poster[role="alert"]')).toContainText("too long to start", { timeout: 2_000 });
   const retryButtons = card.locator('button[aria-label="Retry live view"]');
   await expect(retryButtons).toHaveCount(2);
   expect(await retryButtons.evaluateAll((buttons) => buttons.every((button) => !button.disabled))).toBe(true);
@@ -1412,7 +1934,7 @@ test("disables every camera-open control while recovery Stop is pending", async 
     }
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="garage"]').click();
 
   await expect(card.locator(".camera-is-stopping")).toContainText("Stopping");
@@ -1435,18 +1957,22 @@ test("disables every camera-open control while recovery Stop is pending", async 
   expect(pageErrors).toEqual([]);
 });
 
-test("times out a missing first frame, stops safely, and exposes Retry only after idle", async ({ page }) => {
+test("recreates a stalled live viewer once, then stops safely and exposes Retry", async ({ page }) => {
   const pageErrors = await mount(page, config, {}, {
     cameraPlayerAutoLoad: false,
     cameraFrameTimeoutMs: 2_000,
     cameraStopTimeoutMs: 500
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="garage"]').click();
   await updateEntityState(card, state("camera.example_garage", "streaming"));
   await expect(card.locator(".camera-is-buffering")).toBeVisible();
-  await expect.poll(() => page.evaluate(() => window.__serviceCalls), { timeout: 5_000 }).toEqual([
+  const firstPlayer = card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_garage"]');
+  const firstInstance = await firstPlayer.getAttribute("data-instance-id");
+  await expect(card.locator(".camera-is-buffering")).toContainText("Reconnecting video", { timeout: 3_000 });
+  await expect.poll(async () => card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_garage"]').getAttribute("data-instance-id"), { timeout: 3_000 }).not.toBe(firstInstance);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls), { timeout: 6_000 }).toEqual([
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } }
   ]);
@@ -1456,7 +1982,7 @@ test("times out a missing first frame, stops safely, and exposes Retry only afte
     return buttons.length > 0 && buttons.every((button) => button.disabled);
   })).toBe(true);
   await updateEntityState(card, state("camera.example_garage", "idle"));
-  await expect(card.locator('[role="alert"]')).toContainText("video took too long to load", { timeout: 2_000 });
+  await expect(card.locator('[role="alert"]')).toContainText("could not connect after one retry", { timeout: 2_000 });
   const pickerRetry = card.locator('button[data-camera-open="garage"][aria-label="Retry live view"]');
   const stageRetry = card.locator('button[data-camera-stage-open="garage"][aria-label="Retry live view"]');
   await expect(pickerRetry).toBeEnabled();
@@ -1471,23 +1997,67 @@ test("times out a missing first frame, stops safely, and exposes Retry only afte
   expect(pageErrors).toEqual([]);
 });
 
+test("expires a live camera after two minutes and tears it down on pagehide", async ({ page }) => {
+  const pageErrors = await mount(page, config, {}, {
+    cameraExpiryMs: 10_000,
+    cameraStopTimeoutMs: 1_000
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
+  await card.locator('button[data-camera-open="doorbell"]').click();
+  await expect(card.locator(".camera-live-indicator")).toHaveText("Live");
+  await expect.poll(() => card.evaluate((element) => element._cameraExpiryTimer !== null)).toBe(true);
+  await card.evaluate((element) => {
+    element._cameraExpiryMs = 250;
+    element._armCameraExpiry(element._cameraSession);
+  });
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls), { timeout: 2_000 }).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } }
+  ]);
+  await updateEntityState(card, state("camera.example_doorbell", "idle"));
+  await expect(card.locator('.security-stage-poster[role="alert"]')).toContainText("closed automatically after two minutes");
+
+  await card.evaluate((element) => { element._cameraExpiryMs = 10_000; });
+  await card.locator('button[data-camera-open="doorbell"]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } }
+  ]);
+  await updateEntityState(card, state("camera.example_doorbell", "streaming"));
+  await expect(card.locator(".camera-live-indicator")).toHaveText("Live");
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_doorbell_stop_stream" } }
+  ]);
+  await updateEntityState(card, state("camera.example_doorbell", "idle"));
+  await expect.poll(() => card.evaluate((element) => element._cameraSession)).toBe(null);
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
+});
+
 test("configuration reload cancels a pending Start but still completes the authorized Stop", async ({ page }) => {
   const startKey = "button.press:button.example_garage_start_stream";
   const pageErrors = await mount(page, config, {}, {
     serviceBehaviors: { [startKey]: "pending" }
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="garage"]').click();
   await expect(card.locator(".camera-is-starting")).toBeVisible();
 
   await card.evaluate((element, familyConfig) => element.setConfig({ family_config: familyConfig }), config);
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
   await settlePendingService(page, startKey);
+  await updateEntityState(card, state("camera.example_garage", "idle"));
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_start_stream" } },
+    { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } },
     { domain: "button", service: "press", data: { entity_id: "button.example_garage_stop_stream" } }
   ]);
+  await updateEntityState(card, state("camera.example_garage", "idle"));
+  await expect.poll(() => card.evaluate((element) => element._pendingCameraStarts.size)).toBe(0);
   await updateEntityState(card, state("camera.example_garage", "streaming"));
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
   await updateEntityState(card, state("camera.example_garage", "idle"));
@@ -1501,10 +2071,10 @@ test("configuration reload ignores a late first-frame event and completes the ex
     cameraFrameTimeoutMs: 1_000
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await card.locator('button[data-camera-open="doorbell"]').click();
   await expect(card.locator(".camera-is-buffering")).toBeVisible();
-  await card.locator('[data-entity="camera.example_doorbell"]').evaluate((player) => {
+  await card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]').evaluate((player) => {
     window.__lateReloadPlayer = player;
   });
 
@@ -1524,7 +2094,7 @@ test("never starts a stream when its configured stop control is missing", async 
   delete startOnlyConfig.entry.cameras[0].stop_stream_entity;
   const pageErrors = await mount(page, startOnlyConfig);
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
 
   const doorbell = card.locator(".security-camera").filter({ hasText: "Front door" });
   await expect(doorbell.locator(".privacy-badge")).toHaveText(/Controls unavailable/);
@@ -1543,7 +2113,7 @@ test("fails closed for unexpected camera states and tampered non-exterior camera
     "camera.example_garage": state("camera.example_garage", "recording")
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   const garage = card.locator(".security-camera").filter({ hasText: "Garage" });
   await expect(garage.locator('button[data-camera-open="garage"]')).toBeDisabled();
   await garage.locator('button[data-camera-open="garage"]').evaluate((button) => {
@@ -1570,7 +2140,7 @@ test("fails Security unavailable states safely without presenting them as clear 
     "binary_sensor.example_garage_motion": state("binary_sensor.example_garage_motion", "unknown")
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
 
   const doorbell = card.locator(".security-camera").filter({ hasText: "Front door" });
   await expect(doorbell.locator(".security-signal.is-unavailable")).toContainText("Unavailable");
@@ -1607,17 +2177,98 @@ test("fails Security unavailable states safely without presenting them as clear 
 test("keeps the family map private and spotlights both requested clubs", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="family"]').click();
-  await expect(card.locator('[data-card-type="map"]')).toBeVisible();
+  await expect(card.locator(".today-family")).toContainText("Jobs & rewards");
+  const todayFavourites = card.locator(".today-football .compact-fixture[data-favourite-code]");
+  await expect(todayFavourites).toHaveCount(2);
+  expect(await todayFavourites.evaluateAll((items) => items.map((item) => [item.dataset.favouriteCode, item.dataset.fixtureId]))).toEqual([
+    ["TOT", "1"],
+    ["AVL", "2"]
+  ]);
+  await card.locator('.hub-nav-button[data-view="family"]').click();
+  const map = card.locator('[data-card-type="map"]');
+  await expect(map).toBeVisible();
+  expect(await map.evaluate((element) => Object.keys(element._hass.states).sort())).toEqual([
+    "person.example_child_one",
+    "person.example_child_two",
+    "person.example_parent"
+  ]);
   await expect(card.locator(".family-person")).toHaveCount(2);
   await expect(card.locator(".family-person")).toContainText(["Science revision", "Read chapter four"]);
   await expect(card.locator(".chore-row")).toHaveCount(6);
+  await expect(card.locator(".chore-heading")).toContainText(["Today’s jobs", "Today’s jobs"]);
   await expect(card.locator(".family-person")).toContainText(["Brush teeth", "Get dressed"]);
+  await expect(card.locator(".family-summary-grid")).toHaveCount(2);
+  await expect(card.locator(".family-summary-item")).toHaveCount(6);
+  await expect(card.locator(".family-person")).toContainText(["Weekend movie", "Starlight"]);
+  await expect(card.locator(".family-person")).toContainText(["65% complete", "5 of 7"]);
+  await expect(card.locator(".choreops-link")).toHaveAttribute("href", "/choreops");
 
-  await card.locator('.nav-button[data-view="football"]').click();
-  await expect(card.locator(".spotlight-panel")).toContainText("Tottenham & Aston Villa");
+  await card.locator('.hub-nav-button[data-view="football"]').click();
+  const favouriteHeroes = card.locator(".favourite-hero-card");
+  await expect(favouriteHeroes).toHaveCount(2);
+  expect(await favouriteHeroes.evaluateAll((items) => items.map((item) => [item.dataset.favouriteCode, item.dataset.fixtureId]))).toEqual([
+    ["TOT", "1"],
+    ["AVL", "2"]
+  ]);
+  await expect(favouriteHeroes.nth(0)).toContainText(/Spurs.*Burnley.*20:00/s);
+  await expect(favouriteHeroes.nth(1)).toContainText(/Villa.*Newcastle.*15:00/s);
   await expect(card.locator(".fixture.is-spotlight")).toHaveCount(2);
-  await expect(card.locator(".spotlight-club")).toContainText(["Tottenham Hotspur", "Aston Villa"]);
+  const standings = card.locator(".favourite-standing");
+  await expect(standings).toHaveCount(2);
+  expect(await standings.evaluateAll((items) => items.map((item) => item.dataset.favouriteCode))).toEqual(["TOT", "AVL"]);
+  await expect(standings).toContainText(["#1", "#2"]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("combines a Spurs and Villa head-to-head into one deliberate family derby card", async ({ page }) => {
+  const derby = {
+    id: 77,
+    kickoff_time: "2026-08-21T19:00:00Z",
+    started: true,
+    finished: false,
+    minutes: 67,
+    home: { name: "Tottenham Hotspur", short_name: "TOT" },
+    away: { name: "Aston Villa", short_name: "AVL" },
+    home_score: 2,
+    away_score: 1,
+    home_scorers: ["Solanke"],
+    away_scorers: ["Watkins"],
+    spotlight: true
+  };
+  const pageErrors = await mount(page, config, {
+    "sensor.family_dashboard_premier_league_gw_1": state("sensor.family_dashboard_premier_league_gw_1", "1", { events: [derby] })
+  });
+  const card = page.locator("family-hub-card");
+  const todayDerby = card.locator(".today-football .compact-fixture.is-derby");
+  await expect(todayDerby).toHaveCount(1);
+  await expect(todayDerby).toHaveAttribute("data-favourite-code", "TOT AVL");
+  await expect(todayDerby).toHaveAttribute("data-fixture-id", "77");
+  await expect(todayDerby).toContainText("Family derby");
+
+  await card.locator('.hub-nav-button[data-view="football"]').click();
+  const heroDerby = card.locator(".favourite-hero-card.is-derby");
+  await expect(heroDerby).toHaveCount(1);
+  await expect(heroDerby).toHaveAttribute("data-favourite-code", "TOT AVL");
+  await expect(heroDerby).toHaveAttribute("data-fixture-id", "77");
+  await expect(heroDerby).toContainText(/Family derby.*Spurs & Villa.*Tottenham.*2 — 1.*Aston Villa/s);
+  expect(pageErrors).toEqual([]);
+});
+
+test("suppresses an unsafe direct-card ChoreOps link and escapes generic summary text", async ({ page }) => {
+  const unsafeConfig = locationDisabledConfig();
+  unsafeConfig.chores.dashboard_path = "javascript:alert(1)";
+  const maliciousName = '<img src=x onerror="alert(1)">';
+  const pageErrors = await mount(page, unsafeConfig, {
+    "sensor.child_one_choreops_reward_status_weekend_movie": state("sensor.child_one_choreops_reward_status_weekend_movie", "available", {
+      reward_name: maliciousName,
+      reward_cost: 50
+    })
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="family"]').click();
+  await expect(card.locator(".choreops-link")).toHaveCount(0);
+  await expect(card.locator(".family-summary-grid").first()).toContainText(maliciousName);
+  await expect(card.locator(".family-summary-item img")).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });
 
@@ -1690,9 +2341,11 @@ test("loads only allowlisted crest_url badges and renders initials for untrusted
     "sensor.family_dashboard_premier_league_gw_1": state("sensor.family_dashboard_premier_league_gw_1", "3", { events })
   });
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="football"]').click();
+  await card.locator('.hub-nav-button[data-view="football"]').click();
 
-  await expect(card.locator('.football-hero img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
+  await expect(card.locator('.fixture img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
+  await expect(card.locator(".favourite-hero-card")).toHaveCount(2);
+  await expect(card.locator(".football-favourites-stage")).not.toContainText(/Valid Badge|Hostile Badge/);
   for (const code of ["BAD", "LCR", "LBD", "LGO", "INI"]) {
     const mark = card.locator(".fixture .team-mark").filter({ hasText: code }).first();
     await expect(mark.locator("img")).toHaveCount(0);
@@ -1720,7 +2373,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect(card.locator(".preview-pill")).toHaveCount(0);
   await expect(card.locator('[data-media-toggle="media_player.living_room"]')).toBeDisabled();
 
-  await card.locator('.nav-button[data-view="rooms"]').click();
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
   await card.locator('[data-room="kitchen"]').click();
   await expect(card.locator(".read-only-note")).toBeVisible();
   await expect(card.locator('button[data-toggle="light.kitchen"]')).toBeDisabled();
@@ -1737,16 +2390,16 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
   await expect.poll(() => page.evaluate(() => window.__moreInfoEvents)).toBe(0);
 
-  await card.locator('.nav-button[data-view="calendar"]').click();
+  await card.locator('.hub-nav-button[data-view="calendar"]').click();
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-read-only-guard", "service-boundary");
   await card.locator('[data-mock-calendar-write]').evaluate((button) => button.click());
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
 
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await expect(card.locator('button[data-alarm-action="alarm_arm_home"]')).toBeDisabled();
   await expect(card.locator('button[data-secure-cover-action]')).toBeDisabled();
   await card.locator('button[data-camera-open="doorbell"]').click();
-  await expect(card.locator('[data-card-type="picture-entity"][data-entity="camera.example_doorbell"]')).toBeVisible();
+  await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
   await card.locator('button[data-camera-close="doorbell"]').click();
   await expect(card.locator(".camera-card-slot")).toHaveCount(0);
@@ -1760,31 +2413,36 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect(card.locator(".security-stage-poster")).toContainText("Stream off");
   await expect(card.locator(".security-stage-poster")).toContainText("Read-only mode will not start this camera.");
   await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toBeDisabled();
-  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Read only");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"] > b')).toHaveText("Read only");
 
-  await card.locator('.nav-button[data-view="rooms"]').click();
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
   await card.locator('[data-home-section="cleaning"]').click();
   await expect(card.locator('button[data-vacuum-action="start"]')).toBeDisabled();
 
-  await card.locator('.nav-button[data-view="music"]').click();
+  await card.locator('.hub-nav-button[data-view="music"]').click();
   await expect(card.locator(".media-player-panel")).toContainText("Your full music player");
   await expect(card.locator(".music-meta")).toContainText("playback locked");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toBeVisible();
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("aria-disabled", "true");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-read-only-guard", "service-boundary");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-mode", "in-card");
-  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-height", "100%");
+  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-height", "");
+  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-transparent-background", "false");
   const mediaMetrics = await card.locator(".media-player-stage").evaluate((stage) => {
+    const slot = stage.querySelector(".child-card-slot");
     const child = stage.querySelector("mock-child-card");
-    const childRoot = child.shadowRoot;
+    const childRoot = child.shadowRoot || child;
     const chip = childRoot.querySelector(".mock-chip");
     const chipScroll = childRoot.querySelector(".mock-chip-scroll");
+    const groupChips = childRoot.querySelector("#mmpc-group-chips-controller");
     const speakerScroll = childRoot.querySelector(".mock-speaker-scroll");
     const stageRect = stage.getBoundingClientRect();
     const childRect = child.getBoundingClientRect();
     const chipStyle = getComputedStyle(chip);
-    speakerScroll.scrollTop = 48;
-    chipScroll.scrollLeft = 48;
+    const stageStyle = getComputedStyle(stage);
+    const slotStyle = getComputedStyle(slot);
+    const childStyle = getComputedStyle(child);
+    stage.scrollTop = 48;
     return {
       childTop: childRect.top,
       childBottom: childRect.bottom,
@@ -1792,35 +2450,83 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
       stageBottom: stageRect.bottom,
       chipColour: chipStyle.color,
       chipBackground: chipStyle.backgroundColor,
+      stageBackground: stageStyle.backgroundColor,
+      stageOverflowX: stageStyle.overflowX,
+      stageOverflowY: stageStyle.overflowY,
+      stageScrollHeight: stage.scrollHeight,
+      stageClientHeight: stage.clientHeight,
+      stageScrollTop: stage.scrollTop,
+      slotOverflowX: slotStyle.overflowX,
+      slotOverflowY: slotStyle.overflowY,
+      childInlineHeight: child.style.height,
+      childOverflowX: childStyle.overflowX,
+      childOverflowY: childStyle.overflowY,
+      cardBackground: slotStyle.getPropertyValue("--card-background-color").trim(),
+      primaryBackground: slotStyle.getPropertyValue("--primary-background-color").trim(),
+      mmpcBackground: slotStyle.getPropertyValue("--mmpc-card").trim(),
       speakerOverflow: getComputedStyle(speakerScroll).overflowY,
       speakerScrollHeight: speakerScroll.scrollHeight,
       speakerClientHeight: speakerScroll.clientHeight,
-      speakerScrollTop: speakerScroll.scrollTop,
       chipOverflow: getComputedStyle(chipScroll).overflowX,
       chipScrollWidth: chipScroll.scrollWidth,
       chipClientWidth: chipScroll.clientWidth,
-      chipScrollLeft: chipScroll.scrollLeft,
+      groupFlexWrap: getComputedStyle(groupChips).flexWrap,
+      groupOverflow: getComputedStyle(groupChips).overflowX,
+      groupWidth: groupChips.getBoundingClientRect().width,
+      groupParentWidth: chipScroll.getBoundingClientRect().width,
       childInert: child.inert
     };
   });
   expect(mediaMetrics.childTop).toBeGreaterThanOrEqual(mediaMetrics.stageTop - 1);
-  expect(mediaMetrics.childBottom).toBeLessThanOrEqual(mediaMetrics.stageBottom + 1);
+  expect(mediaMetrics.childBottom).toBeGreaterThan(mediaMetrics.stageBottom);
   expect(mediaMetrics.chipColour).toBe("rgb(247, 248, 252)");
-  expect(mediaMetrics.chipBackground).toBe("rgba(38, 47, 76, 0.96)");
-  expect(mediaMetrics.speakerOverflow).toBe("auto");
+  expect(mediaMetrics.chipBackground).toBe("rgb(38, 50, 81)");
+  expect(mediaMetrics.stageBackground).toBe("rgb(7, 24, 47)");
+  expect(mediaMetrics.stageOverflowX).toBe("auto");
+  expect(mediaMetrics.stageOverflowY).toBe("auto");
+  expect(mediaMetrics.stageScrollHeight).toBeGreaterThan(mediaMetrics.stageClientHeight);
+  expect(mediaMetrics.stageScrollTop).toBeGreaterThan(0);
+  expect(mediaMetrics.slotOverflowX).toBe("visible");
+  expect(mediaMetrics.slotOverflowY).toBe("visible");
+  expect(mediaMetrics.childInlineHeight).toBe("");
+  expect(mediaMetrics.childOverflowX).toBe("visible");
+  expect(mediaMetrics.childOverflowY).toBe("visible");
+  expect(mediaMetrics.cardBackground).toBe("#07182F");
+  expect(mediaMetrics.primaryBackground).toBe("#07182F");
+  expect(mediaMetrics.mmpcBackground).toBe("#07182F");
+  expect(mediaMetrics.speakerOverflow).toBe("visible");
   expect(mediaMetrics.speakerScrollHeight).toBeGreaterThanOrEqual(mediaMetrics.speakerClientHeight);
-  expect(mediaMetrics.chipOverflow).toBe("auto");
-  expect(mediaMetrics.chipScrollWidth).toBeGreaterThan(mediaMetrics.chipClientWidth);
-  expect(mediaMetrics.chipScrollLeft).toBeGreaterThan(0);
+  expect(mediaMetrics.chipOverflow).toBe("visible");
+  expect(mediaMetrics.chipScrollWidth).toBeLessThanOrEqual(mediaMetrics.chipClientWidth + 1);
+  expect(mediaMetrics.groupFlexWrap).toBe("wrap");
+  expect(mediaMetrics.groupOverflow).toBe("visible");
+  expect(mediaMetrics.groupWidth).toBeLessThanOrEqual(mediaMetrics.groupParentWidth + 1);
   expect(mediaMetrics.childInert).toBe(false);
-  if (testInfo.project.use.viewport?.height === 768) expect(mediaMetrics.speakerScrollTop).toBeGreaterThan(0);
+
+  await card.evaluate((element) => {
+    const stage = element.shadowRoot.querySelector(".media-player-stage");
+    stage.dataset.persistenceMarker = "keep-music-stage";
+    stage.scrollTop = 48;
+    element.shadowRoot.querySelector("[data-mock-service]").focus();
+  });
+  await updateEntityState(card, state("media_player.living_room", "playing", {
+    friendly_name: "Living room",
+    media_title: "Updated without a jump"
+  }));
+  await expect(card.locator('.media-player-stage[data-persistence-marker="keep-music-stage"]')).toHaveCount(1);
+  await expect.poll(() => card.locator(".media-player-stage").evaluate((stage) => stage.scrollTop)).toBeGreaterThan(0);
+  await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.dataset?.mockService !== undefined)).toBe(true);
 
   await card.locator("[data-mock-service]").evaluate((button) => button.click());
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
 
-  await card.locator('.nav-button[data-view="family"]').click();
-  await expect(card.locator(".family-rhythm")).toContainText("Location sharing off");
-  await expect(card.locator(".family-rhythm")).not.toContainText(/test|preview/i);
+  await card.locator('.hub-nav-button[data-view="family"]').click();
+  await expect(card.locator(".family-rhythm")).toHaveCount(0);
+  await expect(card.locator(".family-dashboard-heading")).toContainText("Jobs & rewards");
+  await expect(card.locator(".family-dashboard-heading")).not.toContainText(/test|preview/i);
+  await expect(card.locator(".choreops-link")).toHaveCount(0);
+  await expect(card.locator(".family-summary-grid")).toHaveCount(2);
+  await expect(card.locator(".family-summary-item")).toHaveCount(6);
   await expect(card.locator(".chore-row")).toHaveCount(6);
   await expect(card.locator('[data-card-type="map"]')).toHaveCount(0);
   expect(pageErrors).toEqual([]);
@@ -1838,11 +2544,11 @@ async function updateEntityStates(card, nextStates) {
 async function expectApprovalQuality(page, { hotspots = false, securityLabels = false } = {}) {
   const card = page.locator("family-hub-card");
   await expectNoRootOverflow(page);
-  await expect(card).not.toContainText(/Controlled live|mapped(?:\s+rooms|\s+routines)?|fixtures loaded|provider publishes/i);
+  await expect(card).not.toContainText(/Controlled live|mapped(?:\s+rooms|\s+jobs)?|fixtures loaded|provider publishes/i);
   const audit = await card.evaluate((element, options) => {
-    const root = element.shadowRoot.querySelector(".view");
+    const root = element.shadowRoot.querySelector(".hub-view");
     const rootRect = root.getBoundingClientRect();
-    const renderedHeading = element.shadowRoot.querySelector(".topbar h1");
+    const renderedHeading = element.shadowRoot.querySelector(".hub-topbar h1");
     const fontFamily = getComputedStyle(renderedHeading).fontFamily;
     const auditRoots = [root];
     for (let index = 0; index < auditRoots.length; index += 1) {
@@ -1852,7 +2558,7 @@ async function expectApprovalQuality(page, { hotspots = false, securityLabels = 
     }
     const queryAuditRoots = (selector) => auditRoots.flatMap((auditRoot) => [...auditRoot.querySelectorAll(selector)]);
     const typography = queryAuditRoots("*")
-      .filter((node) => node.children.length === 0 && node.textContent.trim() && node.getClientRects().length)
+      .filter((node) => [...node.childNodes].some((child) => child.nodeType === Node.TEXT_NODE && child.textContent.trim()) && node.getClientRects().length)
       .filter((node) => !node.classList.contains("sr-only"))
       .map((node) => ({ text: node.textContent.trim(), size: Number.parseFloat(getComputedStyle(node).fontSize) }))
       .filter(({ size }) => Number.isFinite(size) && size < 12);
@@ -2054,7 +2760,7 @@ async function expectContrast(card, checks) {
 
 async function approvalTextSize(page) {
   return page.locator("family-hub-card").evaluate((element) => {
-    const heading = element.shadowRoot?.querySelector(".topbar h1");
+    const heading = element.shadowRoot?.querySelector(".hub-topbar h1");
     if (!heading) return 0;
     const style = getComputedStyle(heading);
     if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return 0;
@@ -2074,19 +2780,19 @@ async function setApprovalBrowserZoom(page, enabled, restoreState = null) {
       const html = document.documentElement;
       const body = document.body;
       const main = document.querySelector(".ha-main");
-      if (window.__v080ApprovalZoomRestore) throw new Error("Approval browser zoom is already active");
+      if (window.__v090ApprovalZoomRestore) throw new Error("Approval browser zoom is already active");
       const restore = {
         html: html.getAttribute("style"),
         body: body.getAttribute("style"),
         main: main.getAttribute("style"),
-        marker: html.getAttribute("data-v080-browser-zoom"),
+        marker: html.getAttribute("data-v090-browser-zoom"),
         x: window.scrollX,
         y: window.scrollY,
         mainX: main.scrollLeft,
         mainY: main.scrollTop
       };
-      window.__v080ApprovalZoomRestore = restore;
-      html.dataset.v080BrowserZoom = "200";
+      window.__v090ApprovalZoomRestore = restore;
+      html.dataset.v090BrowserZoom = "200";
       html.style.overflow = "auto";
       body.style.overflow = "visible";
       main.style.overflow = "visible";
@@ -2114,22 +2820,22 @@ async function setApprovalBrowserZoom(page, enabled, restoreState = null) {
     const html = document.documentElement;
     const body = document.body;
     const main = document.querySelector(".ha-main");
-    const restore = window.__v080ApprovalZoomRestore;
+    const restore = window.__v090ApprovalZoomRestore;
     if (!restore) return;
     const restoreStyle = (node, value) => value === null ? node.removeAttribute("style") : node.setAttribute("style", value);
     restoreStyle(html, restore.html);
     restoreStyle(body, restore.body);
     restoreStyle(main, restore.main);
-    if (restore.marker === null) delete html.dataset.v080BrowserZoom;
-    else html.setAttribute("data-v080-browser-zoom", restore.marker);
+    if (restore.marker === null) delete html.dataset.v090BrowserZoom;
+    else html.setAttribute("data-v090-browser-zoom", restore.marker);
     main.scrollTo(restore.mainX, restore.mainY);
     window.scrollTo(restore.x, restore.y);
-    delete window.__v080ApprovalZoomRestore;
+    delete window.__v090ApprovalZoomRestore;
     return {
       html: html.getAttribute("style"),
       body: body.getAttribute("style"),
       main: main.getAttribute("style"),
-      marker: html.getAttribute("data-v080-browser-zoom"),
+      marker: html.getAttribute("data-v090-browser-zoom"),
       x: window.scrollX,
       y: window.scrollY,
       mainX: main.scrollLeft,
@@ -2156,11 +2862,11 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     expect(Math.min(horizontalScale, verticalScale), `${name} must exercise a 200% browser-zoom-equivalent viewport`).toBeGreaterThanOrEqual(1.99);
     expect(zoomState.measuredViewport.narrowLayout, `${name} must exercise the responsive layout used by browser zoom`).toBe(true);
     expect(physicalTextScale, `${name} must preserve at least 200%-equivalent physical text scaling`).toBeGreaterThanOrEqual(1.9);
-    const navigationButtons = page.locator("family-hub-card").locator(".nav-button");
+    const navigationButtons = page.locator("family-hub-card").locator(".hub-nav-button");
     for (let index = 0; index < await navigationButtons.count(); index += 1) {
       await expect(navigationButtons.nth(index), `${name} navigation button ${index + 1} must retain an explicit label when its visual label is hidden`).toHaveAttribute("aria-label", /\S/);
     }
-    const navigationIcons = page.locator("family-hub-card").locator(".nav-button ha-icon");
+    const navigationIcons = page.locator("family-hub-card").locator(".hub-nav-button ha-icon");
     for (let index = 0; index < await navigationIcons.count(); index += 1) {
       await expect(navigationIcons.nth(index), `${name} navigation icon ${index + 1} must remain visibly identifiable when labels collapse`).toHaveAttribute("data-mock-glyph", /\S/);
     }
@@ -2170,7 +2876,7 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     }));
     expect(new Set(navigationIconGeometry.map(({ glyph }) => glyph)).size, `${name} navigation icons must remain visually distinct at 200%`).toBe(navigationIconGeometry.length);
     expect(navigationIconGeometry.every(({ width, height }) => width >= 18 && height >= 18), `${name} navigation icons must retain a usable visual footprint at 200%`).toBe(true);
-    const navigationTargetGeometry = await page.locator("family-hub-card").locator(".navigation > .brand, .navigation .nav-button").evaluateAll((buttons) => buttons.map((button) => {
+    const navigationTargetGeometry = await page.locator("family-hub-card").locator(".hub-navigation > .hub-brand, .hub-navigation .hub-nav-button").evaluateAll((buttons) => buttons.map((button) => {
       const bounds = button.getBoundingClientRect();
       return {
         label: button.getAttribute("aria-label"),
@@ -2188,11 +2894,12 @@ async function auditApprovalTextZoom(page, testInfo, name) {
       "Family",
       "Security",
       "Music",
+      "Energy",
       "Football"
     ]);
     expect(navigationTargetGeometry.every((target, index, targets) => index === 0 || target.left >= targets[index - 1].right + 1), `${name} compact navigation targets must stay in visual order without overlap`).toBe(true);
     expect(Math.max(...navigationTargetGeometry.map(({ top }) => top)) - Math.min(...navigationTargetGeometry.map(({ top }) => top)), `${name} compact navigation targets must stay on one aligned row`).toBeLessThanOrEqual(1);
-    const exposedNavigationButtons = page.locator("family-hub-card").locator(".navigation:not([aria-hidden='true']):not([inert]) .nav-button");
+    const exposedNavigationButtons = page.locator("family-hub-card").locator(".hub-navigation:not([aria-hidden='true']):not([inert]) .hub-nav-button");
     for (let index = 0; index < await exposedNavigationButtons.count(); index += 1) {
       await expect(exposedNavigationButtons.nth(index), `${name} exposed navigation button ${index + 1} must retain an accessible name`).toHaveAccessibleName(/\S/);
     }
@@ -2367,11 +3074,11 @@ async function auditApprovalTextZoom(page, testInfo, name) {
       await expect(footballHeading, `${name} must render the football heading at 200%`).toBeVisible();
       await expect(firstFixtureDay, `${name} must render the first fixture date at 200%`).toBeVisible();
       if (name === "football-live") {
-        await expect(page.locator("family-hub-card").locator(".football-hero.is-live"), `${name} must retain its live hero at 200%`).toBeVisible();
+        await expect(page.locator("family-hub-card").locator(".football-favourites-stage.is-live"), `${name} must retain its live favourites stage at 200%`).toBeVisible();
         await expect(page.locator("family-hub-card").locator(".fixture.is-live").first(), `${name} must retain its live fixture at 200%`).toBeVisible();
-        const heroGeometry = await page.locator("family-hub-card").locator(".football-hero").evaluate((hero) => {
+        const heroGeometry = await page.locator("family-hub-card").locator(".football-favourites-stage").evaluate((hero) => {
           const heroBounds = hero.getBoundingClientRect();
-          return [...hero.querySelectorAll(".team-mark.is-hero")].map((mark) => {
+          return [...hero.querySelectorAll(".favourite-hero-card > .favourite-club-heading .team-mark.is-favourite")].map((mark) => {
             const bounds = mark.getBoundingClientRect();
             return {
               inside: bounds.left >= heroBounds.left - 1
@@ -2381,8 +3088,8 @@ async function auditApprovalTextZoom(page, testInfo, name) {
             };
           });
         });
-        expect(heroGeometry.length, `${name} must render both hero crests at 200%`).toBe(2);
-        expect(heroGeometry.every(({ inside }) => inside), `${name} hero crests must remain fully inside the hero at 200%`).toBe(true);
+        expect(heroGeometry.length, `${name} must render one primary crest per favourite at 200%`).toBe(2);
+        expect(heroGeometry.every(({ inside }) => inside), `${name} favourite crests must remain fully inside the stage at 200%`).toBe(true);
       }
       const [toolbarBox, fixtureDayBox] = await Promise.all([footballToolbar.boundingBox(), firstFixtureDay.boundingBox()]);
       expect(toolbarBox, `${name} must measure the football toolbar at 200%`).not.toBeNull();
@@ -2390,11 +3097,11 @@ async function auditApprovalTextZoom(page, testInfo, name) {
       expect(toolbarBox.y + toolbarBox.height, `${name} football toolbar must not crowd the first fixture date at 200%`).toBeLessThanOrEqual(fixtureDayBox.y - 1);
     }
     if (APPROVAL_ZOOM_PROJECTS.includes(testInfo.project.name) && APPROVAL_ZOOM_VIEW_NAMES.includes(name)) {
-      const directory = resolve("test-results/v080-approval/screens", testInfo.project.name);
+      const directory = resolve("test-results/v090-approval/screens", testInfo.project.name);
       await mkdir(directory, { recursive: true });
-      const path = resolve(directory, `v080-zoom-${name}.png`);
+      const path = resolve(directory, `v090-zoom-${name}.png`);
       await page.screenshot({ path, animations: "disabled", fullPage: true });
-      await testInfo.attach(`v0.8 200% zoom ${name} · ${testInfo.project.name}`, { path, contentType: "image/png" });
+      await testInfo.attach(`v0.9 200% zoom ${name} · ${testInfo.project.name}`, { path, contentType: "image/png" });
     }
   } finally {
     const restored = await setApprovalBrowserZoom(page, false, zoomState);
@@ -2410,16 +3117,16 @@ async function captureApproval(page, testInfo, name, options = {}) {
   await expectApprovalQuality(page, options);
   await page.waitForTimeout(120);
   if (APPROVAL_VIEW_NAMES.includes(name)) {
-    const directory = resolve("test-results/v080-approval/screens", testInfo.project.name);
+    const directory = resolve("test-results/v090-approval/screens", testInfo.project.name);
     await mkdir(directory, { recursive: true });
-    const path = resolve(directory, `v080-${name}.png`);
+    const path = resolve(directory, `v090-${name}.png`);
     await page.screenshot({ path, animations: "disabled" });
-    await testInfo.attach(`v0.8 ${name} · ${testInfo.project.name}`, { path, contentType: "image/png" });
+    await testInfo.attach(`v0.9 ${name} · ${testInfo.project.name}`, { path, contentType: "image/png" });
   }
   await auditApprovalTextZoom(page, testInfo, name);
 }
 
-test("v0.8 design approval captures Today, every Home tab, and global palette smoke views", async ({ page }, testInfo) => {
+test("v0.9 design approval captures Today, every Home tab, and global palette smoke views", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("approval-"), "Rendered only by the design approval project");
   const pageErrors = await mount(page, config, {
     ...approvalFootballStates("live"),
@@ -2432,9 +3139,9 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
   const card = page.locator("family-hub-card");
 
   await expect(card.locator(".today-hero")).toContainText("Good afternoon");
-  await expect(card.locator(".weather-pill")).toContainText("Partly cloudy");
+  await expect(card.locator(".hub-weather-pill")).toContainText("Partly cloudy");
   await expect(card.locator(".today-weather")).toContainText("Partly cloudy");
-  expect((await card.locator(".weather-pill,.today-weather").allTextContents()).join(" ")).not.toContain("Partlycloudy");
+  expect((await card.locator(".hub-weather-pill,.today-weather").allTextContents()).join(" ")).not.toContain("Partlycloudy");
   await expect(card.locator(".hero-metrics button[data-view='entry']")).toContainText("Quiet at home");
   await expect(card.locator(".hero-metrics button[data-view='entry']")).not.toContainText("All secure");
   await expectContrast(card, [
@@ -2453,7 +3160,7 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
   for (const floor of structuralFloorplanConfig.floorplan.floors) delete floor.vacuum_map_entity;
   await card.evaluate((element, familyConfig) => element.setConfig({ family_config: familyConfig }), structuralFloorplanConfig);
   await expect(card.locator('[data-current-view="today"]')).toBeVisible();
-  await card.locator('.nav-button[data-view="rooms"]').click();
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
   const homeSections = ["rooms", "lights", "heating", "covers", "cleaning"];
   for (const section of homeSections) {
     await card.locator(`[data-home-section="${section}"]`).click();
@@ -2477,9 +3184,9 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
       ).size, cardSelector);
       const viewportWidth = testInfo.project.use.viewport.width;
       const expectedColumns = section === "lights"
-        ? viewportWidth <= 1030 ? 2 : 5
+        ? 3
         : section === "heating"
-          ? viewportWidth <= 1279 ? 2 : 4
+          ? 2
           : viewportWidth <= 1030 ? 2 : 4;
       expect(columnCount, `${section} must use the balanced approval grid at ${viewportWidth}px`).toBe(expectedColumns);
     }
@@ -2487,6 +3194,7 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
   }
 
   for (const [view, name, selector] of [
+    ["energy", "energy-today", ".energy-view"],
     ["calendar", "calendar-controls", ".calendar-view"],
     ["family", "family-location-off", ".family-dashboard"],
     ["music", "music-five-room", ".media-player-panel"]
@@ -2499,9 +3207,14 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
     await card.evaluate((element, familyConfig) => element.setConfig({ family_config: familyConfig }), nextConfig);
     await expect(card.locator('[data-current-view="today"]')).toBeVisible();
     if (view === "music") await updateEntityStates(card, fiveRoomMusicStates());
-    await card.locator(`.nav-button[data-view="${view}"]`).click();
+    await card.locator(`.hub-nav-button[data-view="${view}"]`).click();
     await expect(card.locator(`[data-current-view="${view}"]`)).toBeVisible();
     await expect(card.locator(selector)).toBeVisible();
+    if (view === "energy") {
+      await expect(card.locator(".energy-meter")).toHaveCount(2);
+      await expect(card.locator(".energy-hero")).toContainText("today so far");
+      await expect(card.locator(".energy-truth-note")).toContainText("Smart-meter totals, not live power");
+    }
     if (view === "calendar") {
       await expect(card.locator("[data-calendar-nav]")).toHaveCount(3);
       await expect(card.locator("[data-calendar-source]")).toHaveCount(2);
@@ -2511,16 +3224,21 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
       await expect(card.locator("[data-calendar-range]")).toHaveText("24–30 August 2026");
     }
     if (view === "family") {
-      await expect(card.locator(".location-off-badge")).toHaveText("Location sharing off");
+      await expect(card.locator(".family-rhythm,.location-off-badge")).toHaveCount(0);
+      await expect(card.locator(".family-dashboard-heading")).toContainText("Jobs & rewards");
+      await expect(card.locator(".choreops-link")).toHaveAttribute("href", "/choreops");
       await expect(card.locator(".family-people-grid .family-person")).toHaveCount(2);
+      await expect(card.locator(".family-people-grid .family-person-heading h2")).toHaveText(["Today’s jobs", "Today’s jobs"]);
+      await expect(card.locator(".family-summary-grid")).toHaveCount(2);
+      await expect(card.locator(".family-summary-item")).toHaveCount(6);
       await expect(card.locator(".map-panel,.family-sidebar,[data-card-type='map']")).toHaveCount(0);
-      const truncatedRoutines = await card.locator(".family-people-grid .chore-row strong,.family-people-grid .chore-row small").evaluateAll((nodes) => {
+      const truncatedFamilyDetails = await card.locator(".family-people-grid .chore-row strong,.family-people-grid .chore-row small,.family-people-grid .family-summary-item strong,.family-people-grid .family-summary-item small").evaluateAll((nodes) => {
         return nodes
           .filter((node) => node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1)
           .map((node) => node.textContent.trim());
       });
-      expect(truncatedRoutines).toEqual([]);
-      const overwrappedRoutines = await card.locator(".family-people-grid .chore-row strong,.family-people-grid .chore-row small").evaluateAll((nodes) => {
+      expect(truncatedFamilyDetails).toEqual([]);
+      const overwrappedFamilyDetails = await card.locator(".family-people-grid .chore-row strong,.family-people-grid .chore-row small,.family-people-grid .family-summary-item strong,.family-people-grid .family-summary-item small").evaluateAll((nodes) => {
         return nodes
           .map((node) => {
             const range = document.createRange();
@@ -2530,7 +3248,7 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
           })
           .filter(({ lines }) => lines > 2);
       });
-      expect(overwrappedRoutines).toEqual([]);
+      expect(overwrappedFamilyDetails).toEqual([]);
       const internallyScrollablePeople = await card.locator(".family-people-grid .family-person").evaluateAll((people) => people
         .filter((person) => person.scrollHeight > person.clientHeight + 1 || person.scrollWidth > person.clientWidth + 1)
         .map((person) => ({
@@ -2543,7 +3261,10 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
         { foreground: ".chore-row small", background: ".chore-row", minimum: 4.5 },
         { foreground: ".family-facts span", background: ".family-facts span", minimum: 4.5 },
         { foreground: ".family-person-heading > span", background: ".family-person-heading > span", minimum: 4.5 },
-        { foreground: ".chore-row b", background: ".chore-row", minimum: 4.5 }
+        { foreground: ".chore-row b", background: ".chore-row", minimum: 4.5 },
+        { foreground: ".family-summary-item p", background: ".family-summary-item", minimum: 4.5 },
+        { foreground: ".family-summary-item small", background: ".family-summary-item", minimum: 4.5 },
+        { foreground: ".choreops-link", background: ".choreops-link", minimum: 4.5 }
       ]);
     }
     if (view === "music") {
@@ -2563,7 +3284,7 @@ test("v0.8 design approval captures Today, every Home tab, and global palette sm
   expect(pageErrors).toEqual([]);
 });
 
-test("v0.8 design approval captures the complete secure-camera lifecycle and protected confirmation", async ({ page }, testInfo) => {
+test("v0.9 design approval captures the complete secure-camera lifecycle and protected confirmation", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("approval-"), "Rendered only by the design approval project");
   test.setTimeout(120_000);
   const doorbellStopKey = "button.press:button.example_doorbell_stop_stream";
@@ -2584,10 +3305,10 @@ test("v0.8 design approval captures the complete secure-camera lifecycle and pro
   const showSecurityWithConfig = async (familyConfig) => {
     await card.evaluate((element, nextConfig) => element.setConfig({ family_config: nextConfig }), familyConfig);
     await expect(card.locator('[data-current-view="today"]')).toBeVisible();
-    await card.locator('.nav-button[data-view="entry"]').click();
+    await card.locator('.hub-nav-button[data-view="entry"]').click();
     await expect(card.locator('[data-current-view="entry"]')).toBeVisible();
   };
-  await card.locator('.nav-button[data-view="entry"]').click();
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
   await expect(card.locator(".security-stage-poster")).toBeVisible();
   await expectContrast(card, [
     { foreground: ".alarm-actions button.is-danger", background: ".alarm-actions button.is-danger", minimum: 4.5 }
@@ -2604,7 +3325,7 @@ test("v0.8 design approval captures the complete secure-camera lifecycle and pro
   await expect(readOnlyDoorbell.locator(".privacy-badge")).toHaveText("Stream off");
   await expect(readOnlyDoorbell.locator('button[data-camera-open="doorbell"]')).toHaveText("Stream off");
   await expect(readOnlyDoorbell.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
-  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Read only");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"] > b')).toHaveText("Read only");
   await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toBeDisabled();
   expect(await card.locator("[data-alarm-action],[data-secure-cover-action]").evaluateAll((buttons) => buttons.length === 4 && buttons.every((button) => button.disabled))).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
@@ -2622,7 +3343,7 @@ test("v0.8 design approval captures the complete secure-camera lifecycle and pro
   await expect(signalsOnlyDoor.locator(".security-signal")).toHaveCount(3);
   await expect(signalsOnlyDoor.locator('button[data-camera-open="doorbell"]')).toHaveText("Signals only");
   await expect(signalsOnlyDoor.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
-  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Signals only");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"] > b')).toHaveText("Signals only");
   await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toBeDisabled();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
   await captureApproval(page, testInfo, "security-signals-only", { securityLabels: true });
@@ -2636,7 +3357,7 @@ test("v0.8 design approval captures the complete secure-camera lifecycle and pro
   await expect(card.locator(".security-stage-poster")).toContainText("Camera not ready");
   await expect(card.locator(".security-stage-poster")).toContainText("Live view cannot start while the camera is in its current state.");
   await expect(card.locator(".security-stage-poster")).not.toHaveAttribute("role", "alert");
-  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Not ready");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"] > b')).toHaveText("Not ready");
   await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toBeDisabled();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
   await captureApproval(page, testInfo, "security-not-ready", { securityLabels: true });
@@ -2651,7 +3372,7 @@ test("v0.8 design approval captures the complete secure-camera lifecycle and pro
 
   await updateEntityState(card, state("camera.example_doorbell", "streaming"));
   await expect(card.locator('.camera-is-buffering[aria-busy="true"]')).toContainText("Loading video");
-  const doorbellPlayer = card.locator('[data-card-type="picture-entity"][data-entity="camera.example_doorbell"]');
+  const doorbellPlayer = card.locator('[data-card-type="picture-entity"][data-camera-view="live"][data-entity="camera.example_doorbell"]');
   await expect(doorbellPlayer).toBeVisible();
   await expect(doorbellPlayer).toHaveAttribute("aria-hidden", "true");
   await expect(doorbellPlayer).toHaveJSProperty("inert", true);
@@ -2715,7 +3436,7 @@ test("v0.8 design approval captures the complete secure-camera lifecycle and pro
   await expect(card.locator('button[aria-label="Retry live view"]')).toHaveCount(0);
   await expect(retryGarage.locator('button[data-camera-open="garage"]')).toHaveText("Unavailable");
   await expect(retryGarage.locator('button[data-camera-open="garage"]')).toBeDisabled();
-  await expect(card.locator('button[data-camera-stage-open="garage"]')).toHaveText("Unavailable");
+  await expect(card.locator('button[data-camera-stage-open="garage"] > b')).toHaveText("Unavailable");
   await expect(card.locator('button[data-camera-stage-open="garage"]')).toBeDisabled();
   await updateEntityState(card, state("camera.example_garage", "idle"));
 
@@ -2729,28 +3450,33 @@ test("v0.8 design approval captures the complete secure-camera lifecycle and pro
   await expect(card.locator(".alarm-panel")).toContainText("Triggered");
   await expect(card.locator(".security-camera").first()).toContainText("Camera unavailable");
   await expect(card.locator('.security-camera').first().locator('button[data-camera-open="doorbell"]')).toHaveText("Unavailable");
-  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Unavailable");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"] > b')).toHaveText("Unavailable");
   await captureApproval(page, testInfo, "security-alert-unavailable", { securityLabels: true });
   expect(pageErrors).toEqual([]);
 });
 
-test("v0.8 design approval captures live, cached, and stale football health", async ({ page }, testInfo) => {
+test("v0.9 design approval captures live, cached, and stale football health", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("approval-"), "Rendered only by the design approval project");
   expect(Object.values(APPROVAL_FOOTBALL_CHECKED_AT).every((checkedAt) => Date.parse(checkedAt) <= Date.parse(APPROVAL_NOW)), "football approval checks must never be in the future").toBe(true);
   const pageErrors = await mount(page, config, approvalFootballStates("live"));
   const card = page.locator("family-hub-card");
-  await card.locator('.nav-button[data-view="football"]').click();
-  await expect(card.locator(".football-hero.is-live")).toBeVisible();
-  await expect(card.locator(".topbar-time")).toHaveText("16:08");
+  await card.locator('.hub-nav-button[data-view="football"]').click();
+  await expect(card.locator(".football-favourites-stage.is-live")).toBeVisible();
+  await expect(card.locator(".favourite-hero-card")).toHaveCount(2);
+  expect(await card.locator(".favourite-hero-card").evaluateAll((items) => items.map((item) => [item.dataset.favouriteCode, item.dataset.fixtureId]))).toEqual([
+    ["TOT", "101"],
+    ["AVL", "102"]
+  ]);
+  await expect(card.locator(".hub-topbar-time")).toHaveText("16:08");
   await expect(card.locator(".football-freshness.is-live strong")).toHaveText("Scores up to date");
   await expect(card.locator(".football-freshness.is-live small")).toHaveText("Checking every 3 minutes. Checked 16:07.");
-  await expect(card.locator('.football-hero img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
-  await expect(card.locator('.football-hero img[src="https://resources.premierleague.com/premierleague/badges/70/t7.png"]')).toBeVisible();
+  await expect(card.locator('.favourite-hero-card[data-favourite-code="TOT"] img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
+  await expect(card.locator('.favourite-hero-card[data-favourite-code="AVL"] img[src="https://resources.premierleague.com/premierleague/badges/70/t7.png"]')).toBeVisible();
   await expect(card.locator('.fixture .team-mark img[src$="/t90.png"]')).toBeHidden();
   await expect(card.locator('.fixture .team-mark').filter({ hasText: "BUR" }).locator("strong")).toHaveAttribute("aria-hidden", "false");
   await expectContrast(card, [
     { foreground: ".fixture .team", background: ".fixture", minimum: 4.5 },
-    { foreground: ".spotlight-club small", background: ".spotlight-panel", minimum: 4.5 }
+    { foreground: ".favourite-standing small", background: ".favourite-standing", minimum: 4.5 }
   ]);
   await captureApproval(page, testInfo, "football-live");
 

@@ -4,12 +4,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { localhostHostValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import * as z from "zod/v4";
+import { ClassroomIntegrationStore } from "./classroom-integration-store.mjs";
 import { startFootballPolling } from "./football-provider.mjs";
 import { DashboardStore } from "./manager-store.mjs";
 import { getSanitisedHomeAssistantInventory } from "./ha-client.mjs";
 
 const CONFIG_SCHEMA = z.record(z.string(), z.unknown());
-const APP_VERSION = process.env.APP_VERSION || "0.8.0";
+const APP_VERSION = process.env.APP_VERSION || "0.9.0";
 const MCP_JSON_BODY_LIMIT_BYTES = 1_500_000;
 const FLOORPLAN_ASSET_SCHEMA = z.object({
   filename: z.enum(["ground-floor.svg", "first-floor.svg"]),
@@ -35,6 +36,7 @@ function errorResult(error) {
 
 export function createFamilyDashboardMcpServer({
   store = new DashboardStore(),
+  classroomStore = new ClassroomIntegrationStore(),
   inventory = getSanitisedHomeAssistantInventory,
   reload = async () => ({
     performed: false,
@@ -84,10 +86,10 @@ export function createFamilyDashboardMcpServer({
     async () => ({
       phase: "authorization_proof",
       account_model: "one child-owned Google authorization per configured Classroom student",
+      account_binding: "forced Google account chooser plus a non-reversible config-entry unique ID derived from the stable submission owner; duplicate and reauth-mismatched accounts are rejected",
       required_scopes: [
         "https://www.googleapis.com/auth/classroom.courses.readonly",
-        "https://www.googleapis.com/auth/classroom.coursework.me.readonly",
-        "https://www.googleapis.com/auth/classroom.student-submissions.me.readonly"
+        "https://www.googleapis.com/auth/classroom.coursework.me.readonly"
       ],
       dashboard_access: "read_only",
       credential_rules: [
@@ -97,12 +99,59 @@ export function createFamilyDashboardMcpServer({
       ],
       output_contract: {
         state: "number of open assignments",
+        open_states: ["NEW", "CREATED", "RECLAIMED_BY_STUDENT"],
+        complete_states: ["TURNED_IN", "RETURNED", "STUDENT_EDITED_AFTER_TURN_IN"],
+        poll_interval_minutes: 15,
+        maximum_assignment_attributes: 20,
         attributes: {
-          assignments: [{ title: "string", course: "string", due_at: "ISO-8601 timestamp or null", alternate_link: "Google-hosted URL" }]
+          assignments: [{ title: "string", course: "string", due_at: "YYYY-MM-DD, ISO-8601 timestamp, or null", alternate_link: "https://classroom.google.com/ URL or null" }],
+          assignments_truncated: "boolean",
+          last_successful_update: "ISO-8601 timestamp",
+          data_stale: "boolean",
+          last_error: "bounded string or null"
         }
       }
     })
   );
+  readTool(
+    "get_classroom_integration_status",
+    "Return only the fixed bundled and installed Family Dashboard Classroom integration hashes, restart requirement and rollback snapshot metadata. Never returns OAuth credentials or tokens.",
+    () => classroomStore.getStatus()
+  );
+
+  server.registerTool("install_classroom_integration", {
+    description: "Install only the fixed, bundled Family Dashboard Classroom custom integration. Requires confirm=true, the exact bundle hash and the exact current installed hash; creates a rollback snapshot and never creates OAuth entries or restarts Home Assistant.",
+    inputSchema: {
+      expected_bundle_hash: z.string().regex(/^[a-f0-9]{64}$/),
+      expected_active_hash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+      confirm: z.boolean()
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }
+  }, async ({ expected_bundle_hash: expectedBundleHash, expected_active_hash: expectedActiveHash, confirm }) => {
+    try {
+      return result(await classroomStore.install({ expectedBundleHash, expectedActiveHash, confirm }));
+    } catch (error) {
+      await store.recordError("install_classroom_integration", error);
+      return errorResult(error);
+    }
+  });
+
+  server.registerTool("rollback_classroom_integration", {
+    description: "Restore one known fixed-file Classroom integration snapshot. Requires confirm=true and the exact active integration hash. It never changes Home Assistant OAuth config entries or tokens and does not restart Home Assistant.",
+    inputSchema: {
+      snapshot_id: z.string().regex(/^\d{8}T\d{6}Z-[a-f0-9]{12}$/),
+      expected_active_hash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+      confirm: z.boolean()
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }
+  }, async ({ snapshot_id: snapshotId, expected_active_hash: expectedActiveHash, confirm }) => {
+    try {
+      return result(await classroomStore.rollback({ snapshotId, expectedActiveHash, confirm }));
+    } catch (error) {
+      await store.recordError("rollback_classroom_integration", error);
+      return errorResult(error);
+    }
+  });
 
   server.registerTool("validate_household_config", {
     description: "Validate and compile a proposed non-secret household configuration without changing live files. The resulting config hash is required for deployment confirmation.",

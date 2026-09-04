@@ -1,13 +1,13 @@
 {
   "name": "@family-dashboard/manager",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "check": "npm test && npm run generate:example",
+    "check": "npm test && npm run test:classroom && npm run generate:example",
     "compile": "node src/cli.mjs",
     "compile:example": "node src/cli.mjs config/example.json generated/example-dashboard.yaml",
     "preview:example": "node preview/render-preview.mjs config/example.json preview/family-dashboard-preview.svg preview/family-dashboard-rooms-preview.svg",
@@ -15,7 +15,8 @@
     "test:approval": "playwright test --config=playwright.approval.config.mjs && node scripts/check-approval-screens.mjs",
     "test:browser": "playwright test",
     "start": "node src/server.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "test:classroom": "python3 -m compileall -q integrations/family_dashboard_classroom && python3 -m unittest -v integrations/test_classroom_provider.py"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

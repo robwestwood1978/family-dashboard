@@ -2,9 +2,9 @@
 
 Family Dashboard is a Home Assistant-native family display for calendars, room controls, music, chores, football and school information. It is designed for a landscape tablet and keeps household configuration separate from the public installation code.
 
-![Generic 1112 by 834 Today view preview](./family_dashboard_manager/app/preview/family-dashboard-preview.svg)
-
-![Generic 1112 by 834 interactive Rooms preview](./family_dashboard_manager/app/preview/family-dashboard-rooms-preview.svg)
+The release workflow renders the current v0.9 component at both supported iPad
+sizes. The older synthetic SVGs in `app/preview` are retained only as deterministic
+compiler fixtures; they are not current design previews.
 
 The repository currently contains one experimental Home Assistant app:
 
@@ -13,7 +13,7 @@ The repository currently contains one experimental Home Assistant app:
 The manager validates a non-secret household configuration, compiles a dedicated Home Assistant YAML panel, packages its first-party Family Hub card, creates rollback snapshots, and exposes a deliberately narrow MCP tool surface for managed deployments.
 
 - Supports `aarch64` and `amd64` Home Assistant OS installations.
-- Writes only `/config/family-dashboard`, a fixed frontend allow-list below `/config/www/family-dashboard`, and its own `/data` directory.
+- Dashboard deployment writes only `/config/family-dashboard`, a fixed frontend allow-list below `/config/www/family-dashboard`, and the app's own `/data` directory. A separate confirmed Classroom installer may manage only `/config/custom_components/family_dashboard_classroom` through a hash-verified staged replacement with snapshot recovery.
 - Uses Home Assistant's internal API only for sanitised inventory and bounded Premier League state sensors.
 - Does not expose a host port, general shell, arbitrary filesystem access or arbitrary service calls.
 - Can run OpenAI Secure MCP Tunnel as an optional, disabled-by-default second service in the same app container.
@@ -28,7 +28,7 @@ This public repository contains generic source, schemas, tests and release packa
 
 HACS remains the installer for the Daylight/legacy Skylight calendar, Mediocre Multi Media Player Card and kiosk-mode dependencies. The Family Hub shell, floorplan engine, Home controls, family summaries, Security boundary and football presentation are bundled with the manager itself; private household artwork stays outside this repository.
 
-Version 0.7 turns the accepted schema-v6 tablet into a controlled live dashboard. Lights, scenes, heating, blinds, cleaning and configured Sonos/Music Assistant players can act only on their validated entity allow-lists; alarm and garage changes still require a second confirmation. Calendar event management, Google Classroom, camera presentation cards and the vacuum map remain read-only, and no child or bedroom camera can enter the Security surface.
+Version 0.9 turns the accepted schema-v6 tablet into a polished family operating surface. It keeps live controls on validated entity allow-lists, adds honest electricity/gas summaries, treats Tottenham and Aston Villa equally, uses ChoreOps as the source of truth for jobs and rewards, and opens exterior cameras through a still-first native Home Assistant live view. Alarm and garage changes still require a fresh second confirmation; Calendar and Classroom remain read-only, and no child or bedroom camera can enter Security.
 
 ## Development
 

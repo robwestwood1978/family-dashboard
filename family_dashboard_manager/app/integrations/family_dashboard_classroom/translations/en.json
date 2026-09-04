@@ -1,0 +1,35 @@
+{
+  "title": "Family Dashboard Classroom",
+  "config": {
+    "flow_title": "Family Dashboard Classroom",
+    "step": {
+      "user": {
+        "title": "Connect Google Classroom",
+        "description": "Enter the child's dashboard name. The child will then sign in to their own Google account and approve two read-only Classroom permissions.",
+        "data": {
+          "child_name": "Child name"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect Google Classroom",
+        "description": "Google no longer accepts this child's Classroom authorization. Continue to reconnect the same child's account."
+      }
+    },
+    "error": {
+      "invalid_child_name": "Enter a child name between 1 and 64 characters."
+    },
+    "abort": {
+      "already_configured": "This child name or Google Classroom account is already connected.",
+      "cannot_connect": "Google Classroom could not be checked. Try again in a moment.",
+      "identity_unavailable": "Google Classroom cannot confirm this account until the school has assigned it some coursework. Try again after coursework appears.",
+      "invalid_auth": "Google did not provide a valid Classroom authorization.",
+      "invalid_child_name": "The child name was not retained. Start the setup again.",
+      "missing_scopes": "Google did not grant exactly the two required read-only Classroom permissions.",
+      "reauth_account_mismatch": "The selected Google account does not match the account originally connected for this child.",
+      "reauth_successful": "Google Classroom was reconnected successfully."
+    }
+  },
+  "application_credentials": {
+    "description": "Create an OAuth client in the [Google Cloud console]({console_url}), enable the Google Classroom API, and add Home Assistant's redirect URI to that client."
+  }
+}

@@ -47,13 +47,23 @@ views:
               "rolling_days": 7
             },
             "chores": {
+              "dashboard_path": "/choreops",
               "profile": "choreops-status",
               "users": [
                 {
+                  "achievement_progress_entities": [
+                    "sensor.child_one_choreops_achievement_progress_stayed_in_bed"
+                  ],
+                  "badge_progress_entities": [
+                    "sensor.child_one_choreops_badge_progress_starlight"
+                  ],
                   "chores_entity": "sensor.child_one_choreops_chores",
                   "dashboard_helper_entity": "sensor.child_one_choreops_ui_dashboard_helper",
                   "person_id": "child_one",
                   "points_entity": "sensor.child_one_choreops_points",
+                  "reward_status_entities": [
+                    "sensor.child_one_choreops_reward_status_weekend_movie"
+                  ],
                   "status_entities": [
                     "sensor.child_one_choreops_chore_status_brush_teeth",
                     "sensor.child_one_choreops_chore_status_get_dressed",
@@ -61,10 +71,19 @@ views:
                   ]
                 },
                 {
+                  "achievement_progress_entities": [
+                    "sensor.child_two_choreops_achievement_progress_stayed_in_bed"
+                  ],
+                  "badge_progress_entities": [
+                    "sensor.child_two_choreops_badge_progress_starlight"
+                  ],
                   "chores_entity": "sensor.child_two_choreops_chores",
                   "dashboard_helper_entity": "sensor.child_two_choreops_ui_dashboard_helper",
                   "person_id": "child_two",
                   "points_entity": "sensor.child_two_choreops_points",
+                  "reward_status_entities": [
+                    "sensor.child_two_choreops_reward_status_weekend_movie"
+                  ],
                   "status_entities": [
                     "sensor.child_two_choreops_chore_status_brush_teeth",
                     "sensor.child_two_choreops_chore_status_get_dressed",
@@ -89,6 +108,21 @@ views:
               "read_only": false,
               "target_height": 834,
               "target_width": 1112
+            },
+            "energy": {
+              "electricity": {
+                "cost_today_entity": "sensor.example_electricity_cost_today",
+                "rate_entity": "sensor.example_electricity_rate",
+                "standing_charge_entity": "sensor.example_electricity_standing_charge",
+                "usage_today_entity": "sensor.example_electricity_usage_today"
+              },
+              "gas": {
+                "cost_today_entity": "sensor.example_gas_cost_today",
+                "rate_entity": "sensor.example_gas_rate",
+                "standing_charge_entity": "sensor.example_gas_standing_charge",
+                "usage_today_entity": "sensor.example_gas_usage_today"
+              },
+              "stale_after_minutes": 180
             },
             "entry": {
               "alarm_entity": "alarm_control_panel.example_home",
@@ -126,10 +160,11 @@ views:
               "calendar": true,
               "chores": true,
               "cleaning": true,
+              "energy": true,
               "entry": true,
               "family": true,
               "football": true,
-              "lists": true,
+              "lists": false,
               "location_map": true,
               "music": true,
               "rooms": true,
@@ -287,6 +322,7 @@ views:
               "table_entity": "sensor.family_dashboard_premier_league_table"
             },
             "home": {
+              "default_room": "living_room",
               "default_section": "rooms"
             },
             "lists": {
@@ -448,11 +484,11 @@ views:
               ],
               "classroom_students": [
                 {
-                  "assignments_entity": "sensor.family_dashboard_classroom_child_one",
+                  "assignments_entity": "sensor.child_one_classroom_open_assignments",
                   "person_id": "child_one"
                 },
                 {
-                  "assignments_entity": "sensor.family_dashboard_classroom_child_two",
+                  "assignments_entity": "sensor.child_two_classroom_open_assignments",
                   "person_id": "child_two"
                 }
               ],

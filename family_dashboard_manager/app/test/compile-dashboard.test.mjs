@@ -23,7 +23,7 @@ test("compiles one first-party panel card with internal product navigation", () 
   assert.equal((yaml.match(/type: custom:family-hub-card/g) || []).length, 1);
   assert.match(yaml, /path: hub/);
   assert.doesNotMatch(yaml, /path: today|path: home|path: lighting|subview:/);
-  assert.deepEqual(getEnabledViewPaths(example), ["today", "calendar", "rooms", "family", "entry", "music", "football"]);
+  assert.deepEqual(getEnabledViewPaths(example), ["today", "calendar", "rooms", "family", "entry", "music", "energy", "football"]);
 });
 
 test("embeds the complete schema-v6 house, family, school, cleaning and Security contract", () => {
@@ -43,7 +43,14 @@ test("embeds the complete schema-v6 house, family, school, cleaning and Security
   assert.ok(config.floorplan.floors.every((floor) => floor.room_hotspots.length > 0));
   assert.deepEqual(config.football.spotlight_team_codes, ["TOT", "AVL"]);
   assert.equal(config.school.classroom_students.length, 2);
+  assert.equal(config.chores.dashboard_path, "/choreops");
+  assert.equal(config.chores.users[0].reward_status_entities.length, 1);
+  assert.equal(config.chores.users[0].badge_progress_entities.length, 1);
+  assert.equal(config.chores.users[0].achievement_progress_entities.length, 1);
   assert.equal(config.cleaning.vacuum_entity, "vacuum.example_robovac");
+  assert.equal(config.home.default_room, "living_room");
+  assert.equal(config.energy.electricity.usage_today_entity, "sensor.example_electricity_usage_today");
+  assert.equal(config.energy.gas.usage_today_entity, "sensor.example_gas_usage_today");
   assert.equal(config.entry.alarm_entity, "alarm_control_panel.example_home");
   assert.equal(config.entry.cameras.length, 2);
   assert.deepEqual(config.location.entities, [
@@ -69,7 +76,7 @@ test("keeps Security inside the first-party confirmation boundary", () => {
 test("puts an enabled non-Today default first in the card's navigation contract", () => {
   const config = structuredClone(example);
   config.display.default_view = "rooms";
-  assert.deepEqual(getEnabledViewPaths(config), ["rooms", "today", "calendar", "family", "entry", "music", "football"]);
+  assert.deepEqual(getEnabledViewPaths(config), ["rooms", "today", "calendar", "family", "entry", "music", "energy", "football"]);
   assert.equal(embeddedConfig(compileDashboard(config)).display.default_view, "rooms");
 });
 
@@ -77,6 +84,7 @@ test("omits disabled internal views while always retaining Today", () => {
   const config = structuredClone(example);
   config.features.calendar = false;
   config.features.music = false;
+  config.features.energy = false;
   config.features.football = false;
   config.features.entry = false;
   assert.deepEqual(getEnabledViewPaths(config), ["today", "rooms", "family"]);
