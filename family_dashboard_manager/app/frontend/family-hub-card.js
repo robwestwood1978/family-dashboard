@@ -1599,6 +1599,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._activeCameraId = null;
     this._cameraSession = null;
     this._cameraOperationToken = 0;
+    this._cameraConfigGeneration = 0;
     this._cameraStartTimer = null;
     this._cameraFrameTimer = null;
     this._cameraSlowTimer = null;
@@ -1606,6 +1607,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._cameraRecoveryPromise = null;
     this._cameraBlockedIds = new Map();
     this._pendingCameraStarts = new Map();
+    this._cameraStopWitnesses = new Map();
     this._cameraBlockTimer = null;
     this._freshnessTimer = null;
     this._cameraBlockRetryMs = CAMERA_START_TIMEOUT_MS;
@@ -1684,6 +1686,9 @@ export class FamilyHubCard extends HTMLElementBase {
     this._childMountGeneration += 1;
     this._invalidateChildHass();
     this._closeActiveCamera({ render: false, invalidate: true });
+    this._cameraConfigGeneration = Number.isInteger(this._cameraConfigGeneration)
+      ? this._cameraConfigGeneration + 1
+      : 1;
     this._config = config;
     this._view = config.display.default_view || "today";
     this._homeSection = config.home.default_section || "rooms";
@@ -1697,16 +1702,26 @@ export class FamilyHubCard extends HTMLElementBase {
     this._securityCameraId = config.entry?.primary_camera_id || config.entry?.cameras?.[0]?.id || null;
     this._entityIds = relevantEntityIds(config);
     this._controlPolicy = buildControlPolicy(config);
+    const reboundWitnesses = new Map();
+    for (const [witnessKey, witness] of this._cameraStopWitnesses) {
+      const entity = witness.entity || witnessKey;
+      const currentCamera = [...this._controlPolicy.cameras.entries()]
+        .find(([, candidate]) => candidate.entity === entity);
+      if (!config.display.read_only && currentCamera) {
+        witness.cameraId = currentCamera[0];
+        witness.configGeneration = this._cameraConfigGeneration;
+      }
+      reboundWitnesses.set(entity, witness);
+    }
+    this._cameraStopWitnesses = reboundWitnesses;
     this._signature = "";
     this._calendarEvents = [];
     this._calendarRequestKey = "";
     this._calendarError = null;
     this._activeCameraId = null;
-    this._cameraError = null;
-    for (const [cameraId, block] of this._cameraBlockedIds) {
-      if (!block.pendingStart) this._cameraBlockedIds.delete(cameraId);
-    }
+    if (this._cameraBlockedIds.size === 0) this._cameraError = null;
     this._clearCameraBlockTimer();
+    this._armCameraBlockRetryNotice();
     this._pendingConfirmation = null;
     this._confirmationReturnFocus = null;
     this._childCards.clear();
@@ -4169,7 +4184,7 @@ export class FamilyHubCard extends HTMLElementBase {
     let camera = this._controlPolicy?.cameras?.get(cameraId);
     let route = cameraControlRoute(camera, this._hass?.states || {});
     let phase = cameraStreamPhase(this._hass?.states?.[camera?.entity]);
-    let retryBlockedCamera = this._canRetryBlockedCamera(cameraId);
+    let retryBlockedCamera = this._retryableCameraBlock(cameraId);
     if (!route || this._view !== "entry" || this._cameraBlockedIds.size > 0 && !retryBlockedCamera) return;
     if (this._config?.display?.read_only && phase !== "streaming") return;
     if (!["idle", "preparing", "streaming"].includes(phase)) {
@@ -4178,7 +4193,7 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     if (retryBlockedCamera) {
-      this._cameraBlockedIds.delete(cameraId);
+      this._cameraBlockedIds.delete(retryBlockedCamera.key);
       this._armCameraBlockRetryNotice();
     }
 
@@ -4190,9 +4205,11 @@ export class FamilyHubCard extends HTMLElementBase {
     this._cameraError = null;
 
     if (this._cameraSession) {
-      const stopped = await this._stopCameraSession(this._cameraSession, token, { render: true });
+      const previousSession = this._cameraSession;
+      const stopped = await this._stopCameraSession(previousSession, token, { render: true });
       if (token !== this._cameraOperationToken) return;
-      if (!stopped) {
+      const previousStillIdle = stopped && this._confirmStoppedCameraState(previousSession);
+      if (!stopped || !previousStillIdle) {
         this._cameraError = { id: cameraId, message: "The previous live view could not be stopped safely. Please try again." };
         this._scheduleRender(true);
         return;
@@ -4203,7 +4220,7 @@ export class FamilyHubCard extends HTMLElementBase {
     camera = this._controlPolicy?.cameras?.get(cameraId);
     route = cameraControlRoute(camera, this._hass?.states || {});
     phase = cameraStreamPhase(this._hass?.states?.[camera?.entity]);
-    retryBlockedCamera = this._canRetryBlockedCamera(cameraId);
+    retryBlockedCamera = this._retryableCameraBlock(cameraId);
     if (!route || this._view !== "entry" || this._cameraBlockedIds.size > 0 && !retryBlockedCamera) return;
     if (this._config?.display?.read_only && phase !== "streaming") return;
     if (!["idle", "preparing", "streaming"].includes(phase)) {
@@ -4212,7 +4229,7 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     if (retryBlockedCamera) {
-      this._cameraBlockedIds.delete(cameraId);
+      this._cameraBlockedIds.delete(retryBlockedCamera.key);
       this._armCameraBlockRetryNotice();
     }
 
@@ -4223,6 +4240,7 @@ export class FamilyHubCard extends HTMLElementBase {
       token,
       route,
       camera: { ...camera },
+      configGeneration: this._cameraConfigGeneration,
       writable: !this._config?.display?.read_only,
       startIssued: false,
       startPromise: null,
@@ -4243,6 +4261,9 @@ export class FamilyHubCard extends HTMLElementBase {
     this._scheduleRender(true);
     if (phase === "preparing") return;
 
+    // Consume only the passive witness for this physical camera, at the last
+    // synchronous boundary before deliberately issuing its next Start.
+    this._cameraStopWitnesses?.delete(camera.entity);
     session.startIssued = true;
     session.startPromise = this._callCameraCommand(
       cameraId,
@@ -4328,27 +4349,88 @@ export class FamilyHubCard extends HTMLElementBase {
   _reconcileCameraSession(states) {
     const session = this._cameraSession;
     let blocksChanged = false;
-    for (const [cameraId, block] of this._cameraBlockedIds) {
-      const state = states[block.entity];
+    for (const [witnessEntity, witness] of this._cameraStopWitnesses || []) {
+      const entity = witness.entity || witnessEntity;
+      const cameraId = witness.cameraId || witness.id || witnessEntity;
+      const state = states[entity];
+      const phase = cameraStreamPhase(state);
+      if (phase === "idle") {
+        witness.idleState = state;
+        continue;
+      }
+      if (!["preparing", "streaming"].includes(phase)) continue;
+      this._cameraStopWitnesses.delete(witnessEntity);
+      if (session?.camera?.entity === entity && session.writable && session.startIssued) continue;
+      this._recordCameraBlock(
+        cameraId,
+        entity,
+        state,
+        witness.recoveryMessage,
+        witness.configGeneration
+      );
+      blocksChanged = true;
+      const message = "A previously closed camera became active again. Live views remain locked until it is idle.";
+      this._cameraError = { id: cameraId, entity, message };
+      if (session && session.phase !== "stopping") {
+        this._closeActiveCamera();
+      }
+    }
+    for (const [blockedEntity, block] of this._cameraBlockedIds) {
+      const entity = block.entity || blockedEntity;
+      const cameraId = block.cameraId || block.id || blockedEntity;
+      const state = states[entity];
       if (block.pendingStart) {
-        const tombstone = this._pendingCameraStarts.get(cameraId);
+        const tombstone = this._pendingCameraStarts.get(entity);
         const blockedPhase = cameraStreamPhase(state);
         if (tombstone
           && tombstone.settled
           && tombstone.stopIssued
+          && !tombstone.stopping
           && blockedPhase === "idle"
           && state !== tombstone.lastStopState) {
-          this._pendingCameraStarts.delete(cameraId);
-          this._cameraBlockedIds.delete(cameraId);
-          if (this._cameraError?.id === cameraId) this._cameraError = null;
+          this._pendingCameraStarts.delete(entity);
+          this._cameraBlockedIds.delete(blockedEntity);
+          const witnessed = this._recordCameraStopWitness(
+            cameraId,
+            tombstone.camera.entity,
+            state,
+            tombstone.recoveryMessage,
+            tombstone.configGeneration
+          );
+          if (this._cameraError?.id === cameraId
+            && (!this._cameraError.entity || this._cameraError.entity === entity)) {
+            this._cameraError = witnessed && tombstone.recoveryMessage
+              ? { id: cameraId, entity, message: tombstone.recoveryMessage }
+              : null;
+          }
           blocksChanged = true;
         } else if (tombstone && ["preparing", "streaming"].includes(blockedPhase)) {
-          void this._finalizePendingCameraStart(cameraId, tombstone);
+          if (tombstone.stopping) {
+            if (!tombstone.activeRetryUsed
+              && state !== tombstone.lastStopState) tombstone.rerunAfterActiveState = true;
+          } else if (state !== tombstone.lastStopState
+            && (!tombstone.stopIssued || !tombstone.activeRetryUsed)) {
+            if (tombstone.stopIssued) tombstone.activeRetryUsed = true;
+            void this._finalizePendingCameraStart(entity, tombstone);
+          }
         }
         continue;
       }
       if (cameraStreamPhase(state) === "idle" && state !== block.baseline) {
-        this._cameraBlockedIds.delete(cameraId);
+        this._cameraBlockedIds.delete(blockedEntity);
+        const witnessed = this._recordCameraStopWitness(
+          cameraId,
+          entity,
+          state,
+          block.recoveryMessage,
+          block.configGeneration
+        );
+        if (this._cameraError?.id === cameraId
+          && (!this._cameraError.entity || this._cameraError.entity === entity)) {
+          this._cameraError = witnessed && block.recoveryMessage
+            ? { id: cameraId, entity, message: block.recoveryMessage }
+            : null;
+        }
         blocksChanged = true;
       }
     }
@@ -4384,45 +4466,131 @@ export class FamilyHubCard extends HTMLElementBase {
     this._cameraStartTimer = null;
   }
 
-  _recordCameraBlock(cameraId, entity, baseline) {
-    if (this._cameraBlockedIds.get(cameraId)?.pendingStart) return;
-    this._cameraBlockedIds.set(cameraId, {
+  _recordCameraBlock(
+    cameraId,
+    entity,
+    baseline,
+    recoveryMessage = null,
+    configGeneration = this._cameraConfigGeneration
+  ) {
+    if (!cameraId || !entity) return null;
+    const existing = this._cameraBlockedIds.get(entity);
+    if (existing?.pendingStart) return entity;
+    this._cameraBlockedIds.set(entity, {
+      cameraId,
       entity,
       baseline,
       pendingStart: false,
-      retryAt: Date.now() + this._cameraBlockRetryMs
+      activeLatched: ["preparing", "streaming"].includes(cameraStreamPhase(baseline)),
+      retryAt: Date.now() + this._cameraBlockRetryMs,
+      recoveryMessage,
+      configGeneration: Number.isInteger(configGeneration) ? configGeneration : 0
     });
     this._armCameraBlockRetryNotice();
+    return entity;
+  }
+
+  _recordCameraStopWitness(
+    cameraId,
+    entity,
+    idleState,
+    recoveryMessage = null,
+    configGeneration = this._cameraConfigGeneration
+  ) {
+    if (!cameraId || !entity || cameraStreamPhase(idleState) !== "idle") return false;
+    const currentGeneration = Number.isInteger(this._cameraConfigGeneration)
+      ? this._cameraConfigGeneration
+      : 0;
+    if (this._config === null) return false;
+    const currentCamera = [...(this._controlPolicy?.cameras?.entries?.() || [])]
+      .find(([, candidate]) => candidate.entity === entity);
+    if (this._config !== undefined && !this._config.display?.read_only && currentCamera) {
+      cameraId = currentCamera[0];
+      configGeneration = currentGeneration;
+    }
+    if (!(this._cameraStopWitnesses instanceof Map)) this._cameraStopWitnesses = new Map();
+    this._cameraStopWitnesses.set(entity, {
+      cameraId,
+      entity,
+      idleState,
+      recoveryMessage,
+      configGeneration: Number.isInteger(configGeneration) ? configGeneration : currentGeneration
+    });
+    return true;
+  }
+
+  _confirmStoppedCameraState(session, recoveryMessage = null) {
+    if (!session?.writable || !session.route?.stop) return true;
+    const camera = session?.camera || this._controlPolicy?.cameras?.get(session?.id);
+    if (!session?.id || !camera?.entity) return false;
+    const state = this._hass?.states?.[camera.entity];
+    if (cameraStreamPhase(state) === "idle") {
+      return this._recordCameraStopWitness(
+        session.id,
+        camera.entity,
+        state,
+        recoveryMessage,
+        session.configGeneration
+      );
+    }
+    this._cameraStopWitnesses?.delete(camera.entity);
+    this._recordCameraBlock(
+      session.id,
+      camera.entity,
+      state,
+      recoveryMessage,
+      session.configGeneration
+    );
+    return false;
+  }
+
+  _retryableCameraBlock(cameraId, now = Date.now()) {
+    const camera = this._controlPolicy?.cameras?.get(cameraId);
+    const entry = camera?.entity ? [camera.entity, this._cameraBlockedIds.get(camera.entity)] : null;
+    const block = entry?.[1];
+    if (!block
+      || block.pendingStart
+      || this._cameraBlockedIds.size !== 1
+      || now < block.retryAt
+      || this._config?.display?.read_only) return null;
+    return cameraStreamPhase(this._hass?.states?.[camera.entity]) === "idle"
+      ? { key: entry[0], block }
+      : null;
   }
 
   _canRetryBlockedCamera(cameraId, now = Date.now()) {
-    const block = this._cameraBlockedIds.get(cameraId);
-    if (!block || block.pendingStart || this._cameraBlockedIds.size !== 1 || now < block.retryAt) return false;
-    return cameraStreamPhase(this._hass?.states?.[block.entity]) === "idle";
+    return Boolean(this._retryableCameraBlock(cameraId, now));
   }
 
-  _registerPendingCameraStart(session, camera, baseline) {
-    if (!session?.startRawPromise || this._pendingCameraStarts.has(session.id)) {
-      return this._pendingCameraStarts.get(session?.id) || null;
+  _registerPendingCameraStart(session, camera, baseline, recoveryMessage = null) {
+    if (!session?.startRawPromise || !camera?.entity || this._pendingCameraStarts.has(camera.entity)) {
+      return this._pendingCameraStarts.get(camera?.entity) || null;
     }
     const tombstone = {
-      id: session.id,
+      cameraId: session.id,
       raw: session.startRawPromise,
       camera: { ...camera },
+      configGeneration: session.configGeneration,
       stopCommand: { ...session.route.stop },
       baseline,
       settled: false,
       stopping: false,
       rerunAfterStop: false,
+      rerunAfterActiveState: false,
+      activeRetryUsed: false,
       stopBeganSettled: null,
       stopIssued: false,
-      lastStopState: null
+      lastStopState: null,
+      recoveryMessage
     };
-    this._pendingCameraStarts.set(session.id, tombstone);
-    this._cameraBlockedIds.set(session.id, {
+    this._pendingCameraStarts.set(camera.entity, tombstone);
+    this._cameraBlockedIds.set(camera.entity, {
+      cameraId: session.id,
       entity: camera.entity,
       baseline,
       pendingStart: true,
+      activeLatched: ["preparing", "streaming"].includes(cameraStreamPhase(baseline)),
+      configGeneration: session.configGeneration,
       retryAt: Infinity
     });
     const settle = () => {
@@ -4431,15 +4599,15 @@ export class FamilyHubCard extends HTMLElementBase {
         if (tombstone.stopBeganSettled === false) tombstone.rerunAfterStop = true;
         return;
       }
-      void this._finalizePendingCameraStart(session.id, tombstone);
+      void this._finalizePendingCameraStart(camera.entity, tombstone);
     };
     Promise.resolve(tombstone.raw).then(settle, settle);
     return tombstone;
   }
 
-  async _finalizePendingCameraStart(cameraId, tombstone) {
+  async _finalizePendingCameraStart(cameraEntity, tombstone) {
     if (!tombstone
-      || this._pendingCameraStarts.get(cameraId) !== tombstone) return false;
+      || this._pendingCameraStarts.get(cameraEntity) !== tombstone) return false;
     if (tombstone.stopping) return false;
     tombstone.stopping = true;
     const settledBeforeStop = tombstone.settled;
@@ -4448,35 +4616,71 @@ export class FamilyHubCard extends HTMLElementBase {
     tombstone.stopIssued = true;
     tombstone.lastStopState = before;
     const stopped = await this._callCameraCommand(
-      cameraId,
+      tombstone.cameraId,
       "stop",
       tombstone.stopCommand,
       this._cameraStopTimeoutMs,
       tombstone.camera
     );
-    const idle = stopped && await this._waitForCameraStopped(
-      tombstone.camera.entity,
-      this._cameraStopTimeoutMs,
-      cameraStreamPhase(before) === "idle" ? before : null
-    );
+    const settlementRequiresFollowUp = tombstone.rerunAfterStop
+      || (!settledBeforeStop && tombstone.settled);
+    const causalIdleStop = stopped
+      && settledBeforeStop
+      && cameraStreamPhase(before) === "idle";
+    let idle = causalIdleStop;
+    if (!settlementRequiresFollowUp && !causalIdleStop) {
+      idle = await this._waitForCameraStopped(
+        tombstone.camera.entity,
+        stopped ? this._cameraStopTimeoutMs : 0,
+        cameraStreamPhase(before) === "idle" ? before : null,
+        () => tombstone.rerunAfterStop || (!settledBeforeStop && tombstone.settled)
+      );
+    }
     tombstone.stopping = false;
     tombstone.stopBeganSettled = null;
-    if (this._pendingCameraStarts.get(cameraId) !== tombstone) return idle;
-    if (tombstone.rerunAfterStop || (!settledBeforeStop && tombstone.settled)) {
+    if (this._pendingCameraStarts.get(cameraEntity) !== tombstone) return idle;
+    const latest = this._hass?.states?.[tombstone.camera.entity];
+    const latestPhase = cameraStreamPhase(latest);
+    idle = latestPhase === "idle"
+      && (latest !== tombstone.lastStopState || stopped && settledBeforeStop);
+    if (["preparing", "streaming"].includes(latestPhase)
+      && latest !== tombstone.lastStopState) tombstone.rerunAfterActiveState = true;
+    const rerunForSettlement = tombstone.rerunAfterStop || (!settledBeforeStop && tombstone.settled);
+    const rerunForActiveState = tombstone.rerunAfterActiveState && !tombstone.activeRetryUsed && !idle;
+    tombstone.rerunAfterActiveState = false;
+    if (rerunForSettlement || rerunForActiveState) {
       tombstone.rerunAfterStop = false;
-      return this._finalizePendingCameraStart(cameraId, tombstone);
+      if (rerunForActiveState) tombstone.activeRetryUsed = true;
+      return this._finalizePendingCameraStart(cameraEntity, tombstone);
     }
     if (idle && tombstone.settled) {
-      this._pendingCameraStarts.delete(cameraId);
-      if (this._cameraBlockedIds.get(cameraId)?.pendingStart) this._cameraBlockedIds.delete(cameraId);
-      if (this._cameraError?.id === cameraId) this._cameraError = null;
+      this._pendingCameraStarts.delete(cameraEntity);
+      if (this._cameraBlockedIds.get(cameraEntity)?.pendingStart) this._cameraBlockedIds.delete(cameraEntity);
+      const witnessed = this._recordCameraStopWitness(
+        tombstone.cameraId,
+        tombstone.camera.entity,
+        latest,
+        tombstone.recoveryMessage,
+        tombstone.configGeneration
+      );
+      if (this._cameraError?.id === tombstone.cameraId
+        && (!this._cameraError.entity || this._cameraError.entity === tombstone.camera.entity)) {
+        this._cameraError = witnessed && tombstone.recoveryMessage
+          ? {
+              id: tombstone.cameraId,
+              entity: tombstone.camera.entity,
+              message: tombstone.recoveryMessage
+            }
+          : null;
+      }
       this._armCameraBlockRetryNotice();
       this._scheduleRender(true);
       return true;
     }
     if (tombstone.settled) {
       this._cameraError = {
-        id: cameraId,
+        id: tombstone.cameraId,
+        entity: tombstone.camera.entity,
         message: "The camera still needs to confirm it has stopped. Live views remain locked for safety."
       };
       this._scheduleRender(true);
@@ -4564,11 +4768,16 @@ export class FamilyHubCard extends HTMLElementBase {
     const token = ++this._cameraOperationToken;
     const recovery = this._stopCameraSession(session, token, { render: true, message });
     this._cameraRecoveryPromise = recovery;
+    let stopped = false;
+    let stopWitnessed = false;
     try {
-      return await recovery;
+      stopped = await recovery;
     } finally {
+      stopWitnessed = this._confirmStoppedCameraState(session, message);
+      if (!stopWitnessed) this._scheduleRender(true);
       if (this._cameraRecoveryPromise === recovery) this._cameraRecoveryPromise = null;
     }
+    return stopped && stopWitnessed;
   }
 
   _closeActiveCamera({ render = true, message = null, invalidate = false } = {}) {
@@ -4594,6 +4803,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const recovery = this._stopCameraSession(session, token, { render, message });
     this._cameraRecoveryPromise = recovery;
     void recovery.finally(() => {
+      if (!this._confirmStoppedCameraState(session, message) && render) this._scheduleRender(true);
       if (this._cameraRecoveryPromise === recovery) this._cameraRecoveryPromise = null;
     });
   }
@@ -4615,13 +4825,13 @@ export class FamilyHubCard extends HTMLElementBase {
       && Boolean(session.route?.stop)
       && (session.startIssued || ["buffering", "viewing"].includes(previousPhase) || ["preparing", "streaming"].includes(phase));
     const pendingTombstone = shouldStop && session.startRawPromise && session.startRawPending
-      ? this._registerPendingCameraStart(session, camera, preStopState)
+      ? this._registerPendingCameraStart(session, camera, preStopState, message)
       : null;
     const currentRoute = cameraControlRoute(camera, this._hass?.states || {});
     const stopCommand = currentRoute?.stop || session.route.stop;
     let stopped = !shouldStop
       || (pendingTombstone
-        ? await this._finalizePendingCameraStart(session.id, pendingTombstone)
+        ? await this._finalizePendingCameraStart(camera.entity, pendingTombstone)
         : await this._callCameraCommand(
           session.id,
           "stop",
@@ -4632,40 +4842,75 @@ export class FamilyHubCard extends HTMLElementBase {
 
     if (!shouldStop) {
       if (this._cameraSession === session) this._cameraSession = null;
-      if (token === this._cameraOperationToken && message) this._cameraError = { id: session.id, message };
+      if (token === this._cameraOperationToken && message) {
+        this._cameraError = { id: session.id, entity: camera?.entity, message };
+      }
       if (render && token === this._cameraOperationToken) this._scheduleRender(true);
       return true;
     }
     const requireFreshIdle = session.startIssued && previousPhase === "starting" && phase === "idle";
-    const initialStateStopped = stopped && await this._waitForCameraStopped(
-      camera.entity,
-      this._cameraStopTimeoutMs,
-      requireFreshIdle ? preStopState : null
-    );
-    const stateStopped = initialStateStopped && !this._pendingCameraStarts.has(session.id);
+    if (stopped && !pendingTombstone) {
+      await this._waitForCameraStopped(
+        camera.entity,
+        this._cameraStopTimeoutMs,
+        requireFreshIdle ? preStopState : null
+      );
+    }
+    const latestStopState = this._hass?.states?.[camera.entity];
+    const stateStopped = cameraStreamPhase(latestStopState) === "idle"
+      && (!requireFreshIdle || latestStopState !== preStopState || pendingTombstone && stopped)
+      && !this._pendingCameraStarts.has(camera.entity);
+    if (stateStopped && session.writable && session.route?.stop) {
+      this._recordCameraStopWitness(
+        session.id,
+        camera.entity,
+        latestStopState,
+        message,
+        session.configGeneration
+      );
+    }
     if (token !== this._cameraOperationToken) {
       if (this._cameraSession === session) this._cameraSession = null;
       if (!stateStopped && (session.startIssued || cameraStreamPhase(this._hass?.states?.[camera.entity]) !== "idle")) {
-        this._recordCameraBlock(session.id, camera.entity, this._hass?.states?.[camera.entity]);
+        this._recordCameraBlock(
+          session.id,
+          camera.entity,
+          this._hass?.states?.[camera.entity],
+          message,
+          session.configGeneration
+        );
       }
       return stateStopped;
     }
     const isCurrentSession = this._cameraSession === session;
     if (isCurrentSession) {
       this._cameraSession = null;
-      if (message) this._cameraError = { id: session.id, message };
-      else if (!stateStopped) this._cameraError = { id: session.id, message: "The live view could not be stopped safely. Please wait for the camera to become idle." };
+      if (message) this._cameraError = { id: session.id, entity: camera.entity, message };
+      else if (!stateStopped) {
+        this._cameraError = {
+          id: session.id,
+          entity: camera.entity,
+          message: "The live view could not be stopped safely. Please wait for the camera to become idle."
+        };
+      }
       if (!stateStopped && (session.startIssued || cameraStreamPhase(this._hass?.states?.[camera.entity]) !== "idle")) {
-        this._recordCameraBlock(session.id, camera.entity, this._hass?.states?.[camera.entity]);
+        this._recordCameraBlock(
+          session.id,
+          camera.entity,
+          this._hass?.states?.[camera.entity],
+          message,
+          session.configGeneration
+        );
       }
     }
     if (render && isCurrentSession) this._scheduleRender(true);
     return stateStopped;
   }
 
-  async _waitForCameraStopped(entityId, timeoutMs, staleIdleState = null) {
+  async _waitForCameraStopped(entityId, timeoutMs, staleIdleState = null, abortWait = null) {
     const deadline = Date.now() + timeoutMs;
     while (true) {
+      if (typeof abortWait === "function" && abortWait()) return false;
       const state = this._hass?.states?.[entityId];
       if (cameraStreamPhase(state) === "idle") {
         if (!staleIdleState || state !== staleIdleState) return true;

@@ -544,6 +544,224 @@ test("accepts only idle as a stopped camera state and requires fresh idle when r
   assert.equal(await card._waitForCameraStopped(entityId, 140, staleIdle), false);
 });
 
+function cameraOnlyConfig(cameras, { readOnly = false } = {}) {
+  return {
+    schema_version: 6,
+    display: { default_view: "entry", read_only: readOnly },
+    home: { default_section: "rooms" },
+    calendar: { initial_view: "week" },
+    floorplan: {
+      default_floor: "ground",
+      floors: [{ id: "ground", room_hotspots: [] }]
+    },
+    rooms: [{ id: "hall", floor_id: "ground" }],
+    entry: {
+      primary_camera_id: cameras[0]?.id || null,
+      cameras: cameras.map((camera) => ({
+        id: camera.id,
+        entity_id: camera.entity,
+        start_stream_entity: camera.startButton,
+        stop_stream_entity: camera.stopButton
+      }))
+    },
+    football: { gameweek_entity_prefix: "sensor.test_gameweek_" },
+    features: { entry: true }
+  };
+}
+
+function prepareCameraConfigCard(card) {
+  card._childMountGeneration = 0;
+  card._invalidateChildHass = () => undefined;
+  card._closeActiveCamera = () => undefined;
+  card._cameraBlockedIds = new Map();
+  card._pendingCameraStarts = new Map();
+  card._cameraStopWitnesses = new Map();
+  card._cameraBlockTimer = null;
+  card._clearCameraBlockTimer = () => undefined;
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._childCards = new Map();
+  card._scheduleRender = () => undefined;
+}
+
+test("keeps an active physical-camera block across a same-ID configuration remap", () => {
+  const oldCamera = {
+    id: "front-door",
+    entity: "camera.old_front",
+    startButton: "button.old_front_start",
+    stopButton: "button.old_front_stop"
+  };
+  const replacement = {
+    id: "front-door",
+    entity: "camera.new_front",
+    startButton: "button.new_front_start",
+    stopButton: "button.new_front_stop"
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  prepareCameraConfigCard(card);
+  card._cameraConfigGeneration = 1;
+  card._config = cameraOnlyConfig([oldCamera]);
+  card._controlPolicy = buildControlPolicy(card._config);
+  card._cameraError = { id: "front-door", message: "Waiting for the old camera to stop." };
+  card._cameraBlockedIds.set(oldCamera.entity, {
+    cameraId: oldCamera.id,
+    entity: oldCamera.entity,
+    baseline: { state: "streaming" },
+    pendingStart: false,
+    activeLatched: true,
+    retryAt: 1_000,
+    configGeneration: 1
+  });
+
+  card.setConfig({ family_config: cameraOnlyConfig([replacement]) });
+
+  assert.equal(card._cameraConfigGeneration, 2);
+  assert.equal(card._cameraBlockedIds.has(oldCamera.entity), true);
+  assert.equal(card._canRetryBlockedCamera(replacement.id, Number.MAX_SAFE_INTEGER), false);
+  assert.deepEqual(card._cameraError, { id: "front-door", message: "Waiting for the old camera to stop." });
+});
+
+test("tracks a same-ID remapped camera by physical entity through late reactivation", async () => {
+  const oldCamera = {
+    id: "front-door",
+    entity: "camera.old_front",
+    startButton: "button.old_front_start",
+    stopButton: "button.old_front_stop"
+  };
+  const replacement = {
+    id: "front-door",
+    entity: "camera.new_front",
+    startButton: "button.new_front_start",
+    stopButton: "button.new_front_stop"
+  };
+  const oldIdle = { state: "idle" };
+  const card = Object.create(FamilyHubCard.prototype);
+  prepareCameraConfigCard(card);
+  card._cameraConfigGeneration = 1;
+  card._config = cameraOnlyConfig([oldCamera]);
+  card._controlPolicy = buildControlPolicy(card._config);
+  card._cameraStopWitnesses.set(oldCamera.entity, {
+    cameraId: oldCamera.id,
+    entity: oldCamera.entity,
+    idleState: oldIdle,
+    recoveryMessage: null,
+    configGeneration: 1
+  });
+
+  card.setConfig({ family_config: cameraOnlyConfig([replacement]) });
+  card._hass = { states: {
+    [oldCamera.entity]: oldIdle,
+    [replacement.entity]: { state: "idle" }
+  } };
+  card._cameraSession = null;
+  card._cameraRecoveryPromise = null;
+  card._cameraOperationToken = 0;
+  card._cameraBlockRetryMs = 10;
+  card._cameraStartTimeoutMs = 10;
+  card._cameraExpiryMs = 10_000;
+  card._clearCameraStartTimer = () => undefined;
+  card._clearCameraExpiryTimer = () => undefined;
+  card._armCameraStartTimeout = () => undefined;
+  card._armCameraExpiry = () => undefined;
+  card._evictCameraChild = () => undefined;
+  let starts = 0;
+  card._callCameraCommand = async () => { starts += 1; return true; };
+
+  await card._openCamera(replacement.id);
+  assert.equal(starts, 1);
+  assert.equal(card._cameraStopWitnesses.has(oldCamera.entity), true);
+  assert.equal(card._cameraStopWitnesses.has(replacement.entity), false);
+
+  let closeOptions = "not-called";
+  card._closeActiveCamera = (options) => {
+    closeOptions = options;
+    card._cameraSession = null;
+  };
+  card._hass.states[oldCamera.entity] = { state: "streaming" };
+  card._reconcileCameraSession(card._hass.states);
+  assert.equal(card._cameraBlockedIds.has(oldCamera.entity), true);
+  assert.equal(card._cameraBlockedIds.has(replacement.entity), false);
+  assert.equal(closeOptions, undefined);
+  assert.match(card._cameraError.message, /previously closed camera became active/i);
+
+  card._hass.states[oldCamera.entity] = { state: "idle" };
+  card._reconcileCameraSession(card._hass.states);
+  assert.equal(card._cameraBlockedIds.size, 0);
+  assert.equal(card._cameraError, null);
+
+  const replacementError = {
+    id: replacement.id,
+    entity: replacement.entity,
+    message: "The replacement camera could not be stopped safely."
+  };
+  card._hass.states[oldCamera.entity] = { state: "streaming" };
+  card._recordCameraBlock(oldCamera.id, oldCamera.entity, card._hass.states[oldCamera.entity]);
+  card._cameraError = replacementError;
+  card._hass.states[oldCamera.entity] = { state: "idle" };
+  card._reconcileCameraSession(card._hass.states);
+  assert.equal(card._cameraBlockedIds.size, 0);
+  assert.equal(card._cameraError, replacementError);
+});
+
+test("releases a settled pending Start after its causal Stop without a redundant idle event", async () => {
+  let resolveRawStart;
+  const rawStart = new Promise((resolve) => { resolveRawStart = resolve; });
+  const idle = { state: "idle" };
+  const camera = {
+    entity: "camera.front_door",
+    startButton: "button.front_start",
+    stopButton: "button.front_stop"
+  };
+  const session = {
+    id: "front-door",
+    phase: "starting",
+    route: { stop: { domain: "button", service: "press", entity: camera.stopButton } },
+    camera,
+    writable: true,
+    startIssued: true,
+    startPromise: Promise.resolve(false),
+    startRawPromise: rawStart,
+    startRawPending: true
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: { [camera.entity]: idle } };
+  card._cameraSession = session;
+  card._cameraOperationToken = 4;
+  card._cameraBlockedIds = new Map();
+  card._pendingCameraStarts = new Map();
+  card._cameraStopWitnesses = new Map();
+  card._cameraStopTimeoutMs = 0;
+  card._cameraBlockRetryMs = 10;
+  card._controlPolicy = { cameras: new Map([[session.id, camera]]) };
+  card._clearCameraStartTimer = () => undefined;
+  card._clearCameraFrameTimers = () => undefined;
+  card._evictCameraChild = () => undefined;
+  card._scheduleRender = () => undefined;
+  card._armCameraBlockRetryNotice = () => undefined;
+  let waitCalls = 0;
+  card._waitForCameraStopped = async (_entity, _timeout, _staleIdle, abortWait) => {
+    waitCalls += 1;
+    assert.equal(typeof abortWait, "function");
+    resolveRawStart(true);
+    await Promise.resolve();
+    assert.equal(abortWait(), true);
+    return false;
+  };
+  let stops = 0;
+  card._callCameraCommand = async () => {
+    stops += 1;
+    return true;
+  };
+
+  const closing = card._stopCameraSession(session, 4, { render: false });
+
+  assert.equal(await closing, true);
+  assert.equal(stops, 2);
+  assert.equal(waitCalls, 1);
+  assert.equal(card._pendingCameraStarts.size, 0);
+  assert.equal(card._cameraBlockedIds.size, 0);
+  assert.equal(card._cameraStopWitnesses.has(camera.entity), true);
+});
+
 test("tears down promptly and retains a tombstone until an unresolved Start receives a final Stop", async () => {
   let resolveRawStart;
   const rawStart = new Promise((resolve) => { resolveRawStart = resolve; });
@@ -586,20 +804,416 @@ test("tears down promptly and retains a tombstone until an unresolved Start rece
   };
   card._waitForCameraStopped = async () => {
     waits += 1;
+    if (waits > 1) card._hass.states["camera.front_door"] = { state: "idle" };
     return waits > 1;
   };
 
-  assert.equal(await card._stopCameraSession(session, 4, { render: false }), false);
+  assert.equal(await card._stopCameraSession(session, 4, {
+    render: false,
+    message: "The camera took too long to start. Please try again."
+  }), false);
   assert.deepEqual(stopCalls, ["stop"]);
   assert.equal(card._cameraSession, null);
-  assert.equal(card._pendingCameraStarts.has("front-door"), true);
+  assert.equal(card._pendingCameraStarts.has(camera.entity), true);
   assert.equal(card._canRetryBlockedCamera("front-door", Number.MAX_SAFE_INTEGER), false);
+  assert.equal(card._cameraError.message, "The camera took too long to start. Please try again.");
 
   resolveRawStart(true);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(stopCalls, ["stop", "stop"]);
   assert.equal(card._pendingCameraStarts.size, 0);
   assert.equal(card._cameraBlockedIds.size, 0);
+  assert.equal(card._cameraError.message, "The camera took too long to start. Please try again.");
+});
+
+test("does not reconcile away a tombstone while its serialized Stop is active", () => {
+  const firstIdle = { state: "idle" };
+  const freshIdle = { state: "idle" };
+  const error = {
+    id: "front-door",
+    entity: "camera.front_door",
+    message: "The camera took too long to start. Please try again."
+  };
+  const tombstone = {
+    cameraId: "front-door",
+    settled: true,
+    stopping: true,
+    stopIssued: true,
+    lastStopState: firstIdle,
+    camera: { entity: "camera.front_door" },
+    recoveryMessage: error.message
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._cameraSession = null;
+  card._cameraBlockedIds = new Map([["camera.front_door", {
+    cameraId: "front-door",
+    entity: "camera.front_door",
+    pendingStart: true,
+    retryAt: Infinity
+  }]]);
+  card._pendingCameraStarts = new Map([["camera.front_door", tombstone]]);
+  card._cameraError = error;
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._scheduleRender = () => undefined;
+
+  card._reconcileCameraSession({ "camera.front_door": freshIdle });
+  assert.equal(card._pendingCameraStarts.get("camera.front_door"), tombstone);
+  assert.equal(card._cameraBlockedIds.has("camera.front_door"), true);
+  assert.equal(card._cameraError, error);
+
+  tombstone.stopping = false;
+  card._reconcileCameraSession({ "camera.front_door": freshIdle });
+  assert.equal(card._pendingCameraStarts.size, 0);
+  assert.equal(card._cameraBlockedIds.size, 0);
+  assert.deepEqual(card._cameraError, error);
+});
+
+test("accepts fresh idle observed during a rejected serialized Stop without losing the wakeup", async () => {
+  const entity = "camera.front_door";
+  const before = { state: "streaming" };
+  const freshIdle = { state: "idle" };
+  const recoveryMessage = "The camera took too long to start. Please try again.";
+  const tombstone = {
+    cameraId: "front-door",
+    settled: true,
+    stopping: false,
+    rerunAfterStop: false,
+    stopBeganSettled: null,
+    stopIssued: false,
+    lastStopState: null,
+    camera: { entity },
+    stopCommand: { domain: "button", service: "press", entity: "button.front_stop" },
+    recoveryMessage
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: { [entity]: before } };
+  card._cameraSession = null;
+  card._cameraStopTimeoutMs = 0;
+  card._cameraBlockedIds = new Map([[entity, {
+    cameraId: "front-door",
+    entity,
+    pendingStart: true,
+    retryAt: Infinity
+  }]]);
+  card._pendingCameraStarts = new Map([[entity, tombstone]]);
+  card._cameraError = { id: "front-door", message: "The camera still needs to confirm it has stopped." };
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._scheduleRender = () => undefined;
+  let retainedDuringStop = false;
+  card._callCameraCommand = async () => {
+    card._hass.states[entity] = freshIdle;
+    card._reconcileCameraSession(card._hass.states);
+    retainedDuringStop = card._pendingCameraStarts.get(entity) === tombstone
+      && card._cameraBlockedIds.has(entity);
+    return false;
+  };
+
+  assert.equal(await card._finalizePendingCameraStart(entity, tombstone), true);
+  assert.equal(retainedDuringStop, true);
+  assert.equal(card._pendingCameraStarts.size, 0);
+  assert.equal(card._cameraBlockedIds.size, 0);
+  assert.deepEqual(card._cameraError, { id: "front-door", entity, message: recoveryMessage });
+});
+
+test("closes the final Stop reconciliation microtask gap without another state event", async () => {
+  const entity = "camera.front_door";
+  const before = { state: "streaming" };
+  const freshIdle = { state: "idle" };
+  const tombstone = {
+    cameraId: "front-door",
+    settled: true,
+    stopping: false,
+    rerunAfterStop: false,
+    stopBeganSettled: null,
+    stopIssued: false,
+    lastStopState: null,
+    camera: { entity },
+    stopCommand: { domain: "button", service: "press", entity: "button.front_stop" },
+    recoveryMessage: null
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: { [entity]: before } };
+  card._cameraSession = null;
+  card._cameraStopTimeoutMs = 0;
+  card._cameraBlockedIds = new Map([[entity, {
+    cameraId: "front-door",
+    entity,
+    pendingStart: true,
+    retryAt: Infinity
+  }]]);
+  card._pendingCameraStarts = new Map([[entity, tombstone]]);
+  card._cameraError = { id: "front-door", message: "The camera still needs to confirm it has stopped." };
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._scheduleRender = () => undefined;
+  card._callCameraCommand = async () => false;
+  let retainedDuringWait = false;
+  card._waitForCameraStopped = async () => {
+    queueMicrotask(() => {
+      card._hass.states[entity] = freshIdle;
+      card._reconcileCameraSession(card._hass.states);
+      retainedDuringWait = card._pendingCameraStarts.get(entity) === tombstone
+        && card._cameraBlockedIds.has(entity);
+    });
+    return false;
+  };
+
+  assert.equal(await card._finalizePendingCameraStart(entity, tombstone), true);
+  assert.equal(retainedDuringWait, true);
+  assert.equal(card._pendingCameraStarts.size, 0);
+  assert.equal(card._cameraBlockedIds.size, 0);
+  assert.equal(card._cameraError, null);
+});
+
+test("serializes one bounded follow-up Stop for an active state published during Stop", async () => {
+  const entity = "camera.front_door";
+  const firstIdle = { state: "idle" };
+  const active = { state: "streaming" };
+  const finalIdle = { state: "idle" };
+  let resolveFirstStop;
+  const firstStop = new Promise((resolve) => { resolveFirstStop = resolve; });
+  const tombstone = {
+    cameraId: "front-door",
+    settled: true,
+    stopping: false,
+    rerunAfterStop: false,
+    rerunAfterActiveState: false,
+    stopBeganSettled: null,
+    stopIssued: false,
+    lastStopState: null,
+    camera: { entity },
+    stopCommand: { domain: "button", service: "press", entity: "button.front_stop" },
+    recoveryMessage: null
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: { [entity]: firstIdle } };
+  card._cameraSession = null;
+  card._cameraStopTimeoutMs = 0;
+  card._cameraBlockedIds = new Map([[entity, {
+    cameraId: "front-door",
+    entity,
+    pendingStart: true,
+    retryAt: Infinity
+  }]]);
+  card._pendingCameraStarts = new Map([[entity, tombstone]]);
+  card._cameraError = null;
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._scheduleRender = () => undefined;
+  const stopCalls = [];
+  card._callCameraCommand = async () => {
+    stopCalls.push("stop");
+    if (stopCalls.length === 1) return firstStop;
+    card._hass.states[entity] = finalIdle;
+    return true;
+  };
+
+  const cleanup = card._finalizePendingCameraStart(entity, tombstone);
+  await Promise.resolve();
+  assert.deepEqual(stopCalls, ["stop"]);
+  card._hass.states[entity] = active;
+  card._reconcileCameraSession(card._hass.states);
+  assert.deepEqual(stopCalls, ["stop"]);
+  assert.equal(tombstone.rerunAfterActiveState, true);
+
+  resolveFirstStop(false);
+  assert.equal(await cleanup, true);
+  assert.deepEqual(stopCalls, ["stop", "stop"]);
+  assert.equal(card._pendingCameraStarts.size, 0);
+  assert.equal(card._cameraBlockedIds.size, 0);
+});
+
+test("does not repeat Stop when an in-flight active state is followed by fresh idle", async () => {
+  const entity = "camera.front_door";
+  const firstIdle = { state: "idle" };
+  const active = { state: "streaming" };
+  const finalIdle = { state: "idle" };
+  const tombstone = {
+    cameraId: "front-door",
+    settled: true,
+    stopping: false,
+    rerunAfterStop: false,
+    rerunAfterActiveState: false,
+    stopBeganSettled: null,
+    stopIssued: false,
+    lastStopState: null,
+    camera: { entity },
+    stopCommand: { domain: "button", service: "press", entity: "button.front_stop" },
+    recoveryMessage: null
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: { [entity]: firstIdle } };
+  card._cameraSession = null;
+  card._cameraStopTimeoutMs = 0;
+  card._cameraBlockedIds = new Map([[entity, {
+    cameraId: "front-door",
+    entity,
+    pendingStart: true,
+    retryAt: Infinity
+  }]]);
+  card._pendingCameraStarts = new Map([[entity, tombstone]]);
+  card._cameraError = null;
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._scheduleRender = () => undefined;
+  let stopCalls = 0;
+  card._callCameraCommand = async () => {
+    stopCalls += 1;
+    card._hass.states[entity] = active;
+    card._reconcileCameraSession(card._hass.states);
+    card._hass.states[entity] = finalIdle;
+    return true;
+  };
+
+  assert.equal(await card._finalizePendingCameraStart(entity, tombstone), true);
+  assert.equal(stopCalls, 1);
+  assert.equal(card._pendingCameraStarts.size, 0);
+  assert.equal(card._cameraBlockedIds.size, 0);
+});
+
+test("keeps the latest active state authoritative after an earlier idle observation", async () => {
+  const entity = "camera.front_door";
+  const initialActive = { state: "streaming" };
+  const firstIdle = { state: "idle" };
+  const lateActive = { state: "streaming" };
+  const finalIdle = { state: "idle" };
+  const tombstone = {
+    cameraId: "front-door",
+    settled: true,
+    stopping: false,
+    rerunAfterStop: false,
+    rerunAfterActiveState: false,
+    stopBeganSettled: null,
+    stopIssued: false,
+    lastStopState: null,
+    camera: { entity },
+    stopCommand: { domain: "button", service: "press", entity: "button.front_stop" },
+    recoveryMessage: null
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: { [entity]: initialActive } };
+  card._cameraSession = null;
+  card._cameraStopTimeoutMs = 0;
+  card._cameraBlockedIds = new Map([[entity, {
+    cameraId: "front-door",
+    entity,
+    pendingStart: true,
+    retryAt: Infinity
+  }]]);
+  card._pendingCameraStarts = new Map([[entity, tombstone]]);
+  card._cameraError = null;
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._scheduleRender = () => undefined;
+  let stopCalls = 0;
+  let waitCalls = 0;
+  card._callCameraCommand = async () => {
+    stopCalls += 1;
+    card._hass.states[entity] = stopCalls === 1 ? firstIdle : finalIdle;
+    return true;
+  };
+  card._waitForCameraStopped = async () => {
+    waitCalls += 1;
+    if (waitCalls === 1) {
+      queueMicrotask(() => {
+        card._hass.states[entity] = lateActive;
+        card._reconcileCameraSession(card._hass.states);
+      });
+    }
+    return true;
+  };
+
+  assert.equal(await card._finalizePendingCameraStart(entity, tombstone), true);
+  assert.equal(stopCalls, 2);
+  assert.equal(waitCalls, 2);
+  assert.equal(card._pendingCameraStarts.size, 0);
+  assert.equal(card._cameraBlockedIds.size, 0);
+  assert.equal(card._hass.states[entity], finalIdle);
+});
+
+test("does not retry Stop on unrelated updates with an unchanged active camera state", async () => {
+  const entity = "camera.front_door";
+  const active = { state: "streaming" };
+  const freshActive = { state: "streaming" };
+  const tombstone = {
+    cameraId: "front-door",
+    settled: true,
+    stopping: false,
+    rerunAfterStop: false,
+    rerunAfterActiveState: false,
+    stopBeganSettled: null,
+    stopIssued: false,
+    lastStopState: null,
+    camera: { entity },
+    stopCommand: { domain: "button", service: "press", entity: "button.front_stop" },
+    recoveryMessage: null
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: { [entity]: active } };
+  card._cameraSession = null;
+  card._cameraStopTimeoutMs = 0;
+  card._cameraBlockedIds = new Map([[entity, {
+    cameraId: "front-door",
+    entity,
+    pendingStart: true,
+    retryAt: Infinity
+  }]]);
+  card._pendingCameraStarts = new Map([[entity, tombstone]]);
+  card._cameraError = null;
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._scheduleRender = () => undefined;
+  let stopCalls = 0;
+  card._callCameraCommand = async () => { stopCalls += 1; return false; };
+  card._waitForCameraStopped = async () => false;
+
+  assert.equal(await card._finalizePendingCameraStart(entity, tombstone), false);
+  assert.equal(stopCalls, 1);
+  for (let index = 0; index < 3; index += 1) card._reconcileCameraSession(card._hass.states);
+  assert.equal(stopCalls, 1);
+
+  card._hass.states[entity] = freshActive;
+  card._reconcileCameraSession(card._hass.states);
+  assert.equal(stopCalls, 2);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(tombstone.stopping, false);
+  assert.equal(tombstone.activeRetryUsed, true);
+  for (let index = 0; index < 3; index += 1) {
+    card._hass.states[entity] = { state: "streaming", attributes: { revision: index } };
+    card._reconcileCameraSession(card._hass.states);
+  }
+  assert.equal(stopCalls, 2);
+  assert.equal(card._pendingCameraStarts.get(entity), tombstone);
+  assert.equal(card._cameraBlockedIds.has(entity), true);
+});
+
+test("clears a transient same-camera safety error after no-message tombstone cleanup", () => {
+  const firstIdle = { state: "idle" };
+  const freshIdle = { state: "idle" };
+  const tombstone = {
+    cameraId: "front-door",
+    settled: true,
+    stopping: false,
+    stopIssued: true,
+    lastStopState: firstIdle,
+    camera: { entity: "camera.front_door" },
+    recoveryMessage: null
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._cameraSession = null;
+  card._cameraBlockedIds = new Map([["camera.front_door", {
+    cameraId: "front-door",
+    entity: "camera.front_door",
+    pendingStart: true,
+    retryAt: Infinity
+  }]]);
+  card._pendingCameraStarts = new Map([["camera.front_door", tombstone]]);
+  card._cameraError = {
+    id: "front-door",
+    message: "The live view could not be stopped safely. Please wait for the camera to become idle."
+  };
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._scheduleRender = () => undefined;
+
+  card._reconcileCameraSession({ "camera.front_door": freshIdle });
+  assert.equal(card._pendingCameraStarts.size, 0);
+  assert.equal(card._cameraBlockedIds.size, 0);
+  assert.equal(card._cameraError, null);
 });
 
 test("uses one Stop when Start settled before the live viewer closes", async () => {
@@ -633,11 +1247,367 @@ test("uses one Stop when Start settled before the live viewer closes", async () 
   card._evictCameraChild = () => undefined;
   card._scheduleRender = () => undefined;
   card._callCameraCommand = async () => { stopCalls += 1; return true; };
-  card._waitForCameraStopped = async () => true;
+  card._waitForCameraStopped = async () => {
+    card._hass.states["camera.front_door"] = { state: "idle" };
+    return true;
+  };
 
   assert.equal(await card._stopCameraSession(session, 5, { render: false }), true);
   assert.equal(stopCalls, 1);
   assert.equal(card._pendingCameraStarts.size, 0);
+});
+
+test("keeps the latest active state authoritative at the outer camera-stop boundary", async () => {
+  const entity = "camera.front_door";
+  const streaming = { state: "streaming" };
+  const observedIdle = { state: "idle" };
+  const lateStreaming = { state: "streaming" };
+  const camera = {
+    entity,
+    startButton: "button.front_start",
+    stopButton: "button.front_stop"
+  };
+  const session = {
+    id: "front-door",
+    phase: "viewing",
+    route: { stop: { domain: "button", service: "press", entity: "button.front_stop" } },
+    camera,
+    writable: true,
+    startIssued: true,
+    startPromise: Promise.resolve(true),
+    startRawPromise: Promise.resolve(true),
+    startRawPending: false
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: { [entity]: streaming } };
+  card._cameraSession = session;
+  card._cameraOperationToken = 9;
+  card._cameraBlockedIds = new Map();
+  card._pendingCameraStarts = new Map();
+  card._cameraStopTimeoutMs = 0;
+  card._cameraBlockRetryMs = 10;
+  card._controlPolicy = { cameras: new Map([["front-door", camera]]) };
+  card._clearCameraStartTimer = () => undefined;
+  card._clearCameraFrameTimers = () => undefined;
+  card._evictCameraChild = () => undefined;
+  card._scheduleRender = () => undefined;
+  card._armCameraBlockRetryNotice = () => undefined;
+  let stopCalls = 0;
+  card._callCameraCommand = async () => { stopCalls += 1; return true; };
+  card._waitForCameraStopped = async () => {
+    card._hass.states[entity] = observedIdle;
+    queueMicrotask(() => {
+      card._hass.states[entity] = lateStreaming;
+      card._reconcileCameraSession(card._hass.states);
+    });
+    return true;
+  };
+
+  assert.equal(await card._stopCameraSession(session, 9, { render: false }), false);
+  assert.equal(stopCalls, 1);
+  assert.equal(card._cameraSession, null);
+  assert.equal(card._cameraBlockedIds.has(entity), true);
+  assert.equal(card._cameraError.id, "front-door");
+  assert.equal(card._hass.states[entity], lateStreaming);
+
+  const finalIdle = { state: "idle" };
+  card._hass.states[entity] = finalIdle;
+  card._reconcileCameraSession(card._hass.states);
+  assert.equal(card._cameraBlockedIds.size, 0);
+  assert.equal(card._cameraError, null);
+});
+
+test("accepts a latest fresh idle missed by the outer camera-stop wait", async () => {
+  const entity = "camera.front_door";
+  const streaming = { state: "streaming" };
+  const freshIdle = { state: "idle" };
+  const camera = {
+    entity,
+    startButton: "button.front_start",
+    stopButton: "button.front_stop"
+  };
+  const session = {
+    id: "front-door",
+    phase: "viewing",
+    route: { stop: { domain: "button", service: "press", entity: "button.front_stop" } },
+    camera,
+    writable: true,
+    startIssued: true,
+    startPromise: Promise.resolve(true),
+    startRawPromise: Promise.resolve(true),
+    startRawPending: false
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: { [entity]: streaming } };
+  card._cameraSession = session;
+  card._cameraOperationToken = 10;
+  card._cameraBlockedIds = new Map();
+  card._pendingCameraStarts = new Map();
+  card._cameraStopTimeoutMs = 0;
+  card._controlPolicy = { cameras: new Map([["front-door", camera]]) };
+  card._clearCameraStartTimer = () => undefined;
+  card._clearCameraFrameTimers = () => undefined;
+  card._evictCameraChild = () => undefined;
+  card._scheduleRender = () => undefined;
+  card._callCameraCommand = async () => true;
+  card._waitForCameraStopped = async () => {
+    queueMicrotask(() => { card._hass.states[entity] = freshIdle; });
+    return false;
+  };
+
+  assert.equal(await card._stopCameraSession(session, 10, { render: false }), true);
+  assert.equal(card._cameraSession, null);
+  assert.equal(card._cameraBlockedIds.size, 0);
+  assert.equal(card._hass.states[entity], freshIdle);
+});
+
+test("revalidates the previous camera immediately before switching to another", async () => {
+  const front = {
+    entity: "camera.front_door",
+    startButton: "button.front_start",
+    stopButton: "button.front_stop"
+  };
+  const garage = {
+    entity: "camera.garage",
+    startButton: "button.garage_start",
+    stopButton: "button.garage_stop"
+  };
+  const previousSession = {
+    id: "front-door",
+    phase: "viewing",
+    route: {
+      start: { domain: "button", service: "press", entity: front.startButton },
+      stop: { domain: "button", service: "press", entity: front.stopButton }
+    },
+    camera: front,
+    writable: true,
+    startIssued: true
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: {
+    [front.entity]: { state: "streaming" },
+    [garage.entity]: { state: "idle" }
+  } };
+  card._config = { display: { read_only: false } };
+  card._controlPolicy = { cameras: new Map([["front-door", front], ["garage", garage]]) };
+  card._view = "entry";
+  card._cameraSession = previousSession;
+  card._cameraRecoveryPromise = null;
+  card._cameraBlockedIds = new Map();
+  card._pendingCameraStarts = new Map();
+  card._cameraOperationToken = 0;
+  card._cameraBlockRetryMs = 10;
+  card._clearCameraStartTimer = () => undefined;
+  card._clearCameraExpiryTimer = () => undefined;
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._scheduleRender = () => undefined;
+  card._stopCameraSession = async () => {
+    card._cameraSession = null;
+    card._hass.states[front.entity] = { state: "idle" };
+    queueMicrotask(() => { card._hass.states[front.entity] = { state: "streaming" }; });
+    return true;
+  };
+  let startCalls = 0;
+  card._callCameraCommand = async () => { startCalls += 1; return true; };
+
+  await card._openCamera("garage");
+  assert.equal(startCalls, 0);
+  assert.equal(card._cameraSession, null);
+  assert.equal(card._cameraBlockedIds.has(front.entity), true);
+  assert.deepEqual(card._cameraError, {
+    id: "garage",
+    message: "The previous live view could not be stopped safely. Please try again."
+  });
+});
+
+test("retains a prior-camera witness across a nested handoff update", async () => {
+  const front = {
+    entity: "camera.front_door",
+    startButton: "button.front_start",
+    stopButton: "button.front_stop"
+  };
+  const garage = {
+    entity: "camera.garage",
+    startButton: "button.garage_start",
+    stopButton: "button.garage_stop"
+  };
+  const previousSession = {
+    id: "front-door",
+    phase: "viewing",
+    route: {
+      start: { domain: "button", service: "press", entity: front.startButton },
+      stop: { domain: "button", service: "press", entity: front.stopButton }
+    },
+    camera: front,
+    writable: true,
+    startIssued: true
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: {
+    [front.entity]: { state: "streaming" },
+    [garage.entity]: { state: "idle" }
+  } };
+  card._config = { display: { read_only: false } };
+  card._controlPolicy = { cameras: new Map([["front-door", front], ["garage", garage]]) };
+  card._view = "entry";
+  card._cameraSession = previousSession;
+  card._cameraRecoveryPromise = null;
+  card._cameraBlockedIds = new Map();
+  card._pendingCameraStarts = new Map();
+  card._cameraStopWitnesses = new Map();
+  card._cameraOperationToken = 0;
+  card._cameraBlockRetryMs = 10;
+  card._cameraStartTimeoutMs = 10;
+  card._cameraExpiryMs = 10_000;
+  card._clearCameraStartTimer = () => undefined;
+  card._clearCameraFrameTimers = () => undefined;
+  card._clearCameraExpiryTimer = () => undefined;
+  card._armCameraStartTimeout = () => undefined;
+  card._armCameraExpiry = () => undefined;
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._evictCameraChild = () => undefined;
+  card._scheduleRender = () => undefined;
+  let garageStops = 0;
+  card._stopCameraSession = async (session) => {
+    card._cameraSession = null;
+    if (session.id === "front-door") {
+      const idle = { state: "idle" };
+      card._hass.states[front.entity] = idle;
+      card._recordCameraStopWitness("front-door", front.entity, idle);
+      queueMicrotask(() => queueMicrotask(() => {
+        card._hass.states[front.entity] = { state: "streaming" };
+        card._reconcileCameraSession(card._hass.states);
+      }));
+    } else {
+      garageStops += 1;
+      const idle = { state: "idle" };
+      card._hass.states[garage.entity] = idle;
+      card._recordCameraStopWitness("garage", garage.entity, idle);
+    }
+    return true;
+  };
+  let garageStarts = 0;
+  card._callCameraCommand = async () => { garageStarts += 1; return true; };
+
+  await card._openCamera("garage");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(garageStarts, 1);
+  assert.equal(garageStops, 1);
+  assert.equal(card._cameraSession, null);
+  assert.equal(card._cameraRecoveryPromise, null);
+  assert.equal(card._cameraBlockedIds.has(front.entity), true);
+  assert.equal(card._cameraStopWitnesses.has(front.entity), false);
+  assert.equal(card._cameraStopWitnesses.has(garage.entity), true);
+});
+
+test("does not treat an unavailable stopped-camera witness as reactivation", () => {
+  const witnessIdle = { state: "idle" };
+  const currentSession = {
+    id: "garage",
+    phase: "viewing",
+    camera: { entity: "camera.garage" },
+    writable: true,
+    startIssued: true
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: {
+    "camera.front_door": { state: "unavailable" },
+    "camera.garage": { state: "streaming" }
+  } };
+  card._cameraSession = currentSession;
+  card._cameraBlockedIds = new Map();
+  card._pendingCameraStarts = new Map();
+  card._cameraStopWitnesses = new Map([["camera.front_door", {
+    cameraId: "front-door",
+    entity: "camera.front_door",
+    idleState: witnessIdle,
+    recoveryMessage: null
+  }]]);
+  card._config = { display: { read_only: false } };
+  card._controlPolicy = { cameras: new Map([
+    ["front-door", { entity: "camera.front_door" }],
+    ["garage", { entity: "camera.garage" }]
+  ]) };
+  card._scheduleRender = () => undefined;
+  let closeCalls = 0;
+  card._closeActiveCamera = () => { closeCalls += 1; };
+
+  card._reconcileCameraSession(card._hass.states);
+  assert.equal(closeCalls, 0);
+  assert.equal(card._cameraSession, currentSession);
+  assert.equal(card._cameraBlockedIds.size, 0);
+  assert.equal(card._cameraStopWitnesses.has("camera.front_door"), true);
+});
+
+test("revalidates a manual close before releasing its recovery interlock", async () => {
+  const entity = "camera.front_door";
+  const camera = {
+    entity,
+    startButton: "button.front_start",
+    stopButton: "button.front_stop"
+  };
+  const session = {
+    id: "front-door",
+    phase: "viewing",
+    route: {
+      start: { domain: "button", service: "press", entity: camera.startButton },
+      stop: { domain: "button", service: "press", entity: camera.stopButton }
+    },
+    camera,
+    writable: true,
+    startIssued: true
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: { [entity]: { state: "streaming" } } };
+  card._controlPolicy = { cameras: new Map([["front-door", camera]]) };
+  card._cameraSession = session;
+  card._cameraRecoveryPromise = null;
+  card._cameraBlockedIds = new Map();
+  card._pendingCameraStarts = new Map();
+  card._cameraOperationToken = 0;
+  card._cameraBlockRetryMs = 10;
+  card._clearCameraStartTimer = () => undefined;
+  card._clearCameraFrameTimers = () => undefined;
+  card._clearCameraExpiryTimer = () => undefined;
+  card._evictCameraChild = () => undefined;
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._scheduleRender = () => undefined;
+  card._stopCameraSession = async () => {
+    card._cameraSession = null;
+    card._hass.states[entity] = { state: "idle" };
+    queueMicrotask(() => queueMicrotask(() => {
+      card._hass.states[entity] = { state: "streaming" };
+      card._reconcileCameraSession(card._hass.states);
+    }));
+    return true;
+  };
+
+  card._closeActiveCamera({ render: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(card._cameraRecoveryPromise, null);
+  assert.equal(card._cameraBlockedIds.has(entity), true);
+});
+
+test("retains an explicit recovery message after an ordinary camera block clears", () => {
+  const entity = "camera.front_door";
+  const baseline = { state: "streaming" };
+  const freshIdle = { state: "idle" };
+  const recoveryMessage = "Live view closed automatically after two minutes.";
+  const card = Object.create(FamilyHubCard.prototype);
+  card._hass = { states: { [entity]: baseline } };
+  card._cameraSession = null;
+  card._cameraBlockRetryMs = 10;
+  card._cameraBlockedIds = new Map();
+  card._pendingCameraStarts = new Map();
+  card._cameraError = { id: "front-door", message: recoveryMessage };
+  card._armCameraBlockRetryNotice = () => undefined;
+  card._scheduleRender = () => undefined;
+
+  card._recordCameraBlock("front-door", entity, baseline, recoveryMessage);
+  card._hass.states[entity] = freshIdle;
+  card._reconcileCameraSession(card._hass.states);
+  assert.equal(card._cameraBlockedIds.size, 0);
+  assert.deepEqual(card._cameraError, { id: "front-door", entity, message: recoveryMessage });
 });
 
 test("repeats late-start Stop when Start settles during an earlier failed cleanup", async () => {
@@ -674,7 +1644,7 @@ test("repeats late-start Stop when Start settles during an earlier failed cleanu
     return true;
   };
   const tombstone = card._registerPendingCameraStart(session, camera, baseline);
-  const earlyCleanup = card._finalizePendingCameraStart("front-door", tombstone);
+  const earlyCleanup = card._finalizePendingCameraStart(camera.entity, tombstone);
   resolveRawStart(true);
   await Promise.resolve();
   resolveFirstStop(false);
@@ -746,7 +1716,13 @@ test("serializes the real close-path Stop with late Start cleanup", async () => 
 test("permits a bounded same-camera retry without releasing the global stop-failure interlock", () => {
   const card = Object.create(FamilyHubCard.prototype);
   card._hass = { states: { "camera.front_door": { state: "idle" }, "camera.garage": { state: "idle" } } };
-  card._cameraBlockedIds = new Map([["front-door", {
+  card._config = { display: { read_only: false } };
+  card._controlPolicy = { cameras: new Map([
+    ["front-door", { entity: "camera.front_door" }],
+    ["garage", { entity: "camera.garage" }]
+  ]) };
+  card._cameraBlockedIds = new Map([["camera.front_door", {
+    cameraId: "front-door",
     entity: "camera.front_door",
     baseline: card._hass.states["camera.front_door"],
     retryAt: 1_000
@@ -754,7 +1730,8 @@ test("permits a bounded same-camera retry without releasing the global stop-fail
   assert.equal(card._canRetryBlockedCamera("front-door", 999), false);
   assert.equal(card._canRetryBlockedCamera("front-door", 1_000), true);
   assert.equal(card._canRetryBlockedCamera("garage", 2_000), false);
-  card._cameraBlockedIds.set("garage", {
+  card._cameraBlockedIds.set("camera.garage", {
+    cameraId: "garage",
     entity: "camera.garage",
     baseline: card._hass.states["camera.garage"],
     retryAt: 1_000
