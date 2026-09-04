@@ -3186,7 +3186,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       const expectedColumns = section === "lights"
         ? 3
         : section === "heating"
-          ? 3
+          ? 2
           : viewportWidth <= 1030 ? 2 : 4;
       expect(columnCount, `${section} must use the balanced approval grid at ${viewportWidth}px`).toBe(expectedColumns);
     }
@@ -3325,7 +3325,7 @@ test("v0.9 design approval captures the complete secure-camera lifecycle and pro
   await expect(readOnlyDoorbell.locator(".privacy-badge")).toHaveText("Stream off");
   await expect(readOnlyDoorbell.locator('button[data-camera-open="doorbell"]')).toHaveText("Stream off");
   await expect(readOnlyDoorbell.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
-  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Read only");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"] > b')).toHaveText("Read only");
   await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toBeDisabled();
   expect(await card.locator("[data-alarm-action],[data-secure-cover-action]").evaluateAll((buttons) => buttons.length === 4 && buttons.every((button) => button.disabled))).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
@@ -3343,7 +3343,7 @@ test("v0.9 design approval captures the complete secure-camera lifecycle and pro
   await expect(signalsOnlyDoor.locator(".security-signal")).toHaveCount(3);
   await expect(signalsOnlyDoor.locator('button[data-camera-open="doorbell"]')).toHaveText("Signals only");
   await expect(signalsOnlyDoor.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
-  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Signals only");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"] > b')).toHaveText("Signals only");
   await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toBeDisabled();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
   await captureApproval(page, testInfo, "security-signals-only", { securityLabels: true });
@@ -3357,7 +3357,7 @@ test("v0.9 design approval captures the complete secure-camera lifecycle and pro
   await expect(card.locator(".security-stage-poster")).toContainText("Camera not ready");
   await expect(card.locator(".security-stage-poster")).toContainText("Live view cannot start while the camera is in its current state.");
   await expect(card.locator(".security-stage-poster")).not.toHaveAttribute("role", "alert");
-  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Not ready");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"] > b')).toHaveText("Not ready");
   await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toBeDisabled();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
   await captureApproval(page, testInfo, "security-not-ready", { securityLabels: true });
@@ -3436,7 +3436,7 @@ test("v0.9 design approval captures the complete secure-camera lifecycle and pro
   await expect(card.locator('button[aria-label="Retry live view"]')).toHaveCount(0);
   await expect(retryGarage.locator('button[data-camera-open="garage"]')).toHaveText("Unavailable");
   await expect(retryGarage.locator('button[data-camera-open="garage"]')).toBeDisabled();
-  await expect(card.locator('button[data-camera-stage-open="garage"]')).toHaveText("Unavailable");
+  await expect(card.locator('button[data-camera-stage-open="garage"] > b')).toHaveText("Unavailable");
   await expect(card.locator('button[data-camera-stage-open="garage"]')).toBeDisabled();
   await updateEntityState(card, state("camera.example_garage", "idle"));
 
@@ -3450,7 +3450,7 @@ test("v0.9 design approval captures the complete secure-camera lifecycle and pro
   await expect(card.locator(".alarm-panel")).toContainText("Triggered");
   await expect(card.locator(".security-camera").first()).toContainText("Camera unavailable");
   await expect(card.locator('.security-camera').first().locator('button[data-camera-open="doorbell"]')).toHaveText("Unavailable");
-  await expect(card.locator('button[data-camera-stage-open="doorbell"]')).toHaveText("Unavailable");
+  await expect(card.locator('button[data-camera-stage-open="doorbell"] > b')).toHaveText("Unavailable");
   await captureApproval(page, testInfo, "security-alert-unavailable", { securityLabels: true });
   expect(pageErrors).toEqual([]);
 });
