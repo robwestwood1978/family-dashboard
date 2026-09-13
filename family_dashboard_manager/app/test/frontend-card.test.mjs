@@ -68,6 +68,11 @@ test("keeps kiosk photos inside the private Home Assistant media source", () => 
   assert.equal(isSafeResolvedPhotoUrl("javascript:alert(1)"), false);
 });
 
+test("gives the kiosk photo frame a stable block containing card", () => {
+  const card = Object.create(FamilyHubCard.prototype);
+  assert.match(card._styles(), /\.hub-card \{[^}]*display:block;/);
+});
+
 test("loads and resolves only image children from the configured private photo album", async () => {
   const source = "media-source://media_source/local/family-dashboard/photos";
   const messages = [];

@@ -1053,7 +1053,7 @@ test("renders the School calendar fallback without claiming Classroom assignment
   const pageErrors = await mount(page, calendarConfig);
   const card = page.locator("family-hub-card");
 
-  await card.locator('button[data-view="family"]').click();
+  await card.locator('.hub-nav-button[data-view="family"]').click();
   await expect(card.locator(".school-calendar-fallback")).toHaveCount(2);
   await expect(card.locator(".school-calendar-fallback").first()).toContainText("School assembly");
   await expect(card.locator(".school-calendar-fallback").first()).toContainText("Calendar-only fallback");

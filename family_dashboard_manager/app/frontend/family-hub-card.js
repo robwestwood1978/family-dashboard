@@ -5350,7 +5350,7 @@ export class FamilyHubCard extends HTMLElementBase {
       *, *::before, *::after { box-sizing:border-box; }
       button, select { font:inherit; }
       button { -webkit-tap-highlight-color:transparent; }
-      .hub-card { position:relative; overflow:hidden; border:0; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); color:var(--hub-text); min-height:100%; height:100%; }
+      .hub-card { position:relative; display:block; overflow:hidden; border:0; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); color:var(--hub-text); min-height:100%; height:100%; }
       .photo-frame { position:absolute; inset:0; z-index:100; width:100%; height:100%; min-height:100%; padding:0; overflow:hidden; border:0; border-radius:inherit; background:#05070b; color:#fff; cursor:pointer; text-align:left; }
       .photo-frame img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; animation:photo-frame-reveal .65s ease both; }
       .photo-frame-shade { position:absolute; inset:0; background:linear-gradient(180deg,rgba(0,0,0,.06) 48%,rgba(0,0,0,.64)); pointer-events:none; }
