@@ -35,6 +35,14 @@ test("embeds the complete schema-v6 house, family, school, cleaning and Security
     legacy_ios: true,
     orientation: "landscape",
     panel_path: "family-dashboard",
+    photo_frame: {
+      enabled: false,
+      idle_seconds: 300,
+      media_source: "media-source://media_source/local/family-dashboard/photos",
+      motion_entity: "binary_sensor.example_ipad_camera_motion",
+      show_clock: true,
+      slide_seconds: 20
+    },
     read_only: false,
     target_height: 834,
     target_width: 1112

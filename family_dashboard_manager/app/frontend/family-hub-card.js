@@ -64,6 +64,7 @@ const CAMERA_SESSION_EXPIRY_MS = 120_000;
 const CONFIRMATION_EXPIRY_MS = 30_000;
 const FRESHNESS_REFRESH_MS = 60_000;
 const CLASSROOM_ASSIGNMENT_LIMIT = 20;
+const PHOTO_FRAME_MEDIA_LIMIT = 250;
 const MAX_CALENDAR_RANGE_MS = 62 * 86_400_000;
 const ALARM_ACTION_LABELS = {
   alarm_arm_home: "Arm home",
@@ -1213,6 +1214,52 @@ export function safeClassroomLink(value) {
   return link.length <= 1_000 && /^https:\/\/classroom\.google\.com\//.test(link) ? link : null;
 }
 
+export function schoolDataSource(config = {}) {
+  return config?.school?.source === "calendar" ? "calendar" : "classroom";
+}
+
+export function isSafePhotoFrameMediaSource(value) {
+  const source = String(value || "");
+  return source.length <= 300
+    && /^media-source:\/\/media_source\/local\/family-dashboard(?:\/[A-Za-z0-9._-]+)*$/.test(source)
+    && !source.includes("..");
+}
+
+export function isSafeResolvedPhotoUrl(value) {
+  const url = String(value || "");
+  return url.length <= 2_000
+    && url.startsWith("/media/local/family-dashboard/")
+    && !/[\\\s<>]/.test(url)
+    && !url.includes("..");
+}
+
+function isSafePhotoMediaId(value, source) {
+  const mediaId = String(value || "");
+  return isSafePhotoFrameMediaSource(source)
+    && mediaId.length <= 600
+    && mediaId.startsWith(`${source}/`)
+    && !/[\\\s<>]/.test(mediaId)
+    && !mediaId.includes("..");
+}
+
+export function nextSchoolCalendarEvent(config = {}, events = [], personId, now = new Date()) {
+  if (schoolDataSource(config) !== "calendar") return null;
+  const schoolEntityIds = new Set([
+    ...(config?.school?.calendar_entities || []),
+    ...(config?.school?.scopay_calendar_entities || [])
+  ]);
+  return (Array.isArray(events) ? events : [])
+    .filter((event) => {
+      const calendar = event?._calendar;
+      return schoolEntityIds.has(calendar?.entity_id)
+        && calendar?.category === "school"
+        && Array.isArray(calendar?.person_ids)
+        && calendar.person_ids.includes(personId)
+        && isCurrentOrFutureCalendarEvent(event, now, config?.product?.timezone);
+    })
+    .sort((left, right) => new Date(calendarEventStart(left)) - new Date(calendarEventStart(right)))[0] || null;
+}
+
 export function classroomAssignmentPresentation(state) {
   const assignments = Array.isArray(state?.attributes?.assignments)
     ? state.attributes.assignments
@@ -1610,6 +1657,18 @@ export class FamilyHubCard extends HTMLElementBase {
     this._cameraStopWitnesses = new Map();
     this._cameraBlockTimer = null;
     this._freshnessTimer = null;
+    this._photoFrameIdleTimer = null;
+    this._photoFrameSlideTimer = null;
+    this._photoFrameActive = false;
+    this._photoFrameIndex = 0;
+    this._photoFrameItems = [];
+    this._photoFrameUrl = null;
+    this._photoFrameLoading = false;
+    this._photoFrameError = null;
+    this._photoFrameMediaSourceKey = null;
+    this._photoFrameBrowseRequest = 0;
+    this._photoFrameResolveRequest = 0;
+    this._photoFrameMotionState = null;
     this._cameraBlockRetryMs = CAMERA_START_TIMEOUT_MS;
     this._cameraStartTimeoutMs = CAMERA_START_TIMEOUT_MS;
     this._cameraStopTimeoutMs = CAMERA_STOP_TIMEOUT_MS;
@@ -1640,13 +1699,17 @@ export class FamilyHubCard extends HTMLElementBase {
     this._boundClick = (event) => this._handleClick(event);
     this._boundChange = (event) => this._handleChange(event);
     this._boundKeydown = (event) => this._handleKeydown(event);
+    this._boundPointerActivity = () => this._handlePhotoFrameActivity();
     this._boundVisibilityChange = () => {
       if (globalThis.document?.visibilityState === "hidden") {
         this._clearFreshnessTimer();
+        this._clearPhotoFrameTimers();
+        this._photoFrameActive = false;
         this._closeActiveCamera({ render: false, invalidate: true });
       } else {
         this._scheduleRender(true);
         this._armFreshnessTimer();
+        this._armPhotoFrameIdleTimer();
       }
     };
     this._boundPageHide = () => this._closeActiveCamera({ render: false, invalidate: true });
@@ -1656,9 +1719,12 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.addEventListener("click", this._boundClick);
     this.shadowRoot.addEventListener("change", this._boundChange);
     this.shadowRoot.addEventListener("keydown", this._boundKeydown);
+    this.shadowRoot.addEventListener("pointerdown", this._boundPointerActivity, { passive: true });
     globalThis.document?.addEventListener?.("visibilitychange", this._boundVisibilityChange);
     globalThis.addEventListener?.("pagehide", this._boundPageHide);
     this._armFreshnessTimer();
+    this._armPhotoFrameIdleTimer();
+    void this._loadPhotoFrameMedia();
     this._scheduleRender(true);
   }
 
@@ -1668,9 +1734,13 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.removeEventListener("click", this._boundClick);
     this.shadowRoot.removeEventListener("change", this._boundChange);
     this.shadowRoot.removeEventListener("keydown", this._boundKeydown);
+    this.shadowRoot.removeEventListener("pointerdown", this._boundPointerActivity);
     globalThis.document?.removeEventListener?.("visibilitychange", this._boundVisibilityChange);
     globalThis.removeEventListener?.("pagehide", this._boundPageHide);
     this._clearFreshnessTimer();
+    this._clearPhotoFrameTimers();
+    this._photoFrameBrowseRequest += 1;
+    this._photoFrameResolveRequest += 1;
     this._closeActiveCamera({ render: false, invalidate: true });
     this._clearCameraBlockTimer();
     this._childCards.clear();
@@ -1690,6 +1760,17 @@ export class FamilyHubCard extends HTMLElementBase {
       ? this._cameraConfigGeneration + 1
       : 1;
     this._config = config;
+    this._clearPhotoFrameTimers();
+    this._photoFrameActive = false;
+    this._photoFrameIndex = 0;
+    this._photoFrameItems = [];
+    this._photoFrameUrl = null;
+    this._photoFrameLoading = false;
+    this._photoFrameError = null;
+    this._photoFrameMediaSourceKey = null;
+    this._photoFrameMotionState = null;
+    this._photoFrameBrowseRequest += 1;
+    this._photoFrameResolveRequest += 1;
     this._view = config.display.default_view || "today";
     this._homeSection = config.home.default_section || "rooms";
     this._calendarMode = config.calendar.initial_view || "week";
@@ -1725,16 +1806,20 @@ export class FamilyHubCard extends HTMLElementBase {
     this._pendingConfirmation = null;
     this._confirmationReturnFocus = null;
     this._childCards.clear();
+    this._armPhotoFrameIdleTimer();
+    void this._loadPhotoFrameMedia();
     this._scheduleRender(true);
   }
 
   set hass(hass) {
     this._invalidateChildHass();
     this._hass = hass;
+    this._reconcilePhotoFrame(hass?.states || {});
     this._pruneInactiveChildCards();
     for (const [key, child] of this._childCards.entries()) child.hass = this._hassForChild(key);
     this._reconcileCameraSession(hass?.states || {});
     if (!this._config) return;
+    void this._loadPhotoFrameMedia();
     const nextSignature = stateSignature(hass?.states || {}, this._entityIds);
     if (nextSignature !== this._signature) {
       this._signature = nextSignature;
@@ -1781,7 +1866,219 @@ export class FamilyHubCard extends HTMLElementBase {
     this._freshnessTimer = null;
   }
 
+  _photoFrameConfig() {
+    const photoFrame = this._config?.display?.photo_frame;
+    return photoFrame?.enabled === true && isSafePhotoFrameMediaSource(photoFrame.media_source)
+      ? photoFrame
+      : null;
+  }
+
+  _clearPhotoFrameIdleTimer() {
+    if (this._photoFrameIdleTimer !== null) clearTimeout(this._photoFrameIdleTimer);
+    this._photoFrameIdleTimer = null;
+  }
+
+  _clearPhotoFrameSlideTimer() {
+    if (this._photoFrameSlideTimer !== null) clearTimeout(this._photoFrameSlideTimer);
+    this._photoFrameSlideTimer = null;
+  }
+
+  _clearPhotoFrameTimers() {
+    this._clearPhotoFrameIdleTimer();
+    this._clearPhotoFrameSlideTimer();
+  }
+
+  _armPhotoFrameIdleTimer() {
+    this._clearPhotoFrameIdleTimer();
+    const photoFrame = this._photoFrameConfig();
+    if (!photoFrame || this._photoFrameActive || !this.isConnected
+      || globalThis.document?.visibilityState === "hidden") return;
+    if (photoFrame.motion_entity
+      && entityStateValue(this._hass?.states?.[photoFrame.motion_entity]) === "on") return;
+    this._photoFrameIdleTimer = setTimeout(() => {
+      this._photoFrameIdleTimer = null;
+      this._activatePhotoFrame();
+    }, photoFrame.idle_seconds * 1_000);
+  }
+
+  _armPhotoFrameSlideTimer() {
+    this._clearPhotoFrameSlideTimer();
+    const photoFrame = this._photoFrameConfig();
+    if (!photoFrame || !this._photoFrameActive || this._photoFrameItems.length < 1) return;
+    this._photoFrameSlideTimer = setTimeout(() => {
+      this._photoFrameSlideTimer = null;
+      if (!this._photoFrameActive || !this._photoFrameItems.length) return;
+      this._photoFrameIndex = (this._photoFrameIndex + 1) % this._photoFrameItems.length;
+      void this._resolvePhotoFrameItem();
+    }, photoFrame.slide_seconds * 1_000);
+  }
+
+  _handlePhotoFrameActivity() {
+    if (this._photoFrameActive) {
+      this._deactivatePhotoFrame();
+      return;
+    }
+    this._armPhotoFrameIdleTimer();
+  }
+
+  _activatePhotoFrame() {
+    const photoFrame = this._photoFrameConfig();
+    if (!photoFrame || globalThis.document?.visibilityState === "hidden") return;
+    if (photoFrame.motion_entity
+      && entityStateValue(this._hass?.states?.[photoFrame.motion_entity]) === "on") {
+      this._armPhotoFrameIdleTimer();
+      return;
+    }
+    this._clearPhotoFrameTimers();
+    this._pendingConfirmation = null;
+    this._confirmationReturnFocus = null;
+    this._photoFrameActive = true;
+    this._photoFrameUrl = null;
+    this._closeActiveCamera({ render: false, invalidate: true });
+    this._scheduleRender(true);
+    if (this._photoFrameItems.length) void this._resolvePhotoFrameItem();
+    else void this._loadPhotoFrameMedia({ refresh: true });
+  }
+
+  _deactivatePhotoFrame() {
+    if (!this._photoFrameActive) {
+      this._armPhotoFrameIdleTimer();
+      return;
+    }
+    this._photoFrameActive = false;
+    this._photoFrameResolveRequest += 1;
+    this._clearPhotoFrameSlideTimer();
+    this._scheduleRender(true);
+    this._armPhotoFrameIdleTimer();
+  }
+
+  _reconcilePhotoFrame(states) {
+    const photoFrame = this._photoFrameConfig();
+    const nextMotion = photoFrame?.motion_entity
+      ? entityStateValue(states?.[photoFrame.motion_entity])
+      : null;
+    const motionStarted = nextMotion === "on" && this._photoFrameMotionState !== "on";
+    const motionEnded = nextMotion !== "on" && this._photoFrameMotionState === "on";
+    this._photoFrameMotionState = nextMotion;
+    if (motionStarted) {
+      if (this._photoFrameActive) this._deactivatePhotoFrame();
+      else this._armPhotoFrameIdleTimer();
+    } else if (motionEnded) {
+      this._armPhotoFrameIdleTimer();
+    }
+  }
+
+  async _loadPhotoFrameMedia({ refresh = false } = {}) {
+    const photoFrame = this._photoFrameConfig();
+    if (!photoFrame || typeof this._hass?.callWS !== "function") return;
+    if (!refresh && (this._photoFrameLoading || this._photoFrameMediaSourceKey === photoFrame.media_source)) return;
+    const request = ++this._photoFrameBrowseRequest;
+    this._photoFrameLoading = true;
+    this._photoFrameError = null;
+    try {
+      const result = await this._hass.callWS({
+        type: "media_source/browse_media",
+        media_content_id: photoFrame.media_source
+      });
+      if (request !== this._photoFrameBrowseRequest || this._photoFrameConfig()?.media_source !== photoFrame.media_source) return;
+      const children = Array.isArray(result?.children) ? result.children : [];
+      this._photoFrameItems = children
+        .filter((item) => (item?.media_class === "image" || String(item?.mime_type || "").startsWith("image/"))
+          && item?.can_play !== false
+          && isSafePhotoMediaId(item?.media_content_id, photoFrame.media_source))
+        .slice(0, PHOTO_FRAME_MEDIA_LIMIT)
+        .map((item) => ({ media_content_id: item.media_content_id }));
+      this._photoFrameMediaSourceKey = photoFrame.media_source;
+      this._photoFrameIndex %= Math.max(1, this._photoFrameItems.length);
+      if (!this._photoFrameItems.length) {
+        this._photoFrameUrl = null;
+        this._photoFrameError = "No photos are available in the private Family Dashboard album.";
+      }
+    } catch {
+      if (request !== this._photoFrameBrowseRequest) return;
+      this._photoFrameItems = [];
+      this._photoFrameUrl = null;
+      this._photoFrameError = "The private photo album is unavailable. Home Assistant will try again next time.";
+    } finally {
+      if (request === this._photoFrameBrowseRequest) {
+        this._photoFrameLoading = false;
+        if (this._photoFrameActive) {
+          this._scheduleRender(true);
+          if (this._photoFrameItems.length) void this._resolvePhotoFrameItem();
+        }
+      }
+    }
+  }
+
+  async _resolvePhotoFrameItem() {
+    const photoFrame = this._photoFrameConfig();
+    const item = this._photoFrameItems[this._photoFrameIndex];
+    if (!photoFrame || !this._photoFrameActive || !item || typeof this._hass?.callWS !== "function") return;
+    const request = ++this._photoFrameResolveRequest;
+    try {
+      const result = await this._hass.callWS({
+        type: "media_source/resolve_media",
+        media_content_id: item.media_content_id
+      });
+      if (request !== this._photoFrameResolveRequest || !this._photoFrameActive) return;
+      if (!String(result?.mime_type || "").startsWith("image/") || !isSafeResolvedPhotoUrl(result?.url)) {
+        throw new Error("unsafe photo response");
+      }
+      this._photoFrameUrl = result.url;
+      this._photoFrameError = null;
+      this._syncPhotoFrameMedia();
+    } catch {
+      if (request !== this._photoFrameResolveRequest || !this._photoFrameActive) return;
+      this._photoFrameUrl = null;
+      this._photoFrameError = "This photo could not be displayed.";
+      this._syncPhotoFrameMedia();
+    } finally {
+      if (request === this._photoFrameResolveRequest && this._photoFrameActive) this._armPhotoFrameSlideTimer();
+    }
+  }
+
+  _syncPhotoFrameMedia() {
+    const frame = this.shadowRoot?.querySelector?.(".photo-frame");
+    if (!frame) {
+      this._scheduleRender(true);
+      return;
+    }
+    const image = frame.querySelector("img");
+    const status = frame.querySelector(".photo-frame-status");
+    if (image) {
+      if (this._photoFrameUrl) image.setAttribute("src", this._photoFrameUrl);
+      else image.removeAttribute("src");
+      image.hidden = !this._photoFrameUrl;
+      image.alt = `Family photo ${this._photoFrameIndex + 1} of ${Math.max(1, this._photoFrameItems.length)}`;
+    }
+    if (status) {
+      status.hidden = Boolean(this._photoFrameUrl);
+      status.textContent = this._photoFrameLoading ? "Loading family photos…" : this._photoFrameError || "Preparing family photos…";
+    }
+  }
+
+  _updatePhotoFrameClock(now = new Date()) {
+    if (!this._photoFrameActive || !this._config?.display?.photo_frame?.show_clock) return;
+    const clock = this.shadowRoot?.querySelector?.(".photo-frame-clock strong");
+    const date = this.shadowRoot?.querySelector?.(".photo-frame-clock span");
+    if (clock) clock.textContent = new Intl.DateTimeFormat(this._config.product.locale, {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: this._config.product.timezone
+    }).format(now);
+    if (date) date.textContent = new Intl.DateTimeFormat(this._config.product.locale, {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      timeZone: this._config.product.timezone
+    }).format(now);
+  }
+
   _refreshTimeSensitiveView(now = new Date()) {
+    if (this._photoFrameActive) {
+      this._updatePhotoFrameClock(now);
+      return;
+    }
     if (this._view === "music") {
       const clock = this.shadowRoot?.querySelector?.(".hub-topbar-time");
       if (clock && this._config) {
@@ -1820,6 +2117,11 @@ export class FamilyHubCard extends HTMLElementBase {
         _calendar: calendar
       }];
     });
+  }
+
+  _nextSchoolCalendarEvent(personId, now = new Date()) {
+    const events = this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents();
+    return nextSchoolCalendarEvent(this._config, events, personId, now);
   }
 
   async _loadCalendarEvents() {
@@ -1874,6 +2176,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._childMountGeneration += 1;
     this._invalidateChildHass();
     const theme = this._config.theme;
+    const shellGuard = this._photoFrameActive ? ' inert aria-hidden="true"' : "";
     this.shadowRoot.innerHTML = `
       <style>${this._styles()}</style>
       <ha-card class="hub-card" style="
@@ -1888,7 +2191,7 @@ export class FamilyHubCard extends HTMLElementBase {
         --hub-backdrop-end:${escapeHtml(theme.backdrop_end)};
         --hub-radius:${Number(theme.radius_px)}px;
       ">
-        <div class="hub-shell">
+        <div class="hub-shell"${shellGuard}>
           ${this._renderNavigation()}
           <main class="hub-content">
             ${this._renderHeader()}
@@ -1897,6 +2200,7 @@ export class FamilyHubCard extends HTMLElementBase {
             </div>
           </main>
         </div>
+        ${this._renderPhotoFrame()}
       </ha-card>
     `;
     for (const crest of this.shadowRoot.querySelectorAll("img[data-team-crest]")) {
@@ -1912,6 +2216,36 @@ export class FamilyHubCard extends HTMLElementBase {
     this._syncConfirmationFocus(confirmationFocusAction);
     if (!confirmationFocusHandled) this._restoreRenderFocus(renderFocus);
     this._restoreEmbeddedRenderState(embeddedRenderState);
+  }
+
+  _renderPhotoFrame() {
+    if (!this._photoFrameActive) return "";
+    const photoFrame = this._photoFrameConfig();
+    if (!photoFrame) return "";
+    const now = new Date();
+    const time = new Intl.DateTimeFormat(this._config.product.locale, {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: this._config.product.timezone
+    }).format(now);
+    const date = new Intl.DateTimeFormat(this._config.product.locale, {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      timeZone: this._config.product.timezone
+    }).format(now);
+    const status = this._photoFrameLoading
+      ? "Loading family photos…"
+      : this._photoFrameError || "Preparing family photos…";
+    return `
+      <button type="button" class="photo-frame" data-photo-frame-dismiss aria-label="Return to the Family Dashboard">
+        <img ${this._photoFrameUrl ? `src="${escapeHtml(this._photoFrameUrl)}"` : ""} ${this._photoFrameUrl ? "" : "hidden"} alt="Family photo ${this._photoFrameIndex + 1} of ${Math.max(1, this._photoFrameItems.length)}">
+        <span class="photo-frame-shade" aria-hidden="true"></span>
+        <span class="photo-frame-status" role="status" ${this._photoFrameUrl ? "hidden" : ""}>${escapeHtml(status)}</span>
+        ${photoFrame.show_clock ? `<span class="photo-frame-clock"><strong>${escapeHtml(time)}</strong><span>${escapeHtml(date)}</span></span>` : ""}
+        <span class="photo-frame-hint"><ha-icon icon="mdi:motion-sensor" aria-hidden="true"></ha-icon>Approach or tap to open the dashboard</span>
+      </button>
+    `;
   }
 
   _captureEmbeddedRenderState() {
@@ -2250,6 +2584,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const states = this._hass?.states || {};
     const choresEnabled = this._config.features.chores === true;
     const schoolEnabled = this._config.features.school === true;
+    const schoolSource = schoolDataSource(this._config);
     return this._config.people.filter((person) => person.role === "child").map((person) => {
       const chore = choresEnabled ? this._config.chores.users.find((entry) => entry.person_id === person.id) : null;
       const choreState = chore ? states[chore.chores_entity] : null;
@@ -2266,12 +2601,15 @@ export class FamilyHubCard extends HTMLElementBase {
         .filter(({ state }) => isEntityAvailable(state))
         .find(({ state }) => !["approved", "completed", "completed_by_other"].includes(String(state?.state || "").toLowerCase()));
       const nextChoreName = nextChore ? normaliseChoreStatus(nextChore.state, nextChore.entityId).name : "Jobs complete";
-      const classroom = schoolEnabled
+      const classroom = schoolEnabled && schoolSource === "classroom"
         ? this._config.school.classroom_students.find((entry) => entry.person_id === person.id)
         : null;
       const classroomState = classroom ? states[classroom.assignments_entity] : null;
       const classroomData = classroomAssignmentPresentation(classroomState);
       const assignmentCount = classroomData.available ? classroomData.count : NaN;
+      const schoolEvent = schoolEnabled && schoolSource === "calendar"
+        ? this._nextSchoolCalendarEvent(person.id)
+        : null;
       const detail = choresEnabled
         ? !chore
           ? "ChoreOps not connected"
@@ -2281,9 +2619,13 @@ export class FamilyHubCard extends HTMLElementBase {
               ? `${due} due · Job status incomplete`
               : `${due} due · ${nextChoreName}`
         : schoolEnabled
-          ? Number.isFinite(assignmentCount)
-            ? `${assignmentCount} open assignment${assignmentCount === 1 ? "" : "s"}${classroomData.stale ? " · Update delayed" : ""}`
-            : "Classroom unavailable"
+          ? schoolSource === "calendar"
+            ? schoolEvent
+              ? `${schoolEvent.summary || schoolEvent._calendar?.label || "School event"} · ${formatClassroomDueDay(calendarEventStart(schoolEvent), this._config.product.locale, this._config.product.timezone)}`
+              : "No upcoming school dates"
+            : Number.isFinite(assignmentCount)
+              ? `${assignmentCount} open assignment${assignmentCount === 1 ? "" : "s"}${classroomData.stale ? " · Update delayed" : ""}`
+              : "Classroom unavailable"
           : "Family overview";
       return `
         <button type="button" class="person-summary" data-view="family" style="--person-colour:${escapeHtml(person.colour)}">
@@ -3058,8 +3400,10 @@ export class FamilyHubCard extends HTMLElementBase {
   _renderFamilyPerson(person) {
     const states = this._hass?.states || {};
     const choresEnabled = this._config.features.chores === true;
+    const schoolEnabled = this._config.features.school === true;
+    const schoolSource = schoolDataSource(this._config);
     const chore = choresEnabled ? this._config.chores.users.find((entry) => entry.person_id === person.id) : null;
-    const classroom = this._config.features.school
+    const classroom = schoolEnabled && schoolSource === "classroom"
       ? this._config.school.classroom_students.find((entry) => entry.person_id === person.id)
       : null;
     const classroomState = classroom ? states[classroom.assignments_entity] : null;
@@ -3089,25 +3433,36 @@ export class FamilyHubCard extends HTMLElementBase {
       ? `${formatDay(lastSuccessfulUpdate, this._config.product.locale, this._config.product.timezone)} at ${formatTime(lastSuccessfulUpdate, this._config.product.locale, this._config.product.timezone)}`
       : null;
     const classroomError = String(classroomState?.attributes?.last_error || "Classroom update delayed").slice(0, 160);
+    const schoolEvent = schoolEnabled && schoolSource === "calendar"
+      ? this._nextSchoolCalendarEvent(person.id)
+      : null;
+    const schoolEventStart = calendarEventStart(schoolEvent);
+    const schoolEventWhen = schoolEventStart
+      ? `${formatClassroomDueDay(schoolEventStart, this._config.product.locale, this._config.product.timezone)} · ${formatTime(schoolEventStart, this._config.product.locale, this._config.product.timezone)}`
+      : "Date to be confirmed";
     const classroomHealth = classroomStale
       ? `<span class="classroom-health is-stale"><ha-icon icon="mdi:cloud-alert-outline" aria-hidden="true"></ha-icon>${escapeHtml(classroomError)}${lastSuccessfulLabel ? ` · Last updated ${escapeHtml(lastSuccessfulLabel)}` : ""}</span>`
       : assignmentsTruncated
         ? `<span class="classroom-health"><ha-icon icon="mdi:format-list-numbered" aria-hidden="true"></ha-icon>Showing the next ${assignments.length} of ${assignmentCount} assignments</span>`
         : "";
-    const classroomStatus = classroom && !classroomData.available
+    const classroomStatus = schoolEnabled && schoolSource === "calendar"
+      ? schoolEvent
+        ? `<div class="assignment school-calendar-fallback"><ha-icon icon="mdi:calendar-school-outline"></ha-icon><div><strong>${escapeHtml(schoolEvent.summary || schoolEvent._calendar?.label || "School event")}</strong><small>${escapeHtml(schoolEventWhen)}${schoolEvent.location ? ` · ${escapeHtml(schoolEvent.location)}` : ""}</small><span class="classroom-health"><ha-icon icon="mdi:shield-check-outline" aria-hidden="true"></ha-icon>Calendar-only fallback · Classroom remains disconnected</span></div></div>`
+        : '<div class="assignment school-calendar-fallback"><ha-icon icon="mdi:calendar-blank-outline"></ha-icon><div><strong>No upcoming school dates</strong><small>The calendar-only fallback is active. Classroom assignments are not being read.</small></div></div>'
+      : classroom && !classroomData.available
       ? '<div class="assignment is-stale"><ha-icon icon="mdi:school-outline"></ha-icon><div><strong>Classroom unavailable</strong><small>The last update could not be read. Home Assistant will retry.</small></div></div>'
       : nextAssignment
       ? `<div class="assignment ${classroomStale ? "is-stale" : ""}"><ha-icon icon="${ICONS.school}"></ha-icon><div>${assignmentTitle}<small>${escapeHtml(nextAssignment.course || "Google Classroom")} · ${escapeHtml(assignmentDue)}</small>${classroomHealth}</div></div>`
       : classroomStale
         ? `<div class="assignment is-stale"><ha-icon icon="mdi:cloud-alert-outline"></ha-icon><div><strong>Classroom update delayed</strong><small>${escapeHtml(classroomError)}${lastSuccessfulLabel ? ` · Last updated ${escapeHtml(lastSuccessfulLabel)}` : ""}</small></div></div>`
-      : !this._config.features.school
+      : !schoolEnabled
         ? '<div class="assignment classroom-locked"><ha-icon icon="mdi:school-outline"></ha-icon><div><strong>Classroom ready after consent</strong><small>Read-only access will be connected separately for each child. No password belongs in this dashboard.</small></div></div>'
         : !classroom
           ? '<div class="assignment is-stale"><ha-icon icon="mdi:school-alert-outline"></ha-icon><div><strong>Classroom not connected</strong><small>This child still needs a separate read-only connection.</small></div></div>'
         : '<div class="assignment"><ha-icon icon="mdi:school-check-outline"></ha-icon><div><strong>No open assignments</strong><small>Google Classroom is up to date.</small></div></div>';
     const presence = this._config.features.location_map && person.location_entity
       ? titleCase(states[person.location_entity]?.state || "Location unavailable")
-      : choresEnabled ? "Today’s jobs" : this._config.features.school ? "School" : "Family overview";
+      : choresEnabled ? "Today’s jobs" : schoolEnabled ? "School" : "Family overview";
     const choreRows = (chore?.status_entities || []).map((entityId) => {
       const state = states[entityId];
       const presentation = normaliseChoreStatus(state, entityId);
@@ -3125,7 +3480,11 @@ export class FamilyHubCard extends HTMLElementBase {
       : "";
     const factItems = [
       ...(choresEnabled && chore ? [`<span><strong>${pointsAvailable ? escapeHtml(formatPoints(points, this._config.product.locale)) : "—"}</strong> points</span>`, `<span><strong>${Number.isFinite(due) ? due : "—"}</strong> due today</span>`] : []),
-      ...(this._config.features.school ? [`<span><strong>${Number.isFinite(assignmentCount) ? assignmentCount : "—"}</strong> assignments</span>`] : [])
+      ...(schoolEnabled
+        ? schoolSource === "calendar"
+          ? [`<span><strong>${schoolEventStart ? escapeHtml(formatClassroomDueDay(schoolEventStart, this._config.product.locale, this._config.product.timezone)) : "—"}</strong> next school date</span>`]
+          : [`<span><strong>${Number.isFinite(assignmentCount) ? assignmentCount : "—"}</strong> assignments</span>`]
+        : [])
     ].join("");
     return `
       <article class="surface family-person" style="--person-colour:${escapeHtml(person.colour)}">
@@ -3931,6 +4290,12 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _handleKeydown(event) {
+    if (this._photoFrameActive) {
+      event.preventDefault();
+      this._deactivatePhotoFrame();
+      return;
+    }
+    this._armPhotoFrameIdleTimer();
     if (this._pendingConfirmation) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -3961,6 +4326,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _handleChange(event) {
+    this._armPhotoFrameIdleTimer();
     const select = event.target.closest?.("[data-gameweek-select]");
     if (!select) return;
     this._gameweek = Math.max(1, Math.min(38, safeNumber(select.value, 1)));
@@ -3970,6 +4336,11 @@ export class FamilyHubCard extends HTMLElementBase {
   _handleClick(event) {
     const target = event.target.closest?.("button, [data-room]");
     if (!target) return;
+    if (this._photoFrameActive || target.dataset.photoFrameDismiss !== undefined) {
+      this._deactivatePhotoFrame();
+      return;
+    }
+    this._armPhotoFrameIdleTimer();
     if (this._pendingConfirmation && !target.dataset.confirmAction) return;
     if (target.dataset.homeTarget) {
       if (!this._enabledViews().some((view) => view.id === "rooms")) return;
@@ -4979,7 +5350,18 @@ export class FamilyHubCard extends HTMLElementBase {
       *, *::before, *::after { box-sizing:border-box; }
       button, select { font:inherit; }
       button { -webkit-tap-highlight-color:transparent; }
-      .hub-card { overflow:hidden; border:0; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); color:var(--hub-text); min-height:100%; height:100%; }
+      .hub-card { position:relative; overflow:hidden; border:0; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); color:var(--hub-text); min-height:100%; height:100%; }
+      .photo-frame { position:absolute; inset:0; z-index:100; width:100%; height:100%; min-height:100%; padding:0; overflow:hidden; border:0; border-radius:inherit; background:#05070b; color:#fff; cursor:pointer; text-align:left; }
+      .photo-frame img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; animation:photo-frame-reveal .65s ease both; }
+      .photo-frame-shade { position:absolute; inset:0; background:linear-gradient(180deg,rgba(0,0,0,.06) 48%,rgba(0,0,0,.64)); pointer-events:none; }
+      .photo-frame-status { position:absolute; inset:0; display:grid; place-items:center; padding:32px; color:rgba(255,255,255,.78); font-size:15px; text-align:center; }
+      .photo-frame-status[hidden] { display:none; }
+      .photo-frame-clock { position:absolute; left:32px; bottom:30px; display:grid; gap:2px; filter:drop-shadow(0 2px 8px rgba(0,0,0,.48)); }
+      .photo-frame-clock strong { font-size:46px; line-height:1; letter-spacing:-.04em; }
+      .photo-frame-clock span { font-size:14px; font-weight:650; }
+      .photo-frame-hint { position:absolute; right:28px; bottom:30px; min-height:40px; padding:0 14px; display:flex; align-items:center; gap:8px; border:1px solid rgba(255,255,255,.32); border-radius:14px; background:rgba(5,7,11,.38); color:rgba(255,255,255,.88); font-size:11px; font-weight:700; -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); }
+      .photo-frame-hint ha-icon { --mdc-icon-size:18px; }
+      @keyframes photo-frame-reveal { from { opacity:.18; transform:scale(1.012); } to { opacity:1; transform:scale(1); } }
       .hub-shell { display:grid; grid-template-columns:86px minmax(0,1fr); min-height:100%; height:100%; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); }
       .hub-navigation { padding:14px 9px; background:linear-gradient(180deg,color-mix(in srgb,var(--hub-nav) 96%,transparent),color-mix(in srgb,var(--hub-nav) 86%,var(--hub-accent))); border-right:1px solid rgba(255,255,255,.1); display:flex; flex-direction:column; gap:14px; min-height:0; }
       .hub-brand { width:54px; height:54px; margin:0 auto; border-radius:50%; border:1px solid rgba(255,255,255,.45); background:rgba(255,255,255,.12); color:#fff; font-size:24px; font-weight:700; cursor:pointer; }

@@ -36,13 +36,17 @@ import {
   isEntityAvailable,
   isConfirmationStillValid,
   isReadOnlyChildMessageAllowed,
+  isSafePhotoFrameMediaSource,
+  isSafeResolvedPhotoUrl,
   isSecureCoverActionAllowed,
   nextFreshnessRefreshDelay,
   isSecureCoverActionSupported,
   normaliseChoreOpsSummary,
   normaliseChoreStatus,
   normaliseFixtureStatus,
+  nextSchoolCalendarEvent,
   safeClassroomLink,
+  schoolDataSource,
   selectFavouriteFixture,
   teamCrest,
   todaySecurityPresentation,
@@ -51,6 +55,94 @@ import {
 
 test("escapes state-derived text before rendering it into the card", () => {
   assert.equal(escapeHtml('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+});
+
+test("keeps kiosk photos inside the private Home Assistant media source", () => {
+  assert.equal(isSafePhotoFrameMediaSource("media-source://media_source/local/family-dashboard/photos"), true);
+  assert.equal(isSafePhotoFrameMediaSource("media-source://media_source/local/family-dashboard"), true);
+  assert.equal(isSafePhotoFrameMediaSource("media-source://media_source/local/../photos"), false);
+  assert.equal(isSafePhotoFrameMediaSource("https://www.icloud.com/sharedalbum/example"), false);
+  assert.equal(isSafeResolvedPhotoUrl("/media/local/family-dashboard/photos/photo-001.jpg?authSig=signed"), true);
+  assert.equal(isSafeResolvedPhotoUrl("/media/local/other/photo.jpg?authSig=signed"), false);
+  assert.equal(isSafeResolvedPhotoUrl("https://example.com/photo.jpg"), false);
+  assert.equal(isSafeResolvedPhotoUrl("javascript:alert(1)"), false);
+});
+
+test("loads and resolves only image children from the configured private photo album", async () => {
+  const source = "media-source://media_source/local/family-dashboard/photos";
+  const messages = [];
+  const card = Object.create(FamilyHubCard.prototype);
+  card._config = {
+    display: {
+      photo_frame: { enabled: true, idle_seconds: 300, slide_seconds: 20, media_source: source, show_clock: true }
+    }
+  };
+  card._hass = {
+    callWS: async (message) => {
+      messages.push(message);
+      if (message.type === "media_source/browse_media") return {
+        children: [
+          { media_class: "image", media_content_id: `${source}/photo-001.jpg` },
+          { mime_type: "image/jpeg", media_content_id: `${source}/photo-002.jpg` },
+          { media_class: "video", media_content_id: `${source}/video.mp4` },
+          { media_class: "image", media_content_id: "media-source://media_source/local/other/photo.jpg" }
+        ]
+      };
+      return {
+        mime_type: "image/jpeg",
+        url: "/media/local/family-dashboard/photos/photo-001.jpg?authSig=test"
+      };
+    }
+  };
+  card._photoFrameItems = [];
+  card._photoFrameIndex = 0;
+  card._photoFrameUrl = null;
+  card._photoFrameLoading = false;
+  card._photoFrameError = null;
+  card._photoFrameMediaSourceKey = null;
+  card._photoFrameBrowseRequest = 0;
+  card._photoFrameResolveRequest = 0;
+  card._photoFrameActive = false;
+  card._syncPhotoFrameMedia = () => undefined;
+  card._armPhotoFrameSlideTimer = () => undefined;
+
+  await card._loadPhotoFrameMedia();
+  assert.deepEqual(card._photoFrameItems.map((item) => item.media_content_id), [
+    `${source}/photo-001.jpg`,
+    `${source}/photo-002.jpg`
+  ]);
+  assert.deepEqual(messages[0], { type: "media_source/browse_media", media_content_id: source });
+
+  card._photoFrameActive = true;
+  await card._resolvePhotoFrameItem();
+  assert.equal(card._photoFrameUrl, "/media/local/family-dashboard/photos/photo-001.jpg?authSig=test");
+  assert.deepEqual(messages[1], { type: "media_source/resolve_media", media_content_id: `${source}/photo-001.jpg` });
+});
+
+test("uses school calendars only when the explicit Classroom fallback is selected", () => {
+  const config = {
+    product: { timezone: "Europe/London" },
+    school: {
+      source: "calendar",
+      calendar_entities: ["calendar.school"],
+      scopay_calendar_entities: []
+    }
+  };
+  const event = {
+    summary: "School assembly",
+    start: "2026-09-14T08:30:00Z",
+    end: "2026-09-14T09:00:00Z",
+    _calendar: {
+      entity_id: "calendar.school",
+      category: "school",
+      person_ids: ["child_one"]
+    }
+  };
+  assert.equal(schoolDataSource(config), "calendar");
+  assert.equal(nextSchoolCalendarEvent(config, [event], "child_one", new Date("2026-09-13T12:00:00Z")), event);
+  assert.equal(nextSchoolCalendarEvent(config, [event], "child_two", new Date("2026-09-13T12:00:00Z")), null);
+  assert.equal(nextSchoolCalendarEvent({ ...config, school: { ...config.school, source: "classroom" } }, [event], "child_one"), null);
+  assert.equal(schoolDataSource({ school: {} }), "classroom");
 });
 
 test("presents Home Assistant weather states as family-friendly labels", () => {

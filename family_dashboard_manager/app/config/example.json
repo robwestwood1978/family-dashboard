@@ -14,7 +14,15 @@
     "default_view": "today",
     "panel_path": "family-dashboard",
     "target_width": 1112,
-    "target_height": 834
+    "target_height": 834,
+    "photo_frame": {
+      "enabled": false,
+      "idle_seconds": 300,
+      "slide_seconds": 20,
+      "media_source": "media-source://media_source/local/family-dashboard/photos",
+      "motion_entity": "binary_sensor.example_ipad_camera_motion",
+      "show_clock": true
+    }
   },
   "theme": {
     "accent": "#5B5BD6",
@@ -285,6 +293,7 @@
     "table_entity": "sensor.family_dashboard_premier_league_table"
   },
   "school": {
+    "source": "classroom",
     "classroom_students": [
       {
         "person_id": "child_one",
