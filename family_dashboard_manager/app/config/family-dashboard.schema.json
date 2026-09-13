@@ -61,7 +61,23 @@
         },
         "panel_path": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
         "target_width": { "type": "integer", "minimum": 768, "maximum": 2560 },
-        "target_height": { "type": "integer", "minimum": 600, "maximum": 1600 }
+        "target_height": { "type": "integer", "minimum": 600, "maximum": 1600 },
+        "photo_frame": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "idle_seconds", "slide_seconds", "media_source", "show_clock"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "idle_seconds": { "type": "integer", "minimum": 30, "maximum": 3600 },
+            "slide_seconds": { "type": "integer", "minimum": 5, "maximum": 300 },
+            "media_source": {
+              "type": "string",
+              "pattern": "^media-source://media_source/local/family-dashboard(?:/[A-Za-z0-9._-]+)*$"
+            },
+            "motion_entity": { "$ref": "#/$defs/binarySensorEntityId" },
+            "show_clock": { "type": "boolean" }
+          }
+        }
       }
     },
     "theme": {
@@ -450,6 +466,10 @@
       "additionalProperties": false,
       "required": ["classroom_students", "calendar_entities", "scopay_calendar_entities"],
       "properties": {
+        "source": {
+          "enum": ["classroom", "calendar"],
+          "description": "Classroom uses the read-only API sensors. Calendar is the admin-independent fallback and uses the configured school calendars."
+        },
         "classroom_students": {
           "type": "array",
           "items": {

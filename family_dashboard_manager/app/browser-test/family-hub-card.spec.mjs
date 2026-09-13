@@ -76,6 +76,7 @@ function fixtureStates() {
     "binary_sensor.example_doorbell_ringing": state("binary_sensor.example_doorbell_ringing", "off"),
     "binary_sensor.example_garage_motion": state("binary_sensor.example_garage_motion", "off"),
     "binary_sensor.example_garage_person": state("binary_sensor.example_garage_person", "off"),
+    "binary_sensor.example_ipad_camera_motion": state("binary_sensor.example_ipad_camera_motion", "off"),
     "cover.example_garage": state("cover.example_garage", "closed", { current_position: 0, supported_features: 3 }),
     "vacuum.example_robovac": state("vacuum.example_robovac", "docked", { battery_level: 88 }),
     "sensor.example_robovac_battery": state("sensor.example_robovac_battery", "88"),
@@ -342,6 +343,13 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       body: isVacuumMap
         ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520"><rect width="800" height="520" rx="28" fill="#F1F5F9"/><path d="M92 86h250v128H211v190H92zM368 86h338v142H558v176H368z" fill="#fff" stroke="#A9B7C8" stroke-width="12" stroke-linejoin="round"/><path d="M211 214h157M558 228v176" fill="none" stroke="#A9B7C8" stroke-width="10"/><path d="M130 363c74-18 124-78 166-130 68-83 167-99 260-70 58 18 92 65 118 121-81 0-139 20-184 62-66 62-143 77-228 52-49-15-90-25-132-35z" fill="none" stroke="#1463E8" stroke-width="9" stroke-linecap="round" stroke-dasharray="7 13"/><circle cx="130" cy="363" r="22" fill="#00A887"/><circle cx="674" cy="284" r="22" fill="#1463E8"/><text x="108" y="472" fill="#5E6B80" font-family="system-ui,sans-serif" font-size="24" font-weight="700">Ground floor cleaning map</text></svg>'
         : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60"><rect width="100" height="60" fill="#eef0f4"/></svg>'
+    });
+  });
+  await page.route("**/media/local/family-dashboard/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1112 834"><defs><linearGradient id="g" x1="0" x2="1"><stop stop-color="#315f75"/><stop offset="1" stop-color="#d89078"/></linearGradient></defs><rect width="1112" height="834" fill="url(#g)"/><circle cx="390" cy="350" r="125" fill="#f7d9b7"/><circle cx="710" cy="350" r="125" fill="#efc6aa"/><path d="M175 800c45-210 350-220 430 0m-95 0c45-210 350-220 430 0" fill="#263853" opacity=".88"/></svg>'
     });
   });
   await page.route("https://resources.premierleague.com/premierleague/badges/**", async (route) => {
@@ -694,6 +702,13 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       async callWS(message) {
         window.__wsCalls.push(message);
         if (message?.type === "calendar/events") return [{ summary: "Protocol event" }];
+        if (message?.type === "media_source/browse_media") return {
+          children: runtimeOptions.photoMediaChildren || []
+        };
+        if (message?.type === "media_source/resolve_media") return {
+          mime_type: "image/svg+xml",
+          url: "/media/local/family-dashboard/photos/photo-001.jpg?authSig=test"
+        };
         return {};
       }
     };
@@ -998,6 +1013,52 @@ test("disabled features leave no dead Today cards or hidden write authority", as
     homeSection: element._homeSection,
     pendingConfirmation: element._pendingConfirmation
   }))).toEqual({ view: "today", homeSection: "rooms", pendingConfirmation: null });
+  expect(pageErrors).toEqual([]);
+});
+
+test("shows private Home Assistant photos while idle and returns on kiosk camera motion", async ({ page }) => {
+  const photoConfig = structuredClone(config);
+  photoConfig.display.photo_frame.enabled = true;
+  const source = photoConfig.display.photo_frame.media_source;
+  const pageErrors = await mount(page, photoConfig, {}, {
+    photoMediaChildren: [
+      { media_class: "image", media_content_id: `${source}/photo-001.jpg` },
+      { media_class: "video", media_content_id: `${source}/private-video.mp4` },
+      { media_class: "image", media_content_id: "media-source://media_source/local/outside/photo.jpg" }
+    ]
+  });
+  const card = page.locator("family-hub-card");
+
+  await card.evaluate((element) => element._activatePhotoFrame());
+  await expect(card.locator(".photo-frame")).toBeVisible();
+  await expect(card.locator(".photo-frame img")).toBeVisible();
+  await expect(card.locator(".photo-frame img")).toHaveAttribute("src", "/media/local/family-dashboard/photos/photo-001.jpg?authSig=test");
+  await expect(card.locator(".hub-shell")).toHaveAttribute("inert", "");
+
+  await updateEntityState(card, state("binary_sensor.example_ipad_camera_motion", "on"));
+  await expect(card.locator(".photo-frame")).toHaveCount(0);
+  await expect(card.locator(".hub-shell")).not.toHaveAttribute("inert", "");
+  await expect.poll(() => page.evaluate(() => window.__wsCalls.filter((message) => message.type?.startsWith("media_source/")))).toEqual([
+    { type: "media_source/browse_media", media_content_id: source },
+    { type: "media_source/resolve_media", media_content_id: `${source}/photo-001.jpg` }
+  ]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("renders the School calendar fallback without claiming Classroom assignment access", async ({ page }) => {
+  const calendarConfig = structuredClone(config);
+  calendarConfig.school.source = "calendar";
+  calendarConfig.school.classroom_students = [];
+  calendarConfig.features.chores = false;
+  const pageErrors = await mount(page, calendarConfig);
+  const card = page.locator("family-hub-card");
+
+  await card.locator('.hub-nav-button[data-view="family"]').click();
+  await expect(card.locator(".school-calendar-fallback")).toHaveCount(2);
+  await expect(card.locator(".school-calendar-fallback").first()).toContainText("School assembly");
+  await expect(card.locator(".school-calendar-fallback").first()).toContainText("Calendar-only fallback");
+  await expect(card).not.toContainText("Classroom unavailable");
+  await expect(card.locator("[data-classroom-person]")).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });
 

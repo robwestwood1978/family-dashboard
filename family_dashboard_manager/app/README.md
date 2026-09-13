@@ -2,9 +2,11 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.9.0 provides:
+Version 0.10.0 provides:
 
 - a secret-rejecting schema-v6 household contract;
+- a private Home Assistant media-source kiosk photo frame with camera-motion return;
+- an explicit calendar-only School fallback that does not claim Classroom assignment access;
 - one generated Home Assistant panel containing the bundled `custom:family-hub-card`;
 - eight internal tablet surfaces: Today, Calendar, Home, Family, Security, Music, Energy and Football;
 - Home sections for Rooms, Lights, Heating, Blinds & doors and Cleaning, backed only by explicitly configured entities, with an optional preferred starting room;

@@ -21,6 +21,7 @@ const VACUUM_MAP_CAMERA = /^camera\.[a-z0-9_]*map[a-z0-9_]*$/;
 const TEAM_CODE = /^[A-Z]{3}$/;
 const FOOTBALL_PREFIX = /^sensor\.[a-z0-9_]+_$/;
 const PREFERENCE_STORAGE_KEY = /^[A-Za-z0-9._-]{1,64}$/;
+const PHOTO_FRAME_MEDIA_SOURCE = /^media-source:\/\/media_source\/local\/family-dashboard(?:\/[A-Za-z0-9._-]+)*$/;
 const PRIVATE_CAMERA_HINT = /(?:bed(?:room)?|nursery|child|kids?|os_room|orson|ernie)/i;
 const FORBIDDEN_KEY = /(?:^|_)(?:api_?key|authorization|credential|password|secret|token)(?:$|_)/i;
 const IANA_TIMEZONE = /^(?:UTC|[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)+)$/;
@@ -172,6 +173,23 @@ export function validateConfig(config) {
   }
   requireInteger(display.target_width, "config.display.target_width", 768, 2560);
   requireInteger(display.target_height, "config.display.target_height", 600, 1600);
+  if (display.photo_frame !== undefined) {
+    const photoFrame = requireObject(display.photo_frame, "config.display.photo_frame");
+    requireBoolean(photoFrame.enabled, "config.display.photo_frame.enabled");
+    requireInteger(photoFrame.idle_seconds, "config.display.photo_frame.idle_seconds", 30, 3600);
+    requireInteger(photoFrame.slide_seconds, "config.display.photo_frame.slide_seconds", 5, 300);
+    requireString(photoFrame.media_source, "config.display.photo_frame.media_source");
+    if (!PHOTO_FRAME_MEDIA_SOURCE.test(photoFrame.media_source) || photoFrame.media_source.includes("..")) {
+      fail("config.display.photo_frame.media_source", "must use the private local Family Dashboard media source");
+    }
+    if (photoFrame.motion_entity !== undefined) {
+      validateEntityId(photoFrame.motion_entity, "config.display.photo_frame.motion_entity", "binary_sensor");
+    }
+    requireBoolean(photoFrame.show_clock, "config.display.photo_frame.show_clock");
+    if (photoFrame.enabled && !display.kiosk) {
+      fail("config.display.photo_frame.enabled", "requires kiosk mode");
+    }
+  }
 
   const theme = requireObject(config.theme, "config.theme");
   for (const key of [
@@ -260,12 +278,14 @@ export function validateConfig(config) {
   }
   const calendarEntities = requireArray(calendar.entities, "config.calendar.entities");
   const calendarIds = [];
+  const calendarEntityIds = [];
   calendarEntities.forEach((entry, index) => {
     const path = `config.calendar.entities[${index}]`;
     requireObject(entry, path);
     validateId(entry.id, `${path}.id`);
     calendarIds.push(entry.id);
     validateEntityId(entry.entity_id, `${path}.entity_id`, "calendar");
+    calendarEntityIds.push(entry.entity_id);
     requireString(entry.label, `${path}.label`);
     validateColour(entry.colour, `${path}.colour`);
     requireArray(entry.person_ids, `${path}.person_ids`).forEach((personId) => {
@@ -276,6 +296,7 @@ export function validateConfig(config) {
     }
   });
   validateUnique(calendarIds, "config.calendar.entities[].id");
+  validateUnique(calendarEntityIds, "config.calendar.entities[].entity_id");
   if (features.calendar && calendarEntities.length === 0) {
     fail("config.calendar.entities", "must not be empty when Calendar is enabled");
   }
@@ -530,6 +551,10 @@ export function validateConfig(config) {
   validateEntityId(football.table_entity, "config.football.table_entity", "sensor");
 
   const school = requireObject(config.school, "config.school");
+  const schoolSource = school.source === undefined ? "classroom" : school.source;
+  if (!["classroom", "calendar"].includes(schoolSource)) {
+    fail("config.school.source", "must be classroom or calendar");
+  }
   const classroomStudents = requireArray(school.classroom_students, "config.school.classroom_students");
   const classroomPersonIds = [];
   const classroomAssignmentEntities = [];
@@ -544,7 +569,7 @@ export function validateConfig(config) {
   });
   validateUnique(classroomPersonIds, "config.school.classroom_students[].person_id");
   validateUnique(classroomAssignmentEntities, "config.school.classroom_students[].assignments_entity");
-  if (features.school) {
+  if (features.school && schoolSource === "classroom") {
     const childPersonIds = config.people.filter((person) => person.role === "child").map((person) => person.id);
     const missingChildren = childPersonIds.filter((personId) => !classroomPersonIds.includes(personId));
     if (missingChildren.length) {
@@ -557,6 +582,29 @@ export function validateConfig(config) {
       validateEntityId(entityId, `config.school.${key}[${index}]`, "calendar");
     });
     validateUnique(entities, `config.school.${key}`);
+  }
+  if (features.school && schoolSource === "calendar") {
+    if (!features.calendar) {
+      fail("config.school.source", "calendar fallback requires the Calendar view");
+    }
+    const configuredSchoolCalendarIds = [...school.calendar_entities, ...school.scopay_calendar_entities];
+    validateUnique(configuredSchoolCalendarIds, "config.school calendar entities");
+    if (configuredSchoolCalendarIds.length === 0) {
+      fail("config.school.calendar_entities", "must contain at least one calendar when calendar fallback is enabled");
+    }
+    const schoolCalendars = calendarEntities.filter((entry) => configuredSchoolCalendarIds.includes(entry.entity_id));
+    const missingCalendars = configuredSchoolCalendarIds.filter((entityId) => !schoolCalendars.some((entry) => entry.entity_id === entityId));
+    if (missingCalendars.length) {
+      fail("config.school.calendar_entities", `must also be configured in config.calendar.entities; missing ${missingCalendars.join(", ")}`);
+    }
+    if (schoolCalendars.some((entry) => entry.category !== "school")) {
+      fail("config.school.calendar_entities", "must reference calendar entries with category school");
+    }
+    const childPersonIds = config.people.filter((person) => person.role === "child").map((person) => person.id);
+    const missingChildren = childPersonIds.filter((personId) => !schoolCalendars.some((entry) => entry.person_ids.includes(personId)));
+    if (missingChildren.length) {
+      fail("config.school.calendar_entities", `must cover every child when calendar fallback is enabled; missing ${missingChildren.join(", ")}`);
+    }
   }
 
   const location = requireObject(config.location, "config.location");

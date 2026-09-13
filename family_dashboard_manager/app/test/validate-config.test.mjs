@@ -74,6 +74,28 @@ test("requires read-only mode to be explicit", () => {
   assert.throws(() => validateConfig(config), /display\.read_only/);
 });
 
+test("bounds kiosk photos to the private Family Dashboard media source", () => {
+  const config = structuredClone(example);
+  config.display.photo_frame.enabled = true;
+  assert.equal(validateConfig(config).display.photo_frame.motion_entity, "binary_sensor.example_ipad_camera_motion");
+
+  const publicAlbum = structuredClone(config);
+  publicAlbum.display.photo_frame.media_source = "https://www.icloud.com/sharedalbum/example";
+  assert.throws(() => validateConfig(publicAlbum), /photo_frame\.media_source/);
+
+  const wrongMotionDomain = structuredClone(config);
+  wrongMotionDomain.display.photo_frame.motion_entity = "sensor.example_ipad_motion";
+  assert.throws(() => validateConfig(wrongMotionDomain), /must use the binary_sensor domain/);
+
+  const tooFast = structuredClone(config);
+  tooFast.display.photo_frame.slide_seconds = 2;
+  assert.throws(() => validateConfig(tooFast), /slide_seconds/);
+
+  const nonKiosk = structuredClone(config);
+  nonKiosk.display.kiosk = false;
+  assert.throws(() => validateConfig(nonKiosk), /photo_frame\.enabled: requires kiosk mode/);
+});
+
 test("accepts the existing manager's private asset root", () => {
   const config = structuredClone(example);
   config.display.read_only = true;
@@ -316,6 +338,29 @@ test("requires one unique Classroom sensor for every child while School is enabl
   const sharedSensor = structuredClone(example);
   sharedSensor.school.classroom_students[1].assignments_entity = sharedSensor.school.classroom_students[0].assignments_entity;
   assert.throws(() => validateConfig(sharedSensor), /assignments_entity.*must be unique/);
+});
+
+test("allows the School view to use mapped read-only calendars without Classroom sensors", () => {
+  const config = structuredClone(example);
+  config.school.source = "calendar";
+  config.school.classroom_students = [];
+  assert.equal(validateConfig(config).school.source, "calendar");
+
+  const notSchool = structuredClone(config);
+  notSchool.calendar.entities.find((entry) => entry.entity_id === "calendar.school").category = "family";
+  assert.throws(() => validateConfig(notSchool), /category school/);
+
+  const missingChild = structuredClone(config);
+  missingChild.calendar.entities.find((entry) => entry.entity_id === "calendar.school").person_ids = ["child_one"];
+  assert.throws(() => validateConfig(missingChild), /calendar fallback.*missing child_two/);
+
+  const unconfigured = structuredClone(config);
+  unconfigured.school.calendar_entities = ["calendar.unconfigured_school"];
+  assert.throws(() => validateConfig(unconfigured), /must also be configured.*calendar\.unconfigured_school/);
+
+  const hiddenCalendar = structuredClone(config);
+  hiddenCalendar.features.calendar = false;
+  assert.throws(() => validateConfig(hiddenCalendar), /calendar fallback requires the Calendar view/);
 });
 
 test("accepts a signals-only household camera while its private stream entity is deferred", () => {

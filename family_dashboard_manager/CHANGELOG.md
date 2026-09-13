@@ -1,3 +1,11 @@
+## 0.10.0
+
+- Add an optional dashboard-native photo frame for kiosk tablets. After a bounded idle period it browses only the private local `media-source://media_source/local/family-dashboard/...` source, rotates image media through Home Assistant's signed local-media path, and returns immediately on the configured Companion App camera-motion sensor or a tap/key press.
+- Keep the display awake in the existing Home Assistant Companion kiosk rather than embedding iCloud or publishing a Shared Album. The first rollout uses curated copies under Home Assistant local media; public and arbitrary image URLs are rejected.
+- Add `school.source: calendar` as an honest read-only fallback while Google Workspace approval is pending. It requires school-category calendars mapped to every child and never labels calendar dates as Classroom assignments, completion, or grades.
+- Preserve schema-v6 compatibility, the existing Manager/app/tunnel identity, bounded live controls, rollback snapshots, private floorplans, and the separate per-child Classroom OAuth path.
+- Add unit, schema and cross-browser regression coverage for private photo resolution, motion return, and calendar-only School presentation.
+
 ## 0.9.0
 
 - Rebuild Security around immediate latest-image camera tiles and deliberate WebRTC live viewing, with one bounded player recovery, a hard session expiry and complete teardown.
