@@ -1,3 +1,9 @@
+## 0.10.1
+
+- Keep the active kiosk photo image mounted across ordinary Home Assistant state updates so its reveal animation cannot restart and pulse between the configured slide changes.
+- Apply the reveal animation only when the private Home Assistant photo URL genuinely changes, preserving the 20-second rotation without changing the album, idle delay or motion-return contract.
+- Add unit and cross-browser regression coverage proving a relevant entity update retains the exact active image element while camera motion still returns to the dashboard.
+
 ## 0.10.0
 
 - Add an optional dashboard-native photo frame for kiosk tablets. After a bounded idle period it browses only the private local `media-source://media_source/local/family-dashboard/...` source, rotates image media through Home Assistant's signed local-media path, and returns immediately on the configured Companion App camera-motion sensor or a tap/key press.

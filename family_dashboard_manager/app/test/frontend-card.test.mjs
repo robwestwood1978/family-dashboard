@@ -71,6 +71,69 @@ test("keeps kiosk photos inside the private Home Assistant media source", () => 
 test("gives the kiosk photo frame a stable block containing card", () => {
   const card = Object.create(FamilyHubCard.prototype);
   assert.match(card._styles(), /\.hub-card \{[^}]*display:block;/);
+  assert.match(card._styles(), /\.photo-frame img\.is-revealing \{ animation:photo-frame-reveal/);
+  assert.doesNotMatch(card._styles(), /\.photo-frame img \{[^}]*animation:/);
+});
+
+test("does not schedule incidental renders while the kiosk photo frame owns the surface", () => {
+  const card = Object.create(FamilyHubCard.prototype);
+  Object.defineProperty(card, "isConnected", { value: true });
+  card._photoFrameActive = true;
+  card._renderPending = false;
+  card._render = () => undefined;
+  card._scheduleRender();
+  assert.equal(card._renderPending, false);
+});
+
+test("replays the photo reveal only when the resolved photo URL changes", () => {
+  const attributes = new Map();
+  const classes = new Set();
+  let revealAdds = 0;
+  let layoutReads = 0;
+  const image = {
+    hidden: true,
+    alt: "",
+    getAttribute: (name) => attributes.get(name) || null,
+    setAttribute: (name, value) => attributes.set(name, value),
+    removeAttribute: (name) => attributes.delete(name),
+    classList: {
+      add: (name) => {
+        if (name === "is-revealing") revealAdds += 1;
+        classes.add(name);
+      },
+      remove: (name) => classes.delete(name)
+    }
+  };
+  Object.defineProperty(image, "offsetWidth", {
+    get: () => {
+      layoutReads += 1;
+      return 1024;
+    }
+  });
+  const status = { hidden: false, textContent: "" };
+  const frame = {
+    querySelector: (selector) => selector === "img" ? image : status
+  };
+  const card = Object.create(FamilyHubCard.prototype);
+  card.shadowRoot = { querySelector: () => frame };
+  card._photoFrameUrl = "/media/local/family-dashboard/photos/one.jpg?authSig=test";
+  card._photoFrameIndex = 0;
+  card._photoFrameItems = [{}, {}];
+  card._photoFrameLoading = false;
+  card._photoFrameError = null;
+
+  card._syncPhotoFrameMedia();
+  card._syncPhotoFrameMedia();
+  assert.equal(revealAdds, 1);
+  assert.equal(layoutReads, 1);
+  assert.equal(classes.has("is-revealing"), true);
+
+  card._photoFrameUrl = "/media/local/family-dashboard/photos/two.jpg?authSig=test";
+  card._photoFrameIndex = 1;
+  card._syncPhotoFrameMedia();
+  assert.equal(revealAdds, 2);
+  assert.equal(layoutReads, 2);
+  assert.equal(image.alt, "Family photo 2 of 2");
 });
 
 test("loads and resolves only image children from the configured private photo album", async () => {
