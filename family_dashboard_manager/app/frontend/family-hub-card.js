@@ -1840,6 +1840,11 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _scheduleRender(force = false) {
     if (!this.isConnected && !force) return;
+    // The photo frame owns the visible surface while it is active. Rebuilding
+    // the shadow tree for ordinary Home Assistant state ticks would replace
+    // the current image and restart its reveal animation, which presents as a
+    // recurring pulse between the configured slide changes.
+    if (this._photoFrameActive && !force) return;
     if (this._renderPending) return;
     this._renderPending = true;
     const callback = () => {
@@ -2046,8 +2051,18 @@ export class FamilyHubCard extends HTMLElementBase {
     const image = frame.querySelector("img");
     const status = frame.querySelector(".photo-frame-status");
     if (image) {
-      if (this._photoFrameUrl) image.setAttribute("src", this._photoFrameUrl);
-      else image.removeAttribute("src");
+      const previousUrl = image.getAttribute("src");
+      if (this._photoFrameUrl) {
+        if (previousUrl !== this._photoFrameUrl) {
+          image.setAttribute("src", this._photoFrameUrl);
+          image.classList.remove("is-revealing");
+          void image.offsetWidth;
+          image.classList.add("is-revealing");
+        }
+      } else {
+        image.removeAttribute("src");
+        image.classList.remove("is-revealing");
+      }
       image.hidden = !this._photoFrameUrl;
       image.alt = `Family photo ${this._photoFrameIndex + 1} of ${Math.max(1, this._photoFrameItems.length)}`;
     }
@@ -5352,7 +5367,8 @@ export class FamilyHubCard extends HTMLElementBase {
       button { -webkit-tap-highlight-color:transparent; }
       .hub-card { position:relative; display:block; overflow:hidden; border:0; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); color:var(--hub-text); min-height:100%; height:100%; }
       .photo-frame { position:absolute; inset:0; z-index:100; width:100%; height:100%; min-height:100%; padding:0; overflow:hidden; border:0; border-radius:inherit; background:#05070b; color:#fff; cursor:pointer; text-align:left; }
-      .photo-frame img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; animation:photo-frame-reveal .65s ease both; }
+      .photo-frame img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+      .photo-frame img.is-revealing { animation:photo-frame-reveal .65s ease both; }
       .photo-frame-shade { position:absolute; inset:0; background:linear-gradient(180deg,rgba(0,0,0,.06) 48%,rgba(0,0,0,.64)); pointer-events:none; }
       .photo-frame-status { position:absolute; inset:0; display:grid; place-items:center; padding:32px; color:rgba(255,255,255,.78); font-size:15px; text-align:center; }
       .photo-frame-status[hidden] { display:none; }

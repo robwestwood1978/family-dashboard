@@ -2,7 +2,7 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.10.0 provides:
+Version 0.10.1 provides:
 
 - a secret-rejecting schema-v6 household contract;
 - a private Home Assistant media-source kiosk photo frame with camera-motion return;

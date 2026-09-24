@@ -1035,6 +1035,18 @@ test("shows private Home Assistant photos while idle and returns on kiosk camera
   await expect(card.locator(".photo-frame img")).toHaveAttribute("src", "/media/local/family-dashboard/photos/photo-001.jpg?authSig=test");
   await expect(card.locator(".hub-shell")).toHaveAttribute("inert", "");
 
+  await card.evaluate((element) => {
+    window.__photoFrameImage = element.shadowRoot.querySelector(".photo-frame img");
+  });
+  await updateEntityState(card, state("weather.home", "rainy", { temperature: 18.5 }));
+  await expect.poll(() => card.evaluate((element) => ({
+    sameImage: element.shadowRoot.querySelector(".photo-frame img") === window.__photoFrameImage,
+    src: element.shadowRoot.querySelector(".photo-frame img")?.getAttribute("src")
+  }))).toEqual({
+    sameImage: true,
+    src: "/media/local/family-dashboard/photos/photo-001.jpg?authSig=test"
+  });
+
   await updateEntityState(card, state("binary_sensor.example_ipad_camera_motion", "on"));
   await expect(card.locator(".photo-frame")).toHaveCount(0);
   await expect(card.locator(".hub-shell")).not.toHaveAttribute("inert", "");
