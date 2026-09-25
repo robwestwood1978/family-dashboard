@@ -3116,6 +3116,7 @@ async function auditApprovalTextZoom(page, testInfo, name) {
         for (const rect of entry.rects) {
           let horizontalScrollReach = false;
           let verticalScrollReach = false;
+          let intentionalEllipsis = false;
           for (let ancestor = entry.parent; ancestor; ancestor = composedParent(ancestor)) {
             if (ancestor.nodeType !== Node.ELEMENT_NODE) continue;
             const style = getComputedStyle(ancestor);
@@ -3124,7 +3125,8 @@ async function auditApprovalTextZoom(page, testInfo, name) {
             const bounds = ancestor.getBoundingClientRect();
             const scrollableX = ["auto", "scroll"].includes(overflowX) && ancestor.scrollWidth > ancestor.clientWidth + 1;
             const scrollableY = ["auto", "scroll"].includes(overflowY) && ancestor.scrollHeight > ancestor.clientHeight + 1;
-            if (["hidden", "clip"].includes(overflowX) && !horizontalScrollReach && (rect.left < bounds.left - 1 || rect.right > bounds.right + 1)) {
+            intentionalEllipsis ||= style.textOverflow === "ellipsis";
+            if (["hidden", "clip"].includes(overflowX) && !horizontalScrollReach && !intentionalEllipsis && (rect.left < bounds.left - 1 || rect.right > bounds.right + 1)) {
               const key = `${entry.text}|${nodeLabel(ancestor)}|x`;
               if (!clippedKeys.has(key)) clipped.push({ text: entry.text, ancestor: nodeLabel(ancestor), axis: "horizontal" });
               clippedKeys.add(key);
