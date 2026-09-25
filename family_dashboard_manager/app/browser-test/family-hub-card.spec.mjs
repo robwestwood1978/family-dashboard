@@ -836,7 +836,7 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
     "calendar.child_two"
   ]);
   await card.locator('[data-calendar-mode="agenda"]').click();
-  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-default-view", "schedule");
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-default-view", "agenda");
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-rolling-days-schedule", "");
   await card.locator('[data-mock-calendar-write]').evaluate((button) => button.click());
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
