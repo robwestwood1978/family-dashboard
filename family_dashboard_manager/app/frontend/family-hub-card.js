@@ -6378,18 +6378,18 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-planner-grid.is-day { grid-template-columns:minmax(0,1fr); }
       .family-planner-day { min-width:0; min-height:0; display:grid; grid-template-rows:52px minmax(0,1fr) auto; border:1px solid rgba(38,50,77,.09); border-radius:15px; background:rgba(255,255,255,.68); overflow:hidden; }
       .family-planner-day.is-today { border-color:rgba(20,99,232,.42); background:#fff; box-shadow:0 8px 20px rgba(35,59,94,.1); }
-      .family-planner-day > header { padding:7px 7px 6px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(38,50,77,.07); }
-      .family-planner-day > header > div:first-child { display:flex; align-items:baseline; gap:4px; }
+      .family-planner-day > header { min-width:0; padding:7px 7px 6px; display:flex; align-items:center; justify-content:space-between; gap:4px; overflow:hidden; border-bottom:1px solid rgba(38,50,77,.07); }
+      .family-planner-day > header > div:first-child { min-width:0; display:flex; align-items:baseline; gap:4px; overflow:hidden; }
       .family-planner-day > header span { color:#68748A; font-size:12px; font-weight:800; text-transform:uppercase; }
       .family-planner-day > header strong { color:#17233A; font-size:18px; line-height:1; }
       .family-planner-day > header small { color:#8A94A6; font-size:12px; text-transform:uppercase; }
-      .day-people { display:flex; flex-direction:row-reverse; }
+      .day-people { min-width:0; flex:0 1 auto; display:flex; flex-direction:row-reverse; overflow:hidden; }
       .day-people i { width:24px; height:24px; margin-left:-5px; display:grid; place-items:center; border:2px solid #fff; border-radius:50%; background:var(--person-colour); color:#fff; font-size:12px; font-style:normal; font-weight:900; }
       .family-planner-events { min-height:0; padding:6px; display:flex; flex-direction:column; gap:5px; overflow:auto; }
       .family-planner-event { position:relative; width:100%; min-width:0; min-height:48px; padding:7px 6px 7px 9px; border:0; border-radius:10px; background:color-mix(in srgb,var(--calendar-colour) 13%,#fff); color:#1E2A42; display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left; cursor:pointer; overflow:hidden; }
       .family-planner-event::before { content:""; position:absolute; inset:4px auto 4px 0; width:3px; border-radius:4px; background:var(--calendar-colour); }
       .family-planner-event strong { width:100%; overflow:hidden; text-overflow:ellipsis; color:#111C33; font-size:12px; line-height:1.2; }
-      .family-planner-event small,.planner-event-time { width:100%; overflow:hidden; text-overflow:ellipsis; color:#68748A; font-size:12px; white-space:nowrap; }
+      .family-planner-event small,.planner-event-time { display:block; width:100%; overflow:hidden; text-overflow:ellipsis; color:#68748A; font-size:12px; white-space:nowrap; }
       .planner-event-time { color:var(--calendar-colour); font-weight:900; }
       .planner-ready-state { margin-top:3px; display:flex; align-items:center; gap:3px; color:#7A5720; font-size:12px; font-weight:850; }
       .planner-ready-state ha-icon { --mdc-icon-size:12px; }
