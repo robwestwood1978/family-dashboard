@@ -14,6 +14,9 @@ import {
   energyFuelPresentation,
   energyOverviewPresentation,
   escapeHtml,
+  extractPreparationItems,
+  familyPlannerEventKey,
+  familyPlannerPeople,
   FamilyHubCard,
   floorplanImageSource,
   floorplanViewBox,
@@ -33,6 +36,8 @@ import {
   isCommandEntityAvailable,
   isControlAction,
   isCurrentOrFutureCalendarEvent,
+  isAllowedPlannerAction,
+  isPreparationWindowEvent,
   isEntityAvailable,
   isConfirmationStillValid,
   isReadOnlyChildMessageAllowed,
@@ -44,7 +49,11 @@ import {
   normaliseChoreOpsSummary,
   normaliseChoreStatus,
   normaliseFixtureStatus,
+  matchPreparationTemplate,
   nextSchoolCalendarEvent,
+  parsePreparationDescription,
+  preparationDescription,
+  preparationProgress,
   safeClassroomLink,
   schoolDataSource,
   selectFavouriteFixture,
@@ -55,6 +64,75 @@ import {
 
 test("escapes state-derived text before rendering it into the card", () => {
   assert.equal(escapeHtml('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+});
+
+test("maps family planner events to people and stable preparation records", () => {
+  const event = {
+    summary: "Ernie football training",
+    description: "Bring the home kit",
+    start: "2026-09-25T17:30:00+01:00",
+    _calendar: { entity_id: "calendar.ernie", person_ids: ["ernie"] }
+  };
+  const people = [
+    { id: "ernie", name: "Ernie", role: "child", colour: "#E76F51" },
+    { id: "zoe", name: "Zoe", role: "adult", colour: "#E4B93F" }
+  ];
+  const templates = [{ id: "football", label: "Football", keywords: ["football"], items: ["Boots"] }];
+  const eventKey = familyPlannerEventKey(event);
+  assert.deepEqual(familyPlannerPeople(event, people).map((person) => person.id), ["ernie"]);
+  assert.equal(familyPlannerEventKey({ ...event, end: "2026-09-25T19:00:00+01:00" }), eventKey);
+  assert.equal(matchPreparationTemplate(event, templates)?.id, "football");
+  const description = preparationDescription(event, "ernie", "football");
+  assert.deepEqual(parsePreparationDescription(description), { eventKey, personId: "ernie", templateId: "football" });
+  assert.equal(parsePreparationDescription("ordinary reminder"), null);
+});
+
+test("extracts and totals only bounded Family Planner checklist items", () => {
+  const event = {
+    summary: "Football",
+    start: "2026-09-25T17:30:00+01:00",
+    _calendar: { entity_id: "calendar.ernie", person_ids: ["ernie"] }
+  };
+  const eventKey = familyPlannerEventKey(event);
+  const items = extractPreparationItems({ response: { "todo.family_prep": { items: [
+    { uid: "one", summary: "Boots", status: "completed", description: preparationDescription(event, "ernie", "football") },
+    { uid: "two", summary: "Water bottle", status: "needs_action", description: preparationDescription(event, "ernie", "football") },
+    { uid: "three", summary: "Unrelated", status: "needs_action", description: "ordinary reminder" }
+  ] } } });
+  assert.equal(items.length, 2);
+  assert.deepEqual(preparationProgress(items, eventKey, ["ernie"]), { total: 2, complete: 1, ready: false });
+  items[1].status = "completed";
+  assert.deepEqual(preparationProgress(items, eventKey), { total: 2, complete: 2, ready: true });
+});
+
+test("shows preparation only inside the configured upcoming window", () => {
+  const now = new Date("2026-09-24T10:00:00Z");
+  assert.equal(isPreparationWindowEvent({ start: "2026-09-25T17:30:00Z" }, 7, now), true);
+  assert.equal(isPreparationWindowEvent({ start: "2026-10-05T17:30:00Z" }, 7, now), false);
+  assert.equal(isPreparationWindowEvent({ start: "2026-09-23T17:30:00Z", end: "2026-09-23T19:00:00Z" }, 7, now), false);
+});
+
+test("allows only configured Family Planner calendar and checklist actions", () => {
+  const config = {
+    features: { calendar: true },
+    display: { read_only: false },
+    calendar: {
+      entities: [
+        { entity_id: "calendar.ernie", allow_create: true },
+        { entity_id: "calendar.school", allow_create: false }
+      ],
+      preparation: { enabled: true, todo_entity: "todo.family_prep" }
+    }
+  };
+  assert.equal(isAllowedPlannerAction("calendar", "create_event", "calendar.ernie", config), true);
+  assert.equal(isAllowedPlannerAction("calendar", "create_event", "calendar.school", config), false);
+  assert.equal(isAllowedPlannerAction("todo", "add_item", "todo.family_prep", config), true);
+  assert.equal(isAllowedPlannerAction("todo", "delete_item", "todo.family_prep", config), false);
+  assert.equal(isAllowedPlannerAction("todo", "add_item", "todo.other", config), false);
+  config.display.read_only = true;
+  assert.equal(isAllowedPlannerAction("calendar", "create_event", "calendar.ernie", config), false);
+  assert.equal(isAllowedPlannerAction("todo", "update_item", "todo.family_prep", config), false);
+  assert.equal(isAllowedPlannerAction("todo", "get_items", "todo.family_prep", config), true);
 });
 
 test("keeps kiosk photos inside the private Home Assistant media source", () => {

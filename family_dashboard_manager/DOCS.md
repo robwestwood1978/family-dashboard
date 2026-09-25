@@ -1,10 +1,10 @@
 # Family Dashboard Manager
 
-Version 0.10.1 upgrades the existing Family Dashboard Manager in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
+Version 0.11.0 upgrades the existing Family Dashboard Manager in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
 
-This release adds the private kiosk photo frame and calendar-only School fallback described in [the v0.10 rollout note](./app/docs/v010-kiosk-school-fallback.md). All v0.9 controlled-live and rollback boundaries below remain in force.
+This release adds the colour-coded Family Planner and **Ready** checklist described in [the v0.11 rollout note](./app/docs/v011-family-planner.md). It retains the private kiosk photo frame and calendar-only School fallback from v0.10. All controlled-live and rollback boundaries below remain in force.
 
-The accepted schema-v6 dashboard can now run in controlled live mode. First-party actions are restricted to exact validated household entities and fixed services. The configured Sonos/Music Assistant card receives a separate bounded media proxy. Calendar, Classroom, camera presentation cards and the vacuum map remain read-only, while every alarm and garage change still asks for a second confirmation.
+The accepted schema-v6 dashboard runs in controlled live mode. First-party actions are restricted to exact validated household entities and fixed services. Calendar creation is allowed only on entries marked `allow_create: true`, and preparation items can be added or ticked only on the configured to-do entity. Classroom, camera presentation cards and the vacuum map remain read-only, while every alarm and garage change still asks for a second confirmation.
 
 ## Upgrade the existing manager
 
@@ -12,9 +12,9 @@ This release requires Home Assistant OS 2026.8.0 or newer.
 
 1. Create a Home Assistant backup.
 2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
-3. Update the installed **Family Dashboard Manager** to v0.10.1; do not uninstall it.
+3. Update the installed **Family Dashboard Manager** to v0.11.0; do not uninstall it.
 4. Keep the existing Secure MCP Tunnel options unchanged and restart the app.
-5. Confirm the manager reconnects through the existing tunnel and reports v0.10.1.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.11.0.
 
 The app exposes no host port. Its manager endpoint remains on the private loopback interface inside the same app container.
 
@@ -37,7 +37,7 @@ lovelace:
 Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.10.1
+/local/family-dashboard/family-hub-card.js?v=0.11.0
 ```
 
 The stock Home Assistant Overview remains available to administrators.
@@ -71,7 +71,7 @@ The schema-v6 household configuration retains the existing panel path and explic
 
 Run `validate_household_config` first. Validation is read-only and returns the exact configuration hash required by `deploy_household_config` with `confirm=true`. Deployment writes only the existing Family Dashboard configuration and fixed frontend allow-list after creating a raw, hash-verified snapshot. Private floorplans are preserved separately.
 
-Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.10.1, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
+Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.11.0, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
 
 ## Household mappings retained from v0.9
 
@@ -108,7 +108,7 @@ partial mappings.
 - Alarm actions accept only the configured alarm entity and the three presented arm-home, arm-away and disarm services. Unavailable entities and unsupported arm modes remain disabled, and confirmation expires if the alarm state changes.
 - Garage actions accept only the configured garage cover, require its advertised open/close feature, and still require confirmation. A moving or unavailable garage never offers an enabled action, and confirmation expires if its state changes.
 - Security opens on authenticated Home Assistant stills and never starts a stream merely by opening the view. Tapping a still starts the exact configured exterior-camera Start route and mounts Home Assistant's native live `picture-entity` for that same camera. The Home Assistant object supplied directly to that card is a least-privilege facade: its ordinary calls accept only the same camera's signed snapshot path and current/legacy camera protocol messages, and deliberately provide no generic signed go2rtc socket. Home Assistant cards share the page and may consume framework connection context, so this facade prevents accidental or unsupported calls but is not a browser sandbox; only trusted, administrator-installed native/custom cards are supported. **Live** appears only after a ready video frame and returns to loading if playback stalls. Start/Stop controls must be configured as an exact pair. The native camera-service fallback is used only when that configured button pair exists but is unavailable; garage RTSP buttons remain preferred where proven, while the existing front-door P2P pair remains a physical-acceptance risk until an RTSP-capable route is verified. Only one viewer may exist at once. Close, camera switching, leaving Security, page hiding and the hard two-minute expiry tear down the viewer and issue the bounded Stop route immediately, even if Start has not returned. One viewer recreation is allowed without restarting Eufy; failure returns to the still with an explicit retry. A signals-only or unavailable camera causes no camera write.
-- Calendar event management and Classroom remain read-only. Embedded camera views and the vacuum map receive a least-privilege facade for normal card API use; this is an accidental-operation guard, not isolation from same-page component code.
+- Family Planner may call only `calendar.create_event` for an explicitly writable mapped calendar and `todo.add_item`/`todo.update_item` for the one mapped preparation list. It has no event edit/delete, to-do delete or generic service bridge. Classroom remains read-only. Embedded camera views and the vacuum map receive a least-privilege facade for normal card API use; this is an accidental-operation guard, not isolation from same-page component code.
 - Exterior-camera validation continues to reject child, nursery and bedroom hints. Sanitised inventory still omits all camera entities.
 
 ## Physical acceptance
@@ -117,7 +117,8 @@ On the target iPad, confirm:
 
 - the existing Family Dashboard and stock Home Assistant Overview both remain available;
 - the dashboard opens without a missing-card error and has no horizontal overflow at the supported landscape size;
-- Calendar switches among Day, Week, Month and Agenda and offers no event creation or editing;
+- Calendar switches among Day, Week, Month and Agenda; Day/Week show per-person colours, and event creation is offered only for explicitly writable calendars;
+- a preparation template creates a checklist for the mapped child, ticks through to **Ready**, and appears beside that child's jobs without changing ChoreOps points;
 - both private floors retain the accepted Hall-to-Hall U-return stair and no stair enters Bedroom 4;
 - each mapped light, scene, heating zone, blind and vacuum action controls only its labelled device;
 - Sonos playback, volume and grouping operate only across the five configured zones;

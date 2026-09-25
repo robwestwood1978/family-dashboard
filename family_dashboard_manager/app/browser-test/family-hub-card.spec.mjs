@@ -672,9 +672,12 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     card.hass = {
       connected: true,
       states,
-      callService(domain, service, data) {
-        window.__serviceCalls.push({ domain, service, data });
-        const key = `${domain}.${service}:${data?.entity_id || ""}`;
+      callService(domain, service, data, target) {
+        const boundedData = target?.entity_id && !data?.entity_id
+          ? { ...data, entity_id: target.entity_id }
+          : data;
+        window.__serviceCalls.push({ domain, service, data: boundedData });
+        const key = `${domain}.${service}:${boundedData?.entity_id || ""}`;
         const behavior = window.__serviceBehaviors[key];
         if (behavior === "reject") return Promise.reject(new Error("simulated camera service failure"));
         if (behavior === "pending") {
@@ -686,6 +689,9 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       },
       async callApi(method, path) {
         window.__apiCalls.push({ method, path });
+        const configuredResponse = Object.entries(runtimeOptions.calendarEventsByEntity || {})
+          .find(([entityId]) => path.includes(encodeURIComponent(entityId)))?.[1];
+        if (configuredResponse) return configuredResponse;
         const school = path.includes("calendar.school");
         const upcoming = {
           summary: school ? "School assembly" : "Family dinner",
@@ -702,6 +708,9 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       async callWS(message) {
         window.__wsCalls.push(message);
         if (message?.type === "calendar/events") return [{ summary: "Protocol event" }];
+        if (message?.type === "call_service" && message?.domain === "todo" && message?.service === "get_items") {
+          return { response: { [message.target?.entity_id]: { items: runtimeOptions.preparationItems || [] } } };
+        }
         if (message?.type === "media_source/browse_media") return {
           children: runtimeOptions.photoMediaChildren || []
         };
@@ -794,37 +803,41 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   }
 
   await card.locator('[data-view="calendar"]').first().click();
-  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toBeVisible();
+  await expect(card.locator(".family-planner-grid")).toBeVisible();
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveCount(0);
   await expect(card.locator("[data-calendar-mode]")).toHaveCount(4);
-  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-event-management", "false");
-  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-show-header-controls", "true");
-  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-hide-navigation-buttons", "false");
-  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-hide-calendars", "false");
-  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-calendar-protocol-reads", "2");
-  // Leaving Calendar revokes and removes the child card. Returning deliberately
-  // creates one fresh child and therefore one new bounded read per calendar.
-  await expect.poll(() => page.evaluate(() => window.__wsCalls.filter((message) => message.type === "calendar/events").map((message) => message.entity_id))).toEqual([
-    "calendar.family",
-    "calendar.school",
-    "calendar.family",
-    "calendar.school"
-  ]);
+  await expect(card.locator("[data-calendar-person]")).toHaveCount(5);
+  const childFilter = card.locator('[data-calendar-person="child_one"]');
+  await childFilter.click();
+  await expect(childFilter).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  await card.locator('[data-calendar-mode="day"]').click();
+  await expect(card.locator(".family-planner-grid.is-day .family-planner-day")).toHaveCount(1);
+  await card.locator('[data-calendar-mode="month"]').click();
+  const daylight = card.locator('[data-card-type="custom:daylight-calendar-card"]');
+  await expect(daylight).toBeVisible();
+  await expect(daylight).toHaveAttribute("data-event-management", "false");
+  await expect(daylight).toHaveAttribute("data-show-header-controls", "true");
+  await expect(daylight).toHaveAttribute("data-hide-navigation-buttons", "false");
+  await expect(daylight).toHaveAttribute("data-hide-calendars", "false");
+  await expect(daylight).toHaveAttribute("data-calendar-protocol-reads", "6");
+  await expect(daylight).toHaveAttribute("data-default-view", "month");
   await expect(card.locator("[data-calendar-nav]")).toHaveCount(3);
   await card.locator('[data-calendar-nav="next"]').click();
   await expect(card.locator("[data-calendar-range]")).toHaveText("31 August–6 September 2026");
   await card.locator('[data-calendar-nav="today"]').click();
   await expect(card.locator("[data-calendar-range]")).toHaveText("24–30 August 2026");
-  const schoolSource = card.locator('[data-calendar-source="calendar.school"]');
-  await schoolSource.click();
-  await expect(schoolSource).toHaveAttribute("aria-pressed", "false");
-  await expect(card.locator('[data-calendar-event="calendar.school"]')).toBeHidden();
-  const familySource = card.locator('[data-calendar-source="calendar.family"]');
-  await familySource.click();
-  await expect(familySource).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
-  await card.locator('[data-calendar-mode="day"]').click();
-  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-default-view", "schedule");
-  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-rolling-days-schedule", "1");
+  await expect.poll(() => page.evaluate(() => window.__wsCalls.filter((message) => message.type === "calendar/events").map((message) => message.entity_id))).toEqual([
+    "calendar.family",
+    "calendar.school",
+    "calendar.parent",
+    "calendar.parent_two",
+    "calendar.child_one",
+    "calendar.child_two"
+  ]);
+  await card.locator('[data-calendar-mode="agenda"]').click();
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-default-view", "agenda");
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-rolling-days-schedule", "");
   await card.locator('[data-mock-calendar-write]').evaluate((button) => button.click());
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
 
@@ -832,6 +845,50 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   await expect(card.locator(".next-panel")).toContainText("Family dinner");
   await expect(card.locator(".next-panel")).not.toContainText("Finished early appointment");
 
+  expect(pageErrors).toEqual([]);
+});
+
+test("creates one Apple calendar event and a point-free Ready checklist inside the bounded planner services", async ({ page }) => {
+  const pageErrors = await mount(page);
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="calendar"]').click();
+  await card.locator(".calendar-add-event").click();
+  await expect(card.locator(".planner-add-modal")).toBeVisible();
+  await card.locator('[data-planner-field="calendar"]').selectOption("calendar.child_one");
+  await card.locator('[data-planner-field="summary"]').fill("Football training");
+  await card.locator('[data-planner-field="date"]').fill("2026-08-25");
+  await card.locator('[data-planner-field="start"]').fill("17:30");
+  await card.locator('[data-planner-field="end"]').fill("19:00");
+  await card.locator('[data-planner-field="location"]').fill("Community pitch");
+  await card.locator('[data-planner-field="template"]').selectOption("football");
+  await card.locator("[data-planner-save]").click();
+
+  await expect(card.locator(".planner-add-modal")).toHaveCount(0);
+  const calls = await page.evaluate(() => window.__serviceCalls);
+  expect(calls.filter((entry) => entry.domain === "calendar" && entry.service === "create_event")).toEqual([{
+    domain: "calendar",
+    service: "create_event",
+    data: {
+      summary: "Football training",
+      start_date_time: "2026-08-25T17:30:00",
+      end_date_time: "2026-08-25T19:00:00",
+      location: "Community pitch",
+      entity_id: "calendar.child_one"
+    }
+  }]);
+  const preparationCalls = calls.filter((entry) => entry.domain === "todo" && entry.service === "add_item");
+  expect(preparationCalls).toHaveLength(5);
+  expect(preparationCalls.map((entry) => entry.data.item)).toEqual([
+    "Football kit",
+    "Shin pads",
+    "Boots",
+    "Snack pack",
+    "Water bottle"
+  ]);
+  expect(preparationCalls.every((entry) => entry.data.entity_id === "todo.family_prep"
+    && entry.data.description.includes("Person: child_one")
+    && entry.data.description.includes("Template: football"))).toBe(true);
+  expect(calls.some((entry) => entry.domain === "choreops")).toBe(false);
   expect(pageErrors).toEqual([]);
 });
 
@@ -853,6 +910,7 @@ test("isolates the dashboard rail and mode controls from Daylight light-DOM styl
   const before = await railGeometry();
   const inactiveColourBefore = await card.locator('.hub-nav-button[data-view="rooms"]').evaluate((button) => getComputedStyle(button).color);
   await card.locator('.hub-nav-button[data-view="calendar"]').click();
+  await card.locator('[data-calendar-mode="month"]').click();
   const calendar = card.locator('[data-card-type="custom:daylight-calendar-card"]');
   await expect(calendar).toBeVisible();
   expect(await calendar.evaluate((element) => element.shadowRoot)).toBe(null);
@@ -867,8 +925,8 @@ test("isolates the dashboard rail and mode controls from Daylight light-DOM styl
   expect(after).toEqual(before);
   expect(inactiveColourAfter).toBe(inactiveColourBefore);
 
-  await expect(card.locator(".calendar-context")).toContainText("Family schedule");
-  await expect(card.locator(".calendar-context")).toContainText("Read only");
+  await expect(card.locator(".calendar-context")).toContainText("Family planner");
+  await expect(card.locator(".calendar-context")).toContainText("Who is doing what");
   const modeStyles = await card.locator(".calendar-modes .segment").evaluateAll((buttons) => buttons.map((button) => {
     const style = getComputedStyle(button);
     return { minHeight: style.minHeight, marginTop: style.marginTop, paddingLeft: style.paddingLeft };
@@ -2464,6 +2522,8 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect.poll(() => page.evaluate(() => window.__moreInfoEvents)).toBe(0);
 
   await card.locator('.hub-nav-button[data-view="calendar"]').click();
+  await expect(card.locator(".calendar-add-event")).toHaveCount(0);
+  await card.locator('[data-calendar-mode="month"]').click();
   await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-read-only-guard", "service-boundary");
   await card.locator('[data-mock-calendar-write]').evaluate((button) => button.click());
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
@@ -3289,12 +3349,9 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       await expect(card.locator(".energy-truth-note")).toContainText("Smart-meter totals, not live power");
     }
     if (view === "calendar") {
-      await expect(card.locator("[data-calendar-nav]")).toHaveCount(3);
-      await expect(card.locator("[data-calendar-source]")).toHaveCount(2);
-      await card.locator('[data-calendar-nav="next"]').click();
-      await expect(card.locator("[data-calendar-range]")).toHaveText("31 August–6 September 2026");
-      await card.locator('[data-calendar-nav="today"]').click();
-      await expect(card.locator("[data-calendar-range]")).toHaveText("24–30 August 2026");
+      await expect(card.locator(".family-planner-day")).toHaveCount(7);
+      await expect(card.locator("[data-calendar-person]")).toHaveCount(5);
+      await expect(card.locator(".calendar-add-event")).toBeVisible();
     }
     if (view === "family") {
       await expect(card.locator(".family-rhythm,.location-off-badge")).toHaveCount(0);

@@ -294,11 +294,37 @@ export function validateConfig(config) {
     if (entry.category && !["family", "personal", "school", "trip", "other"].includes(entry.category)) {
       fail(`${path}.category`, "unsupported calendar category");
     }
+    if (entry.allow_create !== undefined) requireBoolean(entry.allow_create, `${path}.allow_create`);
   });
   validateUnique(calendarIds, "config.calendar.entities[].id");
   validateUnique(calendarEntityIds, "config.calendar.entities[].entity_id");
   if (features.calendar && calendarEntities.length === 0) {
     fail("config.calendar.entities", "must not be empty when Calendar is enabled");
+  }
+  if (calendar.preparation !== undefined) {
+    const preparation = requireObject(calendar.preparation, "config.calendar.preparation");
+    requireBoolean(preparation.enabled, "config.calendar.preparation.enabled");
+    validateEntityId(preparation.todo_entity, "config.calendar.preparation.todo_entity", "todo");
+    requireInteger(preparation.lookahead_days, "config.calendar.preparation.lookahead_days", 1, 31);
+    const templateIds = [];
+    const templates = requireArray(preparation.templates, "config.calendar.preparation.templates");
+    if (templates.length > 30) fail("config.calendar.preparation.templates", "must contain at most 30 templates");
+    templates.forEach((template, index) => {
+      const path = `config.calendar.preparation.templates[${index}]`;
+      requireObject(template, path);
+      validateId(template.id, `${path}.id`);
+      templateIds.push(template.id);
+      requireString(template.label, `${path}.label`);
+      const keywords = requireArray(template.keywords, `${path}.keywords`);
+      const items = requireArray(template.items, `${path}.items`);
+      if (keywords.length === 0 || keywords.length > 20) fail(`${path}.keywords`, "must contain 1 to 20 keywords");
+      if (items.length === 0 || items.length > 30) fail(`${path}.items`, "must contain 1 to 30 checklist items");
+      keywords.forEach((keyword, keywordIndex) => requireString(keyword, `${path}.keywords[${keywordIndex}]`));
+      items.forEach((item, itemIndex) => requireString(item, `${path}.items[${itemIndex}]`));
+      validateUnique(keywords.map((keyword) => keyword.trim().toLocaleLowerCase()), `${path}.keywords`);
+      validateUnique(items.map((item) => item.trim().toLocaleLowerCase()), `${path}.items`);
+    });
+    validateUnique(templateIds, "config.calendar.preparation.templates[].id");
   }
 
   const weather = requireObject(config.weather, "config.weather");
@@ -605,6 +631,9 @@ export function validateConfig(config) {
     if (missingChildren.length) {
       fail("config.school.calendar_entities", `must cover every child when calendar fallback is enabled; missing ${missingChildren.join(", ")}`);
     }
+  }
+  if (calendar.preparation?.enabled && !features.calendar) {
+    fail("config.calendar.preparation.enabled", "requires Calendar to be enabled");
   }
 
   const location = requireObject(config.location, "config.location");
