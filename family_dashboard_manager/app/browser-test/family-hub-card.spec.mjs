@@ -884,8 +884,8 @@ test("creates one Apple calendar event and a point-free Ready checklist inside t
 });
 
 test("previews urgent Ready items on Today and toggles them through the bounded to-do service", async ({ page }) => {
-  const start = new Date(Date.now() + 3_600_000).toISOString();
-  const end = new Date(Date.now() + 7_200_000).toISOString();
+  const start = new Date(Date.parse(APPROVAL_NOW) + 3_600_000).toISOString();
+  const end = new Date(Date.parse(APPROVAL_NOW) + 7_200_000).toISOString();
   const event = {
     summary: "Football training",
     start: { dateTime: start },
