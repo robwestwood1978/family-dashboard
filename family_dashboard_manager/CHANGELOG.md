@@ -1,3 +1,11 @@
+## 0.11.2
+
+- Put event-linked **Ready next** items on Today when they are due today or tomorrow, with direct tick-off through the existing bounded local to-do service and compact ChoreOps summaries retained underneath.
+- Redesign the compact Spurs/Villa fixture with both club crests, a clearer score hierarchy and separate navy/claret edge accents for a family derby.
+- Remove the overlapping favourite-club accents from full fixture rows and give a Spurs–Villa match one deliberate accent on each side.
+- Replace browser-default planner and matchweek dropdown chrome with consistent 48-pixel touch controls and one explicit chevron, while retaining native accessible selection behaviour.
+- Document the safe follow-on Admin design: administrator-only editing backed by the Manager's canonical configuration and validation/rollback flow, rather than fragile per-device browser storage.
+
 ## 0.11.1
 
 - Replace the failing Month and Agenda child-card mounts with first-party views that share the same family colours, event detail, filtering and bounded calendar API as Day and Week.

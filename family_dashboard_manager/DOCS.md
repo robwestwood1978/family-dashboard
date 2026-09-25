@@ -1,6 +1,6 @@
 # Family Dashboard Manager
 
-Version 0.11.1 repairs the existing Family Planner in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
+Version 0.11.2 polishes the existing Family Planner and football presentation in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
 
 This release adds the colour-coded Family Planner and **Ready** checklist described in [the v0.11 rollout note](./app/docs/v011-family-planner.md). It retains the private kiosk photo frame and calendar-only School fallback from v0.10. All controlled-live and rollback boundaries below remain in force.
 
@@ -12,9 +12,9 @@ This release requires Home Assistant OS 2026.8.0 or newer.
 
 1. Create a Home Assistant backup.
 2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
-3. Update the installed **Family Dashboard Manager** to v0.11.1; do not uninstall it.
+3. Update the installed **Family Dashboard Manager** to v0.11.2; do not uninstall it.
 4. Keep the existing Secure MCP Tunnel options unchanged and restart the app.
-5. Confirm the manager reconnects through the existing tunnel and reports v0.11.1.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.11.2.
 
 The app exposes no host port. Its manager endpoint remains on the private loopback interface inside the same app container.
 
@@ -37,7 +37,7 @@ lovelace:
 Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.11.1
+/local/family-dashboard/family-hub-card.js?v=0.11.2
 ```
 
 The stock Home Assistant Overview remains available to administrators.
@@ -71,7 +71,7 @@ The schema-v6 household configuration retains the existing panel path and explic
 
 Run `validate_household_config` first. Validation is read-only and returns the exact configuration hash required by `deploy_household_config` with `confirm=true`. Deployment writes only the existing Family Dashboard configuration and fixed frontend allow-list after creating a raw, hash-verified snapshot. Private floorplans are preserved separately.
 
-Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.11.1, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
+Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.11.2, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
 
 ## Household mappings retained from v0.9
 

@@ -11,6 +11,7 @@ import {
   APPROVAL_ZOOM_PROJECTS,
   APPROVAL_ZOOM_VIEW_NAMES
 } from "./v090-approval-manifest.mjs";
+import { preparationDescription } from "../frontend/family-hub-card.js";
 
 const config = JSON.parse(await readFile(new URL("../config/example.json", import.meta.url), "utf8"));
 const cardSource = await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8");
@@ -882,6 +883,34 @@ test("creates one Apple calendar event and a point-free Ready checklist inside t
   expect(pageErrors).toEqual([]);
 });
 
+test("previews urgent Ready items on Today and toggles them through the bounded to-do service", async ({ page }) => {
+  const start = new Date(Date.now() + 3_600_000).toISOString();
+  const end = new Date(Date.now() + 7_200_000).toISOString();
+  const event = {
+    summary: "Football training",
+    start: { dateTime: start },
+    end: { dateTime: end },
+    _calendar: config.calendar.entities.find((entry) => entry.entity_id === "calendar.child_one")
+  };
+  const pageErrors = await mount(page, config, {}, {
+    calendarEventsByEntity: { "calendar.child_one": [{ summary: event.summary, start: event.start, end: event.end }] },
+    preparationItems: [
+      { uid: "boots", summary: "Football boots", status: "needs_action", description: preparationDescription(event, "child_one", "football") },
+      { uid: "water", summary: "Water bottle", status: "completed", description: preparationDescription(event, "child_one", "football") }
+    ]
+  });
+  const card = page.locator("family-hub-card");
+  await expect(card.locator(".today-ready-item")).toHaveCount(2);
+  await expect(card.locator(".today-ready-preview")).toContainText(/Ready next.*1 still to do.*Football boots.*Child one.*Football training/s);
+  await card.locator('.today-ready-item[data-prep-item="boots"]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.find((entry) => entry.domain === "todo" && entry.service === "update_item"))).toMatchObject({
+    domain: "todo",
+    service: "update_item",
+    data: { entity_id: "todo.family_prep", item: "boots", status: "completed" }
+  });
+  expect(pageErrors).toEqual([]);
+});
+
 test("keeps the first-party month planner isolated from dashboard navigation", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
@@ -992,6 +1021,8 @@ test("retains keyboard focus across equivalent full-card rerenders", async ({ pa
 
   const gameweekSelect = card.locator("select[data-gameweek-select]");
   await gameweekSelect.focus();
+  await expect(gameweekSelect.locator("xpath=..").locator("ha-icon[icon='mdi:chevron-down']")).toBeVisible();
+  expect(await gameweekSelect.evaluate((select) => getComputedStyle(select).appearance)).toBe("none");
   await gameweekSelect.selectOption("7");
   await expect.poll(focusedControl).toMatchObject({ gameweekSelect: true });
 
@@ -2363,6 +2394,7 @@ test("combines a Spurs and Villa head-to-head into one deliberate family derby c
   await expect(todayDerby).toHaveAttribute("data-favourite-code", "TOT AVL");
   await expect(todayDerby).toHaveAttribute("data-fixture-id", "77");
   await expect(todayDerby).toContainText("Family derby");
+  await expect(todayDerby.locator(".team-mark")).toHaveCount(2);
 
   await card.locator('.hub-nav-button[data-view="football"]').click();
   const heroDerby = card.locator(".favourite-hero-card.is-derby");
@@ -2370,6 +2402,15 @@ test("combines a Spurs and Villa head-to-head into one deliberate family derby c
   await expect(heroDerby).toHaveAttribute("data-favourite-code", "TOT AVL");
   await expect(heroDerby).toHaveAttribute("data-fixture-id", "77");
   await expect(heroDerby).toContainText(/Family derby.*Spurs & Villa.*Tottenham.*2 — 1.*Aston Villa/s);
+  await expect(card.locator('.fixture.is-family-derby[data-favourite-code="TOT AVL"]')).toHaveCount(1);
+  const derbyAccents = await card.locator(".fixture.is-family-derby").evaluate((element) => ({
+    left: getComputedStyle(element, "::before").backgroundColor,
+    right: getComputedStyle(element, "::after").backgroundColor,
+    shadow: getComputedStyle(element).boxShadow
+  }));
+  expect(derbyAccents.left).toBe("rgb(19, 34, 87)");
+  expect(derbyAccents.right).toBe("rgb(103, 14, 54)");
+  expect(derbyAccents.shadow).toBe("none");
   expect(pageErrors).toEqual([]);
 });
 

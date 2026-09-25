@@ -28,7 +28,7 @@ This public repository contains generic source, schemas, tests and release packa
 
 HACS remains the installer for the Daylight/legacy Skylight calendar, Mediocre Multi Media Player Card and kiosk-mode dependencies. The Family Hub shell, floorplan engine, Home controls, family summaries, Security boundary and football presentation are bundled with the manager itself; private household artwork stays outside this repository.
 
-Version 0.10 retains the accepted schema-v6 family operating surface and adds a private Home Assistant media-source photo frame with kiosk camera-motion return. While Workspace approval is pending, School can explicitly use mapped read-only calendars without implying that assignment completion or grades are available. Live controls remain on validated entity allow-lists, alarm and garage changes still require a fresh second confirmation, Classroom stays read-only, and no child or bedroom camera can enter Security.
+Version 0.11.2 retains the accepted schema-v6 family operating surface, colour-coded Family Planner and private Home Assistant media-source photo frame. It adds a direct **Ready next** queue to Today, repairs the Spurs/Villa derby treatment and normalises touch selectors. Live controls remain on validated entity allow-lists, alarm and garage changes still require a fresh second confirmation, Classroom stays read-only, and no child or bedroom camera can enter Security.
 
 ## Development
 

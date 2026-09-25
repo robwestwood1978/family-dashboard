@@ -2,7 +2,7 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.11.1 provides:
+Version 0.11.2 provides:
 
 - a secret-rejecting schema-v6 household contract;
 - a private Home Assistant media-source kiosk photo frame with camera-motion return;
@@ -13,7 +13,7 @@ Version 0.11.1 provides:
 - optional electricity and gas smart-meter summaries for honest today-so-far usage, cost, tariff and freshness presentation; no live-power value is inferred;
 - a two-floor 3D floorplan engine with private inert SVG assets, percentage-coordinate hotspots, cache-safe revisions and selected-room controls;
 - a first-party colour-coded Family Planner for Day, Week, Month and Agenda with previous/next navigation and cache-bypassing refresh;
-- bounded event creation on explicitly writable Apple CalDAV calendar entities plus event-linked template and one-off preparation checklists stored in one configured Home Assistant to-do entity;
+- bounded event creation on explicitly writable Apple CalDAV calendar entities plus event-linked template and one-off preparation checklists stored in one configured Home Assistant to-do entity, with urgent Ready items directly tickable from Today;
 - immediate authenticated stills for doorbell, driveway and garden cameras, with the image itself opening a single native Home Assistant live camera card; **Live** requires a ready video frame, stalls return to loading, sessions expire after two minutes, teardown is enforced on close/switch/navigation/backgrounding, and bounded recovery never disguises a failed stream;
 - Eufy vacuum status and bounded controls, while authenticated map images remain inside Home Assistant;
 - named ChoreOps jobs, one optional featured reward, badge and achievement summary per child, an optional live-mode link to the native ChoreOps dashboard, plus a first-party per-child Google Classroom integration with exactly two read-only scopes, a 15-minute coordinator and no more than 20 assignment attributes;

@@ -1048,6 +1048,34 @@ export function preparationProgress(items = [], eventKey, personIds = []) {
   return { total: relevant.length, complete, ready: relevant.length > 0 && complete === relevant.length };
 }
 
+export function todayPreparationPreview(items = [], events = [], people = [], now = new Date(), timeZone = "Europe/London", limit = 3) {
+  const childById = new Map(people.filter((person) => person.role === "child").map((person) => [person.id, person]));
+  const eventByKey = new Map(events
+    .filter((event) => isPreparationWindowEvent(event, 1, now, timeZone))
+    .map((event) => [familyPlannerEventKey(event), event]));
+  const rows = items.map((item) => {
+    const preparation = item?._preparation;
+    const event = eventByKey.get(preparation?.eventKey);
+    const person = childById.get(preparation?.personId);
+    if (!event || !person) return null;
+    return {
+      item,
+      event,
+      person,
+      completed: String(item.status).toLocaleLowerCase() === "completed"
+    };
+  }).filter(Boolean).sort((left, right) => {
+    const eventOrder = new Date(calendarEventStart(left.event) || 0) - new Date(calendarEventStart(right.event) || 0);
+    return eventOrder || Number(left.completed) - Number(right.completed)
+      || String(left.item.summary || left.item.item || "").localeCompare(String(right.item.summary || right.item.item || ""));
+  });
+  return {
+    total: rows.length,
+    complete: rows.filter((row) => row.completed).length,
+    rows: rows.slice(0, Math.max(1, Number(limit) || 3))
+  };
+}
+
 export function isPreparationWindowEvent(event, lookaheadDays = 7, now = new Date(), timeZone = "Europe/London") {
   if (!isCurrentOrFutureCalendarEvent(event, now, timeZone)) return false;
   const eventDate = dateKey(calendarEventStart(event), timeZone);
@@ -2718,11 +2746,22 @@ export class FamilyHubCard extends HTMLElementBase {
       ...(energyCompact ? [`<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energyCompact.value)}</strong><small>${escapeHtml(energyCompact.detail)}</small></span></button>`] : [])
     ];
     const familyHeading = features.chores ? "Tasks, jobs & rewards" : features.school ? "School & tasks" : "Tasks";
+    const preparationPreview = features.family && features.calendar
+      ? todayPreparationPreview(
+        this._preparationItems,
+        this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents(),
+        this._config.people,
+        new Date(),
+        this._config.product.timezone,
+        2
+      )
+      : { total: 0, complete: 0, rows: [] };
     const secondaryCards = [
       ...(features.family ? [`
         <article class="surface children-panel today-family today-secondary">
           <div class="section-heading"><div><p class="eyebrow">To-do</p><h2>${familyHeading}</h2></div><button type="button" data-view="family">Open</button></div>
-          <div class="person-summary-list">${this._renderChildSummaries()}</div>
+          ${this._renderTodayTaskPreview(preparationPreview)}
+          <div class="person-summary-list ${preparationPreview.total ? "has-ready-preview" : ""}">${this._renderChildSummaries()}</div>
         </article>
       `] : []),
       ...(footballSummary ? [`
@@ -2777,6 +2816,22 @@ export class FamilyHubCard extends HTMLElementBase {
         ${secondaryCards.join("")}
       </section>
     `;
+  }
+
+  _renderTodayTaskPreview(preview) {
+    if (!preview?.total) return "";
+    const remaining = preview.total - preview.complete;
+    const today = dateKey(new Date(), this._config.product.timezone);
+    const tomorrow = shiftDateKey(today, 1);
+    const rows = preview.rows.map(({ item, event, person, completed }) => {
+      const itemId = item.uid || item.id || item.summary;
+      const eventDay = dateKey(calendarEventStart(event), this._config.product.timezone);
+      const dayLabel = eventDay === today ? "Today" : eventDay === tomorrow ? "Tomorrow" : formatDay(calendarEventStart(event), this._config.product.locale, this._config.product.timezone);
+      const timeLabel = isAllDayCalendarEvent(event) ? "All day" : formatTime(calendarEventStart(event), this._config.product.locale, this._config.product.timezone);
+      return `<button type="button" class="today-ready-item ${completed ? "is-complete" : ""}" data-prep-item="${escapeHtml(itemId)}" data-prep-status="${completed ? "needs_action" : "completed"}" style="--person-colour:${escapeHtml(person.colour)}" aria-label="${completed ? "Mark not ready" : "Mark ready"}: ${escapeHtml(item.summary || item.item || "Preparation item")}"><span><ha-icon icon="${completed ? "mdi:check" : "mdi:circle-outline"}"></ha-icon></span><div><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong><small>${escapeHtml(`${person.name} · ${event.summary || "Upcoming event"} · ${dayLabel} ${timeLabel}`)}</small></div></button>`;
+    }).join("");
+    const overflow = Math.max(0, preview.total - preview.rows.length);
+    return `<section class="today-ready-preview" aria-label="Ready for upcoming events"><div class="today-ready-heading"><span><strong>Ready next</strong><small>${remaining ? `${remaining} still to do` : "Everything packed"}</small></span><b>${preview.complete}/${preview.total}</b></div><div class="today-ready-list">${rows}</div>${overflow ? `<button type="button" class="today-ready-more" data-view="family">${overflow} more in Tasks <ha-icon icon="mdi:arrow-right"></ha-icon></button>` : ""}</section>`;
   }
 
   _energyPresentation() {
@@ -3726,7 +3781,7 @@ export class FamilyHubCard extends HTMLElementBase {
         return `<div class="planner-check-item ${completed ? "is-complete" : ""}"><button type="button" data-prep-item="${escapeHtml(itemId)}" data-prep-status="${completed ? "needs_action" : "completed"}" aria-label="${completed ? "Mark not ready" : "Mark ready"}" ${this._config.display.read_only ? "disabled" : ""}><span><ha-icon icon="${completed ? "mdi:check" : "mdi:circle-outline"}"></ha-icon></span><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong>${person ? `<small style="--person-colour:${escapeHtml(person.colour)}">${escapeHtml(person.name)}</small>` : ""}</button>${this._config.display.read_only ? "" : `<button type="button" class="planner-remove-item" data-remove-prep-item="${escapeHtml(itemId)}" aria-label="Remove ${escapeHtml(item.summary || item.item || "preparation item")}"><ha-icon icon="mdi:delete-outline"></ha-icon></button>`}</div>`;
       }).join("")}
     </div>` : suggestion && children.length ? `<div class="planner-suggestion"><span><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon></span><div><p class="eyebrow">Suggested preparation</p><h3>${escapeHtml(suggestion.label)}</h3><p>${escapeHtml(suggestion.items.join(" · "))}</p><div>${children.map((person) => `<button type="button" data-add-preparation="${escapeHtml(eventKey)}" data-preparation-template="${escapeHtml(suggestion.id)}" data-preparation-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}">Add for ${escapeHtml(person.name)}</button>`).join("")}</div></div></div>` : '<p class="planner-no-prep">No preparation checklist is linked to this event yet.</p>';
-    const checklistEditor = children.length && !this._config.display.read_only ? `<section class="planner-checklist-editor"><p class="eyebrow">Change the Ready list</p><div class="planner-editor-row"><select data-planner-field="event-person" aria-label="Family member">${children.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)}</option>`).join("")}</select><select data-planner-field="event-template" aria-label="Ready template"><option value="">Choose a template</option>${templates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.label)}</option>`).join("")}</select><button type="button" data-add-event-template="${escapeHtml(eventKey)}">Add template</button></div><div class="planner-editor-row"><input data-planner-field="event-custom-item" type="text" maxlength="120" autocomplete="off" placeholder="Add present, card, water bottle…"/><button type="button" data-add-event-custom="${escapeHtml(eventKey)}">Add item</button></div></section>` : "";
+    const checklistEditor = children.length && !this._config.display.read_only ? `<section class="planner-checklist-editor"><p class="eyebrow">Change the Ready list</p><div class="planner-editor-row"><span class="select-shell"><select data-planner-field="event-person" aria-label="Family member">${children.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span><span class="select-shell"><select data-planner-field="event-template" aria-label="Ready template"><option value="">Choose a template</option>${templates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.label)}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span><button type="button" data-add-event-template="${escapeHtml(eventKey)}">Add template</button></div><div class="planner-editor-row"><input data-planner-field="event-custom-item" type="text" maxlength="120" autocomplete="off" placeholder="Add present, card, water bottle…"/><button type="button" data-add-event-custom="${escapeHtml(eventKey)}">Add item</button></div></section>` : "";
     return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal" role="dialog" aria-modal="true" aria-labelledby="planner-event-title">
       <header style="--calendar-colour:${escapeHtml(calendar.colour)}"><button type="button" class="planner-modal-close" data-planner-close aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">${escapeHtml(people.map((person) => person.name).join(" · ") || calendar.label)}</p><h2 id="planner-event-title">${escapeHtml(event.summary || calendar.label)}</h2><p>${escapeHtml(formatDay(calendarEventStart(event), this._config.product.locale, this._config.product.timezone))}${isAllDayCalendarEvent(event) ? " · All day" : ` · ${escapeHtml(formatTime(calendarEventStart(event), this._config.product.locale, this._config.product.timezone))}`}</p></header>
       <div class="planner-modal-body">${event.location ? `<p class="planner-event-location"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(event.location)}</p>` : ""}${event.description ? `<p class="planner-event-description">${escapeHtml(event.description)}</p>` : ""}${checklist}${checklistEditor}</div>
@@ -3744,13 +3799,13 @@ export class FamilyHubCard extends HTMLElementBase {
     return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal planner-add-modal" role="dialog" aria-modal="true" aria-labelledby="planner-add-title">
       <header><button type="button" class="planner-modal-close" data-planner-close aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">Family planner</p><h2 id="planner-add-title">Add an event</h2><p>This will be added to the selected Apple calendar.</p></header>
       <div class="planner-event-form">
-        <label><span>Who is it for?</span><select data-planner-field="calendar">${calendars.map((calendar) => `<option value="${escapeHtml(calendar.entity_id)}">${escapeHtml(calendar.label)}</option>`).join("")}</select></label>
+        <label><span>Who is it for?</span><span class="select-shell"><select data-planner-field="calendar">${calendars.map((calendar) => `<option value="${escapeHtml(calendar.entity_id)}">${escapeHtml(calendar.label)}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span></label>
         <label class="is-wide"><span>Event</span><input data-planner-field="summary" type="text" maxlength="120" autocomplete="off" placeholder="Football training" /></label>
         <label><span>Date</span><input data-planner-field="date" type="date" value="${escapeHtml(date)}" /></label>
         <label><span>Starts</span><input data-planner-field="start" type="time" value="${escapeHtml(startTime)}" /></label>
         <label><span>Ends</span><input data-planner-field="end" type="time" value="${escapeHtml(endTime)}" /></label>
         <label class="is-wide"><span>Location</span><input data-planner-field="location" type="text" maxlength="160" autocomplete="off" placeholder="Optional" /></label>
-        <label class="is-wide"><span>Get ready template</span><select data-planner-field="template"><option value="">No checklist</option>${templates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.label)}</option>`).join("")}</select></label>
+        <label class="is-wide"><span>Get ready template</span><span class="select-shell"><select data-planner-field="template"><option value="">No checklist</option>${templates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.label)}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span></label>
         <label class="is-wide"><span>Extra Ready items</span><textarea data-planner-field="custom-items" maxlength="600" placeholder="One item per line, for example:&#10;Birthday present&#10;Birthday card"></textarea><small>These are added alongside any template you choose.</small></label>
         <p class="planner-form-error" role="alert">${escapeHtml(this._plannerModal.error || "")}</p>
       </div>
@@ -4000,8 +4055,10 @@ export class FamilyHubCard extends HTMLElementBase {
       : favouriteCode;
     return `
       <button type="button" class="compact-fixture ${derby ? "is-derby" : ""}" data-view="football" data-fixture-id="${escapeHtml(fixture.id ?? "")}"${favouriteAttribute ? ` data-favourite-code="${escapeHtml(favouriteAttribute)}"` : ""}>
-        <span title="${escapeHtml(fixture.home?.name || "Home")}">${escapeHtml(compactClubName(fixture.home))}</span><strong>${escapeHtml(score)}</strong><span title="${escapeHtml(fixture.away?.name || "Away")}">${escapeHtml(compactClubName(fixture.away))}</span>
-        <small>${escapeHtml(derby ? `Family derby · ${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)}` : status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone))}</small>
+        <span class="compact-team" title="${escapeHtml(fixture.home?.name || "Home")}">${this._renderTeamMark(fixture.home, "small")}<span>${escapeHtml(compactClubName(fixture.home))}</span></span>
+        <strong class="compact-score">${escapeHtml(score)}</strong>
+        <span class="compact-team is-away" title="${escapeHtml(fixture.away?.name || "Away")}"><span>${escapeHtml(compactClubName(fixture.away))}</span>${this._renderTeamMark(fixture.away, "small")}</span>
+        <small class="compact-fixture-detail">${escapeHtml(derby ? `Family derby · ${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)}` : status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone))}</small>
       </button>
     `;
   }
@@ -4163,7 +4220,7 @@ export class FamilyHubCard extends HTMLElementBase {
             <div><p class="eyebrow">Match centre</p><h2>Matchweek ${gameweek}</h2></div>
             <div class="matchweek-controls">
               <button type="button" data-gameweek="${Math.max(1, gameweek - 1)}" ${gameweek <= 1 ? "disabled" : ""} aria-label="Previous matchweek"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
-              <label><span class="sr-only">Choose matchweek</span><select data-gameweek-select>${available.map((entry) => `<option value="${entry}" ${entry === gameweek ? "selected" : ""}>MW ${entry}</option>`).join("")}</select></label>
+              <label><span class="sr-only">Choose matchweek</span><span class="select-shell"><select data-gameweek-select>${available.map((entry) => `<option value="${entry}" ${entry === gameweek ? "selected" : ""}>MW ${entry}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span></label>
               <button type="button" data-gameweek="${Math.min(38, gameweek + 1)}" ${gameweek >= 38 ? "disabled" : ""} aria-label="Next matchweek"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
             </div>
             <div class="segments football-tabs" role="group" aria-label="Football view">
@@ -4212,7 +4269,7 @@ export class FamilyHubCard extends HTMLElementBase {
     ];
     const favouriteCodes = this._config.football.spotlight_team_codes.filter((code) => fixtureIncludesTeam(fixture, code));
     return `
-      <div class="fixture ${fixture.spotlight ? "is-spotlight" : ""} ${status === "live" ? "is-live" : ""}"${favouriteCodes.length ? ` data-favourite-code="${escapeHtml(favouriteCodes.join(" "))}"` : ""}>
+      <div class="fixture ${fixture.spotlight ? "is-spotlight" : ""} ${status === "live" ? "is-live" : ""} ${favouriteCodes.length > 1 ? "is-family-derby" : ""}"${favouriteCodes.length ? ` data-favourite-code="${escapeHtml(favouriteCodes.join(" "))}"` : ""}>
         <span class="team home-team">${this._renderTeamMark(fixture.home)}<span>${escapeHtml(fixture.home?.name || "Home")}</span></span>
         <strong class="fixture-score">${escapeHtml(score)}<small>${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "FT" : ""}</small></strong>
         <span class="team away-team"><span>${escapeHtml(fixture.away?.name || "Away")}</span>${this._renderTeamMark(fixture.away)}</span>
@@ -6045,11 +6102,40 @@ export class FamilyHubCard extends HTMLElementBase {
       .person-summary strong,.person-summary small { display:block; }
       .person-summary small { margin-top:2px; color:var(--hub-muted); font-size:10px; }
       .points { font-size:11px; font-weight:700; color:var(--person-colour); }
+      .today-ready-preview { min-height:0; margin-top:10px; display:grid; gap:6px; }
+      .today-ready-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+      .today-ready-heading span,.today-ready-heading strong,.today-ready-heading small { display:block; }
+      .today-ready-heading strong { font-size:12px; }
+      .today-ready-heading small { margin-top:1px; color:var(--hub-muted); font-size:9px; }
+      .today-ready-heading b { padding:4px 7px; border-radius:999px; background:color-mix(in srgb,var(--hub-accent) 11%,var(--hub-surface)); color:var(--hub-accent); font-size:10px; }
+      .today-ready-list { display:grid; gap:5px; }
+      .today-ready-item { min-width:0; min-height:40px; padding:4px 7px; display:grid; grid-template-columns:28px minmax(0,1fr); align-items:center; gap:7px; border:1px solid color-mix(in srgb,var(--person-colour) 20%,transparent); border-radius:11px; background:color-mix(in srgb,var(--person-colour) 7%,var(--hub-surface)); color:var(--hub-text); text-align:left; cursor:pointer; }
+      .today-ready-item > span { width:27px; height:27px; display:grid; place-items:center; border-radius:9px; background:color-mix(in srgb,var(--person-colour) 14%,var(--hub-surface)); color:var(--person-colour); }
+      .today-ready-item ha-icon { --mdc-icon-size:17px; }
+      .today-ready-item strong,.today-ready-item small { display:block; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+      .today-ready-item strong { font-size:11px; }
+      .today-ready-item small { margin-top:2px; color:var(--hub-muted); font-size:9px; }
+      .today-ready-item.is-complete { opacity:.7; }
+      .today-ready-item.is-complete > span { background:#1B9A6B; color:#fff; }
+      .today-ready-item.is-complete strong { text-decoration:line-through; }
+      .today-ready-more { width:max-content; min-height:28px; padding:0; display:flex; align-items:center; gap:3px; border:0; background:transparent; color:var(--hub-accent); font-size:10px; font-weight:800; cursor:pointer; }
+      .today-ready-more ha-icon { --mdc-icon-size:14px; }
+      .person-summary-list.has-ready-preview { margin-top:7px; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px; }
+      .person-summary-list.has-ready-preview .person-summary { min-height:38px; padding:4px 7px; grid-template-columns:28px minmax(0,1fr); }
+      .person-summary-list.has-ready-preview .person-initial { width:27px; height:27px; font-size:11px; }
+      .person-summary-list.has-ready-preview .points { display:none; }
+      .person-summary-list.has-ready-preview .person-summary strong { font-size:11px; }
+      .person-summary-list.has-ready-preview .person-summary small { font-size:9px; }
       .featured-fixtures { display:grid; gap:8px; margin-top:12px; }
-      .compact-fixture { border:1px solid color-mix(in srgb,var(--hub-accent) 18%,transparent); border-radius:15px; background:var(--hub-surface); min-height:60px; padding:9px 10px; color:var(--hub-text); display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:7px; align-items:center; cursor:pointer; }
-      .compact-fixture > span { min-width:0; overflow:hidden; font-size:10px; font-weight:650; white-space:nowrap; text-overflow:ellipsis; }
-      .compact-fixture span:last-of-type { text-align:right; }
-      .compact-fixture small { grid-column:1/-1; color:var(--hub-muted); font-size:9px; text-align:center; }
+      .compact-fixture { position:relative; overflow:hidden; border:1px solid color-mix(in srgb,var(--hub-accent) 18%,transparent); border-radius:15px; background:var(--hub-surface); min-height:70px; padding:8px 12px; color:var(--hub-text); display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:7px; align-items:center; cursor:pointer; }
+      .compact-team { min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; font-size:10px; font-weight:750; }
+      .compact-team > span:last-child { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+      .compact-team.is-away { justify-content:flex-end; text-align:right; }
+      .compact-score { min-width:52px; font-size:14px; text-align:center; }
+      .compact-fixture-detail { grid-column:1/-1; color:var(--hub-muted); font-size:9px; text-align:center; }
+      .compact-fixture.is-derby::before,.compact-fixture.is-derby::after { content:""; position:absolute; inset-block:0; width:4px; }
+      .compact-fixture.is-derby::before { left:0; background:#132257; }
+      .compact-fixture.is-derby::after { right:0; background:#670E36; }
       .now-playing { display:grid; grid-template-columns:58px minmax(0,1fr) 38px; gap:12px; align-items:center; margin-top:14px; }
       .artwork { width:58px; height:58px; border-radius:14px; overflow:hidden; display:grid; place-items:center; background:linear-gradient(145deg,var(--hub-accent),var(--hub-backdrop-end)); color:#fff; }
       .artwork img { width:100%; height:100%; object-fit:cover; }
@@ -6324,13 +6410,17 @@ export class FamilyHubCard extends HTMLElementBase {
       .football-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:12px; align-items:center; }
       .football-toolbar h2 { margin:3px 0 0; font-size:20px; }
       .matchweek-controls { display:flex; align-items:center; gap:4px; }
-      .matchweek-controls button { width:34px; height:34px; display:grid; place-items:center; border:0; border-radius:10px; background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); color:var(--hub-accent); cursor:pointer; }
+      .matchweek-controls button { width:48px; height:48px; display:grid; place-items:center; border:0; border-radius:12px; background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); color:var(--hub-accent); cursor:pointer; }
       .matchweek-controls button:disabled { opacity:.35; cursor:default; }
-      .matchweek-controls select { height:34px; min-width:76px; border:1px solid color-mix(in srgb,var(--hub-muted) 18%,transparent); border-radius:10px; background:var(--hub-surface); color:var(--hub-text); padding:0 8px; }
+      .select-shell { position:relative; min-width:0; display:block; }
+      .select-shell select { width:100%; padding-right:36px !important; appearance:none; -webkit-appearance:none; }
+      .select-shell > ha-icon { position:absolute; top:50%; right:10px; translate:0 -50%; color:currentColor; pointer-events:none; --mdc-icon-size:18px; }
+      .matchweek-controls .select-shell { min-width:88px; color:var(--hub-text); }
+      .matchweek-controls select { height:48px; min-width:88px; border:1px solid color-mix(in srgb,var(--hub-muted) 18%,transparent); border-radius:12px; background:var(--hub-surface); color:var(--hub-text); padding:0 10px; font-weight:750; }
       .football-tabs .segment { min-height:30px; }
       .fixture-groups { min-height:0; overflow:auto; padding-right:4px; }
       .fixture-day h3 { margin:13px 0 7px; color:var(--hub-muted); font-size:10px; letter-spacing:.09em; text-transform:uppercase; }
-      .fixture { min-height:46px; display:grid; grid-template-columns:minmax(0,1fr) 82px minmax(0,1fr); align-items:center; gap:8px; padding:6px 10px; border-top:1px solid color-mix(in srgb,var(--hub-muted) 12%,transparent); }
+      .fixture { position:relative; min-height:46px; display:grid; grid-template-columns:minmax(0,1fr) 82px minmax(0,1fr); align-items:center; gap:8px; padding:6px 10px; border-top:1px solid color-mix(in srgb,var(--hub-muted) 12%,transparent); overflow:hidden; }
       .fixture.is-spotlight { border-radius:12px; border:1px solid color-mix(in srgb,var(--hub-accent) 26%,transparent); background:color-mix(in srgb,var(--hub-accent) 6%,var(--hub-surface)); margin:4px 0; }
       .fixture.is-live { border-color:#d94848; }
       .team { font-size:12px; font-weight:600; }
@@ -6468,7 +6558,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .planner-checklist-editor { margin-top:14px; padding-top:14px; border-top:1px solid #E1E7EF; display:grid; gap:8px; }
       .planner-editor-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:7px; }
       .planner-editor-row + .planner-editor-row { grid-template-columns:minmax(0,1fr) auto; }
-      .planner-editor-row input,.planner-editor-row select { min-width:0; height:48px; padding:0 10px; border:1px solid #D9E1EC; border-radius:10px; background:#fff; color:#152139; font:inherit; font-size:12px; }
+      .planner-editor-row input,.planner-editor-row select { min-width:0; width:100%; height:48px; padding:0 10px; border:1px solid #D9E1EC; border-radius:10px; background:#fff; color:#152139; font:inherit; font-size:12px; }
       .planner-editor-row button { min-height:48px; padding:0 12px; border:0; border-radius:10px; background:#1463E8; color:#fff; font-size:12px; font-weight:850; cursor:pointer; }
       .planner-modal > footer { min-height:58px; padding:10px 25px; border-top:1px solid #E4E9F1; background:#fff; display:flex; justify-content:space-between; align-items:center; gap:10px; }
       .planner-modal > footer > span { display:flex; align-items:center; gap:5px; color:#68748A; font-size:12px; }
@@ -6477,7 +6567,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .planner-event-form label { display:grid; gap:5px; }
       .planner-event-form label.is-wide { grid-column:1/-1; }
       .planner-event-form label > span { color:#536078; font-size:12px; font-weight:850; text-transform:uppercase; letter-spacing:.04em; }
-      .planner-event-form input,.planner-event-form select,.planner-event-form textarea { min-width:0; height:48px; padding:0 11px; border:1px solid #D9E1EC; border-radius:11px; background:#fff; color:#152139; font:inherit; font-size:12px; }
+      .planner-event-form input,.planner-event-form select,.planner-event-form textarea { min-width:0; width:100%; height:48px; padding:0 11px; border:1px solid #D9E1EC; border-radius:11px; background:#fff; color:#152139; font:inherit; font-size:12px; }
       .planner-event-form textarea { height:84px; padding:10px 11px; resize:vertical; }
       .planner-event-form label > small { color:#758096; font-size:11px; }
       .planner-form-error { grid-column:1/-1; min-height:15px; margin:0; color:#B83C4A; font-size:12px; font-weight:750; }
@@ -6736,11 +6826,11 @@ export class FamilyHubCard extends HTMLElementBase {
       .featured-fixtures { gap:8px; margin-top:10px; }
       .compact-fixture { min-height:62px; border-color:#DCE4EE; background:#F7F9FC; border-radius:16px; }
       .compact-fixture[data-favourite-code~="TOT"] { border-left:4px solid #132257; }
-      .compact-fixture[data-favourite-code~="AVL"] { box-shadow:inset 4px 0 #670E36; }
-      .compact-fixture.is-derby { border-left-color:#132257; background:linear-gradient(90deg,rgba(19,34,87,.055),rgba(103,14,54,.065)); box-shadow:inset -4px 0 #670E36; }
-      .compact-fixture > span { font-size:12px; }
-      .compact-fixture strong { font-size:15px; }
-      .compact-fixture small { color:#5E6B80; font-size:12px; }
+      .compact-fixture[data-favourite-code~="AVL"] { border-left:4px solid #670E36; }
+      .compact-fixture.is-derby { border-left-color:#DCE4EE; border-right:1px solid #DCE4EE; background:#F7F9FC; box-shadow:none; }
+      .compact-team { font-size:12px; }
+      .compact-score { font-size:15px; }
+      .compact-fixture-detail { color:#5E6B80; font-size:11px; }
       .now-playing { grid-template-columns:64px minmax(0,1fr) 48px; margin-top:13px; }
       .artwork { width:64px; height:64px; background:linear-gradient(145deg,#1463E8,#00A887); }
       .now-playing h2 { font-size:17px; }
@@ -7063,15 +7153,19 @@ export class FamilyHubCard extends HTMLElementBase {
       .football-toolbar h2 { font-size:21px; }
       .matchweek-controls { gap:5px; }
       .matchweek-controls button { width:48px; height:48px; background:#EAF2FF; color:#1463E8; }
-      .matchweek-controls select { height:48px; min-width:82px; border-color:#DCE4EE; background:#fff; color:#0B1830; font-size:13px; }
+      .matchweek-controls .select-shell { min-width:94px; color:#33445C; }
+      .matchweek-controls select { height:48px; min-width:94px; border-color:#DCE4EE; background:#fff; color:#0B1830; font-size:13px; box-shadow:0 4px 12px rgba(21,43,75,.05); }
       .football-tabs .segment { min-height:48px; }
       .fixture-groups { padding-right:5px; }
       .fixture-day h3 { margin:12px 0 7px; color:#5E6B80; font-size:12px; }
       .fixture { min-height:58px; grid-template-columns:minmax(0,1fr) 92px minmax(0,1fr); gap:10px; padding:8px 10px; border-color:#E1E8F0; }
       .fixture.is-spotlight { border-color:#BFD3F2; background:#F4F8FF; }
       .fixture[data-favourite-code~="TOT"] { border-left:4px solid #132257; }
-      .fixture[data-favourite-code~="AVL"] { box-shadow:inset 4px 0 #670E36; }
-      .fixture[data-favourite-code~="TOT"][data-favourite-code~="AVL"] { border-left-color:#132257; box-shadow:inset 4px 0 #670E36; }
+      .fixture[data-favourite-code~="AVL"] { border-left:4px solid #670E36; }
+      .fixture.is-family-derby { border-left:1px solid #BFD3F2; box-shadow:none; }
+      .fixture.is-family-derby::before,.fixture.is-family-derby::after { content:""; position:absolute; inset-block:0; width:4px; }
+      .fixture.is-family-derby::before { left:0; background:#132257; }
+      .fixture.is-family-derby::after { right:0; background:#670E36; }
       .fixture.is-live { border-color:#E86E5A; }
       .team { display:flex; align-items:center; gap:8px; color:#0B1830; font-size:13px; }
       .away-team { justify-content:flex-end; }
