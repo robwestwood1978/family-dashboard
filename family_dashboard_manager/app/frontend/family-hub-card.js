@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 103332)
-Total output lines: 7034
-
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null },
   { id: "calendar", label: "Calendar", icon: "mdi:calendar-month", feature: "calendar" },
@@ -2510,7 +2507,3552 @@ export class FamilyHubCard extends HTMLElementBase {
       .find((candidate) => (
         candidate.tagName === descriptor.tagName
         && (!descriptor.markerClass || candidate.classList.contains(descriptor.markerClass))
-        && (!descriptor.gameweekRole || c…53332 tokens truncated…ly-note { display:flex; align-items:center; gap:7px; margin:14px 0 0; padding:10px 12px; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); color:var(--hub-muted); font-size:12px; }
+        && (!descriptor.gameweekRole || candidate.getAttribute("aria-label") === descriptor.gameweekRole)
+        && Object.entries(descriptor.dataset).every(([key, value]) => candidate.dataset?.[key] === value)
+      ));
+    if (!control || control.disabled || control.getAttribute("aria-disabled") === "true") return;
+    try {
+      control.focus({ preventScroll: true });
+    } catch {
+      control.focus();
+    }
+  }
+
+  _syncConfirmationFocus(confirmationFocusAction = null) {
+    if (this._pendingConfirmation) {
+      const action = ["cancel", "confirm"].includes(confirmationFocusAction)
+        ? confirmationFocusAction
+        : "cancel";
+      const control = this.shadowRoot.querySelector(`button[data-confirm-action="${action}"]`)
+        || this.shadowRoot.querySelector('button[data-confirm-action="cancel"]');
+      control?.focus();
+      return;
+    }
+    if (!this._confirmationReturnFocus) return;
+    const descriptor = this._confirmationReturnFocus;
+    this._confirmationReturnFocus = null;
+    const control = [...this.shadowRoot.querySelectorAll("button")].find((button) => (
+      button.dataset[descriptor.datasetKey] === descriptor.action
+      && button.dataset.entity === descriptor.entity
+    ));
+    const fallback = this.shadowRoot.querySelector(descriptor.datasetKey === "secureCoverAction"
+      ? ".garage-panel"
+      : ".alarm-panel");
+    if (control && !control.disabled && control.getAttribute("aria-disabled") !== "true") control.focus();
+    else fallback?.focus();
+  }
+
+  _renderNavigation() {
+    const coreIds = new Set(["today", "calendar", "rooms", "family", "entry"]);
+    const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
+    const renderButtons = (views) => views.map((view) => `
+      <button class="hub-nav-button ${this._view === view.id ? "is-active" : ""}" type="button" data-view="${view.id}" aria-label="${escapeHtml(view.label)}" aria-current="${this._view === view.id ? "page" : "false"}">
+        <ha-icon icon="${view.icon}" aria-hidden="true"></ha-icon>
+        <span>${escapeHtml(view.label)}</span>
+      </button>
+    `).join("");
+    const views = this._enabledViews();
+    return `
+      <nav class="hub-navigation" aria-label="Family Dashboard views"${confirmationGuard}>
+        <button class="hub-brand" type="button" data-view="today" aria-label="Open Today"><ha-icon icon="mdi:home-heart" aria-hidden="true"></ha-icon><span>Family</span></button>
+        <div class="hub-nav-items hub-nav-core">${renderButtons(views.filter((view) => coreIds.has(view.id)))}</div>
+        <div class="hub-nav-items hub-nav-utility" aria-label="More"><span class="hub-nav-divider" aria-hidden="true"></span>${renderButtons(views.filter((view) => !coreIds.has(view.id)))}</div>
+      </nav>
+    `;
+  }
+
+  _renderHeader() {
+    const now = new Date();
+    const locale = this._config.product.locale;
+    const date = new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", timeZone: this._config.product.timezone }).format(now);
+    const time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", timeZone: this._config.product.timezone }).format(now);
+    const weatherEnabled = this._config.features.weather === true;
+    const weather = weatherEnabled ? this._hass?.states?.[this._config.weather.entity_id] : null;
+    const temperature = weather?.attributes?.temperature;
+    const weatherText = weather
+      ? `${formatTemperature(temperature)} · ${weatherStateLabel(weather.state)}`
+      : "Home";
+    const currentDefinition = VIEW_DEFINITIONS.find((view) => view.id === this._view) || VIEW_DEFINITIONS[0];
+    const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
+    return `
+      <header class="hub-topbar"${confirmationGuard}>
+        <div class="hub-page-title">
+          <p class="hub-topbar-date">${escapeHtml(date)}</p>
+          <h1>${escapeHtml(currentDefinition.label)}</h1>
+        </div>
+        <div class="hub-header-actions">
+          ${weatherEnabled ? `<button class="hub-weather-pill" type="button" data-more-info="${escapeHtml(this._config.weather.entity_id)}" ${this._config.display.read_only ? 'aria-disabled="true"' : ""}>
+            <ha-icon icon="mdi:weather-partly-cloudy" aria-hidden="true"></ha-icon>
+            <span>${escapeHtml(weatherText)}</span>
+          </button>` : ""}
+          <time class="hub-topbar-time">${escapeHtml(time)}</time>
+        </div>
+      </header>
+    `;
+  }
+
+  _renderView() {
+    switch (this._view) {
+      case "calendar": return this._renderCalendar();
+      case "rooms": return this._renderRooms();
+      case "family": return this._renderFamily();
+      case "entry": return this._renderSecurity();
+      case "music": return this._renderMusic();
+      case "energy": return this._renderEnergy();
+      case "football": return this._renderFootball();
+      default: return this._renderToday();
+    }
+  }
+
+  _renderToday() {
+    const states = this._hass?.states || {};
+    const features = this._config.features;
+    const homeSummary = features.rooms ? homeSummaryPresentation(this._config, states) : null;
+    const nextCalendar = features.calendar
+      ? (this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents())
+        .filter((event) => isCurrentOrFutureCalendarEvent(event, new Date(), this._config.product.timezone))
+        .sort((a, b) => new Date(calendarEventStart(a)) - new Date(calendarEventStart(b)))[0]
+      : null;
+    const playing = features.music ? firstPlayingPlayer(this._config, states) : null;
+    const footballSummary = features.football ? this._featuredFixtures() : null;
+    const weather = features.weather ? states[this._config.weather.entity_id] : null;
+    const alarm = features.entry ? states[this._config.entry?.alarm_entity] : null;
+    const garage = features.entry ? states[this._config.entry?.garage?.cover_entity] : null;
+    const entrySignals = features.entry
+      ? (this._config.entry?.cameras || []).flatMap((camera) => [
+        camera.ringing_entity,
+        camera.person_entity,
+        camera.motion_entity
+      ]).filter(Boolean).map((entityId) => states[entityId])
+      : [];
+    const securitySummary = features.entry ? todaySecurityPresentation(alarm, garage, entrySignals) : null;
+    const energySummary = this._energyPresentation();
+    const energyCompact = energyCompactPresentation(energySummary);
+    const lightingCompact = homeLightingCompactPresentation(homeSummary || {});
+    const heatingCompact = homeHeatingCompactPresentation(homeSummary || {});
+    const heroMetrics = [
+      ...(features.rooms ? [
+        `<button type="button" data-home-target="heating"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${escapeHtml(heatingCompact.value)}</strong><small>${escapeHtml(heatingCompact.detail)}</small></span></button>`,
+        `<button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${escapeHtml(lightingCompact.value)}</strong><small>${escapeHtml(lightingCompact.detail)}</small></span></button>`
+      ] : []),
+      ...(securitySummary ? [`<button type="button" data-view="entry"><ha-icon icon="${securitySummary.icon}"></ha-icon><span><strong>${escapeHtml(securitySummary.title)}</strong><small>${escapeHtml(securitySummary.detail)}</small></span></button>`] : []),
+      ...(energyCompact ? [`<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energyCompact.value)}</strong><small>${escapeHtml(energyCompact.detail)}</small></span></button>`] : [])
+    ];
+    const familyHeading = features.chores ? "Jobs & rewards" : features.school ? "School" : "Family overview";
+    const secondaryCards = [
+      ...(features.family ? [`
+        <article class="surface children-panel today-family today-secondary">
+          <div class="section-heading"><div><p class="eyebrow">Family</p><h2>${familyHeading}</h2></div><button type="button" data-view="family">Open</button></div>
+          <div class="person-summary-list">${this._renderChildSummaries()}</div>
+        </article>
+      `] : []),
+      ...(footballSummary ? [`
+        <article class="surface football-panel today-football today-secondary">
+          <div class="section-heading"><div><p class="eyebrow">Football</p><h2>${escapeHtml(footballSummary.title)}</h2></div><button type="button" data-view="football">Open</button></div>
+          <div class="featured-fixtures">${footballSummary.html}</div>
+        </article>
+      `] : []),
+      ...(features.music ? [`
+        <article class="surface now-playing-panel today-music today-secondary">
+          <div class="section-heading"><div><p class="eyebrow">Music</p><h2>${playing ? "Now playing" : "House sound"}</h2></div><button type="button" data-view="music">Open</button></div>
+          ${playing ? `
+            <div class="now-playing">
+              <div class="artwork">${playing.state.attributes.entity_picture ? `<img src="${escapeHtml(playing.state.attributes.entity_picture)}" alt="">` : '<ha-icon icon="mdi:music-note" aria-hidden="true"></ha-icon>'}</div>
+              <div class="now-playing-copy" title="${escapeHtml(`${playing.state.attributes.media_title || "Music"} · ${playing.state.attributes.media_artist || playing.player.name}`)}"><h2>${escapeHtml(playing.state.attributes.media_title || "Music")}</h2><p>${escapeHtml(playing.state.attributes.media_artist || playing.player.name)}</p></div>
+              <button type="button" class="icon-action" data-media-toggle="${escapeHtml(playing.player.entity_id)}" aria-label="Play or pause" ${this._config.display.read_only ? 'disabled aria-disabled="true"' : ""}><ha-icon icon="${playing.state.state === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon></button>
+            </div>
+          ` : `
+            <div class="quiet-music"><div class="today-card-icon is-coral"><ha-icon icon="mdi:music-note"></ha-icon></div><div><strong>The house is quiet</strong><span>Choose a room in Music</span></div></div>
+          `}
+        </article>
+      `] : [])
+    ];
+    return `
+      <section class="today-grid" data-calendar="${features.calendar}" data-secondary-count="${secondaryCards.length}" aria-label="Today at a glance">
+        <article class="surface hero-panel today-hero ${features.weather ? "" : "is-weatherless"}">
+          <div class="today-hero-copy">
+            <p class="eyebrow">${escapeHtml(new Intl.DateTimeFormat(this._config.product.locale, { weekday: "long", timeZone: this._config.product.timezone }).format(new Date()))}</p>
+            <h2>${escapeHtml(greetingForTime(new Date(), this._config.product.timezone))}</h2>
+            <p>${features.calendar ? nextCalendar ? `${escapeHtml(nextCalendar.summary || nextCalendar._calendar?.label || "Family event")} is next at ${escapeHtml(formatTime(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}.` : "The day is clear and the house is ready." : "Home is ready when you are."}</p>
+          </div>
+          ${features.weather ? `<div class="today-weather" aria-label="Current weather">
+            <ha-icon icon="mdi:weather-partly-cloudy" aria-hidden="true"></ha-icon>
+            <strong>${escapeHtml(formatTemperature(weather?.attributes?.temperature))}</strong>
+            <span>${escapeHtml(weatherStateLabel(weather?.state || "Home"))}</span>
+          </div>` : ""}
+          ${heroMetrics.length ? `<div class="hero-metrics ${energySummary ? "has-energy" : ""}" data-metric-count="${heroMetrics.length}">${heroMetrics.join("")}</div>` : ""}
+        </article>
+        ${features.calendar ? `<article class="surface next-panel today-next">
+          <div class="today-card-icon is-amber"><ha-icon icon="mdi:calendar-clock"></ha-icon></div>
+          <p class="eyebrow">Coming up</p>
+          ${nextCalendar ? `
+            <h2>${escapeHtml(nextCalendar.summary || nextCalendar._calendar?.label || "Family event")}</h2>
+            <p class="supporting">${escapeHtml(formatDay(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}${isAllDayCalendarEvent(nextCalendar) ? " · All day" : ` at ${escapeHtml(formatTime(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}`}</p>
+            <button class="text-action" type="button" data-view="calendar">See the day <ha-icon icon="mdi:arrow-right"></ha-icon></button>
+          ` : `
+            <h2>No plans yet</h2>
+            <p class="supporting">The next family event will appear here.</p>
+            <button class="text-action" type="button" data-view="calendar">Open calendar <ha-icon icon="mdi:arrow-right"></ha-icon></button>
+          `}
+        </article>` : ""}
+        ${secondaryCards.join("")}
+      </section>
+    `;
+  }
+
+  _energyPresentation() {
+    if (!this._config.features.energy || !this._config.energy) return null;
+    return energyOverviewPresentation(this._config.energy, this._hass?.states || {}, {
+      locale: this._config.product.locale,
+      timeZone: this._config.product.timezone,
+      now: new Date()
+    });
+  }
+
+  _renderEnergy() {
+    const summary = this._energyPresentation();
+    if (!summary) return '<p class="hub-empty-state large">Energy is not configured.</p>';
+    const statusLabels = {
+      current: ["Latest readings", "mdi:check-circle-outline"],
+      stale: ["Update delayed", "mdi:clock-alert-outline"],
+      partial: ["Partial readings", "mdi:alert-circle-outline"],
+      unverified: ["Update time unknown", "mdi:clock-question-outline"],
+      unavailable: ["Waiting for meters", "mdi:progress-clock"]
+    };
+    const renderFuel = (id, label, icon, fuel) => {
+      const [statusLabel, statusIcon] = statusLabels[fuel.status] || statusLabels.unavailable;
+      return `
+        <article class="surface energy-meter is-${id} is-${escapeHtml(fuel.status)}" data-energy-fuel="${id}">
+          <header class="energy-meter-heading">
+            <span class="energy-meter-icon"><ha-icon icon="${icon}" aria-hidden="true"></ha-icon></span>
+            <div><p class="eyebrow">Smart meter</p><h2>${label}</h2></div>
+            <span class="energy-status"><ha-icon icon="${statusIcon}" aria-hidden="true"></ha-icon>${escapeHtml(statusLabel)}</span>
+          </header>
+          <div class="energy-primary-metrics">
+            <span><small>Cost today</small><strong>${escapeHtml(fuel.cost)}</strong></span>
+            <span><small>Used today</small><strong>${escapeHtml(fuel.usage)}</strong></span>
+          </div>
+          <div class="energy-tariff">
+            <span><small>Unit rate</small><strong>${escapeHtml(fuel.rate)}</strong></span>
+            <span><small>Standing charge</small><strong>${escapeHtml(fuel.standingCharge)}</strong></span>
+          </div>
+          <p class="energy-freshness"><ha-icon icon="mdi:clock-outline" aria-hidden="true"></ha-icon>${escapeHtml(fuel.freshness)}</p>
+        </article>
+      `;
+    };
+    const [heroLabel, heroIcon] = statusLabels[summary.status] || statusLabels.unavailable;
+    return `
+      <section class="energy-view" aria-label="Household energy today">
+        <article class="surface energy-hero is-${escapeHtml(summary.status)}">
+          <div>
+            <p class="eyebrow">Today so far</p>
+            <h2>${escapeHtml(summary.totalCost === "—" ? "Meter data pending" : summary.totalCost)}</h2>
+            <p>${escapeHtml(summary.detail)}</p>
+          </div>
+          <span class="energy-hero-status"><ha-icon icon="${heroIcon}" aria-hidden="true"></ha-icon><strong>${escapeHtml(heroLabel)}</strong><small>Readings can arrive at different times</small></span>
+        </article>
+        <div class="energy-meter-grid">
+          ${renderFuel("electricity", "Electricity", "mdi:lightning-bolt", summary.electricity)}
+          ${renderFuel("gas", "Gas", "mdi:fire", summary.gas)}
+        </div>
+        <article class="surface energy-truth-note">
+          <ha-icon icon="mdi:information-outline" aria-hidden="true"></ha-icon>
+          <div><strong>Smart-meter totals, not live power</strong><span>These figures show today so far. Gas and electricity may refresh on different schedules.</span></div>
+        </article>
+      </section>
+    `;
+  }
+
+  _renderChildSummaries() {
+    const states = this._hass?.states || {};
+    const choresEnabled = this._config.features.chores === true;
+    const schoolEnabled = this._config.features.school === true;
+    const schoolSource = schoolDataSource(this._config);
+    return this._config.people.filter((person) => person.role === "child").map((person) => {
+      const chore = choresEnabled ? this._config.chores.users.find((entry) => entry.person_id === person.id) : null;
+      const choreState = chore ? states[chore.chores_entity] : null;
+      const pointsState = chore ? states[chore.points_entity] : null;
+      const choreStateAvailable = isEntityAvailable(choreState);
+      const pointsStateAvailable = isEntityAvailable(pointsState);
+      const due = choreStateAvailable
+        ? safeNumber(choreState?.attributes?.chore_stat_current_due_today, 0)
+        : NaN;
+      const choreStatuses = (chore?.status_entities || [])
+        .map((entityId) => ({ entityId, state: states[entityId] }));
+      const hasUnavailableChore = choreStatuses.some(({ state }) => !isEntityAvailable(state));
+      const nextChore = choreStatuses
+        .filter(({ state }) => isEntityAvailable(state))
+        .find(({ state }) => !["approved", "completed", "completed_by_other"].includes(String(state?.state || "").toLowerCase()));
+      const nextChoreName = nextChore ? normaliseChoreStatus(nextChore.state, nextChore.entityId).name : "Jobs complete";
+      const classroom = schoolEnabled && schoolSource === "classroom"
+        ? this._config.school.classroom_students.find((entry) => entry.person_id === person.id)
+        : null;
+      const classroomState = classroom ? states[classroom.assignments_entity] : null;
+      const classroomData = classroomAssignmentPresentation(classroomState);
+      const assignmentCount = classroomData.available ? classroomData.count : NaN;
+      const schoolEvent = schoolEnabled && schoolSource === "calendar"
+        ? this._nextSchoolCalendarEvent(person.id)
+        : null;
+      const detail = choresEnabled
+        ? !chore
+          ? "ChoreOps not connected"
+          : !choreStateAvailable || !pointsStateAvailable
+            ? "ChoreOps unavailable"
+            : hasUnavailableChore
+              ? `${due} due · Job status incomplete`
+              : `${due} due · ${nextChoreName}`
+        : schoolEnabled
+          ? schoolSource === "calendar"
+            ? schoolEvent
+              ? `${schoolEvent.summary || schoolEvent._calendar?.label || "School event"} · ${formatClassroomDueDay(calendarEventStart(schoolEvent), this._config.product.locale, this._config.product.timezone)}`
+              : "No upcoming school dates"
+            : Number.isFinite(assignmentCount)
+              ? `${assignmentCount} open assignment${assignmentCount === 1 ? "" : "s"}${classroomData.stale ? " · Update delayed" : ""}`
+              : "Classroom unavailable"
+          : "Family overview";
+      return `
+        <button type="button" class="person-summary" data-view="family" style="--person-colour:${escapeHtml(person.colour)}">
+          <span class="person-initial">${escapeHtml(person.name.slice(0, 1))}</span>
+          <span><strong>${escapeHtml(person.name)}</strong><small>${escapeHtml(detail)}</small></span>
+          ${choresEnabled && chore ? `<span class="points">${pointsStateAvailable ? `${escapeHtml(formatPoints(pointsState.state, this._config.product.locale))} pts` : "— pts"}</span>` : ""}
+        </button>
+      `;
+    }).join("");
+  }
+
+  _renderCalendar() {
+    const modes = [
+      { id: "day", label: "Day", icon: "mdi:calendar-today" },
+      { id: "week", label: "Week", icon: "mdi:calendar-week" },
+      { id: "month", label: "Month", icon: "mdi:calendar-month" },
+      { id: "agenda", label: "Agenda", icon: "mdi:format-list-bulleted" }
+    ];
+    const modeButtons = modes.map((mode) => `<button type="button" class="segment ${mode.id === this._calendarMode ? "is-selected" : ""}" data-calendar-mode="${mode.id}" aria-pressed="${mode.id === this._calendarMode}"><ha-icon icon="${mode.icon}" aria-hidden="true"></ha-icon>${mode.label}</button>`).join("");
+    const plannerMode = ["day", "week"].includes(this._calendarMode);
+    const canCreate = !this._config.display.read_only
+      && this._config.calendar.entities.some((entry) => entry.allow_create === true);
+    const personFilters = [
+      { id: "all", name: "Everyone", colour: this._config.theme.accent },
+      ...this._config.people.filter((person) => person.role !== "household")
+    ].map((person) => `<button type="button" class="calendar-person-filter ${this._calendarPersonFilter === person.id ? "is-selected" : ""}" data-calendar-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}" aria-pressed="${this._calendarPersonFilter === person.id}"><span>${escapeHtml(person.id === "all" ? "All" : person.name.slice(0, 1))}</span>${escapeHtml(person.name)}</button>`).join("");
+    return `
+      <section class="single-surface surface calendar-view">
+        <div class="calendar-toolbar">
+          <div class="calendar-context"><ha-icon icon="mdi:calendar-heart" aria-hidden="true"></ha-icon><span><strong>Family planner</strong><small>Who is doing what, and what needs to be ready</small></span></div>
+          <div class="calendar-toolbar-actions">${canCreate ? '<button type="button" class="calendar-add-event" data-planner-add-event><ha-icon icon="mdi:plus"></ha-icon>Add event</button>' : ""}<div class="segments calendar-modes" role="group" aria-label="Choose calendar view">${modeButtons}</div></div>
+        </div>
+        <div class="calendar-person-filters" role="group" aria-label="Filter by family member">${personFilters}</div>
+        ${plannerMode
+          ? `<div class="family-planner-slot">${this._renderFamilyPlanner()}</div>`
+          : `<div id="calendar-card-slot" class="child-card-slot calendar-card-slot">${this._renderCalendarFallback()}</div>`}
+      </section>
+    `;
+  }
+
+  _plannerEventByKey(eventKey) {
+    const events = this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents();
+    return events.find((event) => familyPlannerEventKey(event) === eventKey) || null;
+  }
+
+  _renderFamilyPlanner() {
+    const allDays = this._calendarWindow();
+    const days = this._calendarMode === "day" ? allDays.slice(0, 1) : allDays.slice(0, 7);
+    const timeZone = this._config.product.timezone;
+    const locale = this._config.product.locale;
+    const sourceEvents = this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents();
+    const events = this._calendarPersonFilter === "all"
+      ? sourceEvents
+      : sourceEvents.filter((event) => event?._calendar?.person_ids?.includes(this._calendarPersonFilter));
+    const columns = days.map((day) => {
+      const dayEvents = events.filter((event) => dateKey(calendarEventStart(event), timeZone) === day.key);
+      const activePeople = this._config.people.filter((person) => person.role !== "household"
+        && dayEvents.some((event) => event?._calendar?.person_ids?.includes(person.id)));
+      const prepItems = this._preparationItems.filter((item) => {
+        const event = this._plannerEventByKey(item?._preparation?.eventKey);
+        return event && dateKey(calendarEventStart(event), timeZone) === day.key;
+      });
+      const prepComplete = prepItems.filter((item) => String(item.status).toLocaleLowerCase() === "completed").length;
+      return `
+        <section class="family-planner-day ${day.isToday ? "is-today" : ""}">
+          <header><div><span>${escapeHtml(day.weekday)}</span><strong>${escapeHtml(day.day)}</strong><small>${escapeHtml(day.month)}</small></div><div class="day-people" aria-label="Family members with events">${activePeople.map((person) => `<i style="--person-colour:${escapeHtml(person.colour)}" title="${escapeHtml(person.name)}">${escapeHtml(person.name.slice(0, 1))}</i>`).join("")}</div></header>
+          <div class="family-planner-events">
+            ${dayEvents.map((event) => {
+              const calendar = event._calendar || this._config.calendar.entities[0];
+              const people = familyPlannerPeople(event, this._config.people).filter((person) => person.role !== "household");
+              const progress = preparationProgress(this._preparationItems, familyPlannerEventKey(event));
+              const personLabel = calendar.category === "family" ? calendar.label : people.map((person) => person.name).join(" · ") || calendar.label;
+              return `<button type="button" class="family-planner-event ${progress.ready ? "is-ready" : ""}" data-planner-event="${escapeHtml(familyPlannerEventKey(event))}" style="--calendar-colour:${escapeHtml(calendar.colour)}">
+                <span class="planner-event-time">${isAllDayCalendarEvent(event) ? "All day" : escapeHtml(formatTime(calendarEventStart(event), locale, timeZone))}</span>
+                <strong>${escapeHtml(event.summary || calendar.label)}</strong>
+                <small>${escapeHtml(personLabel)}</small>
+                ${progress.total ? `<span class="planner-ready-state"><ha-icon icon="${progress.ready ? "mdi:check-circle" : "mdi:bag-personal-outline"}"></ha-icon>${progress.ready ? "Ready" : `${progress.complete}/${progress.total}`}</span>` : ""}
+              </button>`;
+            }).join("") || '<p class="family-planner-empty">Clear day</p>'}
+          </div>
+          ${prepItems.length ? `<footer class="day-ready ${prepComplete === prepItems.length ? "is-ready" : ""}"><ha-icon icon="${prepComplete === prepItems.length ? "mdi:check-circle" : "mdi:bag-personal-outline"}"></ha-icon>${prepComplete === prepItems.length ? "Ready" : `${prepComplete} of ${prepItems.length} packed`}</footer>` : ""}
+        </section>`;
+    }).join("");
+    return `${this._calendarLoading || this._preparationLoading ? `<div class="calendar-loading"><span></span>${this._calendarLoading ? "Refreshing the family week…" : "Refreshing Ready lists…"}</div>` : ""}${this._calendarError ? `<p class="calendar-warning">${escapeHtml(this._calendarError)}</p>` : ""}${this._preparationError ? `<p class="calendar-warning preparation-warning">${escapeHtml(this._preparationError)}</p>` : ""}<div class="family-planner-grid ${this._calendarMode === "day" ? "is-day" : ""}">${columns}</div>`;
+  }
+
+  _renderCalendarFallback() {
+    const days = this._calendarWindow();
+    const events = this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents();
+    const timeZone = this._config.product.timezone;
+    const locale = this._config.product.locale;
+    const columns = days.map((day) => {
+      const dayEvents = events.filter((event) => dateKey(calendarEventStart(event), timeZone) === day.key);
+      return `
+        <section class="hub-agenda-day ${day.isToday ? "is-today" : ""}">
+          <header><span>${escapeHtml(day.weekday)}</span><strong>${escapeHtml(day.day)}</strong><small>${escapeHtml(day.month)}</small></header>
+          <div class="hub-agenda-events">
+            ${dayEvents.slice(0, 5).map((event) => {
+              const calendar = event._calendar || this._config.calendar.entities[0];
+              return `
+                <article class="hub-agenda-event" style="--calendar-colour:${escapeHtml(calendar.colour)}">
+                  <span class="event-time">${isAllDayCalendarEvent(event) ? "All day" : escapeHtml(formatTime(calendarEventStart(event), locale, timeZone))}</span>
+                  <strong>${escapeHtml(event.summary || calendar.label)}</strong>
+                  ${event.location ? `<small><ha-icon icon="mdi:map-marker-outline" aria-hidden="true"></ha-icon>${escapeHtml(event.location)}</small>` : ""}
+                </article>
+              `;
+            }).join("") || '<p class="hub-agenda-empty">Nothing planned</p>'}
+            ${dayEvents.length > 5 ? `<span class="hub-agenda-more">+${dayEvents.length - 5} more</span>` : ""}
+          </div>
+        </section>
+      `;
+    }).join("");
+    return `
+      <div class="calendar-fallback" aria-label="Built-in calendar fallback">
+        ${this._calendarLoading ? '<div class="calendar-loading"><span></span>Refreshing the family week…</div>' : ""}
+        ${this._calendarError ? '<p class="calendar-warning">Daylight is unavailable, so this safe built-in agenda is being shown.</p>' : ""}
+        <div class="hub-agenda-board">${columns}</div>
+      </div>
+    `;
+  }
+
+  _renderRooms() {
+    const sectionDefinitions = [
+      { id: "rooms", label: "Rooms", icon: "mdi:floor-plan" },
+      { id: "lights", label: "Lights", icon: "mdi:lightbulb-group-outline" },
+      { id: "heating", label: "Heating", icon: "mdi:radiator" },
+      { id: "covers", label: "Blinds & doors", icon: "mdi:blinds-horizontal" },
+      ...(this._config.features.cleaning ? [{ id: "cleaning", label: "Cleaning", icon: "mdi:robot-vacuum" }] : [])
+    ];
+    if (!sectionDefinitions.some((entry) => entry.id === this._homeSection)) this._homeSection = "rooms";
+    const summary = homeSummaryPresentation(this._config, this._hass?.states || {});
+    const cleaningState = titleCase(this._hass?.states?.[this._config.cleaning?.vacuum_entity]?.state || "unavailable");
+    const lightingUnavailable = summary.lightCount > 0 && summary.availableLights === 0;
+    const lightingPartial = summary.availableLights > 0 && summary.availableLights < summary.lightCount;
+    const heatingUnavailable = summary.heatingZones > 0 && summary.availableHeatingZones === 0;
+    const heatingPartial = summary.availableHeatingZones > 0 && summary.availableHeatingZones < summary.heatingZones;
+    const coversUnavailable = summary.coverCount > 0 && summary.availableCovers === 0;
+    const coversPartial = summary.availableCovers > 0 && summary.availableCovers < summary.coverCount;
+    const headings = {
+      rooms: ["Home overview", "The whole house, at a glance"],
+      lights: [lightingUnavailable ? "Lighting status unavailable" : lightingPartial ? "Lighting status incomplete" : summary.lightCount === 0 ? "No lights configured" : summary.roomsLit ? `${summary.roomsLit} of ${summary.lightingRooms} rooms lit` : "All lights are off", lightingPartial ? `${summary.availableLights} of ${summary.lightCount} lights reporting` : summary.lightCount === 0 ? "Add room lighting mappings" : "Lighting, room by room"],
+      heating: [heatingUnavailable ? "Heating status unavailable" : heatingPartial ? "Heating status incomplete" : summary.heatingZones ? `${summary.zonesHeating} of ${summary.heatingZones} zones heating` : "No heating zones configured", heatingPartial ? `${summary.availableHeatingZones} of ${summary.heatingZones} zones reporting` : summary.heatingZones ? "Comfort across every zone" : "Add room climate mappings"],
+      covers: [coversUnavailable ? "Cover status unavailable" : coversPartial ? "Cover status incomplete" : summary.coverCount === 0 ? "No blinds or doors configured" : summary.openCovers ? `${summary.openCovers} open` : "Everything closed", coversPartial ? `${summary.availableCovers} of ${summary.coverCount} blinds and doors reporting` : summary.coverCount === 0 ? "Add room cover mappings" : "Blinds and doors"],
+      cleaning: [cleaningState, "Whole-home cleaning"]
+    };
+    const [eyebrow, title] = headings[this._homeSection] || headings.rooms;
+    const sectionButtons = sectionDefinitions.map((entry) => `
+      <button type="button" class="segment ${entry.id === this._homeSection ? "is-selected" : ""}" data-home-section="${entry.id}" aria-pressed="${entry.id === this._homeSection}">
+        <ha-icon icon="${entry.icon}" aria-hidden="true"></ha-icon>${escapeHtml(entry.label)}
+      </button>
+    `).join("");
+    return `
+      <section class="home-surface">
+        <div class="home-toolbar">
+          <div><p class="eyebrow">${escapeHtml(eyebrow)}</p><h2>${escapeHtml(title)}</h2></div>
+          <div class="segments home-segments" role="group" aria-label="Choose Home section">${sectionButtons}</div>
+        </div>
+        <div class="home-section" data-home-section-current="${escapeHtml(this._homeSection)}">${this._renderHomeSection()}</div>
+      </section>
+    `;
+  }
+
+  _renderHomeSection() {
+    switch (this._homeSection) {
+      case "lights": return this._renderAllLights();
+      case "heating": return this._renderAllHeating();
+      case "covers": return this._renderAllCovers();
+      case "cleaning": return this._renderCleaning();
+      default: return this._renderRoomExplorer();
+    }
+  }
+
+  _renderRoomExplorer() {
+    const states = this._hass?.states || {};
+    const floor = this._config.floorplan.floors.find((entry) => entry.id === this._floor) || this._config.floorplan.floors[0];
+    const selectedRoom = this._config.rooms.find((room) => room.id === this._room)
+      || this._config.rooms.find((room) => room.floor_id === floor.id)
+      || this._config.rooms[0];
+    const floorButtons = this._config.floorplan.floors.map((entry) => `
+      <button type="button" class="segment ${entry.id === floor.id ? "is-selected" : ""}" data-floor="${entry.id}" aria-pressed="${entry.id === floor.id}">${escapeHtml(entry.name)}</button>
+    `).join("");
+    const summary = homeSummaryPresentation(this._config, states);
+    const energy = this._energyPresentation();
+    const energyCompact = energyCompactPresentation(energy);
+    const lightingCompact = homeLightingCompactPresentation(summary);
+    const heatingCompact = homeHeatingCompactPresentation(summary);
+    const lightingUnavailable = summary.lightCount > 0 && summary.availableLights === 0;
+    const lightingPartial = summary.availableLights > 0 && summary.availableLights < summary.lightCount;
+    const heatingUnavailable = summary.heatingZones > 0 && summary.availableHeatingZones === 0;
+    const heatingPartial = summary.availableHeatingZones > 0 && summary.availableHeatingZones < summary.heatingZones;
+    const summaryLinks = [
+      `<button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(lightingCompact.value)}</strong><small>${escapeHtml(lightingCompact.detail)}</small></span><ha-icon icon="mdi:chevron-right" aria-hidden="true"></ha-icon></button>`,
+      `<button type="button" data-home-target="heating"><ha-icon icon="mdi:radiator" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(heatingCompact.value)}</strong><small>${escapeHtml(heatingCompact.detail)}</small></span><ha-icon icon="mdi:chevron-right" aria-hidden="true"></ha-icon></button>`,
+      ...(energyCompact ? [`<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(energyCompact.value)}</strong><small>${escapeHtml(energyCompact.detail)}</small></span><ha-icon icon="mdi:chevron-right" aria-hidden="true"></ha-icon></button>`] : [])
+    ].join("");
+    return `
+      <section class="home-overview">
+        <div class="home-summary-links" data-summary-count="${energy ? 3 : 2}" aria-label="Home summaries">${summaryLinks}</div>
+        <section class="rooms-layout">
+          <article class="surface floorplan-panel">
+            <div class="section-heading floorplan-heading">
+              <div><p class="eyebrow">${escapeHtml(floor.name)}</p><h2>${this._config.display.read_only ? "Choose a room to explore" : "Choose a room"}</h2></div>
+              <div class="segments" role="group" aria-label="Choose floor">${floorButtons}</div>
+            </div>
+            ${this._renderFloorplan(floor, selectedRoom)}
+          </article>
+          <aside class="surface room-detail home-drawer" aria-label="Selected room controls">${this._renderRoomDetail(selectedRoom)}</aside>
+        </section>
+      </section>
+    `;
+  }
+
+  _renderAllLights() {
+    const states = this._hass?.states || {};
+    const readOnly = this._config.display.read_only === true;
+    const rooms = this._config.rooms.filter((room) => room.lights.length).map((room) => {
+      const lightStates = room.lights.map((entityId) => states[entityId]);
+      const onCount = lightStates.filter((state) => state?.state === "on").length;
+      const availableCount = lightStates.filter(isEntityAvailable).length;
+      const controls = room.lights.map((entityId) => {
+        const state = states[entityId];
+        const available = isEntityAvailable(state);
+        const isOn = state?.state === "on";
+        const name = entityName(state, titleCase(entityId.split(".")[1]));
+        const reportedBrightness = safeNumber(state?.attributes?.brightness, NaN);
+        const brightness = isOn
+          ? Number.isFinite(reportedBrightness) ? `${Math.round(reportedBrightness / 2.55)}%` : "On"
+          : titleCase(state?.state || "unavailable");
+        const unavailable = readOnly || !available ? ' disabled aria-disabled="true"' : "";
+        const actionLabel = available ? `Turn ${name} ${isOn ? "off" : "on"}` : `${name} unavailable`;
+        return `<button type="button" class="whole-home-control ${isOn ? "is-on" : ""}" data-toggle="${escapeHtml(entityId)}" aria-label="${escapeHtml(actionLabel)}" aria-pressed="${isOn}"${unavailable}><ha-icon icon="${ICONS.light}" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(brightness)}</small></span></button>`;
+      }).join("");
+      const status = availableCount === 0
+        ? "Status unavailable"
+        : availableCount < room.lights.length
+          ? `${onCount} on · ${availableCount} of ${room.lights.length} reporting`
+          : `${onCount} of ${room.lights.length} on`;
+      return `<article class="surface whole-home-card"><div class="whole-home-heading"><span><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><h3>${escapeHtml(room.name)}</h3><p>${status}</p></div></div><div class="whole-home-controls">${controls}</div></article>`;
+    }).join("");
+    return `<div class="whole-home-grid">${rooms || '<p class="hub-empty-state">No room lights are available yet.</p>'}</div>`;
+  }
+
+  _renderAllHeating() {
+    const states = this._hass?.states || {};
+    const readOnly = this._config.display.read_only === true;
+    const heatingRooms = this._config.rooms.filter((room) => room.climate);
+    const zones = heatingRooms.map((room) => {
+      const state = states[room.climate];
+      const current = roomTemperature(room, states);
+      const target = isEntityAvailable(state)
+        ? safeNumber(state?.attributes?.temperature, NaN)
+        : NaN;
+      const presentation = heatingPresentation(state);
+      const targetLabel = formatTemperature(target);
+      const powerService = presentation.isOn ? "turn_off" : "turn_on";
+      const powerLabel = presentation.available ? presentation.isOn ? "On" : "Off" : "—";
+      const powerLabelText = presentation.available
+        ? `Turn ${room.name} heating ${presentation.isOn ? "off" : "on"}`
+        : `${room.name} heating unavailable`;
+      const powerPressed = presentation.available ? ` aria-pressed="${presentation.isOn}"` : "";
+      const powerDisabled = readOnly || !presentation.available ? ' disabled aria-disabled="true"' : "";
+      const targetDisabled = readOnly || !presentation.available || !Number.isFinite(target)
+        ? ' disabled aria-disabled="true"'
+        : "";
+      return `
+        <article class="surface heating-card is-${escapeHtml(presentation.tone)} ${presentation.available ? presentation.isOn ? "is-on" : "is-off" : "is-state-unavailable"}" data-climate-card="${escapeHtml(room.climate)}">
+          <div class="heating-card-heading">
+            <span class="heating-icon"><ha-icon icon="${ICONS.climate}"></ha-icon></span>
+            <div><h3>${escapeHtml(room.name)}</h3><p class="heating-status"><span aria-hidden="true"></span>${escapeHtml(presentation.label)}</p></div>
+            <button type="button" class="heating-power ${presentation.isOn ? "is-on" : ""}" data-climate-power="${powerService}" data-entity="${escapeHtml(room.climate)}" aria-label="${escapeHtml(powerLabelText)}"${powerPressed}${powerDisabled}><ha-icon icon="mdi:power"></ha-icon><span>${powerLabel}</span></button>
+          </div>
+          <div class="heating-body">
+            <div class="heating-current"><small>Current</small><strong class="heating-current-value">${formatTemperature(current)}</strong></div>
+            <div class="heating-target-control" role="group" aria-label="${escapeHtml(room.name)} target temperature, currently ${targetLabel}">
+              <small>Target</small>
+              <div class="heating-stepper">
+                <button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower ${escapeHtml(room.name)} target from ${targetLabel}"${targetDisabled}>−</button>
+                <output class="heating-target-value">${targetLabel}</output>
+                <button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Raise ${escapeHtml(room.name)} target from ${targetLabel}"${targetDisabled}>+</button>
+              </div>
+            </div>
+          </div>
+        </article>
+      `;
+    }).join("");
+    return `<div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="hub-empty-state">No heating controls are available yet.</p>'}</div>`;
+  }
+
+  _renderAllCovers() {
+    const states = this._hass?.states || {};
+    const readOnly = this._config.display.read_only === true;
+    const secureCover = this._controlPolicy.secureCover;
+    const covers = this._config.rooms.flatMap((room) => room.covers
+      .filter((entityId) => entityId !== secureCover)
+      .map((entityId) => ({ room, entityId })));
+    const cards = covers.map(({ room, entityId }) => {
+      const state = states[entityId];
+      const available = isEntityAvailable(state);
+      const name = entityName(state, "Blind");
+      const disabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
+      const position = safeNumber(state?.attributes?.current_position, NaN);
+      return `
+        <article class="surface cover-card">
+          <div class="cover-card-heading"><span><ha-icon icon="${ICONS.cover}"></ha-icon></span><div><h3>${escapeHtml(name)}</h3><p>${escapeHtml(room.name)} · ${escapeHtml(titleCase(state?.state || "unavailable"))}${Number.isFinite(position) ? ` · ${position}%` : ""}</p></div></div>
+          <div class="cover-actions"><button type="button" data-cover-action="open_cover" data-entity="${escapeHtml(entityId)}" aria-label="Open ${escapeHtml(name)}"${disabled}><ha-icon icon="mdi:arrow-up"></ha-icon>Open</button><button type="button" data-cover-action="stop_cover" data-entity="${escapeHtml(entityId)}" aria-label="Stop ${escapeHtml(name)}"${disabled}><ha-icon icon="mdi:stop"></ha-icon>Stop</button><button type="button" data-cover-action="close_cover" data-entity="${escapeHtml(entityId)}" aria-label="Close ${escapeHtml(name)}"${disabled}><ha-icon icon="mdi:arrow-down"></ha-icon>Close</button></div>
+        </article>
+      `;
+    }).join("");
+    const garage = this._config.features.entry ? this._hass?.states?.[this._config.entry.garage.cover_entity] : null;
+    const garageCard = this._config.features.entry ? `
+      <article class="surface cover-card">
+        <div class="cover-card-heading"><span><ha-icon icon="mdi:garage-variant"></ha-icon></span><div><h3>Garage door</h3><p>${escapeHtml(titleCase(garage?.state || "unavailable"))} · protected action</p></div></div>
+        <div class="cover-actions is-single"><button type="button" data-view="entry"><ha-icon icon="mdi:shield-home-outline"></ha-icon>Open Security</button></div>
+      </article>
+    ` : "";
+    return `<div class="cover-grid">${cards}${garageCard || (!cards ? '<p class="hub-empty-state">No blinds or door controls are available yet.</p>' : "")}</div>`;
+  }
+
+  _renderCleaning() {
+    const states = this._hass?.states || {};
+    const config = this._config.cleaning;
+    const vacuum = states[config.vacuum_entity];
+    const readOnly = this._config.display.read_only === true;
+    const available = isEntityAvailable(vacuum);
+    const disabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
+    const battery = config.battery_entity ? states[config.battery_entity]?.state : vacuum?.attributes?.battery_level;
+    const task = config.task_entity ? states[config.task_entity]?.state : vacuum?.state;
+    const dock = config.dock_entity ? states[config.dock_entity]?.state : null;
+    const facts = [
+      [Number.isFinite(Number(battery)) ? `${Number(battery)}%` : "—", "Battery"],
+      [titleCase(task || "unavailable"), "Current task"],
+      [titleCase(dock || vacuum?.state || "unavailable"), "Dock"]
+    ].map(([value, label]) => `<span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(label)}</small></span>`).join("");
+    return `
+      <article class="surface cleaning-panel">
+        <div class="cleaning-hero"><span><ha-icon icon="${ICONS.vacuum}"></ha-icon></span><div><p class="eyebrow">Whole-home cleaning</p><h2>${escapeHtml(entityName(vacuum, "Robot vacuum"))}</h2><p>${escapeHtml(titleCase(vacuum?.state || "unavailable"))}</p></div></div>
+        <div class="cleaning-facts">${facts}</div>
+        <div class="cleaning-actions"><button type="button" data-vacuum-action="start" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:play"></ha-icon>Start</button><button type="button" data-vacuum-action="pause" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:pause"></ha-icon>Pause</button><button type="button" data-vacuum-action="return_to_base" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:home-map-marker"></ha-icon>Return home</button></div>
+        ${config.map_entity ? '<div id="vacuum-map-card-slot" class="child-card-slot vacuum-map-slot"></div>' : '<div class="vacuum-map-placeholder"><ha-icon icon="mdi:map-outline"></ha-icon><span>The cleaning map is not available yet.</span></div>'}
+      </article>
+    `;
+  }
+
+  _renderFloorplan(floor, selectedRoom) {
+    const states = this._hass?.states || {};
+    const viewHeight = 100 / safeNumber(floor.aspect_ratio, 1.666667);
+    const viewBox = floorplanViewBox(floor);
+    const imageSource = floorplanImageSource(floor, states);
+    const overlays = floor.light_overlays.map((overlay) => {
+      const state = states[overlay.entity_id];
+      if (state?.state !== "on") return "";
+      const opacity = Math.max(0.18, safeNumber(state.attributes?.brightness, 255) / 255);
+      return `<image class="light-overlay" href="${escapeHtml(overlay.image)}" x="0" y="0" width="100" height="${viewHeight.toFixed(4)}" preserveAspectRatio="none" opacity="${opacity.toFixed(3)}" aria-hidden="true"></image>`;
+    }).join("");
+    const hotspots = floor.room_hotspots.map((hotspot) => {
+      const room = this._config.rooms.find((entry) => entry.id === hotspot.room_id);
+      if (!room) return "";
+      const summary = deriveRoomState(room, states, this._config.theme.accent);
+      const points = hotspot.points.map(([x, y]) => `${x},${(y * viewHeight / 100).toFixed(4)}`).join(" ");
+      const lightStatus = summary.totalLights === 0
+        ? null
+        : summary.availableLights === 0
+          ? "Lighting unavailable"
+          : summary.availableLights < summary.totalLights
+            ? `${summary.lightsOn} on · ${summary.availableLights} of ${summary.totalLights} lights reporting`
+            : `${summary.lightsOn}/${summary.totalLights} lights`;
+      const status = [
+        lightStatus,
+        Number.isFinite(summary.temperature) ? formatTemperature(summary.temperature) : null
+      ].filter(Boolean).join(" · ") || "Open room";
+      return `
+        <g class="room-hotspot ${selectedRoom?.id === room.id ? "is-selected" : ""} ${summary.lightsOn ? "has-light" : ""}" role="button" tabindex="0" data-room="${room.id}" aria-label="${escapeHtml(`${room.name}, ${status}`)}" style="--room-colour:${escapeHtml(summary.colour)}">
+          <title>${escapeHtml(`${room.name}, ${status}`)}</title>
+          <polygon points="${points}"></polygon>
+        </g>
+      `;
+    }).join("");
+    return `
+      <div class="floorplan-canvas">
+        <div class="floorplan-backdrop" aria-hidden="true"></div>
+        <svg class="floorplan-visual" viewBox="${viewBox}" preserveAspectRatio="xMidYMid meet" role="group" aria-label="Rooms on ${escapeHtml(floor.name)}">
+          <image class="floorplan-image" href="${escapeHtml(imageSource)}" x="0" y="0" width="100" height="${viewHeight.toFixed(4)}" preserveAspectRatio="none" aria-hidden="true"></image>
+          ${overlays}
+          ${hotspots}
+        </svg>
+      </div>
+    `;
+  }
+
+  _renderRoomDetail(room) {
+    if (!room) return '<p class="hub-empty-state">Choose a room.</p>';
+    const states = this._hass?.states || {};
+    const summary = deriveRoomState(room, states, this._config.theme.accent);
+    const readOnly = this._config.display.read_only === true;
+    const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
+    const lights = room.lights.map((entityId) => {
+      const state = states[entityId];
+      const available = isEntityAvailable(state);
+      const isOn = state?.state === "on";
+      const name = entityName(state, entityId.split(".")[1]);
+      const reportedBrightness = safeNumber(state?.attributes?.brightness, NaN);
+      const lightDetail = isOn
+        ? Number.isFinite(reportedBrightness) ? `${Math.round(reportedBrightness / 2.55)}%` : "On"
+        : titleCase(state?.state || "unavailable");
+      const toggleDisabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
+      const actionLabel = available ? `Turn ${name} ${isOn ? "off" : "on"}` : `${name} unavailable`;
+      return `
+        <div class="control-row">
+          <button type="button" class="control-main ${isOn ? "is-on" : ""}" data-toggle="${escapeHtml(entityId)}" aria-label="${escapeHtml(actionLabel)}" aria-pressed="${isOn}"${toggleDisabled}>
+            <ha-icon icon="${ICONS.light}" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(lightDetail)}</small></span>
+          </button>
+          <button type="button" class="icon-action" data-more-info="${escapeHtml(entityId)}" aria-label="Open light details"${disabled}><ha-icon icon="mdi:tune"></ha-icon></button>
+        </div>
+      `;
+    }).join("");
+    const climate = room.climate ? states[room.climate] : null;
+    const climateAvailable = isEntityAvailable(climate) && Number.isFinite(summary.targetTemperature);
+    const climateDisabled = readOnly || !climateAvailable ? ' disabled aria-disabled="true"' : "";
+    const climateControl = room.climate ? `
+      <div class="climate-control">
+        <div><span>Temperature</span><strong>${formatTemperature(summary.temperature)}</strong><small>Target ${formatTemperature(summary.targetTemperature)}</small></div>
+        <div class="stepper">
+          <button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="${climateAvailable ? "Lower target temperature" : "Temperature control unavailable"}"${climateDisabled}>−</button>
+          <button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="${climateAvailable ? "Raise target temperature" : "Temperature control unavailable"}"${climateDisabled}>+</button>
+        </div>
+      </div>
+    ` : "";
+    const covers = room.covers.flatMap((entityId) => {
+      const state = states[entityId];
+      const available = isEntityAvailable(state);
+      const name = entityName(state, entityId === this._controlPolicy.secureCover ? "Garage door" : "Blind");
+      if (entityId === this._controlPolicy.secureCover) {
+        return this._config.features.entry ? [`
+          <div class="cover-control is-protected"><span><ha-icon icon="mdi:garage-variant" aria-hidden="true"></ha-icon><strong>${escapeHtml(name)}</strong><small>${escapeHtml(titleCase(state?.state || "unavailable"))} · protected action</small></span><div>
+            <button type="button" data-view="entry" aria-label="Open Security for ${escapeHtml(name)}"><ha-icon icon="mdi:shield-home-outline" aria-hidden="true"></ha-icon></button>
+          </div></div>
+        `] : [];
+      }
+      const coverDisabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
+      return [`
+        <div class="cover-control"><span><ha-icon icon="${ICONS.cover}" aria-hidden="true"></ha-icon><strong>${escapeHtml(name)}</strong><small>${escapeHtml(titleCase(state?.state || "unavailable"))}</small></span><div>
+          <button type="button" data-cover-action="open_cover" data-entity="${escapeHtml(entityId)}" aria-label="Open ${escapeHtml(name)}"${coverDisabled}><ha-icon icon="mdi:arrow-up" aria-hidden="true"></ha-icon></button>
+          <button type="button" data-cover-action="stop_cover" data-entity="${escapeHtml(entityId)}" aria-label="Stop ${escapeHtml(name)}"${coverDisabled}><ha-icon icon="mdi:stop" aria-hidden="true"></ha-icon></button>
+          <button type="button" data-cover-action="close_cover" data-entity="${escapeHtml(entityId)}" aria-label="Close ${escapeHtml(name)}"${coverDisabled}><ha-icon icon="mdi:arrow-down" aria-hidden="true"></ha-icon></button>
+        </div></div>
+      `];
+    }).join("");
+    const scenes = room.scenes.map((entityId) => {
+      const state = states[entityId];
+      const available = isEntityAvailable(state);
+      const sceneDisabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
+      const name = entityName(state, titleCase(entityId.split(".")[1]));
+      return `<button type="button" class="scene-button" data-scene="${escapeHtml(entityId)}" aria-label="${escapeHtml(available ? `Activate ${name}` : `${name} unavailable`)}"${sceneDisabled}><ha-icon icon="${ICONS.scene}"></ha-icon>${escapeHtml(name)}</button>`;
+    }).join("");
+    const media = (this._config.features.music ? room.media_players : []).map((entityId) => {
+      const state = states[entityId];
+      const available = isEntityAvailable(state);
+      const playing = state?.state === "playing";
+      const name = entityName(state, "Speaker");
+      const mediaDisabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
+      const actionLabel = available ? `${playing ? "Pause" : "Play"} ${name}` : `${name} unavailable`;
+      return `
+        <button type="button" class="media-room-control" data-media-toggle="${escapeHtml(entityId)}" aria-label="${escapeHtml(actionLabel)}" aria-pressed="${playing}"${mediaDisabled}><ha-icon icon="${playing ? "mdi:pause-circle" : "mdi:play-circle"}" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(state?.attributes?.media_title || titleCase(state?.state || "unavailable"))}</small></span></button>
+      `;
+    }).join("");
+    const lightStatus = summary.totalLights === 0
+      ? "No lights"
+      : summary.availableLights === 0
+        ? "Lighting unavailable"
+        : summary.availableLights < summary.totalLights
+          ? `${summary.lightsOn} on · ${summary.availableLights} of ${summary.totalLights} lights reporting`
+          : `${summary.lightsOn} light${summary.lightsOn === 1 ? "" : "s"} on`;
+    return `
+      <div class="room-title"><span class="room-icon"><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><p class="eyebrow">${readOnly ? "Read-only room" : "Room controls"}</p><h2>${escapeHtml(room.name)}</h2><p>${escapeHtml(lightStatus)}${Number.isFinite(summary.temperature) ? ` · ${formatTemperature(summary.temperature)}` : ""}</p></div></div>
+      ${readOnly ? '<p class="read-only-note"><ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon>Controls are disabled while this version is being checked.</p>' : ""}
+      <div class="room-control-list">${climateControl}${lights}${covers}</div>
+      ${scenes ? `<div class="scene-list"><p class="eyebrow">Scenes</p>${scenes}</div>` : ""}
+      ${media ? `<div class="room-media"><p class="eyebrow">Music</p>${media}</div>` : ""}
+      ${!climate && !lights && !covers && !scenes && !media ? '<p class="hub-empty-state">No controls are available for this room yet.</p>' : ""}
+    `;
+  }
+
+  _renderSecurity() {
+    const states = this._hass?.states || {};
+    const entry = this._config.entry;
+    const alarm = states[entry.alarm_entity];
+    const garage = states[entry.garage.cover_entity];
+    const readOnly = this._config.display.read_only === true;
+    const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
+    const garageState = entityStateValue(garage);
+    const garageAction = garageState === "closed"
+      ? "open_cover"
+      : garageState === "open"
+        ? "close_cover"
+        : null;
+    const garageActionAllowed = garageAction && isSecureCoverActionAllowed(garage, garageAction);
+    const garageDisabled = readOnly || !garageActionAllowed ? ' disabled aria-disabled="true"' : "";
+    const garageButtonLabel = garageAction === "open_cover"
+      ? "Open garage"
+      : garageAction === "close_cover"
+        ? "Close garage"
+        : garageState === "opening"
+          ? "Opening…"
+          : garageState === "closing"
+            ? "Closing…"
+            : "Unavailable";
+    const garageActionLabel = garageAction === "open_cover"
+      ? "Open garage door"
+      : garageAction === "close_cover"
+        ? "Close garage door"
+        : `Garage door ${garageButtonLabel.toLowerCase()}`;
+    const garageActionAttributes = garageActionAllowed
+      ? ` data-secure-cover-action="${garageAction}" data-entity="${escapeHtml(entry.garage.cover_entity)}" data-action-label="${garageActionLabel}"`
+      : "";
+    const garageMotion = entry.garage.motion_entity
+      ? binarySignalPresentation(states[entry.garage.motion_entity])
+      : null;
+    const alarmDisabled = (service) => readOnly || !isAlarmActionSupported(alarm, service)
+      ? ' disabled aria-disabled="true"'
+      : "";
+    const cameraOperationPending = this._cameraSession?.phase === "stopping"
+      || Boolean(this._cameraRecoveryPromise);
+    const hasBlockedCamera = this._cameraBlockedIds.size > 0;
+    const presentCamera = (camera) => {
+      const signalDefinitions = [
+        [camera.ringing_entity, "Ringing", "mdi:bell-ring-outline"],
+        [camera.person_entity, "Person", "mdi:account-alert-outline"],
+        [camera.motion_entity, "Motion", "mdi:motion-sensor"]
+      ].filter(([entityId]) => entityId);
+      const signals = signalDefinitions.map(([entityId, label, icon]) => {
+        const signal = binarySignalPresentation(states[entityId]);
+        return `<span class="security-signal ${signal.active ? "is-active" : ""} ${signal.available ? "" : "is-unavailable"}"><ha-icon icon="${icon}"></ha-icon><strong>${escapeHtml(label)}</strong><small>${signal.label}</small></span>`;
+      }).join("");
+      const cameraControl = this._controlPolicy.cameras.get(camera.id);
+      const cameraEntityAvailable = Boolean(camera.entity_id) && isEntityAvailable(states[camera.entity_id]);
+      const cameraAvailable = isCameraControlAvailable(cameraControl, states);
+      const commandPairValid = Boolean(cameraControl?.startButton && cameraControl?.stopButton);
+      const phase = cameraStreamPhase(states[camera.entity_id]);
+      const session = this._cameraSession?.id === camera.id ? this._cameraSession : null;
+      const isStarting = session?.phase === "starting";
+      const isBuffering = session?.phase === "buffering";
+      const isViewing = session?.phase === "viewing";
+      const isStopping = session?.phase === "stopping";
+      const retryBlockedCamera = this._canRetryBlockedCamera(camera.id);
+      const isWaiting = !session && (cameraOperationPending || hasBlockedCamera && !retryBlockedCamera);
+      const cameraError = this._cameraError?.id === camera.id ? this._cameraError.message : "";
+      const cameraReady = ["idle", "preparing", "streaming"].includes(phase);
+      const readOnlyStartBlocked = readOnly && cameraAvailable && cameraReady && phase !== "streaming";
+      const canOpen = cameraAvailable
+        && cameraReady
+        && !session
+        && !cameraOperationPending
+        && (!hasBlockedCamera || retryBlockedCamera)
+        && (!readOnly || phase === "streaming");
+      const hasMountedStream = (isBuffering || isViewing) && phase === "streaming" && cameraAvailable;
+      const cameraStatus = cameraError
+        ? canOpen
+          ? { label: "Retry available", icon: "mdi:refresh-circle" }
+          : { label: "Live view unavailable", icon: "mdi:camera-off-outline" }
+        : isWaiting
+          ? { label: "Waiting…", icon: "mdi:shield-clock-outline" }
+          : session
+            ? cameraSessionPresentation(session.phase, phase)
+            : readOnlyStartBlocked
+              ? { label: "Stream off", icon: "mdi:lock-outline" }
+              : cameraAvailable && cameraReady ? cameraSessionPresentation(null, phase) : null;
+      const badgeLabel = cameraStatus?.label
+        || (camera.entity_id
+          ? cameraEntityAvailable && !commandPairValid
+            ? "Controls unavailable"
+            : cameraEntityAvailable && commandPairValid && !cameraReady
+              ? "Not ready"
+              : "Camera unavailable"
+          : "Signals only");
+      const badgeIcon = cameraStatus?.icon
+        || (camera.entity_id
+          ? cameraEntityAvailable && commandPairValid && !cameraReady
+            ? "mdi:camera-clock-outline"
+            : "mdi:camera-off-outline"
+          : "mdi:shield-check-outline");
+      return {
+        camera,
+        signals,
+        cameraAvailable,
+        cameraReady,
+        readOnlyStartBlocked,
+        canOpen,
+        hasMountedStream,
+        isStarting,
+        isBuffering,
+        isViewing,
+        isStopping,
+        isWaiting,
+        cameraError,
+        badgeLabel,
+        badgeIcon,
+        session
+      };
+    };
+    const cameras = entry.cameras.map(presentCamera);
+    const selectedId = this._cameraSession?.id || this._securityCameraId || entry.primary_camera_id || cameras[0]?.camera.id;
+    const selected = cameras.find((item) => item.camera.id === selectedId) || cameras[0];
+    const cameraCards = cameras.map((item) => {
+      const waitingForSafeStop = item.isWaiting || item.isStopping;
+      const retryAvailable = Boolean(item.cameraError && item.canOpen);
+      const actionLabel = retryAvailable
+        ? "Retry live view"
+        : waitingForSafeStop
+          ? "Camera controls unavailable while the secure stream closes"
+          : item.cameraError
+            ? "Live view unavailable"
+            : !item.camera.entity_id
+              ? `${escapeHtml(item.camera.name)} has signals only`
+              : !item.cameraAvailable
+                ? `${escapeHtml(item.camera.name)} camera unavailable`
+                : !item.cameraReady
+                  ? `${escapeHtml(item.camera.name)} camera not ready`
+                  : item.readOnlyStartBlocked
+                    ? `${escapeHtml(item.camera.name)} stream is off in read-only mode`
+                    : `View ${escapeHtml(item.camera.name)} live`;
+      const actionText = item.isViewing
+        ? "Live"
+        : waitingForSafeStop
+          ? "Please wait"
+          : retryAvailable
+            ? "Retry"
+            : item.cameraError
+              ? "Unavailable"
+              : !item.camera.entity_id
+                ? "Signals only"
+                : !item.cameraAvailable
+                  ? "Unavailable"
+                  : !item.cameraReady
+                    ? "Not ready"
+                    : item.readOnlyStartBlocked
+                      ? "Stream off"
+                      : "View live";
+      const actionIcon = item.isViewing
+        ? "mdi:video"
+        : waitingForSafeStop
+          ? "mdi:shield-clock-outline"
+          : item.readOnlyStartBlocked
+            ? "mdi:lock-outline"
+            : item.canOpen
+              ? "mdi:play-circle-outline"
+              : "mdi:camera-off-outline";
+      return `
+        <article class="surface security-camera ${item.camera.id === selected?.camera.id ? "is-selected" : ""}">
+          <div class="camera-tile-media">
+            <div id="camera-poster-tile-${escapeHtml(item.camera.id)}" class="camera-poster-slot camera-tile-poster"><span class="camera-poster-fallback"><ha-icon icon="${item.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon>Still unavailable</span></div>
+            <button type="button" class="camera-poster-action" data-camera-open="${escapeHtml(item.camera.id)}" aria-label="${actionLabel}" ${item.canOpen ? "" : 'disabled aria-disabled="true"'}><span><ha-icon icon="${actionIcon}"></ha-icon>${actionText}</span></button>
+          </div>
+          <div class="camera-tile-details">
+            <div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(item.camera.role))}</p><h2>${escapeHtml(item.camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${item.badgeIcon}"></ha-icon>${item.badgeLabel}</span></div>
+            ${item.signals ? `<div class="security-signals">${item.signals}</div>` : ""}
+          </div>
+        </article>
+      `;
+    }).join("");
+    const bufferingMessage = selected?.session?.slow
+      ? "Still loading—this camera is taking longer than usual. Keep this screen open."
+      : "The secure stream is ready; waiting for the first picture.";
+    const stageActionText = selected?.cameraError
+      ? selected.canOpen ? "Retry" : "Unavailable"
+      : !selected?.camera?.entity_id
+        ? "Signals only"
+        : !selected?.cameraAvailable
+          ? "Unavailable"
+          : !selected?.cameraReady
+            ? "Not ready"
+            : selected?.readOnlyStartBlocked
+              ? "Read only"
+              : "View live";
+    const stageActionLabel = selected?.cameraError
+      ? selected.canOpen ? "Retry live view" : "Live view unavailable"
+      : !selected?.camera?.entity_id
+        ? "Live video is not configured for this signals-only camera"
+        : !selected?.cameraAvailable
+          ? "Camera unavailable"
+          : !selected?.cameraReady
+            ? "Camera not ready"
+            : selected?.readOnlyStartBlocked
+              ? "Live stream is off in read-only mode"
+              : "Start selected live view";
+    const stageActionIcon = selected?.readOnlyStartBlocked
+      ? "mdi:lock-outline"
+      : selected?.canOpen ? "mdi:play" : "mdi:camera-off-outline";
+    const stageStatus = selected?.isStarting
+      ? { title: "Waking camera…", detail: `The latest ${selected.camera.name} still remains visible while the secure stream starts.`, icon: "mdi:loading" }
+      : selected?.isBuffering
+        ? { title: selected.session?.viewerRecoveryAttempted ? "Reconnecting video…" : "Loading video…", detail: bufferingMessage, icon: "mdi:loading" }
+        : selected?.isStopping
+          ? { title: "Stopping live view…", detail: "Closing the secure stream before another camera can open.", icon: "mdi:loading" }
+          : selected?.isWaiting
+            ? { title: "Waiting for camera…", detail: "The previous secure stream must become idle before another camera can open.", icon: "mdi:shield-clock-outline" }
+            : null;
+    const idleStageTitle = selected?.cameraError
+      ? "Live view unavailable"
+      : !selected?.camera?.entity_id
+        ? "Signals only"
+        : !selected?.cameraAvailable
+          ? "Camera unavailable"
+          : !selected?.cameraReady
+            ? "Camera not ready"
+            : selected?.readOnlyStartBlocked
+              ? "Stream off"
+              : "Tap the picture for live video";
+    const idleStageDetail = selected?.cameraError
+      ? selected.cameraError
+      : !selected?.camera?.entity_id
+        ? "Live video is not configured for this entry camera."
+        : selected?.cameraAvailable
+          ? selected?.cameraReady
+            ? selected?.readOnlyStartBlocked
+              ? "Read-only mode will not start this camera."
+              : "This is the latest available still; live video starts only when you tap."
+            : "Live view cannot start while the camera is in its current state."
+          : "This camera is currently unavailable.";
+    const selectedStream = `
+      <div class="camera-stage-stack ${selected?.isViewing ? "is-live" : "is-poster"} ${!selected?.session ? "security-stage-poster" : ""}" data-camera-phase="${escapeHtml(selected?.session?.phase || "idle")}" ${!selected?.session && selected?.cameraError ? 'role="alert"' : ""}>
+        <div id="camera-poster-stage-${escapeHtml(selected?.camera.id || "")}" class="camera-poster-slot camera-stage-poster-slot"><span class="camera-poster-fallback"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon>Latest still unavailable</span></div>
+        ${selected?.hasMountedStream ? `<slot id="camera-card-slot-${escapeHtml(selected.camera.id)}" name="camera-${escapeHtml(selected.camera.id)}" class="child-card-slot camera-card-slot"></slot>` : ""}
+        ${selected?.isViewing ? '<span class="camera-live-indicator" role="status"><span></span>Live</span>' : ""}
+        ${stageStatus ? `<div class="camera-stream-overlay camera-is-${escapeHtml(selected.session?.phase || "waiting")}" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="${stageStatus.icon}"></ha-icon><div><strong>${escapeHtml(stageStatus.title)}</strong><small>${escapeHtml(stageStatus.detail)}</small></div></div>` : ""}
+        ${!selected?.session && !selected?.isWaiting ? `<button type="button" class="camera-stage-action" data-camera-stage-open="${escapeHtml(selected?.camera.id || "")}" aria-label="${stageActionLabel}" ${selected?.canOpen ? "" : 'disabled aria-disabled="true"'}><span><strong>${escapeHtml(idleStageTitle)}</strong><small>${escapeHtml(idleStageDetail)}</small></span><b><ha-icon icon="${stageActionIcon}"></ha-icon>${stageActionText}</b></button>` : ""}
+        ${selected?.session && !selected?.isStopping ? `<button type="button" class="camera-close" data-camera-close="${escapeHtml(selected.camera.id)}"><ha-icon icon="mdi:close"></ha-icon>${selected.isViewing ? "Close live view" : "Cancel"}</button>` : ""}
+      </div>`;
+    return `
+      <section class="security-layout">
+        <div class="security-main"${confirmationGuard}>
+          <article class="security-stage" aria-label="Selected secure camera">
+            <div class="security-stage-heading"><div><p class="eyebrow">Live view</p><h2>${escapeHtml(selected?.camera.name || "Entry camera")}</h2></div><span class="stage-privacy"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Private · on demand</span></div>
+            <div class="security-stage-media">${selectedStream}</div>
+          </article>
+          <div class="security-camera-picker" aria-label="Choose an entry camera">${cameraCards}</div>
+        </div>
+        <aside class="security-sidebar"${confirmationGuard}>
+          <article class="surface alarm-panel" tabindex="-1" aria-label="Home alarm controls">
+            <div class="security-card-heading"><div><p class="eyebrow">Home alarm</p><h2>${escapeHtml(titleCase(alarm?.state || "unavailable"))}</h2></div><span class="alarm-state ${String(alarm?.state || "").includes("triggered") ? "is-alert" : ""} ${isEntityAvailable(alarm) ? "" : "is-unavailable"}"><ha-icon icon="${ICONS.security}"></ha-icon></span></div>
+            <p>You’ll confirm before the alarm changes.</p>
+            <div class="alarm-actions"><button type="button" data-alarm-action="alarm_arm_home" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Arm home"${alarmDisabled("alarm_arm_home")}><ha-icon icon="mdi:shield-home-outline"></ha-icon>Home</button><button type="button" data-alarm-action="alarm_arm_away" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Arm away"${alarmDisabled("alarm_arm_away")}><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Away</button><button type="button" class="is-danger" data-alarm-action="alarm_disarm" data-entity="${escapeHtml(entry.alarm_entity)}" data-action-label="Disarm alarm"${alarmDisabled("alarm_disarm")}><ha-icon icon="mdi:shield-off-outline"></ha-icon>Disarm</button></div>
+          </article>
+          <article class="surface garage-panel" tabindex="-1" aria-label="Garage controls">
+            <div class="garage-heading"><span><ha-icon icon="mdi:garage-variant"></ha-icon></span><div><p class="eyebrow">Garage door</p><h2>${escapeHtml(titleCase(garage?.state || "unavailable"))}</h2></div></div>
+            ${garageMotion ? `<p class="garage-motion ${garageMotion.active ? "is-active" : ""} ${garageMotion.available ? "" : "is-unavailable"}"><ha-icon icon="mdi:motion-sensor"></ha-icon>${garageMotion.available ? garageMotion.active ? "Motion detected" : "No motion detected" : "Motion unavailable"}</p>` : ""}
+            <button type="button" class="garage-action"${garageActionAttributes}${garageDisabled}><ha-icon icon="${garageAction === "open_cover" ? "mdi:garage-open-variant" : garageAction === "close_cover" ? "mdi:garage-alert-variant" : "mdi:garage-clock"}"></ha-icon>${garageButtonLabel}</button>
+          </article>
+          <p class="security-privacy-note"><ha-icon icon="mdi:shield-account-outline"></ha-icon>Entry cameras only. The viewer opens only when you choose it. A stream started here stops when you close the view, leave Security or after two minutes.</p>
+        </aside>
+        ${this._renderConfirmation()}
+      </section>
+    `;
+  }
+
+  _renderConfirmation() {
+    if (!this._pendingConfirmation) return "";
+    return `
+      <div class="confirmation-backdrop" role="presentation">
+        <section class="confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title">
+          <span><ha-icon icon="mdi:shield-alert-outline"></ha-icon></span>
+          <p class="eyebrow">Please confirm</p>
+          <h2 id="confirmation-title">${escapeHtml(this._pendingConfirmation.label)}</h2>
+          <p>This is a protected household action. Nothing changes until you press Confirm.</p>
+          <div><button type="button" data-confirm-action="cancel">Cancel</button><button type="button" class="confirm-primary" data-confirm-action="confirm">Confirm</button></div>
+        </section>
+      </div>
+    `;
+  }
+
+  _renderPlannerModal() {
+    if (!this._plannerModal) return "";
+    if (this._plannerModal.type === "add") return this._renderPlannerAddModal();
+    const event = this._plannerEventByKey(this._plannerModal.eventKey);
+    if (!event) return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal" role="dialog" aria-modal="true" aria-labelledby="planner-event-missing-title">
+      <header><button type="button" class="planner-modal-close" data-planner-close aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">Family planner</p><h2 id="planner-event-missing-title">Event no longer available</h2></header>
+      <div class="planner-modal-body"><p class="planner-no-prep">The calendar changed while this event was open.</p></div>
+      <footer><span>Close this window to refresh the planner.</span><button type="button" data-planner-close>Close</button></footer>
+    </section></div>`;
+    const calendar = event._calendar || this._config.calendar.entities[0];
+    const people = familyPlannerPeople(event, this._config.people).filter((person) => person.role !== "household");
+    const children = people.filter((person) => person.role === "child");
+    const eventKey = familyPlannerEventKey(event);
+    const items = this._preparationItems.filter((item) => item?._preparation?.eventKey === eventKey);
+    const progress = preparationProgress(items, eventKey);
+    const suggestion = matchPreparationTemplate(event, this._config.calendar.preparation?.templates || []);
+    const checklist = items.length ? `<div class="planner-checklist">
+      <div class="planner-checklist-heading"><div><p class="eyebrow">Get ready</p><h3>${progress.ready ? "Ready" : `${progress.complete} of ${progress.total} complete`}</h3></div><span class="${progress.ready ? "is-ready" : ""}"><ha-icon icon="${progress.ready ? "mdi:check-circle" : "mdi:bag-personal-outline"}"></ha-icon></span></div>
+      ${items.map((item) => {
+        const completed = String(item.status).toLocaleLowerCase() === "completed";
+        const person = this._config.people.find((entry) => entry.id === item._preparation.personId);
+        const itemId = item.uid || item.id || item.summary;
+        return `<button type="button" class="planner-check-item ${completed ? "is-complete" : ""}" data-prep-item="${escapeHtml(itemId)}" data-prep-status="${completed ? "needs_action" : "completed"}"><span><ha-icon icon="${completed ? "mdi:check" : "mdi:circle-outline"}"></ha-icon></span><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong>${person ? `<small style="--person-colour:${escapeHtml(person.colour)}">${escapeHtml(person.name)}</small>` : ""}</button>`;
+      }).join("")}
+    </div>` : suggestion && children.length ? `<div class="planner-suggestion"><span><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon></span><div><p class="eyebrow">Suggested preparation</p><h3>${escapeHtml(suggestion.label)}</h3><p>${escapeHtml(suggestion.items.join(" · "))}</p><div>${children.map((person) => `<button type="button" data-add-preparation="${escapeHtml(eventKey)}" data-preparation-template="${escapeHtml(suggestion.id)}" data-preparation-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}">Add for ${escapeHtml(person.name)}</button>`).join("")}</div></div></div>` : '<p class="planner-no-prep">No preparation checklist is linked to this event.</p>';
+    return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal" role="dialog" aria-modal="true" aria-labelledby="planner-event-title">
+      <header style="--calendar-colour:${escapeHtml(calendar.colour)}"><button type="button" class="planner-modal-close" data-planner-close aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">${escapeHtml(people.map((person) => person.name).join(" · ") || calendar.label)}</p><h2 id="planner-event-title">${escapeHtml(event.summary || calendar.label)}</h2><p>${escapeHtml(formatDay(calendarEventStart(event), this._config.product.locale, this._config.product.timezone))}${isAllDayCalendarEvent(event) ? " · All day" : ` · ${escapeHtml(formatTime(calendarEventStart(event), this._config.product.locale, this._config.product.timezone))}`}</p></header>
+      <div class="planner-modal-body">${event.location ? `<p class="planner-event-location"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(event.location)}</p>` : ""}${event.description ? `<p class="planner-event-description">${escapeHtml(event.description)}</p>` : ""}${checklist}</div>
+      <footer><span><ha-icon icon="mdi:apple"></ha-icon>Calendar details stay in Apple Calendar</span></footer>
+    </section></div>`;
+  }
+
+  _renderPlannerAddModal() {
+    const now = new Date(Date.now() + 3_600_000);
+    const date = dateKey(now, this._config.product.timezone);
+    const startTime = formatTimeInput(now, this._config.product.timezone);
+    const endTime = formatTimeInput(new Date(now.getTime() + 3_600_000), this._config.product.timezone);
+    const calendars = this._config.calendar.entities.filter((entry) => entry.allow_create === true);
+    const templates = this._config.calendar.preparation?.templates || [];
+    return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal planner-add-modal" role="dialog" aria-modal="true" aria-labelledby="planner-add-title">
+      <header><button type="button" class="planner-modal-close" data-planner-close aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">Family planner</p><h2 id="planner-add-title">Add an event</h2><p>This will be added to the selected Apple calendar.</p></header>
+      <div class="planner-event-form">
+        <label><span>Who is it for?</span><select data-planner-field="calendar">${calendars.map((calendar) => `<option value="${escapeHtml(calendar.entity_id)}">${escapeHtml(calendar.label)}</option>`).join("")}</select></label>
+        <label class="is-wide"><span>Event</span><input data-planner-field="summary" type="text" maxlength="120" autocomplete="off" placeholder="Football training" /></label>
+        <label><span>Date</span><input data-planner-field="date" type="date" value="${escapeHtml(date)}" /></label>
+        <label><span>Starts</span><input data-planner-field="start" type="time" value="${escapeHtml(startTime)}" /></label>
+        <label><span>Ends</span><input data-planner-field="end" type="time" value="${escapeHtml(endTime)}" /></label>
+        <label class="is-wide"><span>Location</span><input data-planner-field="location" type="text" maxlength="160" autocomplete="off" placeholder="Optional" /></label>
+        <label class="is-wide"><span>Get ready template</span><select data-planner-field="template"><option value="">No checklist</option>${templates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.label)}</option>`).join("")}</select></label>
+        <p class="planner-form-error" role="alert">${escapeHtml(this._plannerModal.error || "")}</p>
+      </div>
+      <footer><button type="button" data-planner-close>Cancel</button><button type="button" class="planner-save" data-planner-save ${this._plannerModal.saving ? "disabled" : ""}>${this._plannerModal.saving ? "Adding…" : "Add to calendar"}</button></footer>
+    </section></div>`;
+  }
+
+  _renderFamily() {
+    const locationEnabled = this._config.features.location_map;
+    const choresEnabled = this._config.features.chores === true;
+    const familyTitle = choresEnabled ? "Jobs & rewards" : this._config.features.school ? "School" : "Family overview";
+    const children = this._config.people.filter((person) => person.role === "child");
+    if (!locationEnabled) {
+      return `
+        <section class="family-dashboard">
+          <header class="family-dashboard-heading"><div><p class="eyebrow">Family</p><h2>${familyTitle}</h2></div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
+          <div class="family-people-grid">${children.map((person) => this._renderFamilyPerson(person)).join("")}</div>
+        </section>
+      `;
+    }
+    return `
+      <section class="family-layout">
+        <article class="surface map-panel">
+          <div class="section-heading"><div><p class="eyebrow">${locationEnabled ? "Family map" : "Family overview"}</p><h2>${locationEnabled ? "Presence & location" : "Private family summary"}</h2></div><span>${locationEnabled ? "Private to Home Assistant" : "Location sharing off"}</span></div>
+          ${locationEnabled ? '<div id="map-card-slot" class="child-card-slot map-slot"></div>' : '<p class="hub-empty-state">Location sharing is disabled.</p>'}
+        </article>
+        <aside class="family-sidebar" aria-label="${choresEnabled ? "Family jobs and rewards" : "Family details"}">
+          <div class="family-scroll-cue"><strong>${familyTitle}</strong><span><ha-icon icon="mdi:swap-vertical" aria-hidden="true"></ha-icon>Swipe for everyone</span></div>
+          ${choresEnabled ? this._renderChoreOpsLink("family-sidebar-link") : ""}
+          ${children.map((person) => this._renderFamilyPerson(person)).join("")}
+        </aside>
+      </section>
+    `;
+  }
+
+  _renderChoreOpsLink(extraClass = "") {
+    if (this._config.display.read_only || !this._config.features.chores) return "";
+    const path = safeInternalDashboardPath(this._config.chores?.dashboard_path);
+    if (!path) return "";
+    return `<a class="choreops-link ${extraClass}" href="${escapeHtml(path)}" data-choreops-link="native"><ha-icon icon="mdi:arrow-right" aria-hidden="true"></ha-icon>Open ChoreOps</a>`;
+  }
+
+  _renderChoreOpsSummary(chore) {
+    if (!chore) return "";
+    const states = this._hass?.states || {};
+    const firstSummary = (entityIds, kind) => {
+      const entityId = entityIds?.[0];
+      return entityId ? normaliseChoreOpsSummary(states[entityId], entityId, kind) : null;
+    };
+    const items = [
+      firstSummary(chore.reward_status_entities, "reward"),
+      firstSummary(chore.badge_progress_entities, "badge"),
+      firstSummary(chore.achievement_progress_entities, "achievement")
+    ].filter(Boolean);
+    if (!items.length) return "";
+    const labels = { reward: "Reward", badge: "Badge", achievement: "Achievement" };
+    const rows = items.map((item) => `
+      <div class="family-summary-item is-${escapeHtml(item.tone)}">
+        <span><ha-icon icon="${escapeHtml(item.icon)}" aria-hidden="true"></ha-icon></span>
+        <div><p>${labels[item.kind]}</p><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.label)}</small></div>
+      </div>
+    `).join("");
+    return `<section class="family-summary-grid" aria-label="Rewards and progress">${rows}</section>`;
+  }
+
+  _renderPersonPreparation(person) {
+    if (!this._config.calendar?.preparation?.enabled) return "";
+    const lookaheadDays = this._config.calendar.preparation.lookahead_days || 7;
+    const events = (this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents())
+      .filter((event) => event?._calendar?.person_ids?.includes(person.id))
+      .filter((event) => isPreparationWindowEvent(event, lookaheadDays, new Date(), this._config.product.timezone));
+    const eventMap = new Map(events.map((event) => [familyPlannerEventKey(event), event]));
+    const items = this._preparationItems.filter((item) => item?._preparation?.personId === person.id
+      && eventMap.has(item._preparation.eventKey));
+    if (!items.length) return "";
+    const complete = items.filter((item) => String(item.status).toLocaleLowerCase() === "completed").length;
+    const ready = complete === items.length;
+    const rows = items.slice(0, 6).map((item) => {
+      const completed = String(item.status).toLocaleLowerCase() === "completed";
+      const event = eventMap.get(item._preparation.eventKey);
+      const itemId = item.uid || item.id || item.summary;
+      return `<button type="button" class="family-prep-item ${completed ? "is-complete" : ""}" data-prep-item="${escapeHtml(itemId)}" data-prep-status="${completed ? "needs_action" : "completed"}"><span><ha-icon icon="${completed ? "mdi:check" : "mdi:circle-outline"}"></ha-icon></span><div><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong><small>${escapeHtml(event?.summary || "Upcoming event")}</small></div></button>`;
+    }).join("");
+    return `<section class="family-preparation ${ready ? "is-ready" : ""}" aria-label="Get ready for upcoming events"><div class="chore-heading"><p class="eyebrow">Get ready</p><span>${ready ? "Ready" : `${complete} of ${items.length}`}</span></div><div class="family-prep-list">${rows}</div>${items.length > 6 ? `<button type="button" class="family-prep-more" data-view="calendar">Open planner for ${items.length - 6} more</button>` : ""}</section>`;
+  }
+
+  _renderFamilyPerson(person) {
+    const states = this._hass?.states || {};
+    const choresEnabled = this._config.features.chores === true;
+    const schoolEnabled = this._config.features.school === true;
+    const schoolSource = schoolDataSource(this._config);
+    const chore = choresEnabled ? this._config.chores.users.find((entry) => entry.person_id === person.id) : null;
+    const classroom = schoolEnabled && schoolSource === "classroom"
+      ? this._config.school.classroom_students.find((entry) => entry.person_id === person.id)
+      : null;
+    const classroomState = classroom ? states[classroom.assignments_entity] : null;
+    const classroomData = classroomAssignmentPresentation(classroomState);
+    const assignments = classroomData.assignments;
+    const assignmentCount = classroomData.available ? classroomData.count : NaN;
+    const assignmentsTruncated = classroomData.truncated;
+    const classroomStale = classroomState?.attributes?.data_stale === true;
+    const pointsState = chore ? states[chore.points_entity] : null;
+    const choresState = chore ? states[chore.chores_entity] : null;
+    const pointsAvailable = isEntityAvailable(pointsState);
+    const choresSummaryAvailable = isEntityAvailable(choresState);
+    const points = pointsAvailable ? pointsState.state : null;
+    const due = choresSummaryAvailable
+      ? safeNumber(choresState.attributes?.chore_stat_current_due_today, 0)
+      : NaN;
+    const nextAssignment = assignments[0];
+    const classroomLink = safeClassroomLink(nextAssignment?.alternate_link);
+    const assignmentTitle = classroomLink
+      ? `<a href="${escapeHtml(classroomLink)}" target="_blank" rel="noopener noreferrer" data-classroom-person="${escapeHtml(person.id)}">${escapeHtml(nextAssignment.title || "Assignment")}</a>`
+      : `<strong>${escapeHtml(nextAssignment?.title || "Assignment")}</strong>`;
+    const assignmentDue = nextAssignment?.due_at
+      ? formatClassroomDueDay(nextAssignment.due_at, this._config.product.locale, this._config.product.timezone)
+      : "No due date";
+    const lastSuccessfulUpdate = classroomState?.attributes?.last_successful_update;
+    const lastSuccessfulLabel = lastSuccessfulUpdate
+      ? `${formatDay(lastSuccessfulUpdate, this._config.product.locale, this._config.product.timezone)} at ${formatTime(lastSuccessfulUpdate, this._config.product.locale, this._config.product.timezone)}`
+      : null;
+    const classroomError = String(classroomState?.attributes?.last_error || "Classroom update delayed").slice(0, 160);
+    const schoolEvent = schoolEnabled && schoolSource === "calendar"
+      ? this._nextSchoolCalendarEvent(person.id)
+      : null;
+    const schoolEventStart = calendarEventStart(schoolEvent);
+    const schoolEventWhen = schoolEventStart
+      ? `${formatClassroomDueDay(schoolEventStart, this._config.product.locale, this._config.product.timezone)} · ${formatTime(schoolEventStart, this._config.product.locale, this._config.product.timezone)}`
+      : "Date to be confirmed";
+    const classroomHealth = classroomStale
+      ? `<span class="classroom-health is-stale"><ha-icon icon="mdi:cloud-alert-outline" aria-hidden="true"></ha-icon>${escapeHtml(classroomError)}${lastSuccessfulLabel ? ` · Last updated ${escapeHtml(lastSuccessfulLabel)}` : ""}</span>`
+      : assignmentsTruncated
+        ? `<span class="classroom-health"><ha-icon icon="mdi:format-list-numbered" aria-hidden="true"></ha-icon>Showing the next ${assignments.length} of ${assignmentCount} assignments</span>`
+        : "";
+    const classroomStatus = schoolEnabled && schoolSource === "calendar"
+      ? schoolEvent
+        ? `<div class="assignment school-calendar-fallback"><ha-icon icon="mdi:calendar-school-outline"></ha-icon><div><strong>${escapeHtml(schoolEvent.summary || schoolEvent._calendar?.label || "School event")}</strong><small>${escapeHtml(schoolEventWhen)}${schoolEvent.location ? ` · ${escapeHtml(schoolEvent.location)}` : ""}</small><span class="classroom-health"><ha-icon icon="mdi:shield-check-outline" aria-hidden="true"></ha-icon>Calendar-only fallback · Classroom remains disconnected</span></div></div>`
+        : '<div class="assignment school-calendar-fallback"><ha-icon icon="mdi:calendar-blank-outline"></ha-icon><div><strong>No upcoming school dates</strong><small>The calendar-only fallback is active. Classroom assignments are not being read.</small></div></div>'
+      : classroom && !classroomData.available
+      ? '<div class="assignment is-stale"><ha-icon icon="mdi:school-outline"></ha-icon><div><strong>Classroom unavailable</strong><small>The last update could not be read. Home Assistant will retry.</small></div></div>'
+      : nextAssignment
+      ? `<div class="assignment ${classroomStale ? "is-stale" : ""}"><ha-icon icon="${ICONS.school}"></ha-icon><div>${assignmentTitle}<small>${escapeHtml(nextAssignment.course || "Google Classroom")} · ${escapeHtml(assignmentDue)}</small>${classroomHealth}</div></div>`
+      : classroomStale
+        ? `<div class="assignment is-stale"><ha-icon icon="mdi:cloud-alert-outline"></ha-icon><div><strong>Classroom update delayed</strong><small>${escapeHtml(classroomError)}${lastSuccessfulLabel ? ` · Last updated ${escapeHtml(lastSuccessfulLabel)}` : ""}</small></div></div>`
+      : !schoolEnabled
+        ? '<div class="assignment classroom-locked"><ha-icon icon="mdi:school-outline"></ha-icon><div><strong>Classroom ready after consent</strong><small>Read-only access will be connected separately for each child. No password belongs in this dashboard.</small></div></div>'
+        : !classroom
+          ? '<div class="assignment is-stale"><ha-icon icon="mdi:school-alert-outline"></ha-icon><div><strong>Classroom not connected</strong><small>This child still needs a separate read-only connection.</small></div></div>'
+        : '<div class="assignment"><ha-icon icon="mdi:school-check-outline"></ha-icon><div><strong>No open assignments</strong><small>Google Classroom is up to date.</small></div></div>';
+    const presence = this._config.features.location_map && person.location_entity
+      ? titleCase(states[person.location_entity]?.state || "Location unavailable")
+      : choresEnabled ? "Today’s jobs" : schoolEnabled ? "School" : "Family overview";
+    const choreRows = (chore?.status_entities || []).map((entityId) => {
+      const state = states[entityId];
+      const presentation = normaliseChoreStatus(state, entityId);
+      return `
+        <li class="chore-row is-${escapeHtml(presentation.tone)}">
+          <span class="chore-check"><ha-icon icon="${presentation.tone === "done" ? "mdi:check" : presentation.tone === "overdue" ? "mdi:alert" : "mdi:circle-small"}" aria-hidden="true"></ha-icon></span>
+          <span><strong>${escapeHtml(presentation.name)}</strong><small>${escapeHtml(presentation.label)}${presentation.due ? ` · ${escapeHtml(formatTime(presentation.due, this._config.product.locale, this._config.product.timezone))}` : ""}</small></span>
+          ${Number.isFinite(presentation.points) ? `<b>+${presentation.points}</b>` : ""}
+        </li>
+      `;
+    }).join("");
+    const choreOpsSummary = choresEnabled ? this._renderChoreOpsSummary(chore) : "";
+    const choreHeading = choresEnabled && this._config.features.location_map
+      ? `<div class="chore-heading"><p class="eyebrow">Today’s jobs</p><span>${choreRows ? `${(chore?.status_entities || []).length} jobs` : "None yet"}</span></div>`
+      : "";
+    const factItems = [
+      ...(choresEnabled && chore ? [`<span><strong>${pointsAvailable ? escapeHtml(formatPoints(points, this._config.product.locale)) : "—"}</strong> points</span>`, `<span><strong>${Number.isFinite(due) ? due : "—"}</strong> due today</span>`] : []),
+      ...(schoolEnabled
+        ? schoolSource === "calendar"
+          ? [`<span><strong>${schoolEventStart ? escapeHtml(formatClassroomDueDay(schoolEventStart, this._config.product.locale, this._config.product.timezone)) : "—"}</strong> next school date</span>`]
+          : [`<span><strong>${Number.isFinite(assignmentCount) ? assignmentCount : "—"}</strong> assignments</span>`]
+        : [])
+    ].join("");
+    return `
+      <article class="surface family-person" style="--person-colour:${escapeHtml(person.colour)}">
+        <div class="family-person-heading"><span>${escapeHtml(person.name.slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person.name)}</p><h2>${escapeHtml(presence)}</h2></div></div>
+        ${factItems ? `<div class="family-facts">${factItems}</div>` : ""}
+        ${choresEnabled && !chore ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps is not connected for this child.</p>' : choresEnabled && (!pointsAvailable || !choresSummaryAvailable) ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps data is currently unavailable.</p>' : ""}
+        ${this._renderPersonPreparation(person)}
+        ${choreHeading}
+        ${choresEnabled && chore ? choreRows ? `<ul class="chore-list" aria-label="Today’s jobs">${choreRows}</ul>` : '<p class="hub-empty-state compact">No jobs are due yet.</p>' : ""}
+        ${choreOpsSummary}
+        ${classroomStatus}
+      </article>
+    `;
+  }
+
+  _renderMusic() {
+    const readOnly = this._config.display.read_only;
+    return `
+      <section class="music-experience">
+        <article class="surface media-player-panel">
+          <div class="section-heading music-heading"><div><p class="eyebrow">Spotify · Sonos</p><h2>${readOnly ? "Your full music player" : "Browse, group and play"}</h2></div><span class="music-meta">${this._config.media.players.length} rooms${readOnly ? ' · <ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon> playback locked' : ""}</span></div>
+          <div class="media-player-stage ${readOnly ? "is-read-only" : ""}">
+            <div id="music-card-slot" class="child-card-slot"></div>
+          </div>
+        </article>
+      </section>
+    `;
+  }
+
+  _footballState() {
+    const states = this._hass?.states || {};
+    const index = states[this._config.football.index_entity];
+    const suggested = safeNumber(index?.attributes?.current_gameweek || index?.attributes?.next_gameweek || index?.state, 1);
+    const gameweek = Math.max(1, Math.min(38, this._gameweek || suggested || 1));
+    const gameweekState = states[`${this._config.football.gameweek_entity_prefix}${gameweek}`];
+    const table = states[this._config.football.table_entity];
+    return { index, gameweek, gameweekState, table };
+  }
+
+  _featuredFixtures() {
+    const { index, gameweekState, table } = this._footballState();
+    if (!isEntityAvailable(index) || !isEntityAvailable(gameweekState)) {
+      return {
+        title: "Spurs & Villa",
+        html: this._config.football.spotlight_team_codes
+          .map((code) => this._renderCompactUnavailableFavourite(code))
+          .join("")
+      };
+    }
+    const fixtures = gameweekState?.attributes?.events || [];
+    const models = buildFavouriteClubModels(
+      fixtures,
+      this._config.football.spotlight_team_codes,
+      isEntityAvailable(table) ? table.attributes?.rows || [] : []
+    );
+    const derby = favouriteDerbyFixture(models);
+    const html = derby
+      ? this._renderCompactFixture(derby, { derby: true })
+      : models.map((model) => this._renderCompactFavourite(model)).join("");
+    return {
+      title: this._favouriteTitle(models),
+      html: html || '<p class="hub-empty-state">No favourite clubs are configured yet.</p>'
+    };
+  }
+
+  _renderCompactFixture(fixture, { favouriteCode = "", derby = false } = {}) {
+    const status = normaliseFixtureStatus(fixture);
+    const score = status === "upcoming"
+      ? formatTime(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)
+      : `${fixture.home_score ?? "–"}–${fixture.away_score ?? "–"}`;
+    const favouriteAttribute = derby
+      ? this._config.football.spotlight_team_codes.join(" ")
+      : favouriteCode;
+    return `
+      <button type="button" class="compact-fixture ${derby ? "is-derby" : ""}" data-view="football" data-fixture-id="${escapeHtml(fixture.id ?? "")}"${favouriteAttribute ? ` data-favourite-code="${escapeHtml(favouriteAttribute)}"` : ""}>
+        <span title="${escapeHtml(fixture.home?.name || "Home")}">${escapeHtml(compactClubName(fixture.home))}</span><strong>${escapeHtml(score)}</strong><span title="${escapeHtml(fixture.away?.name || "Away")}">${escapeHtml(compactClubName(fixture.away))}</span>
+        <small>${escapeHtml(derby ? `Family derby · ${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)}` : status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone))}</small>
+      </button>
+    `;
+  }
+
+  _renderCompactFavourite(model) {
+    if (model.fixture) return this._renderCompactFixture(model.fixture, { favouriteCode: model.code });
+    return `
+      <button type="button" class="compact-fixture is-empty" data-view="football" data-favourite-code="${escapeHtml(model.code)}">
+        <span class="compact-favourite-name">${escapeHtml(compactClubName(model.team))}</span><strong>—</strong><span>No match</span>
+        <small>No fixture this matchweek</small>
+      </button>
+    `;
+  }
+
+  _renderCompactUnavailableFavourite(code) {
+    const presentation = this._clubPresentation(code);
+    return `
+      <button type="button" class="compact-fixture is-empty is-unavailable" data-view="football" data-favourite-code="${escapeHtml(code)}">
+        <span class="compact-favourite-name">${escapeHtml(presentation.label)}</span><strong>—</strong><span>Waiting</span>
+        <small>Fixture data unavailable</small>
+      </button>
+    `;
+  }
+
+  _renderTeamMark(team, size = "small") {
+    const crest = teamCrest(team);
+    const code = team?.short_name || team?.code || String(team?.name || "?").slice(0, 3).toUpperCase();
+    return `<span class="team-mark is-${escapeHtml(size)}"><strong aria-hidden="${crest ? "true" : "false"}">${escapeHtml(code)}</strong>${crest ? `<img data-team-crest src="${escapeHtml(crest)}" alt="${escapeHtml(`${team?.name || code} crest`)}">` : ""}</span>`;
+  }
+
+  _favouriteTitle(models) {
+    return models.map((model) => (
+      FOOTBALL_CLUB_PRESENTATION[model.code]?.label || compactClubName(model.team)
+    )).join(" & ") || "Family football";
+  }
+
+  _footballMatchValue(fixture, status) {
+    if (!fixture) return "—";
+    return status === "upcoming"
+      ? formatTime(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)
+      : `${fixture.home_score ?? "–"} — ${fixture.away_score ?? "–"}`;
+  }
+
+  _footballMatchDetail(fixture, status) {
+    if (!fixture) return "No fixture this matchweek";
+    if (status === "live") return `LIVE · ${fixture.minutes || 0}'`;
+    if (status === "finished") return "Full time";
+    return formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone);
+  }
+
+  _clubPresentation(code) {
+    return FOOTBALL_CLUB_PRESENTATION[code] || { label: code, primary: "#0C315D", accent: "#8FD8CB" };
+  }
+
+  _renderFavouriteHero(model) {
+    const presentation = this._clubPresentation(model.code);
+    const statusLabel = model.status === "live" ? `LIVE · ${model.fixture?.minutes || 0}'` : model.status === "finished" ? "FULL TIME" : model.status === "upcoming" ? "UP NEXT" : "NO MATCH";
+    const venue = model.fixture ? model.is_home ? "Home against" : "Away at" : "This matchweek";
+    return `
+      <article class="favourite-hero-card is-${escapeHtml(model.status)}" data-favourite-code="${escapeHtml(model.code)}" data-fixture-id="${escapeHtml(model.fixture?.id ?? "")}" style="--club-primary:${presentation.primary};--club-accent:${presentation.accent}">
+        <header class="favourite-club-heading">
+          <div class="favourite-club-identity">${this._renderTeamMark(model.team, "favourite")}<div><small>Family favourite</small><strong>${escapeHtml(presentation.label)}</strong></div></div>
+          <span class="favourite-match-status">${escapeHtml(statusLabel)}</span>
+        </header>
+        ${model.fixture ? `<div class="favourite-fixture-summary">
+          <div class="favourite-opponent"><small>${escapeHtml(venue)}</small><strong>${escapeHtml(compactClubName(model.opponent))}</strong></div>
+          ${this._renderTeamMark(model.opponent, "small")}
+          <div class="favourite-result"><strong>${escapeHtml(this._footballMatchValue(model.fixture, model.status))}</strong><small>${escapeHtml(this._footballMatchDetail(model.fixture, model.status))}</small></div>
+        </div>` : `<div class="favourite-fixture-summary is-empty"><ha-icon icon="mdi:calendar-blank-outline" aria-hidden="true"></ha-icon><div><strong>No fixture this matchweek</strong><small>${escapeHtml(`${presentation.label} remain pinned here.`)}</small></div></div>`}
+      </article>
+    `;
+  }
+
+  _renderUnavailableFavourite(code) {
+    const presentation = this._clubPresentation(code);
+    const team = { short_name: code, code, name: FOOTBALL_CLUB_NAMES[code] || code };
+    return `
+      <article class="favourite-hero-card is-unavailable" data-favourite-code="${escapeHtml(code)}" style="--club-primary:${presentation.primary};--club-accent:${presentation.accent}">
+        <header class="favourite-club-heading">
+          <div class="favourite-club-identity">${this._renderTeamMark(team, "favourite")}<div><small>Family favourite</small><strong>${escapeHtml(presentation.label)}</strong></div></div>
+          <span class="favourite-match-status">WAITING</span>
+        </header>
+        <div class="favourite-fixture-summary is-empty"><ha-icon icon="mdi:cloud-alert-outline" aria-hidden="true"></ha-icon><div><strong>Fixture data unavailable</strong><small>Home Assistant will retry automatically.</small></div></div>
+      </article>
+    `;
+  }
+
+  _renderDerbyHero(models, fixture) {
+    const status = normaliseFixtureStatus(fixture);
+    const statusLabel = status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "FULL TIME" : "UP NEXT";
+    return `
+      <article class="favourite-hero-card is-derby is-${escapeHtml(status)}" data-favourite-code="${escapeHtml(models.map((model) => model.code).join(" "))}" data-fixture-id="${escapeHtml(fixture.id ?? "")}">
+        <header class="derby-heading"><div><small>Family derby</small><strong>${escapeHtml(this._favouriteTitle(models))}</strong></div><span class="favourite-match-status">${escapeHtml(statusLabel)}</span></header>
+        <div class="derby-fixture">
+          <div class="derby-team">${this._renderTeamMark(fixture.home, "favourite")}<strong>${escapeHtml(compactClubName(fixture.home))}</strong></div>
+          <div class="favourite-result"><strong>${escapeHtml(this._footballMatchValue(fixture, status))}</strong><small>${escapeHtml(this._footballMatchDetail(fixture, status))}</small></div>
+          <div class="derby-team is-away">${this._renderTeamMark(fixture.away, "favourite")}<strong>${escapeHtml(compactClubName(fixture.away))}</strong></div>
+        </div>
+      </article>
+    `;
+  }
+
+  _renderFavouriteStandings(models) {
+    return `
+      <article class="surface favourite-standings">
+        <div><p class="eyebrow">Where they stand</p><h2>Premier League</h2></div>
+        <div class="favourite-standing-list">${models.map((model) => {
+          const presentation = this._clubPresentation(model.code);
+          const position = safeNumber(model.standing?.position, NaN);
+          const points = safeNumber(model.standing?.points, NaN);
+          const goalDifference = safeNumber(model.standing?.goal_difference, NaN);
+          const detail = Number.isFinite(points) && Number.isFinite(goalDifference)
+            ? `${formatPoints(points, this._config.product.locale)} pts · ${goalDifference > 0 ? "+" : ""}${goalDifference} GD`
+            : "Table position pending";
+          return `<div class="favourite-standing" data-favourite-code="${escapeHtml(model.code)}" style="--club-primary:${presentation.primary};--club-accent:${presentation.accent}">${this._renderTeamMark(model.team)}<div><strong>${escapeHtml(presentation.label)}</strong><small>${escapeHtml(detail)}</small></div><b>${Number.isFinite(position) ? `#${position}` : "—"}</b></div>`;
+        }).join("")}</div>
+      </article>
+    `;
+  }
+
+  _renderFootball() {
+    const { index, gameweek, gameweekState, table } = this._footballState();
+    const events = gameweekState?.attributes?.events || [];
+    const available = index?.attributes?.available_gameweeks || Array.from({ length: 38 }, (_, position) => position + 1);
+    const fixtureDataAvailable = isEntityAvailable(index) && isEntityAvailable(gameweekState);
+    const favouriteModels = buildFavouriteClubModels(
+      events,
+      this._config.football.spotlight_team_codes,
+      isEntityAvailable(table) ? table.attributes?.rows || [] : []
+    );
+    const derbyFixture = favouriteDerbyFixture(favouriteModels);
+    const hasLiveFavourite = favouriteModels.some((model) => model.status === "live");
+    const indexFreshness = footballFreshness(index);
+    const freshness = !isEntityAvailable(index)
+      ? indexFreshness
+      : !isEntityAvailable(gameweekState)
+        ? {
+          status: "waiting",
+          title: "Waiting for fixtures",
+          detail: "The selected matchweek has not arrived yet."
+        }
+        : indexFreshness;
+    const checkedLabel = index?.attributes?.last_checked
+      ? `Checked ${formatTime(index.attributes.last_checked, this._config.product.locale, this._config.product.timezone)}`
+      : "Awaiting first check";
+    this._gameweek = gameweek;
+    return `
+      <section class="football-experience">
+        <article class="football-favourites-stage ${hasLiveFavourite ? "is-live" : ""}">
+          <div class="football-hero-heading"><div><p class="eyebrow">Premier League · Matchweek ${gameweek}</p><h2>${escapeHtml(this._favouriteTitle(favouriteModels))}</h2></div><span class="football-freshness is-${freshness.status}"><i></i><span><strong>${escapeHtml(freshness.title)}</strong><small>${escapeHtml(freshness.status === "live" ? `${freshness.detail} ${checkedLabel}.` : `${checkedLabel}.`)}</small></span></span></div>
+          ${freshness.status === "live" ? "" : `<p class="football-health-note is-${freshness.status}" role="status">${escapeHtml(freshness.detail)}</p>`}
+          <div class="favourite-hero-grid">${fixtureDataAvailable
+            ? derbyFixture ? this._renderDerbyHero(favouriteModels, derbyFixture) : favouriteModels.map((model) => this._renderFavouriteHero(model)).join("")
+            : this._config.football.spotlight_team_codes.map((code) => this._renderUnavailableFavourite(code)).join("")}</div>
+        </article>
+        <div class="football-layout">
+          <article class="surface football-main">
+          <div class="football-toolbar">
+            <div><p class="eyebrow">Match centre</p><h2>Matchweek ${gameweek}</h2></div>
+            <div class="matchweek-controls">
+              <button type="button" data-gameweek="${Math.max(1, gameweek - 1)}" ${gameweek <= 1 ? "disabled" : ""} aria-label="Previous matchweek"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+              <label><span class="sr-only">Choose matchweek</span><select data-gameweek-select>${available.map((entry) => `<option value="${entry}" ${entry === gameweek ? "selected" : ""}>MW ${entry}</option>`).join("")}</select></label>
+              <button type="button" data-gameweek="${Math.min(38, gameweek + 1)}" ${gameweek >= 38 ? "disabled" : ""} aria-label="Next matchweek"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+            </div>
+            <div class="segments football-tabs" role="group" aria-label="Football view">
+              <button type="button" class="segment ${this._footballTab === "fixtures" ? "is-selected" : ""}" data-football-tab="fixtures" aria-pressed="${this._footballTab === "fixtures"}">Fixtures</button>
+              <button type="button" class="segment ${this._footballTab === "table" ? "is-selected" : ""}" data-football-tab="table" aria-pressed="${this._footballTab === "table"}">Table</button>
+            </div>
+          </div>
+          ${this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(events, fixtureDataAvailable)}
+          </article>
+          <aside class="football-sidebar">
+            ${this._renderFavouriteStandings(favouriteModels)}
+          </aside>
+        </div>
+      </section>
+    `;
+  }
+
+  _renderFixtures(events, available = true) {
+    if (!available) return '<p class="hub-empty-state large">Fixture data is unavailable. Home Assistant will retry.</p>';
+    if (!events.length) return `
+      <div class="football-empty">
+        <span class="football-orbit"><ha-icon icon="mdi:soccer" aria-hidden="true"></ha-icon></span>
+        <div><p class="eyebrow">Between matchweeks</p><h3>No fixtures yet</h3><p>We’ll show the next Spurs or Aston Villa match here as soon as it is announced.</p></div>
+        <div class="empty-clubs"><span>TOT</span><i></i><span>AVL</span></div>
+      </div>
+    `;
+    const grouped = new Map();
+    for (const fixture of events) {
+      const key = formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone);
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(fixture);
+    }
+    return `<div class="fixture-groups">${[...grouped.entries()].map(([day, fixtures]) => `
+      <section class="fixture-day"><h3>${escapeHtml(day)}</h3>${fixtures.map((fixture) => this._renderFixture(fixture)).join("")}</section>
+    `).join("")}</div>`;
+  }
+
+  _renderFixture(fixture) {
+    const status = normaliseFixtureStatus(fixture);
+    const score = status === "upcoming"
+      ? formatTime(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)
+      : `${fixture.home_score ?? "–"} — ${fixture.away_score ?? "–"}`;
+    const scorers = [
+      ...(fixture.home_scorers || []).map((name) => `${name} (H)`),
+      ...(fixture.away_scorers || []).map((name) => `${name} (A)`)
+    ];
+    const favouriteCodes = this._config.football.spotlight_team_codes.filter((code) => fixtureIncludesTeam(fixture, code));
+    return `
+      <div class="fixture ${fixture.spotlight ? "is-spotlight" : ""} ${status === "live" ? "is-live" : ""}"${favouriteCodes.length ? ` data-favourite-code="${escapeHtml(favouriteCodes.join(" "))}"` : ""}>
+        <span class="team home-team">${this._renderTeamMark(fixture.home)}<span>${escapeHtml(fixture.home?.name || "Home")}</span></span>
+        <strong class="fixture-score">${escapeHtml(score)}<small>${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "FT" : ""}</small></strong>
+        <span class="team away-team"><span>${escapeHtml(fixture.away?.name || "Away")}</span>${this._renderTeamMark(fixture.away)}</span>
+        ${scorers.length ? `<span class="scorers">${escapeHtml(scorers.join(" · "))}</span>` : ""}
+      </div>
+    `;
+  }
+
+  _renderLeagueTable(tableState) {
+    if (!isEntityAvailable(tableState)) return '<p class="hub-empty-state large">League table data is unavailable. Home Assistant will retry.</p>';
+    const rows = tableState?.attributes?.rows || [];
+    if (!rows.length) return '<p class="hub-empty-state large">The league table will appear after the first results.</p>';
+    return `
+      <div class="league-table-wrap"><table class="league-table"><thead><tr><th>#</th><th>Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody>
+        ${rows.map((row) => `<tr class="${row.spotlight ? "is-spotlight" : ""}"><td>${row.position}</td><td><strong>${escapeHtml(row.name)}</strong></td><td>${row.played}</td><td>${row.won}</td><td>${row.drawn}</td><td>${row.lost}</td><td>${row.goal_difference > 0 ? "+" : ""}${row.goal_difference}</td><td><strong>${row.points}</strong></td></tr>`).join("")}
+      </tbody></table></div>
+    `;
+  }
+
+  _activeChildCardKeys() {
+    const keys = new Set();
+    if (!this._config) return keys;
+    if (this._view === "calendar" && this._config.features?.calendar !== false) {
+      keys.add(`calendar:${this._calendarMode}`);
+    }
+    if (this._view === "family" && this._config.features?.location_map) keys.add("map");
+    if (this._view === "music" && this._config.features?.music !== false) keys.add("music");
+    if (this._view === "rooms"
+      && this._homeSection === "cleaning"
+      && this._config.features?.cleaning
+      && this._config.cleaning?.map_entity) keys.add("vacuum-map");
+    if (this._view === "entry" && this._config.features?.entry !== false) {
+      const cameras = this._config.entry?.cameras || [];
+      for (const camera of cameras) {
+        if (camera.entity_id) keys.add(`camera-poster:tile:${camera.id}`);
+      }
+      const selectedId = this._cameraSession?.id
+        || this._securityCameraId
+        || this._config.entry?.primary_camera_id
+        || cameras[0]?.id;
+      if (cameras.some((camera) => camera.id === selectedId && camera.entity_id)) {
+        keys.add(`camera-poster:stage:${selectedId}`);
+      }
+      const liveCamera = cameras.find((camera) => camera.id === this._activeCameraId);
+      if (liveCamera?.entity_id
+        && ["buffering", "viewing"].includes(this._cameraSession?.phase)
+        && cameraStreamPhase(this._hass?.states?.[liveCamera.entity_id]) === "streaming") {
+        keys.add(`camera:${liveCamera.id}`);
+      }
+    }
+    return keys;
+  }
+
+  _removeChildCard(key) {
+    const child = this._childCards?.get?.(key);
+    this._invalidateChildHass(key);
+    child?.__familyCameraObserverCleanup?.();
+    child?.remove?.();
+    this._childCards?.delete?.(key);
+  }
+
+  _pruneInactiveChildCards() {
+    if (!(this._childCards instanceof Map)) return;
+    const activeKeys = this._activeChildCardKeys();
+    for (const key of [...this._childCards.keys()]) {
+      if (!activeKeys.has(key)) this._removeChildCard(key);
+    }
+  }
+
+  _mountChildCards() {
+    if (!this._hass || !globalThis.loadCardHelpers) return;
+    this._pruneInactiveChildCards();
+    if (this._view === "calendar" && ["month", "agenda"].includes(this._calendarMode)) {
+      const viewMap = {
+        day: "schedule",
+        week: "week-compact",
+        month: "month",
+        agenda: "agenda"
+      };
+      const calendarNames = Object.fromEntries(this._config.calendar.entities.map((entry) => [entry.entity_id, entry.label]));
+      const colours = Object.fromEntries(this._config.calendar.entities.map((entry) => [entry.entity_id, entry.colour]));
+      const calendarIcons = Object.fromEntries(this._config.calendar.entities.map((entry) => [
+        entry.entity_id,
+        /school/i.test(`${entry.label} ${entry.entity_id}`) ? "mdi:school-outline" : "mdi:home-heart"
+      ]));
+      this._ensureChildCard(`calendar:${this._calendarMode}`, {
+        type: this._config.calendar.card_type,
+        title: "",
+        entities: this._config.calendar.entities.map((entry) => entry.entity_id),
+        calendar_names: calendarNames,
+        calendar_badge_icons: calendarIcons,
+        colors: colours,
+        default_view: viewMap[this._calendarMode] || "week-compact",
+        ...(this._calendarMode === "day" ? { rolling_days_schedule: 1 } : {}),
+        rolling_days_agenda: this._config.calendar.rolling_days,
+        first_day_of_week: 1,
+        week_days: [0, 1, 2, 3, 4, 5, 6],
+        use_24hr_schedule: true,
+        shorten_event_times: true,
+        show_event_location: true,
+        show_current_time_bar: true,
+        past_event_mode: "muted",
+        show_header_controls: true,
+        hide_navigation_buttons: false,
+        hide_calendars: false,
+        hide_view_selector: true,
+        hide_add_event_button: true,
+        hide_dark_mode_toggle: true,
+        enable_event_management: false,
+        readonly_calendars: this._config.calendar.entities.map((entry) => entry.entity_id),
+        preference_storage_key: this._config.calendar.preference_storage_key,
+        compact_header: true,
+        compact_height: true,
+        color_scheme: "light",
+        language: this._config.product.locale.split("-")[0],
+        locale: this._config.product.locale,
+        time_zone: this._config.product.timezone
+      }, "calendar-card-slot");
+    }
+    if (this._view === "family" && this._config.features.location_map) {
+      this._ensureChildCard("map", {
+        type: "map",
+        auto_fit: true,
+        fit_zones: true,
+        hours_to_show: this._config.location.hours_to_show,
+        entities: this._config.location.entities
+      }, "map-card-slot");
+    }
+    if (this._view === "music") {
+      const mediaPlayers = this._config.media.players.map((player) => ({
+        ...player,
+        ...(player.ma_entity_id ? {
+          media_browser: player.media_browser || [{ entity_id: player.ma_entity_id, name: "Spotify & Music" }]
+        } : {})
+      }));
+      this._ensureChildCard("music", {
+        type: this._config.media.card_type,
+        size: "large",
+        mode: "in-card",
+        entity_id: this._config.media.initial_player,
+        media_players: mediaPlayers,
+        options: {
+          player_is_active_when: "playing_or_paused",
+          show_volume_step_buttons: true,
+          default_tab: "massive",
+          transparent_background_on_home: false
+        }
+      }, "music-card-slot");
+    }
+    if (this._view === "rooms" && this._homeSection === "cleaning" && this._config.cleaning.map_entity) {
+      this._ensureChildCard("vacuum-map", {
+        type: "picture-entity",
+        entity: this._config.cleaning.map_entity,
+        camera_view: "auto",
+        show_name: false,
+        show_state: false
+      }, "vacuum-map-card-slot");
+    }
+    if (this._view === "entry") {
+      const posterConfig = (camera) => ({
+        type: "picture-entity",
+        entity: camera.entity_id,
+        camera_view: "auto",
+        aspect_ratio: "16:9",
+        fit_mode: "cover",
+        show_name: false,
+        show_state: false,
+        tap_action: { action: "none" },
+        hold_action: { action: "none" },
+        double_tap_action: { action: "none" }
+      });
+      for (const camera of this._config.entry.cameras || []) {
+        if (!camera.entity_id) continue;
+        this._ensureChildCard(
+          `camera-poster:tile:${camera.id}`,
+          posterConfig(camera),
+          `camera-poster-tile-${camera.id}`
+        );
+      }
+      const selectedId = this._cameraSession?.id
+        || this._securityCameraId
+        || this._config.entry.primary_camera_id
+        || this._config.entry.cameras?.[0]?.id;
+      const selected = this._config.entry.cameras.find((camera) => camera.id === selectedId);
+      if (selected?.entity_id) {
+        this._ensureChildCard(
+          `camera-poster:stage:${selected.id}`,
+          posterConfig(selected),
+          `camera-poster-stage-${selected.id}`
+        );
+      }
+    }
+    if (this._view === "entry"
+      && ["buffering", "viewing"].includes(this._cameraSession?.phase)
+      && this._activeCameraId) {
+      const camera = this._config.entry.cameras.find((entry) => entry.id === this._activeCameraId);
+      if (camera?.entity_id && cameraStreamPhase(this._hass.states?.[camera.entity_id]) === "streaming") {
+        this._ensureChildCard(`camera:${camera.id}`, {
+          type: "picture-entity",
+          entity: camera.entity_id,
+          camera_view: "live",
+          aspect_ratio: "16:9",
+          fit_mode: "cover",
+          show_name: false,
+          show_state: false,
+          tap_action: { action: "none" },
+          hold_action: { action: "none" },
+          double_tap_action: { action: "none" }
+        }, `camera-card-slot-${camera.id}`);
+      }
+    }
+  }
+
+  async _ensureChildCard(key, cardConfig, slotId) {
+    const slot = this.shadowRoot.getElementById(slotId);
+    const mountGeneration = this._childMountGeneration;
+    if (!slot || !this.isConnected || !this._activeChildCardKeys().has(key)) return;
+    let child = this._childCards.get(key);
+    if (!child) {
+      try {
+        const helpers = await globalThis.loadCardHelpers();
+        if (!this.isConnected
+          || this._childMountGeneration !== mountGeneration
+          || !this._activeChildCardKeys().has(key)
+          || !this._isCurrentCameraSlot(key, slotId, slot)) return;
+        child = helpers.createCardElement(cardConfig);
+        child.classList.add("embedded-card");
+        this._childCards.set(key, child);
+      } catch (error) {
+        const message = key.startsWith("camera:")
+          ? "The secure live view could not load. Please try again."
+          : key.startsWith("camera-poster:")
+            ? "The latest camera still is unavailable."
+            : `This Home Assistant card could not load: ${escapeHtml(error?.message || error)}`;
+        slot.innerHTML = `<p class="hub-empty-state">${message}</p>`;
+        return;
+      }
+    }
+    if (!this.isConnected
+      || this._childMountGeneration !== mountGeneration
+      || !this._activeChildCardKeys().has(key)
+      || !this._isCurrentCameraSlot(key, slotId, slot)) return;
+    if (key === "music") {
+      const readOnly = this._config.display.read_only === true;
+      child.inert = false;
+      if (readOnly) {
+        child.setAttribute("aria-disabled", "true");
+        child.dataset.readOnlyGuard = "service-boundary";
+      } else {
+        child.removeAttribute("aria-disabled");
+        delete child.dataset.readOnlyGuard;
+      }
+    }
+    if (key.startsWith("calendar:") || key.startsWith("camera-poster:") || key === "vacuum-map") {
+      child.inert = false;
+      child.setAttribute("data-read-only-guard", "service-boundary");
+      child.setAttribute("aria-label", key.startsWith("calendar:") ? "Read-only family calendar" : "Latest camera still");
+      if (key.startsWith("camera-poster:")) child.inert = true;
+    }
+    if (key.startsWith("camera:")) {
+      const buffering = this._cameraSession?.phase === "buffering";
+      child.inert = buffering;
+      child.setAttribute("data-read-only-guard", "service-boundary");
+      child.setAttribute("aria-label", "Read-only camera view");
+      if (buffering) child.setAttribute("aria-hidden", "true");
+      else child.removeAttribute("aria-hidden");
+    }
+    child.hass = this._hassForChild(key);
+    if (key.startsWith("camera:")) {
+      child.slot = `camera-${key.slice("camera:".length)}`;
+      if (child.parentElement !== this) this.append(child);
+      const cameraId = key.slice("camera:".length);
+      const sessionToken = this._cameraSession?.token;
+      if (child.__familyCameraObserverToken !== sessionToken) {
+        child.__familyCameraObserverCleanup?.();
+        this._observeCameraMedia(child, cameraId, sessionToken);
+      }
+    } else {
+      slot.replaceChildren(child);
+    }
+  }
+
+  _isCurrentCameraSlot(key, slotId, slot) {
+    if (this.shadowRoot.getElementById(slotId) !== slot) return false;
+    if (!key.startsWith("camera:")) return true;
+    const cameraId = key.slice("camera:".length);
+    return this._view === "entry"
+      && this._cameraSession?.id === cameraId
+      && ["buffering", "viewing"].includes(this._cameraSession?.phase)
+      && cameraStreamPhase(this._hass?.states?.[this._controlPolicy.cameras.get(cameraId)?.entity]) === "streaming"
+      && this.shadowRoot.getElementById(slotId) === slot;
+  }
+
+  _observeCameraMedia(child, cameraId, sessionToken) {
+    let closed = false;
+    let frameReady = false;
+    let readyMediaElement = null;
+    let scanTimer = null;
+    const observedRoots = new Map();
+    const mediaReady = (media) => {
+      if (media?.tagName === "VIDEO") return media.readyState >= 2;
+      return false;
+    };
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (scanTimer !== null) clearTimeout(scanTimer);
+      for (const [root, observer] of observedRoots) {
+        observer?.disconnect();
+        root.removeEventListener("load", markReady, true);
+        root.removeEventListener("loadeddata", markReady, true);
+        root.removeEventListener("playing", markReady, true);
+        root.removeEventListener("canplay", markReady, true);
+        root.removeEventListener("stalled", markLost, true);
+        root.removeEventListener("waiting", markLost, true);
+        root.removeEventListener("ended", markLost, true);
+        root.removeEventListener("emptied", markLost, true);
+        root.removeEventListener("error", markLost, true);
+      }
+      observedRoots.clear();
+    };
+    const markReady = (event) => {
+      const media = event?.target;
+      if (!mediaReady(media)) return;
+      frameReady = true;
+      readyMediaElement = media;
+      this._markCameraFrameReady(cameraId, sessionToken, child);
+    };
+    const reportLost = (terminal = false) => {
+      if (!frameReady) return;
+      frameReady = false;
+      readyMediaElement = null;
+      this._markCameraMediaLost(cameraId, sessionToken, child, { terminal });
+    };
+    const markLost = (event) => {
+      if (event?.target?.tagName !== "VIDEO") return;
+      reportLost(["ended", "emptied", "error"].includes(event.type));
+    };
+    const scheduleScan = (delay = 100) => {
+      if (closed) return;
+      if (scanTimer !== null) clearTimeout(scanTimer);
+      scanTimer = setTimeout(() => {
+        scanTimer = null;
+        inspect();
+      }, delay);
+    };
+    const observeRoot = (root) => {
+      if (!root || observedRoots.has(root)) return;
+      root.addEventListener("load", markReady, true);
+      root.addEventListener("loadeddata", markReady, true);
+      root.addEventListener("playing", markReady, true);
+      root.addEventListener("canplay", markReady, true);
+      root.addEventListener("stalled", markLost, true);
+      root.addEventListener("waiting", markLost, true);
+      root.addEventListener("ended", markLost, true);
+      root.addEventListener("emptied", markLost, true);
+      root.addEventListener("error", markLost, true);
+      const observer = typeof MutationObserver === "function"
+        ? new MutationObserver(() => scheduleScan(0))
+        : null;
+      observer?.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
+      observedRoots.set(root, observer);
+    };
+    const inspectRoot = (root) => {
+      if (!root || closed) return null;
+      observeRoot(root);
+      if (root.shadowRoot) {
+        const readyInOwnShadow = inspectRoot(root.shadowRoot);
+        if (readyInOwnShadow) return readyInOwnShadow;
+      }
+      for (const element of root.querySelectorAll?.("*") || []) {
+        if (mediaReady(element)) return element;
+        if (element.shadowRoot) {
+          const readyInNestedShadow = inspectRoot(element.shadowRoot);
+          if (readyInNestedShadow) return readyInNestedShadow;
+        }
+      }
+      return null;
+    };
+    const inspect = () => {
+      if (closed) return;
+      const readyMedia = inspectRoot(child);
+      if (readyMedia) {
+        markReady({ target: readyMedia });
+        return;
+      }
+      if (frameReady && (!readyMediaElement?.isConnected || !mediaReady(readyMediaElement))) reportLost(false);
+      scheduleScan();
+    };
+    child.__familyCameraObserverToken = sessionToken;
+    child.__familyCameraObserverCleanup = cleanup;
+    inspect();
+  }
+
+  _invalidateChildHass(key = null) {
+    if (!(this._childHassTokens instanceof Map)) this._childHassTokens = new Map();
+    if (key === null) {
+      for (const activeKey of [...this._childHassTokens.keys()]) this._invalidateChildHass(activeKey);
+      this._childHassTokens.clear();
+      this._readOnlyHassSource = null;
+      this._readOnlyHass = new Map();
+      this._musicHassSource = null;
+      this._musicHass = null;
+      return;
+    }
+    const token = this._childHassTokens.get(key);
+    if (token) {
+      token.active = false;
+      for (const cleanup of token.cleanups || []) {
+        try { cleanup(); } catch { /* Child subscriptions are best-effort cleanup. */ }
+      }
+      token.cleanups?.clear?.();
+    }
+    this._childHassTokens.delete(key);
+    this._readOnlyHass?.delete?.(key);
+    if (key === "music") {
+      this._musicHassSource = null;
+      this._musicHass = null;
+    }
+  }
+
+  _childHassGuard(key) {
+    if (!(this._childHassTokens instanceof Map)) this._childHassTokens = new Map();
+    const token = { active: true, cleanups: new Set() };
+    this._childHassTokens.set(key, token);
+    const guard = () => token.active && this._childHassTokens.get(key) === token;
+    guard.onRevoke = (cleanup) => {
+      if (typeof cleanup !== "function") return () => undefined;
+      if (!guard()) {
+        cleanup();
+        return () => undefined;
+      }
+      token.cleanups.add(cleanup);
+      return () => token.cleanups.delete(cleanup);
+    };
+    return guard;
+  }
+
+  _hassForChild(key) {
+    const forceReadOnly = key.startsWith("calendar:")
+      || key.startsWith("camera:")
+      || key.startsWith("camera-poster:")
+      || key === "map"
+      || key === "vacuum-map";
+    if (!this._hass) return this._hass;
+    if (key === "music" && !this._config?.display?.read_only) {
+      if (this._musicHassSource !== this._hass || !this._musicHass) {
+        this._invalidateChildHass(key);
+        this._musicHassSource = this._hass;
+        this._musicHass = createControlledMediaHass(
+          this._hass,
+          this._controlPolicy,
+          this._childHassGuard(key)
+        );
+      }
+      return this._musicHass;
+    }
+    if (!forceReadOnly && key !== "music") return this._hass;
+    if (this._readOnlyHassSource !== this._hass) {
+      for (const cachedKey of this._readOnlyHass?.keys?.() || []) this._invalidateChildHass(cachedKey);
+      this._readOnlyHassSource = this._hass;
+      this._readOnlyHass = new Map();
+    }
+    if (this._readOnlyHass.has(key)) return this._readOnlyHass.get(key);
+    this._invalidateChildHass(key);
+    const source = this._hass;
+    const isActive = this._childHassGuard(key);
+    const cameraId = key.startsWith("camera:")
+      ? key.slice("camera:".length)
+      : key.startsWith("camera-poster:")
+        ? key.split(":").at(-1)
+        : null;
+    const cameraEntity = key === "vacuum-map"
+      ? this._config.cleaning.map_entity || null
+      : cameraId ? this._controlPolicy.cameras.get(cameraId)?.entity || null : null;
+    const calendarEntities = new Set(key.startsWith("calendar:")
+      ? this._config.calendar.entities.map((entry) => entry.entity_id)
+      : []);
+    const allowMessage = (message) => isReadOnlyChildMessageAllowed(message, {
+      cameraEntity,
+      allowCameraStream: key.startsWith("camera:"),
+      calendarEntities
+    });
+    const scopedEntityIds = key.startsWith("calendar:")
+      ? this._config.calendar.entities.map((entry) => entry.entity_id)
+      : key === "map"
+        ? [
+            ...(this._config.location?.entities || []),
+            ...Object.keys(source.states || {}).filter((entityId) => entityId.startsWith("zone."))
+          ]
+        : cameraEntity ? [cameraEntity] : [];
+    const scopedStates = Object.freeze(Object.fromEntries(
+      [...new Set(scopedEntityIds)]
+        .filter((entityId) => source.states?.[entityId])
+        .map((entityId) => [entityId, source.states[entityId]])
+    ));
+    const connection = guardedChildConnection(source.connection, allowMessage, isActive);
+    const readOnlyHass = guardedChildHass(source, {
+      states: scopedStates,
+      callService: () => Promise.resolve(undefined),
+      // Native read-only cards use the guarded websocket protocol. Do not
+      // expose a generic REST GET bridge that could fetch another camera.
+      callApi: (method, path, ...args) => isActive() && isAllowedCalendarApiRequest(method, path, calendarEntities)
+        ? guardedChildResult(source.callApi?.(String(method || "GET").toUpperCase(), String(path), ...args), isActive)
+        : Promise.resolve(undefined),
+      callWS: (message, ...args) => {
+        const snapshot = snapshotChildObject(message);
+        return isActive() && snapshot && allowMessage(snapshot)
+          ? guardedChildResult(source.callWS?.(snapshot, ...args), isActive)
+          : Promise.resolve(undefined);
+      },
+      ...(connection ? { connection } : {})
+    }, isActive);
+    this._readOnlyHass.set(key, readOnlyHass);
+    return readOnlyHass;
+  }
+
+  _handleKeydown(event) {
+    if (this._photoFrameActive) {
+      event.preventDefault();
+      this._deactivatePhotoFrame();
+      return;
+    }
+    this._armPhotoFrameIdleTimer();
+    if (this._plannerModal) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this._plannerModal = null;
+        this._scheduleRender(true);
+        return;
+      }
+      if (event.key === "Tab") {
+        const controls = [...this.shadowRoot.querySelectorAll('.planner-modal button:not([disabled]),.planner-modal input:not([disabled]),.planner-modal select:not([disabled])')];
+        if (!controls.length) return;
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        const active = this.shadowRoot.activeElement;
+        if (event.shiftKey && (active === first || !controls.includes(active))) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (active === last || !controls.includes(active))) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+      return;
+    }
+    if (this._pendingConfirmation) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this._pendingConfirmation = null;
+        this._scheduleRender(true);
+        return;
+      }
+      if (event.key === "Tab") {
+        const controls = [...this.shadowRoot.querySelectorAll('.confirmation-dialog button:not([disabled])')];
+        if (!controls.length) return;
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        const active = this.shadowRoot.activeElement;
+        if (event.shiftKey && (active === first || !controls.includes(active))) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (active === last || !controls.includes(active))) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+      return;
+    }
+    const target = event.target.closest?.("[data-room]");
+    if (!target || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    this._selectRoom(target.dataset.room);
+  }
+
+  _handleChange(event) {
+    this._armPhotoFrameIdleTimer();
+    const select = event.target.closest?.("[data-gameweek-select]");
+    if (!select) return;
+    this._gameweek = Math.max(1, Math.min(38, safeNumber(select.value, 1)));
+    this._scheduleRender(true);
+  }
+
+  async _callPlannerAction(domain, service, entityId, data = {}) {
+    if (!isAllowedPlannerAction(domain, service, entityId, this._config) || typeof this._hass?.callService !== "function") {
+      throw new Error("This Family Planner action is not allowed.");
+    }
+    return this._hass.callService(domain, service, data, { entity_id: entityId });
+  }
+
+  async _createPreparationItems(event, template, personIds) {
+    const entityId = this._config.calendar.preparation?.todo_entity;
+    if (!entityId || !template || !personIds.length) return;
+    const eventKey = familyPlannerEventKey(event);
+    const existingKeys = new Set(this._preparationItems
+      .filter((item) => item?._preparation?.eventKey === eventKey)
+      .map((item) => `${item._preparation.personId}|${String(item.summary || item.item || "").trim().toLocaleLowerCase()}`));
+    const dueValue = calendarEventStart(event);
+    for (const personId of personIds) {
+      const person = this._config.people.find((entry) => entry.id === personId && entry.role === "child");
+      if (!person) continue;
+      for (const item of template.items) {
+        const duplicateKey = `${personId}|${String(item).trim().toLocaleLowerCase()}`;
+        if (existingKeys.has(duplicateKey)) continue;
+        const data = {
+          item,
+          description: preparationDescription(event, personId, template.id),
+          ...(isAllDayCalendarEvent(event) ? { due_date: String(dueValue).slice(0, 10) } : { due_datetime: dueValue })
+        };
+        await this._callPlannerAction("todo", "add_item", entityId, data);
+        existingKeys.add(duplicateKey);
+      }
+    }
+    this._preparationRequestKey = "";
+    await this._loadPreparationItems(true);
+  }
+
+  async _addPreparationForEvent(eventKey, templateId, personId) {
+    const event = this._plannerEventByKey(eventKey);
+    const template = this._config.calendar.preparation?.templates?.find((entry) => entry.id === templateId);
+    if (!event || !template || !event?._calendar?.person_ids?.includes(personId)) return;
+    try {
+      await this._createPreparationItems(event, template, [personId]);
+    } catch (error) {
+      this._preparationError = error?.message || "The preparation checklist could not be created.";
+      this._scheduleRender(true);
+    }
+  }
+
+  async _togglePreparationItem(itemId, status) {
+    const entityId = this._config.calendar.preparation?.todo_entity;
+    const item = this._preparationItems.find((entry) => String(entry.uid || entry.id || entry.summary) === itemId);
+    if (!entityId || !item || !["completed", "needs_action"].includes(status)) return;
+    const previousStatus = item.status;
+    item.status = status;
+    this._scheduleRender(true);
+    try {
+      await this._callPlannerAction("todo", "update_item", entityId, { item: itemId, status });
+      this._preparationRequestKey = "";
+      await this._loadPreparationItems(true);
+    } catch (error) {
+      item.status = previousStatus;
+      this._preparationError = error?.message || "The checklist item could not be updated.";
+      this._scheduleRender(true);
+    }
+  }
+
+  async _savePlannerEvent() {
+    if (this._plannerModal?.type !== "add" || this._plannerModal.saving) return;
+    const field = (name) => this.shadowRoot.querySelector(`[data-planner-field="${name}"]`)?.value?.trim?.() || "";
+    const calendarEntity = field("calendar");
+    const calendar = this._config.calendar.entities.find((entry) => entry.entity_id === calendarEntity && entry.allow_create === true);
+    const summary = field("summary");
+    const date = field("date");
+    const startTime = field("start");
+    const endTime = field("end");
+    if (!calendar || !summary || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(startTime) || !/^\d{2}:\d{2}$/.test(endTime)) {
+      this._plannerModal.error = "Choose a calendar and enter the event, date, start and end time.";
+      this._scheduleRender(true);
+      return;
+    }
+    const start = `${date}T${startTime}:00`;
+    const end = `${date}T${endTime}:00`;
+    if (end <= start) {
+      this._plannerModal.error = "The end time must be after the start time.";
+      this._scheduleRender(true);
+      return;
+    }
+    this._plannerModal.saving = true;
+    this._plannerModal.error = "";
+    this._scheduleRender(true);
+    try {
+      const location = field("location");
+      await this._callPlannerAction("calendar", "create_event", calendar.entity_id, {
+        summary,
+        start_date_time: start,
+        end_date_time: end,
+        ...(location ? { location } : {})
+      });
+      const event = { summary, start, end, location, _calendar: calendar };
+      const template = this._config.calendar.preparation?.templates?.find((entry) => entry.id === field("template"));
+      if (template) {
+        const childIds = calendar.person_ids.filter((personId) => this._config.people.some((person) => person.id === personId && person.role === "child"));
+        await this._createPreparationItems(event, template, childIds);
+      }
+      this._plannerModal = null;
+      this._calendarRequestKey = "";
+      await this._loadCalendarEvents();
+      this._scheduleRender(true);
+    } catch (error) {
+      this._plannerModal.saving = false;
+      this._plannerModal.error = error?.message || "The event could not be added to Apple Calendar.";
+      this._scheduleRender(true);
+    }
+  }
+
+  _handleClick(event) {
+    const target = event.target.closest?.("button, [data-room]");
+    if (!target) return;
+    if (this._photoFrameActive || target.dataset.photoFrameDismiss !== undefined) {
+      this._deactivatePhotoFrame();
+      return;
+    }
+    this._armPhotoFrameIdleTimer();
+    if (this._plannerModal) {
+      if (target.dataset.plannerClose !== undefined) {
+        this._plannerModal = null;
+        this._scheduleRender(true);
+      } else if (target.dataset.plannerSave !== undefined) {
+        void this._savePlannerEvent();
+      } else if (target.dataset.prepItem) {
+        void this._togglePreparationItem(target.dataset.prepItem, target.dataset.prepStatus);
+      } else if (target.dataset.addPreparation) {
+        void this._addPreparationForEvent(target.dataset.addPreparation, target.dataset.preparationTemplate, target.dataset.preparationPerson);
+      }
+      return;
+    }
+    if (target.dataset.plannerAddEvent !== undefined) {
+      this._plannerModal = { type: "add", saving: false, error: "" };
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.plannerEvent) {
+      this._plannerModal = { type: "event", eventKey: target.dataset.plannerEvent };
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.calendarPerson) {
+      const allowed = new Set(["all", ...this._config.people.map((person) => person.id)]);
+      if (allowed.has(target.dataset.calendarPerson)) this._calendarPersonFilter = target.dataset.calendarPerson;
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.prepItem) {
+      void this._togglePreparationItem(target.dataset.prepItem, target.dataset.prepStatus);
+      return;
+    }
+    if (this._pendingConfirmation && !target.dataset.confirmAction) return;
+    if (target.dataset.homeTarget) {
+      if (!this._enabledViews().some((view) => view.id === "rooms")) return;
+      this._view = "rooms";
+      this._homeSection = target.dataset.homeTarget;
+      this._childMountGeneration += 1;
+      this._pruneInactiveChildCards();
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.view) {
+      if (!this._enabledViews().some((view) => view.id === target.dataset.view)) return;
+      if (this._view === "entry" && target.dataset.view !== "entry") this._closeActiveCamera({ render: false, invalidate: true });
+      this._view = target.dataset.view;
+      this._childMountGeneration += 1;
+      this._pruneInactiveChildCards();
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.homeSection) {
+      const allowedHomeSections = new Set([
+        "rooms",
+        "lights",
+        "heating",
+        "covers",
+        ...(this._config.features.cleaning ? ["cleaning"] : [])
+      ]);
+      if (!this._config.features.rooms || !allowedHomeSections.has(target.dataset.homeSection)) return;
+      this._homeSection = target.dataset.homeSection;
+      this._childMountGeneration += 1;
+      this._pruneInactiveChildCards();
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.calendarMode) {
+      this._calendarMode = target.dataset.calendarMode;
+      this._childMountGeneration += 1;
+      this._pruneInactiveChildCards();
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.floor) {
+      this._floor = target.dataset.floor;
+      this._room = this._config.floorplan.floors.find((floor) => floor.id === this._floor)?.room_hotspots?.[0]?.room_id || null;
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.room) {
+      this._selectRoom(target.dataset.room);
+      return;
+    }
+    if (target.dataset.footballTab) {
+      this._footballTab = target.dataset.footballTab;
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.gameweek) {
+      this._gameweek = safeNumber(target.dataset.gameweek, 1);
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.cameraOpen) {
+      void this._openCamera(target.dataset.cameraOpen);
+      return;
+    }
+    if (target.dataset.cameraStageOpen) {
+      void this._openCamera(target.dataset.cameraStageOpen);
+      return;
+    }
+    if (target.dataset.cameraClose) {
+      this._closeActiveCamera();
+      return;
+    }
+    if (target.dataset.confirmAction) {
+      if (target.dataset.confirmAction === "confirm" && this._pendingConfirmation && !this._config.display.read_only) {
+        const action = this._pendingConfirmation;
+        const currentState = this._hass?.states?.[action.entity];
+        const stateUnchanged = isConfirmationStillValid(action, currentState);
+        const approved = action.domain === "alarm_control_panel"
+          ? this._config.features.entry
+            && action.entity === this._controlPolicy.alarm
+            && stateUnchanged
+            && isAlarmActionSupported(currentState, action.service)
+          : action.domain === "cover"
+            && this._config.features.entry
+            && action.entity === this._controlPolicy.secureCover
+            && stateUnchanged
+            && isSecureCoverActionAllowed(currentState, action.service);
+        if (approved) this._hass?.callService?.(action.domain, action.service, { entity_id: action.entity });
+      }
+      this._pendingConfirmation = null;
+      this._scheduleRender(true);
+      return;
+    }
+    if (this._config.display.read_only && (isControlAction(target.dataset) || target.dataset.moreInfo)) return;
+    if (target.dataset.alarmAction && target.dataset.entity) {
+      if (!this._config.features.entry
+        || target.dataset.entity !== this._controlPolicy.alarm
+        || !isAlarmActionSupported(this._hass?.states?.[target.dataset.entity], target.dataset.alarmAction)) return;
+      const expectedStateObject = this._hass?.states?.[target.dataset.entity];
+      this._pendingConfirmation = {
+        domain: "alarm_control_panel",
+        service: target.dataset.alarmAction,
+        entity: target.dataset.entity,
+        expectedState: entityStateValue(expectedStateObject),
+        expectedStateObject,
+        expectedLastChanged: expectedStateObject?.last_changed || null,
+        createdAt: Date.now(),
+        label: ALARM_ACTION_LABELS[target.dataset.alarmAction]
+      };
+      this._confirmationReturnFocus = {
+        datasetKey: "alarmAction",
+        action: target.dataset.alarmAction,
+        entity: target.dataset.entity
+      };
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.secureCoverAction && target.dataset.entity) {
+      if (!this._config.features.entry
+        || target.dataset.entity !== this._controlPolicy.secureCover
+        || !isSecureCoverActionAllowed(this._hass?.states?.[target.dataset.entity], target.dataset.secureCoverAction)) return;
+      const expectedStateObject = this._hass?.states?.[target.dataset.entity];
+      this._pendingConfirmation = {
+        domain: "cover",
+        service: target.dataset.secureCoverAction,
+        entity: target.dataset.entity,
+        expectedState: entityStateValue(expectedStateObject),
+        expectedStateObject,
+        expectedLastChanged: expectedStateObject?.last_changed || null,
+        createdAt: Date.now(),
+        label: target.dataset.secureCoverAction === "open_cover" ? "Open garage door" : target.dataset.secureCoverAction === "close_cover" ? "Close garage door" : "Stop garage door"
+      };
+      this._confirmationReturnFocus = {
+        datasetKey: "secureCoverAction",
+        action: target.dataset.secureCoverAction,
+        entity: target.dataset.entity
+      };
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.moreInfo) {
+      if (this._controlPolicy.moreInfo.has(target.dataset.moreInfo)) this._showMoreInfo(target.dataset.moreInfo);
+      return;
+    }
+    if (target.dataset.toggle) {
+      if (this._controlPolicy.lights.has(target.dataset.toggle)
+        && isEntityAvailable(this._hass?.states?.[target.dataset.toggle])) {
+        this._hass?.callService?.("light", "toggle", { entity_id: target.dataset.toggle });
+      }
+      return;
+    }
+    if (target.dataset.scene) {
+      if (this._controlPolicy.scenes.has(target.dataset.scene)
+        && isEntityAvailable(this._hass?.states?.[target.dataset.scene])) {
+        this._hass?.callService?.("scene", "turn_on", { entity_id: target.dataset.scene });
+      }
+      return;
+    }
+    if (target.dataset.mediaToggle) {
+      if (this._controlPolicy.mediaPlayers.has(target.dataset.mediaToggle)
+        && isEntityAvailable(this._hass?.states?.[target.dataset.mediaToggle])) {
+        this._hass?.callService?.("media_player", "media_play_pause", { entity_id: target.dataset.mediaToggle });
+      }
+      return;
+    }
+    if (target.dataset.coverAction && target.dataset.entity) {
+      if (this._controlPolicy.covers.has(target.dataset.entity)
+        && target.dataset.entity !== this._controlPolicy.secureCover
+        && COVER_SERVICES.has(target.dataset.coverAction)
+        && isEntityAvailable(this._hass?.states?.[target.dataset.entity])) {
+        this._hass?.callService?.("cover", target.dataset.coverAction, { entity_id: target.dataset.entity });
+      }
+      return;
+    }
+    if (target.dataset.vacuumAction && target.dataset.entity) {
+      if (target.dataset.entity === this._controlPolicy.vacuum && VACUUM_SERVICES.has(target.dataset.vacuumAction)) {
+        if (isEntityAvailable(this._hass?.states?.[target.dataset.entity])) {
+          this._hass?.callService?.("vacuum", target.dataset.vacuumAction, { entity_id: target.dataset.entity });
+        }
+      }
+      return;
+    }
+    if (target.dataset.climatePower && target.dataset.entity) {
+      if (this._controlPolicy.climates.has(target.dataset.entity)
+        && CLIMATE_POWER_SERVICES.has(target.dataset.climatePower)
+        && isEntityAvailable(this._hass?.states?.[target.dataset.entity])) {
+        this._hass?.callService?.("climate", target.dataset.climatePower, { entity_id: target.dataset.entity });
+      }
+      return;
+    }
+    if (target.dataset.climateAdjust && target.dataset.entity) {
+      const adjustment = Number(target.dataset.climateAdjust);
+      if (!this._controlPolicy.climates.has(target.dataset.entity) || ![-0.5, 0.5].includes(adjustment)) return;
+      const state = this._hass?.states?.[target.dataset.entity];
+      if (!isEntityAvailable(state)) return;
+      const current = safeNumber(state?.attributes?.temperature, NaN);
+      if (Number.isFinite(current)) {
+        this._hass.callService("climate", "set_temperature", {
+          entity_id: target.dataset.entity,
+          temperature: Math.round((current + adjustment) * 2) / 2
+        });
+      }
+    }
+  }
+
+  async _openCamera(cameraId) {
+    if (!cameraId || this._cameraSession?.id === cameraId
+      && ["starting", "buffering", "viewing", "stopping"].includes(this._cameraSession.phase)) return;
+    if (this._cameraSession?.phase === "stopping" || this._cameraRecoveryPromise) return;
+
+    let camera = this._controlPolicy?.cameras?.get(cameraId);
+    let route = cameraControlRoute(camera, this._hass?.states || {});
+    let phase = cameraStreamPhase(this._hass?.states?.[camera?.entity]);
+    let retryBlockedCamera = this._retryableCameraBlock(cameraId);
+    if (!route || this._view !== "entry" || this._cameraBlockedIds.size > 0 && !retryBlockedCamera) return;
+    if (this._config?.display?.read_only && phase !== "streaming") return;
+    if (!["idle", "preparing", "streaming"].includes(phase)) {
+      this._cameraError = { id: cameraId, message: "The camera is not ready to start a live view." };
+      this._scheduleRender(true);
+      return;
+    }
+    if (retryBlockedCamera) {
+      this._cameraBlockedIds.delete(retryBlockedCamera.key);
+      this._armCameraBlockRetryNotice();
+    }
+
+    this._securityCameraId = cameraId;
+
+    const token = ++this._cameraOperationToken;
+    this._clearCameraStartTimer();
+    this._clearCameraExpiryTimer();
+    this._cameraError = null;
+
+    if (this._cameraSession) {
+      const previousSession = this._cameraSession;
+      const stopped = await this._stopCameraSession(previousSession, token, { render: true });
+      if (token !== this._cameraOperationToken) return;
+      const previousStillIdle = stopped && this._confirmStoppedCameraState(previousSession);
+      if (!stopped || !previousStillIdle) {
+        this._cameraError = { id: cameraId, message: "The previous live view could not be stopped safely. Please try again." };
+        this._scheduleRender(true);
+        return;
+      }
+    }
+
+    if (token !== this._cameraOperationToken) return;
+    camera = this._controlPolicy?.cameras?.get(cameraId);
+    route = cameraControlRoute(camera, this._hass?.states || {});
+    phase = cameraStreamPhase(this._hass?.states?.[camera?.entity]);
+    retryBlockedCamera = this._retryableCameraBlock(cameraId);
+    if (!route || this._view !== "entry" || this._cameraBlockedIds.size > 0 && !retryBlockedCamera) return;
+    if (this._config?.display?.read_only && phase !== "streaming") return;
+    if (!["idle", "preparing", "streaming"].includes(phase)) {
+      this._cameraError = { id: cameraId, message: "The camera is not ready to start a live view." };
+      this._scheduleRender(true);
+      return;
+    }
+    if (retryBlockedCamera) {
+      this._cameraBlockedIds.delete(retryBlockedCamera.key);
+      this._armCameraBlockRetryNotice();
+    }
+
+    this._evictCameraChild(cameraId);
+    const session = {
+      id: cameraId,
+      phase: "starting",
+      token,
+      route,
+      camera: { ...camera },
+      configGeneration: this._cameraConfigGeneration,
+      writable: !this._config?.display?.read_only,
+      startIssued: false,
+      startPromise: null,
+      startRawPromise: null,
+      startRawPending: false,
+      viewerRecoveryAttempted: false
+    };
+    this._cameraSession = session;
+    this._activeCameraId = null;
+    this._armCameraExpiry(session);
+
+    if (phase === "streaming") {
+      this._bufferCameraSession(session);
+      return;
+    }
+
+    this._armCameraStartTimeout(session);
+    this._scheduleRender(true);
+    if (phase === "preparing") return;
+
+    // Consume only the passive witness for this physical camera, at the last
+    // synchronous boundary before deliberately issuing its next Start.
+    this._cameraStopWitnesses?.delete(camera.entity);
+    session.startIssued = true;
+    session.startPromise = this._callCameraCommand(
+      cameraId,
+      "start",
+      route.start,
+      this._cameraStartTimeoutMs,
+      session.camera,
+      (rawPromise) => {
+        session.startRawPromise = rawPromise;
+        session.startRawPending = true;
+        const settled = () => { session.startRawPending = false; };
+        Promise.resolve(rawPromise).then(settled, settled);
+      }
+    );
+    const started = await session.startPromise;
+    if (token !== this._cameraOperationToken || this._cameraSession !== session || session.phase !== "starting") return;
+    if (cameraStreamPhase(this._hass?.states?.[camera.entity]) === "streaming") {
+      this._bufferCameraSession(session);
+      return;
+    }
+    if (!started) void this._recoverCameraSession(session, "Live view could not start. Please try again.");
+  }
+
+  _bufferCameraSession(session) {
+    if (!session || this._cameraSession !== session || session.token !== this._cameraOperationToken) return;
+    const camera = this._controlPolicy?.cameras?.get(session.id);
+    if (cameraStreamPhase(this._hass?.states?.[camera?.entity]) !== "streaming") return;
+    this._clearCameraStartTimer();
+    this._clearCameraFrameTimers();
+    session.phase = "buffering";
+    session.slow = false;
+    this._activeCameraId = session.id;
+    this._cameraError = null;
+    this._armCameraFrameTimers(session);
+    this._scheduleRender(true);
+  }
+
+  _markCameraFrameReady(cameraId, token, child) {
+    const session = this._cameraSession;
+    if (!child
+      || !session
+      || session.id !== cameraId
+      || session.token !== token
+      || session.token !== this._cameraOperationToken
+      || session.phase !== "buffering"
+      || this._view !== "entry"
+      || this._childCards.get(`camera:${cameraId}`) !== child) return;
+    const camera = this._controlPolicy?.cameras?.get(cameraId);
+    if (cameraStreamPhase(this._hass?.states?.[camera?.entity]) !== "streaming") return;
+    this._clearCameraFrameTimers();
+    session.phase = "viewing";
+    session.slow = false;
+    this._cameraError = null;
+    this._scheduleRender(true);
+  }
+
+  _markCameraMediaLost(cameraId, token, child, { terminal = false } = {}) {
+    const session = this._cameraSession;
+    if (!child
+      || !session
+      || session.id !== cameraId
+      || session.token !== token
+      || session.token !== this._cameraOperationToken
+      || !["buffering", "viewing"].includes(session.phase)
+      || this._view !== "entry"
+      || this._childCards.get(`camera:${cameraId}`) !== child) return;
+    const camera = this._controlPolicy?.cameras?.get(cameraId);
+    if (cameraStreamPhase(this._hass?.states?.[camera?.entity]) !== "streaming") return;
+    this._clearCameraFrameTimers();
+    session.phase = "buffering";
+    session.slow = true;
+    this._cameraError = null;
+    if (terminal) {
+      if (!this._recoverCameraViewer(session)) {
+        void this._recoverCameraSession(session, "The live video ended. Please try again.");
+      }
+      return;
+    }
+    this._armCameraFrameTimers(session);
+    this._scheduleRender(true);
+  }
+
+  _reconcileCameraSession(states) {
+    const session = this._cameraSession;
+    let blocksChanged = false;
+    for (const [witnessEntity, witness] of this._cameraStopWitnesses || []) {
+      const entity = witness.entity || witnessEntity;
+      const cameraId = witness.cameraId || witness.id || witnessEntity;
+      const state = states[entity];
+      const phase = cameraStreamPhase(state);
+      if (phase === "idle") {
+        witness.idleState = state;
+        continue;
+      }
+      if (!["preparing", "streaming"].includes(phase)) continue;
+      this._cameraStopWitnesses.delete(witnessEntity);
+      if (session?.camera?.entity === entity && session.writable && session.startIssued) continue;
+      this._recordCameraBlock(
+        cameraId,
+        entity,
+        state,
+        witness.recoveryMessage,
+        witness.configGeneration
+      );
+      blocksChanged = true;
+      const message = "A previously closed camera became active again. Live views remain locked until it is idle.";
+      this._cameraError = { id: cameraId, entity, message };
+      if (session && session.phase !== "stopping") {
+        this._closeActiveCamera();
+      }
+    }
+    for (const [blockedEntity, block] of this._cameraBlockedIds) {
+      const entity = block.entity || blockedEntity;
+      const cameraId = block.cameraId || block.id || blockedEntity;
+      const state = states[entity];
+      if (block.pendingStart) {
+        const tombstone = this._pendingCameraStarts.get(entity);
+        const blockedPhase = cameraStreamPhase(state);
+        if (tombstone
+          && tombstone.settled
+          && tombstone.stopIssued
+          && !tombstone.stopping
+          && blockedPhase === "idle"
+          && state !== tombstone.lastStopState) {
+          this._pendingCameraStarts.delete(entity);
+          this._cameraBlockedIds.delete(blockedEntity);
+          const witnessed = this._recordCameraStopWitness(
+            cameraId,
+            tombstone.camera.entity,
+            state,
+            tombstone.recoveryMessage,
+            tombstone.configGeneration
+          );
+          if (this._cameraError?.id === cameraId
+            && (!this._cameraError.entity || this._cameraError.entity === entity)) {
+            this._cameraError = witnessed && tombstone.recoveryMessage
+              ? { id: cameraId, entity, message: tombstone.recoveryMessage }
+              : null;
+          }
+          blocksChanged = true;
+        } else if (tombstone && ["preparing", "streaming"].includes(blockedPhase)) {
+          if (tombstone.stopping) {
+            if (!tombstone.activeRetryUsed
+              && state !== tombstone.lastStopState) tombstone.rerunAfterActiveState = true;
+          } else if (state !== tombstone.lastStopState
+            && (!tombstone.stopIssued || !tombstone.activeRetryUsed)) {
+            if (tombstone.stopIssued) tombstone.activeRetryUsed = true;
+            void this._finalizePendingCameraStart(entity, tombstone);
+          }
+        }
+        continue;
+      }
+      if (cameraStreamPhase(state) === "idle" && state !== block.baseline) {
+        this._cameraBlockedIds.delete(blockedEntity);
+        const witnessed = this._recordCameraStopWitness(
+          cameraId,
+          entity,
+          state,
+          block.recoveryMessage,
+          block.configGeneration
+        );
+        if (this._cameraError?.id === cameraId
+          && (!this._cameraError.entity || this._cameraError.entity === entity)) {
+          this._cameraError = witnessed && block.recoveryMessage
+            ? { id: cameraId, entity, message: block.recoveryMessage }
+            : null;
+        }
+        blocksChanged = true;
+      }
+    }
+    if (blocksChanged) {
+      this._armCameraBlockRetryNotice();
+      this._scheduleRender(true);
+    }
+    if (!session || session.phase === "stopping") return;
+    const camera = this._controlPolicy?.cameras?.get(session.id);
+    const phase = cameraStreamPhase(states[camera?.entity]);
+    if (session.phase === "starting") {
+      if (phase === "streaming") this._bufferCameraSession(session);
+      else if (["unavailable", "unexpected"].includes(phase)) {
+        void this._recoverCameraSession(session, "The camera became unavailable. Please try again.");
+      }
+      return;
+    }
+    if (["buffering", "viewing"].includes(session.phase) && phase !== "streaming") {
+      this._closeActiveCamera({ message: "The live stream ended. You can try again." });
+    }
+  }
+
+  _armCameraStartTimeout(session) {
+    this._clearCameraStartTimer();
+    this._cameraStartTimer = setTimeout(() => {
+      if (this._cameraSession !== session || session.token !== this._cameraOperationToken) return;
+      void this._recoverCameraSession(session, "The camera took too long to start. Please try again.");
+    }, this._cameraStartTimeoutMs);
+  }
+
+  _clearCameraStartTimer() {
+    if (this._cameraStartTimer !== null) clearTimeout(this._cameraStartTimer);
+    this._cameraStartTimer = null;
+  }
+
+  _recordCameraBlock(
+    cameraId,
+    entity,
+    baseline,
+    recoveryMessage = null,
+    configGeneration = this._cameraConfigGeneration
+  ) {
+    if (!cameraId || !entity) return null;
+    const existing = this._cameraBlockedIds.get(entity);
+    if (existing?.pendingStart) return entity;
+    this._cameraBlockedIds.set(entity, {
+      cameraId,
+      entity,
+      baseline,
+      pendingStart: false,
+      activeLatched: ["preparing", "streaming"].includes(cameraStreamPhase(baseline)),
+      retryAt: Date.now() + this._cameraBlockRetryMs,
+      recoveryMessage,
+      configGeneration: Number.isInteger(configGeneration) ? configGeneration : 0
+    });
+    this._armCameraBlockRetryNotice();
+    return entity;
+  }
+
+  _recordCameraStopWitness(
+    cameraId,
+    entity,
+    idleState,
+    recoveryMessage = null,
+    configGeneration = this._cameraConfigGeneration
+  ) {
+    if (!cameraId || !entity || cameraStreamPhase(idleState) !== "idle") return false;
+    const currentGeneration = Number.isInteger(this._cameraConfigGeneration)
+      ? this._cameraConfigGeneration
+      : 0;
+    if (this._config === null) return false;
+    const currentCamera = [...(this._controlPolicy?.cameras?.entries?.() || [])]
+      .find(([, candidate]) => candidate.entity === entity);
+    if (this._config !== undefined && !this._config.display?.read_only && currentCamera) {
+      cameraId = currentCamera[0];
+      configGeneration = currentGeneration;
+    }
+    if (!(this._cameraStopWitnesses instanceof Map)) this._cameraStopWitnesses = new Map();
+    this._cameraStopWitnesses.set(entity, {
+      cameraId,
+      entity,
+      idleState,
+      recoveryMessage,
+      configGeneration: Number.isInteger(configGeneration) ? configGeneration : currentGeneration
+    });
+    return true;
+  }
+
+  _confirmStoppedCameraState(session, recoveryMessage = null) {
+    if (!session?.writable || !session.route?.stop) return true;
+    const camera = session?.camera || this._controlPolicy?.cameras?.get(session?.id);
+    if (!session?.id || !camera?.entity) return false;
+    const state = this._hass?.states?.[camera.entity];
+    if (cameraStreamPhase(state) === "idle") {
+      return this._recordCameraStopWitness(
+        session.id,
+        camera.entity,
+        state,
+        recoveryMessage,
+        session.configGeneration
+      );
+    }
+    this._cameraStopWitnesses?.delete(camera.entity);
+    this._recordCameraBlock(
+      session.id,
+      camera.entity,
+      state,
+      recoveryMessage,
+      session.configGeneration
+    );
+    return false;
+  }
+
+  _retryableCameraBlock(cameraId, now = Date.now()) {
+    const camera = this._controlPolicy?.cameras?.get(cameraId);
+    const entry = camera?.entity ? [camera.entity, this._cameraBlockedIds.get(camera.entity)] : null;
+    const block = entry?.[1];
+    if (!block
+      || block.pendingStart
+      || this._cameraBlockedIds.size !== 1
+      || now < block.retryAt
+      || this._config?.display?.read_only) return null;
+    return cameraStreamPhase(this._hass?.states?.[camera.entity]) === "idle"
+      ? { key: entry[0], block }
+      : null;
+  }
+
+  _canRetryBlockedCamera(cameraId, now = Date.now()) {
+    return Boolean(this._retryableCameraBlock(cameraId, now));
+  }
+
+  _registerPendingCameraStart(session, camera, baseline, recoveryMessage = null) {
+    if (!session?.startRawPromise || !camera?.entity || this._pendingCameraStarts.has(camera.entity)) {
+      return this._pendingCameraStarts.get(camera?.entity) || null;
+    }
+    const tombstone = {
+      cameraId: session.id,
+      raw: session.startRawPromise,
+      camera: { ...camera },
+      configGeneration: session.configGeneration,
+      stopCommand: { ...session.route.stop },
+      baseline,
+      settled: false,
+      stopping: false,
+      rerunAfterStop: false,
+      rerunAfterActiveState: false,
+      activeRetryUsed: false,
+      stopBeganSettled: null,
+      stopIssued: false,
+      lastStopState: null,
+      recoveryMessage
+    };
+    this._pendingCameraStarts.set(camera.entity, tombstone);
+    this._cameraBlockedIds.set(camera.entity, {
+      cameraId: session.id,
+      entity: camera.entity,
+      baseline,
+      pendingStart: true,
+      activeLatched: ["preparing", "streaming"].includes(cameraStreamPhase(baseline)),
+      configGeneration: session.configGeneration,
+      retryAt: Infinity
+    });
+    const settle = () => {
+      tombstone.settled = true;
+      if (tombstone.stopping) {
+        if (tombstone.stopBeganSettled === false) tombstone.rerunAfterStop = true;
+        return;
+      }
+      void this._finalizePendingCameraStart(camera.entity, tombstone);
+    };
+    Promise.resolve(tombstone.raw).then(settle, settle);
+    return tombstone;
+  }
+
+  async _finalizePendingCameraStart(cameraEntity, tombstone) {
+    if (!tombstone
+      || this._pendingCameraStarts.get(cameraEntity) !== tombstone) return false;
+    if (tombstone.stopping) return false;
+    tombstone.stopping = true;
+    const settledBeforeStop = tombstone.settled;
+    tombstone.stopBeganSettled = settledBeforeStop;
+    const before = this._hass?.states?.[tombstone.camera.entity];
+    tombstone.stopIssued = true;
+    tombstone.lastStopState = before;
+    const stopped = await this._callCameraCommand(
+      tombstone.cameraId,
+      "stop",
+      tombstone.stopCommand,
+      this._cameraStopTimeoutMs,
+      tombstone.camera
+    );
+    const settlementRequiresFollowUp = tombstone.rerunAfterStop
+      || (!settledBeforeStop && tombstone.settled);
+    const causalIdleStop = stopped
+      && settledBeforeStop
+      && cameraStreamPhase(before) === "idle";
+    let idle = causalIdleStop;
+    if (!settlementRequiresFollowUp && !causalIdleStop) {
+      idle = await this._waitForCameraStopped(
+        tombstone.camera.entity,
+        stopped ? this._cameraStopTimeoutMs : 0,
+        cameraStreamPhase(before) === "idle" ? before : null,
+        () => tombstone.rerunAfterStop || (!settledBeforeStop && tombstone.settled)
+      );
+    }
+    tombstone.stopping = false;
+    tombstone.stopBeganSettled = null;
+    if (this._pendingCameraStarts.get(cameraEntity) !== tombstone) return idle;
+    const latest = this._hass?.states?.[tombstone.camera.entity];
+    const latestPhase = cameraStreamPhase(latest);
+    idle = latestPhase === "idle"
+      && (latest !== tombstone.lastStopState || stopped && settledBeforeStop);
+    if (["preparing", "streaming"].includes(latestPhase)
+      && latest !== tombstone.lastStopState) tombstone.rerunAfterActiveState = true;
+    const rerunForSettlement = tombstone.rerunAfterStop || (!settledBeforeStop && tombstone.settled);
+    const rerunForActiveState = tombstone.rerunAfterActiveState && !tombstone.activeRetryUsed && !idle;
+    tombstone.rerunAfterActiveState = false;
+    if (rerunForSettlement || rerunForActiveState) {
+      tombstone.rerunAfterStop = false;
+      if (rerunForActiveState) tombstone.activeRetryUsed = true;
+      return this._finalizePendingCameraStart(cameraEntity, tombstone);
+    }
+    if (idle && tombstone.settled) {
+      this._pendingCameraStarts.delete(cameraEntity);
+      if (this._cameraBlockedIds.get(cameraEntity)?.pendingStart) this._cameraBlockedIds.delete(cameraEntity);
+      const witnessed = this._recordCameraStopWitness(
+        tombstone.cameraId,
+        tombstone.camera.entity,
+        latest,
+        tombstone.recoveryMessage,
+        tombstone.configGeneration
+      );
+      if (this._cameraError?.id === tombstone.cameraId
+        && (!this._cameraError.entity || this._cameraError.entity === tombstone.camera.entity)) {
+        this._cameraError = witnessed && tombstone.recoveryMessage
+          ? {
+              id: tombstone.cameraId,
+              entity: tombstone.camera.entity,
+              message: tombstone.recoveryMessage
+            }
+          : null;
+      }
+      this._armCameraBlockRetryNotice();
+      this._scheduleRender(true);
+      return true;
+    }
+    if (tombstone.settled) {
+      this._cameraError = {
+        id: tombstone.cameraId,
+        entity: tombstone.camera.entity,
+        message: "The camera still needs to confirm it has stopped. Live views remain locked for safety."
+      };
+      this._scheduleRender(true);
+    }
+    return false;
+  }
+
+  _armCameraBlockRetryNotice() {
+    this._clearCameraBlockTimer();
+    const now = Date.now();
+    const nextRetryAt = Math.min(...[...this._cameraBlockedIds.values()]
+      .map((block) => block.retryAt)
+      .filter((retryAt) => Number.isFinite(retryAt) && retryAt > now));
+    if (!Number.isFinite(nextRetryAt)) return;
+    this._cameraBlockTimer = setTimeout(() => {
+      this._cameraBlockTimer = null;
+      this._scheduleRender();
+      this._armCameraBlockRetryNotice();
+    }, Math.max(0, nextRetryAt - now));
+  }
+
+  _clearCameraBlockTimer() {
+    if (this._cameraBlockTimer !== null) clearTimeout(this._cameraBlockTimer);
+    this._cameraBlockTimer = null;
+  }
+
+  _armCameraFrameTimers(session) {
+    this._cameraSlowTimer = setTimeout(() => {
+      if (this._cameraSession !== session
+        || session.token !== this._cameraOperationToken
+        || session.phase !== "buffering") return;
+      session.slow = true;
+      this._scheduleRender(true);
+    }, this._cameraSlowMessageMs);
+    this._cameraFrameTimer = setTimeout(() => {
+      if (this._cameraSession !== session
+        || session.token !== this._cameraOperationToken
+        || session.phase !== "buffering") return;
+      if (this._recoverCameraViewer(session)) return;
+      void this._recoverCameraSession(session, "The video could not connect after one retry. Please try again.");
+    }, this._cameraFrameTimeoutMs);
+  }
+
+  _clearCameraFrameTimers() {
+    if (this._cameraFrameTimer !== null) clearTimeout(this._cameraFrameTimer);
+    if (this._cameraSlowTimer !== null) clearTimeout(this._cameraSlowTimer);
+    this._cameraFrameTimer = null;
+    this._cameraSlowTimer = null;
+  }
+
+  _recoverCameraViewer(session) {
+    if (!session
+      || this._cameraSession !== session
+      || session.token !== this._cameraOperationToken
+      || session.phase !== "buffering"
+      || session.viewerRecoveryAttempted
+      || this._view !== "entry") return false;
+    const camera = this._controlPolicy?.cameras?.get(session.id);
+    if (cameraStreamPhase(this._hass?.states?.[camera?.entity]) !== "streaming") return false;
+    session.viewerRecoveryAttempted = true;
+    session.slow = false;
+    this._clearCameraFrameTimers();
+    this._evictCameraChild(session.id);
+    this._armCameraFrameTimers(session);
+    this._scheduleRender(true);
+    return true;
+  }
+
+  _armCameraExpiry(session) {
+    this._clearCameraExpiryTimer();
+    this._cameraExpiryTimer = setTimeout(() => {
+      if (this._cameraSession !== session || session.token !== this._cameraOperationToken) return;
+      this._closeActiveCamera({ message: "Live view closed automatically after two minutes." });
+    }, this._cameraExpiryMs);
+  }
+
+  _clearCameraExpiryTimer() {
+    if (this._cameraExpiryTimer !== null) clearTimeout(this._cameraExpiryTimer);
+    this._cameraExpiryTimer = null;
+  }
+
+  async _recoverCameraSession(session, message) {
+    if (!session || this._cameraSession !== session) return false;
+    this._clearCameraExpiryTimer();
+    const token = ++this._cameraOperationToken;
+    const recovery = this._stopCameraSession(session, token, { render: true, message });
+    this._cameraRecoveryPromise = recovery;
+    let stopped = false;
+    let stopWitnessed = false;
+    try {
+      stopped = await recovery;
+    } finally {
+      stopWitnessed = this._confirmStoppedCameraState(session, message);
+      if (!stopWitnessed) this._scheduleRender(true);
+      if (this._cameraRecoveryPromise === recovery) this._cameraRecoveryPromise = null;
+    }
+    return stopped && stopWitnessed;
+  }
+
+  _closeActiveCamera({ render = true, message = null, invalidate = false } = {}) {
+    const session = this._cameraSession;
+    if (session?.phase === "stopping") {
+      if (invalidate) ++this._cameraOperationToken;
+      this._evictCameraChild(session.id);
+      this._activeCameraId = null;
+      if (render) this._scheduleRender(true);
+      return;
+    }
+    ++this._cameraOperationToken;
+    this._clearCameraStartTimer();
+    this._clearCameraFrameTimers();
+    this._clearCameraExpiryTimer();
+    if (!session) {
+      if (this._activeCameraId) this._evictCameraChild(this._activeCameraId);
+      this._activeCameraId = null;
+      if (render) this._scheduleRender(true);
+      return;
+    }
+    const token = this._cameraOperationToken;
+    const recovery = this._stopCameraSession(session, token, { render, message });
+    this._cameraRecoveryPromise = recovery;
+    void recovery.finally(() => {
+      if (!this._confirmStoppedCameraState(session, message) && render) this._scheduleRender(true);
+      if (this._cameraRecoveryPromise === recovery) this._cameraRecoveryPromise = null;
+    });
+  }
+
+  async _stopCameraSession(session, token, { render = true, message = null } = {}) {
+    if (!session) return true;
+    const previousPhase = session.phase;
+    this._clearCameraStartTimer();
+    this._clearCameraFrameTimers();
+    session.phase = "stopping";
+    this._activeCameraId = null;
+    this._evictCameraChild(session.id);
+    if (render) this._scheduleRender(true);
+
+    const camera = session.camera || this._controlPolicy?.cameras?.get(session.id);
+    const phase = cameraStreamPhase(this._hass?.states?.[camera?.entity]);
+    const preStopState = this._hass?.states?.[camera?.entity];
+    const shouldStop = session.writable
+      && Boolean(session.route?.stop)
+      && (session.startIssued || ["buffering", "viewing"].includes(previousPhase) || ["preparing", "streaming"].includes(phase));
+    const pendingTombstone = shouldStop && session.startRawPromise && session.startRawPending
+      ? this._registerPendingCameraStart(session, camera, preStopState, message)
+      : null;
+    const currentRoute = cameraControlRoute(camera, this._hass?.states || {});
+    const stopCommand = currentRoute?.stop || session.route.stop;
+    let stopped = !shouldStop
+      || (pendingTombstone
+        ? await this._finalizePendingCameraStart(camera.entity, pendingTombstone)
+        : await this._callCameraCommand(
+          session.id,
+          "stop",
+          stopCommand,
+          this._cameraStopTimeoutMs,
+          camera
+        ));
+
+    if (!shouldStop) {
+      if (this._cameraSession === session) this._cameraSession = null;
+      if (token === this._cameraOperationToken && message) {
+        this._cameraError = { id: session.id, entity: camera?.entity, message };
+      }
+      if (render && token === this._cameraOperationToken) this._scheduleRender(true);
+      return true;
+    }
+    const requireFreshIdle = session.startIssued && previousPhase === "starting" && phase === "idle";
+    if (stopped && !pendingTombstone) {
+      await this._waitForCameraStopped(
+        camera.entity,
+        this._cameraStopTimeoutMs,
+        requireFreshIdle ? preStopState : null
+      );
+    }
+    const latestStopState = this._hass?.states?.[camera.entity];
+    const stateStopped = cameraStreamPhase(latestStopState) === "idle"
+      && (!requireFreshIdle || latestStopState !== preStopState || pendingTombstone && stopped)
+      && !this._pendingCameraStarts.has(camera.entity);
+    if (stateStopped && session.writable && session.route?.stop) {
+      this._recordCameraStopWitness(
+        session.id,
+        camera.entity,
+        latestStopState,
+        message,
+        session.configGeneration
+      );
+    }
+    if (token !== this._cameraOperationToken) {
+      if (this._cameraSession === session) this._cameraSession = null;
+      if (!stateStopped && (session.startIssued || cameraStreamPhase(this._hass?.states?.[camera.entity]) !== "idle")) {
+        this._recordCameraBlock(
+          session.id,
+          camera.entity,
+          this._hass?.states?.[camera.entity],
+          message,
+          session.configGeneration
+        );
+      }
+      return stateStopped;
+    }
+    const isCurrentSession = this._cameraSession === session;
+    if (isCurrentSession) {
+      this._cameraSession = null;
+      if (message) this._cameraError = { id: session.id, entity: camera.entity, message };
+      else if (!stateStopped) {
+        this._cameraError = {
+          id: session.id,
+          entity: camera.entity,
+          message: "The live view could not be stopped safely. Please wait for the camera to become idle."
+        };
+      }
+      if (!stateStopped && (session.startIssued || cameraStreamPhase(this._hass?.states?.[camera.entity]) !== "idle")) {
+        this._recordCameraBlock(
+          session.id,
+          camera.entity,
+          this._hass?.states?.[camera.entity],
+          message,
+          session.configGeneration
+        );
+      }
+    }
+    if (render && isCurrentSession) this._scheduleRender(true);
+    return stateStopped;
+  }
+
+  async _waitForCameraStopped(entityId, timeoutMs, staleIdleState = null, abortWait = null) {
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+      if (typeof abortWait === "function" && abortWait()) return false;
+      const state = this._hass?.states?.[entityId];
+      if (cameraStreamPhase(state) === "idle") {
+        if (!staleIdleState || state !== staleIdleState) return true;
+      }
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  async _callCameraCommand(cameraId, direction, command, timeoutMs, authorizedCamera = null, onDispatched = null) {
+    const camera = authorizedCamera || this._controlPolicy?.cameras?.get(cameraId);
+    if (!camera || !camera.startButton || !camera.stopButton || !command) return false;
+    const expectedButton = direction === "start" ? camera.startButton : camera.stopButton;
+    const approved = command.domain === "button"
+      ? command.service === "press" && Boolean(expectedButton) && command.entity === expectedButton
+      : command.domain === "camera"
+        && command.service === (direction === "start" ? "turn_on" : "turn_off")
+        && command.entity === camera.entity
+      ;
+    if (!approved || typeof this._hass?.callService !== "function") return false;
+
+    let timeout;
+    try {
+      const call = Promise.resolve(this._hass.callService(command.domain, command.service, { entity_id: command.entity }));
+      if (typeof onDispatched === "function") onDispatched(call);
+      await Promise.race([
+        call,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("camera command timeout")), timeoutMs);
+        })
+      ]);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
+  _evictCameraChild(cameraId) {
+    if (!cameraId) return;
+    this._removeChildCard(`camera:${cameraId}`);
+  }
+
+  _selectRoom(roomId) {
+    const room = this._config.rooms.find((entry) => entry.id === roomId);
+    if (!room) return;
+    this._room = roomId;
+    this._floor = room.floor_id;
+    this._scheduleRender(true);
+  }
+
+  _showMoreInfo(entityId) {
+    if (this._config.display.read_only || !this._controlPolicy.moreInfo.has(entityId)) return;
+    const event = new CustomEvent("hass-more-info", {
+      bubbles: true,
+      composed: true,
+      detail: { entityId }
+    });
+    this.dispatchEvent(event);
+  }
+
+  _styles() {
+    return `
+      :host { --family-ha-header-offset:var(--header-height,56px); --hub-focus:#0B57C7; display:block; width:100%; min-width:0; min-height:664px; height:calc(100vh - var(--family-ha-header-offset)); margin-top:var(--family-ha-header-offset); color:var(--primary-text-color); font-family:var(--family-font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif); }
+      *, *::before, *::after { box-sizing:border-box; }
+      button, select { font:inherit; }
+      button { -webkit-tap-highlight-color:transparent; }
+      .hub-card { position:relative; display:block; overflow:hidden; border:0; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); color:var(--hub-text); min-height:100%; height:100%; }
+      .photo-frame { position:absolute; inset:0; z-index:100; width:100%; height:100%; min-height:100%; padding:0; overflow:hidden; border:0; border-radius:inherit; background:#05070b; color:#fff; cursor:pointer; text-align:left; }
+      .photo-frame img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+      .photo-frame img.is-revealing { animation:photo-frame-reveal .65s ease both; }
+      .photo-frame-shade { position:absolute; inset:0; background:linear-gradient(180deg,rgba(0,0,0,.06) 48%,rgba(0,0,0,.64)); pointer-events:none; }
+      .photo-frame-status { position:absolute; inset:0; display:grid; place-items:center; padding:32px; color:rgba(255,255,255,.78); font-size:15px; text-align:center; }
+      .photo-frame-status[hidden] { display:none; }
+      .photo-frame-clock { position:absolute; left:32px; bottom:30px; display:grid; gap:2px; filter:drop-shadow(0 2px 8px rgba(0,0,0,.48)); }
+      .photo-frame-clock strong { font-size:46px; line-height:1; letter-spacing:-.04em; }
+      .photo-frame-clock span { font-size:14px; font-weight:650; }
+      .photo-frame-hint { position:absolute; right:28px; bottom:30px; min-height:40px; padding:0 14px; display:flex; align-items:center; gap:8px; border:1px solid rgba(255,255,255,.32); border-radius:14px; background:rgba(5,7,11,.38); color:rgba(255,255,255,.88); font-size:11px; font-weight:700; -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); }
+      .photo-frame-hint ha-icon { --mdc-icon-size:18px; }
+      @keyframes photo-frame-reveal { from { opacity:.18; transform:scale(1.012); } to { opacity:1; transform:scale(1); } }
+      .hub-shell { display:grid; grid-template-columns:86px minmax(0,1fr); min-height:100%; height:100%; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); }
+      .hub-navigation { padding:14px 9px; background:linear-gradient(180deg,color-mix(in srgb,var(--hub-nav) 96%,transparent),color-mix(in srgb,var(--hub-nav) 86%,var(--hub-accent))); border-right:1px solid rgba(255,255,255,.1); display:flex; flex-direction:column; gap:14px; min-height:0; }
+      .hub-brand { width:54px; height:54px; margin:0 auto; border-radius:50%; border:1px solid rgba(255,255,255,.45); background:rgba(255,255,255,.12); color:#fff; font-size:24px; font-weight:700; cursor:pointer; }
+      .hub-nav-items { display:flex; min-height:0; flex:1; flex-direction:column; justify-content:center; gap:8px; }
+      .hub-nav-button { min-height:64px; border:1px solid transparent; border-radius:20px; background:transparent; color:rgba(255,255,255,.72); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; cursor:pointer; }
+      .hub-nav-button ha-icon { --mdc-icon-size:22px; }
+      .hub-nav-button span { font-size:10px; font-weight:600; }
+      .hub-nav-button.is-active { color:#fff; background:linear-gradient(145deg,var(--hub-backdrop-end),var(--hub-accent)); border-color:rgba(255,255,255,.35); box-shadow:0 10px 24px rgba(13,18,34,.28); }
+      .hub-content { min-width:0; min-height:0; padding:12px 18px 16px; display:grid; grid-template-rows:56px minmax(0,1fr); gap:10px; background:linear-gradient(135deg,rgba(17,28,51,.18),rgba(183,101,98,.12)); }
+      .hub-topbar { min-width:0; display:flex; justify-content:space-between; align-items:center; color:#fff; padding:0 4px; }
+      .hub-topbar h1 { margin:2px 0 0; font-size:30px; line-height:1; font-weight:700; }
+      .eyebrow { margin:0; font-size:10px; line-height:1.2; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--hub-muted); }
+      .hub-topbar .eyebrow { color:rgba(255,255,255,.72); }
+      .hub-header-actions { display:flex; align-items:center; gap:9px; }
+      .preview-pill { min-height:36px; padding:0 12px; border:1px solid rgba(255,255,255,.34); border-radius:14px; display:flex; align-items:center; gap:7px; background:rgba(255,255,255,.13); color:#fff; font-size:11px; font-weight:700; }
+      .preview-pill ha-icon { --mdc-icon-size:18px; }
+      .hub-weather-pill { min-height:48px; padding:0 16px; border:1px solid rgba(255,255,255,.28); border-radius:18px; background:rgba(255,255,255,.14); color:#fff; display:flex; align-items:center; gap:9px; cursor:pointer; }
+      .hub-view { min-height:0; min-width:0; }
+      .surface { color:var(--hub-text); background:linear-gradient(145deg,color-mix(in srgb,var(--hub-surface) 82%,transparent),color-mix(in srgb,var(--hub-backdrop-mid) 72%,transparent)); border:1px solid rgba(255,255,255,.16); border-radius:var(--hub-radius); box-shadow:0 20px 52px rgba(3,8,24,.3),inset 0 1px 0 rgba(255,255,255,.1); -webkit-backdrop-filter:blur(22px) saturate(1.18); backdrop-filter:blur(22px) saturate(1.18); }
+      .today-grid { height:100%; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(245px,.9fr) minmax(240px,.85fr); grid-template-rows:minmax(190px,.82fr) minmax(210px,1.18fr); gap:14px; }
+      .today-grid article { padding:20px; min-width:0; overflow:hidden; }
+      .today-grid h2 { margin:7px 0 0; font-size:22px; line-height:1.16; }
+      .supporting { margin:8px 0 0; color:var(--hub-muted); font-size:13px; }
+      .hero-panel { grid-column:span 2; background:linear-gradient(140deg,color-mix(in srgb,var(--hub-accent) 86%,#000),var(--hub-backdrop-end)); color:#fff; }
+      .hero-panel .eyebrow { color:rgba(255,255,255,.7); }
+      .hero-panel h2 { font-size:30px; }
+      .hero-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:22px; }
+      .hero-metrics.has-energy { grid-template-columns:repeat(4,minmax(0,1fr)); }
+      .hero-metrics[data-metric-count="1"] { grid-template-columns:minmax(0,1fr); }
+      .hero-metrics[data-metric-count="2"] { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .hero-metrics[data-metric-count="3"] { grid-template-columns:repeat(3,minmax(0,1fr)); }
+      .hero-metrics button { text-align:left; min-height:74px; padding:12px 14px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.12); color:#fff; border-radius:16px; cursor:pointer; }
+      .hero-metrics strong,.hero-metrics span { display:block; }
+      .hero-metrics strong { font-size:18px; }
+      .hero-metrics span { margin-top:4px; font-size:10px; opacity:.74; }
+      .next-panel { display:flex; flex-direction:column; }
+      .next-panel .text-action { margin-top:auto; }
+      .text-action,.section-heading > button { width:max-content; border:0; padding:5px 0; background:transparent; color:var(--hub-accent); font-size:12px; font-weight:700; cursor:pointer; }
+      .children-panel { grid-row:2; display:flex; flex-direction:column; justify-content:center; }
+      .football-panel { grid-row:2; display:flex; flex-direction:column; justify-content:center; }
+      .now-playing-panel { grid-row:2; display:flex; flex-direction:column; justify-content:center; }
+      .section-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+      .section-heading h2 { margin:4px 0 0; font-size:19px; }
+      .section-heading > span { color:var(--hub-muted); font-size:11px; }
+      .person-summary-list { display:grid; gap:8px; margin-top:14px; }
+      .person-summary { width:100%; border:0; background:color-mix(in srgb,var(--person-colour) 9%,var(--hub-surface)); padding:10px; border-radius:15px; display:grid; grid-template-columns:36px minmax(0,1fr) auto; align-items:center; gap:9px; text-align:left; color:var(--hub-text); cursor:pointer; }
+      .person-initial { width:34px; height:34px; display:grid; place-items:center; border-radius:50%; background:var(--person-colour); color:#fff; font-weight:700; }
+      .person-summary strong,.person-summary small { display:block; }
+      .person-summary small { margin-top:2px; color:var(--hub-muted); font-size:10px; }
+      .points { font-size:11px; font-weight:700; color:var(--person-colour); }
+      .featured-fixtures { display:grid; gap:8px; margin-top:12px; }
+      .compact-fixture { border:1px solid color-mix(in srgb,var(--hub-accent) 18%,transparent); border-radius:15px; background:var(--hub-surface); min-height:60px; padding:9px 10px; color:var(--hub-text); display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:7px; align-items:center; cursor:pointer; }
+      .compact-fixture > span { min-width:0; overflow:hidden; font-size:10px; font-weight:650; white-space:nowrap; text-overflow:ellipsis; }
+      .compact-fixture span:last-of-type { text-align:right; }
+      .compact-fixture small { grid-column:1/-1; color:var(--hub-muted); font-size:9px; text-align:center; }
+      .now-playing { display:grid; grid-template-columns:58px minmax(0,1fr) 38px; gap:12px; align-items:center; margin-top:14px; }
+      .artwork { width:58px; height:58px; border-radius:14px; overflow:hidden; display:grid; place-items:center; background:linear-gradient(145deg,var(--hub-accent),var(--hub-backdrop-end)); color:#fff; }
+      .artwork img { width:100%; height:100%; object-fit:cover; }
+      .now-playing-copy { min-width:0; }
+      .now-playing h2 { display:-webkit-box; margin:0; overflow:hidden; font-size:16px; line-height:1.18; overflow-wrap:anywhere; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+      .now-playing p { display:-webkit-box; margin:4px 0 0; overflow:hidden; color:var(--hub-muted); font-size:11px; line-height:1.25; overflow-wrap:anywhere; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+      .today-next h2 { display:-webkit-box; overflow:hidden; overflow-wrap:anywhere; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
+      .icon-action { width:38px; height:38px; padding:0; display:grid; place-items:center; border:0; border-radius:50%; background:color-mix(in srgb,var(--hub-accent) 12%,var(--hub-surface)); color:var(--hub-accent); cursor:pointer; }
+      .single-surface { height:100%; padding:18px; overflow:hidden; }
+      .embedded-view { display:grid; grid-template-rows:48px minmax(0,1fr); gap:10px; }
+      .child-card-slot { min-height:0; overflow:auto; border-radius:16px; }
+      .child-card-slot > * { display:block; min-height:100%; }
+      .home-surface { height:100%; min-height:0; display:grid; grid-template-rows:52px minmax(0,1fr); gap:10px; }
+      .home-toolbar { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:12px; color:#fff; padding:0 4px; }
+      .home-toolbar h2 { margin:3px 0 0; font-size:19px; }
+      .home-toolbar .eyebrow { color:rgba(255,255,255,.68); }
+      .home-section { min-width:0; min-height:0; }
+      .home-segments { max-width:70%; overflow-x:auto; }
+      .home-segments .segment,.calendar-modes .segment { display:flex; align-items:center; gap:5px; }
+      .home-segments ha-icon,.calendar-modes ha-icon { --mdc-icon-size:15px; }
+      .home-overview { height:100%; min-height:0; display:grid; grid-template-rows:66px minmax(0,1fr); gap:10px; }
+      .home-summary-links { min-width:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+      .home-summary-links[data-summary-count="2"] { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .home-summary-links button { min-width:0; min-height:58px; padding:8px 12px; display:grid; grid-template-columns:30px minmax(0,1fr) 18px; align-items:center; gap:9px; border:1px solid rgba(255,255,255,.12); border-radius:15px; background:rgba(8,15,31,.46); color:var(--hub-text); text-align:left; cursor:pointer; }
+      .home-summary-links button > ha-icon:first-child { --mdc-icon-size:21px; color:#bcaeff; }
+      .home-summary-links button > ha-icon:last-child { --mdc-icon-size:17px; color:var(--hub-muted); }
+      .home-summary-links strong,.home-summary-links small { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .home-summary-links strong { font-size:14px; }
+      .home-summary-links small { margin-top:2px; color:var(--hub-muted); font-size:10px; }
+      .whole-home-grid { height:100%; min-height:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; overflow:auto; align-content:start; padding:1px 3px 4px 1px; }
+      .whole-home-card { min-width:0; padding:15px; }
+      .whole-home-heading,.heating-card-heading,.cover-card-heading { min-width:0; display:flex; align-items:center; gap:10px; }
+      .whole-home-heading > span,.heating-card-heading > span,.cover-card-heading > span { flex:0 0 40px; width:40px; height:40px; display:grid; place-items:center; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 13%,rgba(8,15,31,.64)); color:#bcaeff; }
+      .whole-home-heading h3,.heating-card-heading h3,.cover-card-heading h3 { margin:0; font-size:15px; }
+      .whole-home-heading p,.heating-card-heading p,.cover-card-heading p { margin:3px 0 0; color:var(--hub-muted); font-size:9px; }
+      .whole-home-controls { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:13px; }
+      .whole-home-control { min-width:0; min-height:52px; display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid rgba(255,255,255,.1); border-radius:13px; background:rgba(8,15,31,.5); color:var(--hub-text); text-align:left; cursor:pointer; }
+      .whole-home-control.is-on { border-color:rgba(242,184,92,.44); background:rgba(128,88,29,.34); color:#ffd789; }
+      .whole-home-control ha-icon { flex:0 0 auto; --mdc-icon-size:19px; }
+      .whole-home-control span { min-width:0; }
+      .whole-home-control strong,.whole-home-control small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .whole-home-control strong { font-size:10px; }
+      .whole-home-control small { margin-top:3px; color:var(--hub-muted); font-size:8px; }
+      .heating-grid,.cover-grid { height:100%; min-height:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; align-content:start; overflow:auto; padding:1px 3px 4px 1px; }
+      .heating-card { min-width:0; min-height:174px; padding:16px; display:grid; grid-template-rows:auto minmax(0,1fr); gap:13px; transition:border-color .18s ease,background .18s ease; }
+      .cover-card { min-width:0; padding:16px; }
+      .heating-card-heading { min-height:44px; }
+      .heating-card-heading > div { min-width:0; }
+      .heating-card-heading > .heating-icon { flex-basis:44px; width:44px; height:44px; }
+      .heating-card-heading h3 { font-size:16px; }
+      .heating-card-heading .heating-status { display:flex; align-items:center; gap:5px; font-size:11px; }
+      .heating-status > span { width:6px; height:6px; border-radius:50%; background:#8d96aa; box-shadow:0 0 0 3px rgba(141,150,170,.1); }
+      .heating-power { flex:0 0 auto; min-width:58px; min-height:44px; margin-left:auto; padding:0 10px; border:1px solid rgba(255,255,255,.12); border-radius:13px; background:rgba(8,15,31,.48); color:var(--hub-muted); display:flex; align-items:center; justify-content:center; gap:5px; font-size:10px; font-weight:800; cursor:pointer; }
+      .heating-power ha-icon { --mdc-icon-size:16px; }
+      .heating-power.is-on { border-color:rgba(242,184,92,.36); background:rgba(128,88,29,.25); color:#f5d493; }
+      .heating-power:disabled { opacity:.5; cursor:not-allowed; }
+      .heating-body { min-width:0; display:grid; grid-template-columns:minmax(72px,.72fr) minmax(150px,1.28fr); align-items:end; gap:14px; padding-top:13px; border-top:1px solid rgba(255,255,255,.1); }
+      .heating-current,.heating-target-control { min-width:0; }
+      .heating-current small,.heating-target-control > small { display:block; color:var(--hub-muted); font-size:10px; font-weight:700; letter-spacing:.02em; }
+      .heating-current-value { display:block; margin-top:5px; color:var(--hub-text); font-size:30px; line-height:.95; letter-spacing:-.04em; }
+      .heating-target-control { width:100%; justify-self:end; }
+      .heating-stepper { min-width:0; margin-top:5px; display:grid; grid-template-columns:44px minmax(48px,1fr) 44px; align-items:center; overflow:hidden; border:1px solid rgba(255,255,255,.09); border-radius:12px; background:rgba(255,255,255,.075); }
+      .heating-stepper button,.heating-target-value { min-height:44px; border:0; background:transparent; color:#c8bcff; }
+      .heating-stepper button { width:44px; height:44px; padding:0; display:grid; place-items:center; border-radius:0; font-size:18px; font-weight:800; cursor:pointer; }
+      .heating-stepper button:first-child { border-radius:11px 0 0 11px; }
+      .heating-stepper button:last-child { border-radius:0 11px 11px 0; }
+      .heating-stepper button:disabled { cursor:not-allowed; opacity:.48; }
+      .heating-target-value { display:grid; place-items:center; border-width:0 1px; border-style:solid; border-color:rgba(255,255,255,.09); color:var(--hub-text); font-size:19px; font-weight:800; }
+      .heating-card.is-heating { border-color:rgba(242,184,92,.42); background:linear-gradient(145deg,color-mix(in srgb,var(--hub-surface) 78%,rgba(128,88,29,.3)),color-mix(in srgb,var(--hub-backdrop-mid) 70%,transparent)); }
+      .heating-card.is-heating .heating-icon,.heating-card.is-heating .heating-status { color:#ffd789; }
+      .heating-card.is-heating .heating-status > span { background:#f2b85c; box-shadow:0 0 0 3px rgba(242,184,92,.14); }
+      .heating-card.is-idle .heating-status > span { background:#8dc9b0; box-shadow:0 0 0 3px rgba(141,201,176,.12); }
+      .heating-card.is-cooling .heating-icon,.heating-card.is-cooling .heating-status { color:#8ecff1; }
+      .heating-card.is-cooling .heating-status > span { background:#72bde6; box-shadow:0 0 0 3px rgba(114,189,230,.13); }
+      .heating-card.is-auto .heating-status > span { background:#aa99ff; box-shadow:0 0 0 3px rgba(170,153,255,.13); }
+      .heating-card.is-off { background:linear-gradient(145deg,color-mix(in srgb,var(--hub-surface) 72%,transparent),color-mix(in srgb,var(--hub-backdrop-mid) 64%,transparent)); }
+      .heating-card.is-off .heating-icon,.heating-card.is-off .heating-status,.heating-card.is-off .heating-target-control { opacity:.7; }
+      .heating-card.is-unavailable { border-style:dashed; }
+      .heating-card.is-unavailable .heating-icon,.heating-card.is-unavailable .heating-status,.heating-card.is-unavailable .heating-target-control { opacity:.5; }
+      .cover-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:16px; }
+      .cover-actions.is-single { grid-template-columns:1fr; }
+      .cover-actions button { min-width:0; min-height:42px; border:0; border-radius:12px; background:rgba(255,255,255,.08); color:#c8bcff; display:flex; align-items:center; justify-content:center; gap:4px; font-size:9px; font-weight:750; cursor:pointer; }
+      .cover-actions ha-icon { --mdc-icon-size:15px; }
+      .cleaning-panel { height:100%; min-height:0; padding:22px; display:grid; grid-template-columns:minmax(0,.86fr) minmax(0,1.14fr); grid-template-rows:auto auto minmax(0,1fr); gap:16px 24px; overflow:hidden; }
+      .cleaning-hero { display:flex; align-items:center; gap:15px; }
+      .cleaning-hero > span { width:72px; height:72px; display:grid; place-items:center; border-radius:24px; background:linear-gradient(145deg,var(--hub-accent),var(--hub-backdrop-end)); color:#fff; }
+      .cleaning-hero > span ha-icon { --mdc-icon-size:38px; }
+      .cleaning-hero h2 { margin:4px 0 0; font-size:23px; }
+      .cleaning-hero p:last-child { margin:5px 0 0; color:var(--hub-muted); font-size:11px; }
+      .cleaning-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; align-self:center; }
+      .cleaning-facts span { padding:12px; border:1px solid rgba(255,255,255,.1); border-radius:14px; background:rgba(8,15,31,.44); }
+      .cleaning-facts strong,.cleaning-facts small { display:block; }
+      .cleaning-facts strong { font-size:14px; }
+      .cleaning-facts small { margin-top:4px; color:var(--hub-muted); font-size:8px; }
+      .cleaning-actions { display:flex; align-items:center; gap:8px; }
+      .cleaning-actions button { min-height:46px; padding:0 16px; border:0; border-radius:14px; background:color-mix(in srgb,var(--hub-accent) 18%,rgba(8,15,31,.72)); color:#d8d0ff; display:flex; align-items:center; gap:6px; font-weight:750; cursor:pointer; }
+      .vacuum-map-slot,.vacuum-map-placeholder { grid-column:2; grid-row:2/4; min-height:0; overflow:hidden; border:1px solid rgba(255,255,255,.1); border-radius:18px; background:rgba(6,12,27,.54); }
+      .vacuum-map-slot .embedded-card { height:100%; }
+      .vacuum-map-placeholder { display:grid; place-items:center; align-content:center; gap:10px; padding:28px; color:var(--hub-muted); text-align:center; font-size:11px; }
+      .vacuum-map-placeholder ha-icon { --mdc-icon-size:44px; color:#a999ff; }
+      .energy-view { height:100%; min-height:0; display:grid; grid-template-rows:146px minmax(0,1fr) 74px; gap:14px; }
+      .energy-hero { min-width:0; padding:22px 26px; display:flex; align-items:center; justify-content:space-between; gap:24px; overflow:hidden; border:0; background:radial-gradient(circle at 88% 18%,rgba(0,168,135,.25),transparent 32%),linear-gradient(135deg,#061B3A,#0C315D); color:#fff; }
+      .energy-hero .eyebrow { color:#8FD8CB; }
+      .energy-hero h2 { margin:6px 0 0; color:#fff; font-size:40px; line-height:1; letter-spacing:-.04em; }
+      .energy-hero p:last-child { margin:8px 0 0; color:#C7D4E4; font-size:13px; }
+      .energy-hero-status { flex:0 0 auto; min-width:214px; padding:12px 14px; display:grid; grid-template-columns:24px minmax(0,1fr); gap:2px 9px; align-items:center; border:1px solid rgba(255,255,255,.14); border-radius:16px; background:rgba(255,255,255,.075); }
+      .energy-hero-status ha-icon { grid-row:1/3; --mdc-icon-size:22px; color:#8FD8CB; }
+      .energy-hero-status strong,.energy-hero-status small { display:block; }
+      .energy-hero-status strong { font-size:12px; }
+      .energy-hero-status small { color:#AFC0D5; font-size:10px; }
+      .energy-meter-grid { min-height:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+      .energy-meter { min-width:0; min-height:0; padding:20px; display:grid; grid-template-rows:auto minmax(92px,1fr) auto auto; gap:14px; overflow:hidden; }
+      .energy-meter-heading { min-width:0; display:grid; grid-template-columns:48px minmax(0,1fr) auto; align-items:center; gap:11px; }
+      .energy-meter-icon { width:48px; height:48px; display:grid; place-items:center; border-radius:15px; background:color-mix(in srgb,var(--hub-accent) 15%,rgba(8,15,31,.64)); color:#c8bcff; }
+      .energy-meter-icon ha-icon { --mdc-icon-size:25px; }
+      .energy-meter-heading h2 { margin:3px 0 0; font-size:20px; }
+      .energy-status { min-height:34px; padding:0 10px; display:flex; align-items:center; gap:6px; border:1px solid rgba(255,255,255,.11); border-radius:12px; color:var(--hub-muted); font-size:10px; font-weight:750; }
+      .energy-status ha-icon { --mdc-icon-size:16px; }
+      .energy-meter.is-stale .energy-status,.energy-meter.is-partial .energy-status,.energy-meter.is-unverified .energy-status { color:#ffd789; }
+      .energy-primary-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+      .energy-primary-metrics > span { min-width:0; padding:14px; border:1px solid rgba(255,255,255,.1); border-radius:15px; background:rgba(8,15,31,.42); }
+      .energy-primary-metrics small,.energy-primary-metrics strong,.energy-tariff small,.energy-tariff strong { display:block; }
+      .energy-primary-metrics small,.energy-tariff small { color:var(--hub-muted); font-size:10px; }
+      .energy-primary-metrics strong { margin-top:7px; font-size:27px; line-height:1; letter-spacing:-.035em; }
+      .energy-tariff { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding-top:12px; border-top:1px solid rgba(255,255,255,.1); }
+      .energy-tariff strong { margin-top:4px; font-size:13px; }
+      .energy-freshness { margin:0; display:flex; align-items:center; gap:6px; color:var(--hub-muted); font-size:10px; }
+      .energy-freshness ha-icon { --mdc-icon-size:15px; }
+      .energy-truth-note { min-width:0; padding:13px 18px; display:grid; grid-template-columns:34px minmax(0,1fr); align-items:center; gap:11px; }
+      .energy-truth-note > ha-icon { --mdc-icon-size:24px; color:#8FD8CB; }
+      .energy-truth-note strong,.energy-truth-note span { display:block; }
+      .energy-truth-note strong { font-size:12px; }
+      .energy-truth-note span { margin-top:3px; color:var(--hub-muted); font-size:10px; }
+      .rooms-layout { height:100%; display:grid; grid-template-columns:minmax(0,3.2fr) minmax(232px,1fr); gap:12px; }
+      .floorplan-panel { min-width:0; min-height:0; padding:14px; display:grid; grid-template-rows:48px minmax(0,1fr); gap:7px; }
+      .floorplan-heading { align-items:center; }
+      .segments { display:flex; flex-shrink:0; align-items:center; gap:4px; padding:3px; border-radius:13px; background:color-mix(in srgb,var(--hub-muted) 10%,transparent); }
+      .segment { min-height:32px; padding:0 12px; border:0; border-radius:10px; background:transparent; color:var(--hub-muted); font-size:11px; font-weight:700; white-space:nowrap; cursor:pointer; }
+      .segment.is-selected { color:#fff; background:var(--hub-accent); }
+      .floorplan-canvas { position:relative; min-height:0; overflow:hidden; border-radius:18px; background:radial-gradient(circle at 52% 34%,rgba(100,91,145,.38) 0,rgba(20,28,52,.88) 52%,rgba(7,13,29,.96) 100%); border:1px solid rgba(255,255,255,.14); }
+      .floorplan-backdrop { position:absolute; inset:0; background:linear-gradient(145deg,rgba(255,255,255,.07),transparent 48%),radial-gradient(ellipse at 50% 80%,rgba(3,8,24,.62),transparent 55%); }
+      .floorplan-visual { position:absolute; inset:0; width:100%; height:100%; z-index:4; }
+      .floorplan-image,.light-overlay { pointer-events:none; }
+      .light-overlay { mix-blend-mode:screen; }
+      .room-hotspot { cursor:pointer; outline:none; }
+      .room-hotspot polygon { fill:transparent; stroke:transparent; stroke-width:.45; vector-effect:non-scaling-stroke; transition:fill .18s ease,stroke .18s ease,filter .18s ease; }
+      .room-hotspot.has-light polygon { fill:color-mix(in srgb,var(--room-colour) 12%,transparent); filter:drop-shadow(0 0 4px var(--room-colour)); }
+      .room-hotspot.is-selected polygon,.room-hotspot:focus polygon { fill:color-mix(in srgb,var(--hub-accent) 8%,transparent); stroke:#b9aaff; stroke-width:.72; filter:drop-shadow(0 0 4px var(--hub-accent)); }
+      .room-detail { padding:16px; min-height:0; overflow:auto; }
+      .read-only-note { display:flex; align-items:center; gap:7px; margin:14px 0 0; padding:10px 12px; border-radius:13px; background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); color:var(--hub-muted); font-size:12px; }
       .read-only-note ha-icon { --mdc-icon-size:17px; color:var(--hub-accent); }
       .read-only-music { display:grid; place-items:center; grid-template-columns:minmax(0,1fr) 130px; padding:42px; }
       .read-only-music h2 { margin:7px 0 0; font-size:30px; }
