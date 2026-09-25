@@ -145,7 +145,7 @@
     "preparation": {
       "enabled": true,
       "todo_entity": "todo.family_prep",
-      "lookahead_days": 7,
+      "lookahead_days": 1,
       "templates": [
         {
           "id": "football",
@@ -158,6 +158,30 @@
           "label": "School trip",
           "keywords": ["school trip", "river walk", "museum"],
           "items": ["School uniform", "Waterproof coat", "Snack pack", "Water bottle"]
+        },
+        {
+          "id": "birthday_party",
+          "label": "Birthday party",
+          "keywords": ["birthday", "party"],
+          "items": ["Birthday present", "Birthday card"]
+        },
+        {
+          "id": "swimming",
+          "label": "Swimming",
+          "keywords": ["swimming", "swim"],
+          "items": ["Swimming kit", "Goggles", "Towel", "Water bottle"]
+        },
+        {
+          "id": "sleepover",
+          "label": "Sleepover",
+          "keywords": ["sleepover", "overnight"],
+          "items": ["Pyjamas", "Toothbrush", "Clean clothes", "Favourite book"]
+        },
+        {
+          "id": "day_out",
+          "label": "Day out",
+          "keywords": ["day out", "zoo", "theme park"],
+          "items": ["Coat", "Snack pack", "Water bottle", "Tickets"]
         }
       ]
     }

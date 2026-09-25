@@ -93,7 +93,7 @@ views:
               "preference_storage_key": "family_dashboard_example_calendar",
               "preparation": {
                 "enabled": true,
-                "lookahead_days": 7,
+                "lookahead_days": 1,
                 "templates": [
                   {
                     "id": "football",
@@ -125,6 +125,61 @@ views:
                       "museum"
                     ],
                     "label": "School trip"
+                  },
+                  {
+                    "id": "birthday_party",
+                    "items": [
+                      "Birthday present",
+                      "Birthday card"
+                    ],
+                    "keywords": [
+                      "birthday",
+                      "party"
+                    ],
+                    "label": "Birthday party"
+                  },
+                  {
+                    "id": "swimming",
+                    "items": [
+                      "Swimming kit",
+                      "Goggles",
+                      "Towel",
+                      "Water bottle"
+                    ],
+                    "keywords": [
+                      "swimming",
+                      "swim"
+                    ],
+                    "label": "Swimming"
+                  },
+                  {
+                    "id": "sleepover",
+                    "items": [
+                      "Pyjamas",
+                      "Toothbrush",
+                      "Clean clothes",
+                      "Favourite book"
+                    ],
+                    "keywords": [
+                      "sleepover",
+                      "overnight"
+                    ],
+                    "label": "Sleepover"
+                  },
+                  {
+                    "id": "day_out",
+                    "items": [
+                      "Coat",
+                      "Snack pack",
+                      "Water bottle",
+                      "Tickets"
+                    ],
+                    "keywords": [
+                      "day out",
+                      "zoo",
+                      "theme park"
+                    ],
+                    "label": "Day out"
                   }
                 ],
                 "todo_entity": "todo.family_prep"
