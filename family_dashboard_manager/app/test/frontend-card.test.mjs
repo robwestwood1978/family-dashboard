@@ -54,6 +54,7 @@ import {
   parsePreparationDescription,
   preparationDescription,
   preparationProgress,
+  todayPreparationPreview,
   safeClassroomLink,
   schoolDataSource,
   selectFavouriteFixture,
@@ -103,6 +104,27 @@ test("extracts and totals only bounded Family Planner checklist items", () => {
   assert.deepEqual(preparationProgress(items, eventKey, ["ernie"]), { total: 2, complete: 1, ready: false });
   items[1].status = "completed";
   assert.deepEqual(preparationProgress(items, eventKey), { total: 2, complete: 2, ready: true });
+});
+
+test("builds the Today Ready preview from child checklist items due today or tomorrow", () => {
+  const now = new Date("2026-09-25T09:00:00Z");
+  const event = {
+    summary: "Football training",
+    start: "2026-09-25T17:30:00Z",
+    _calendar: { entity_id: "calendar.ernie", person_ids: ["ernie"] }
+  };
+  const eventKey = familyPlannerEventKey(event);
+  const preview = todayPreparationPreview([
+    { uid: "boots", summary: "Boots", status: "needs_action", _preparation: { eventKey, personId: "ernie", templateId: "football" } },
+    { uid: "water", summary: "Water bottle", status: "completed", _preparation: { eventKey, personId: "ernie", templateId: "football" } },
+    { uid: "adult", summary: "Keys", status: "needs_action", _preparation: { eventKey, personId: "zoe", templateId: "custom" } }
+  ], [event], [
+    { id: "ernie", name: "Ernie", role: "child", colour: "#E76F51" },
+    { id: "zoe", name: "Zoe", role: "adult", colour: "#E4B93F" }
+  ], now, "Europe/London", 3);
+  assert.equal(preview.total, 2);
+  assert.equal(preview.complete, 1);
+  assert.deepEqual(preview.rows.map((row) => row.item.uid), ["boots", "water"]);
 });
 
 test("shows preparation only inside the configured upcoming window", () => {
