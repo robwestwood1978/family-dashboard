@@ -6830,7 +6830,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .compact-fixture.is-derby { border-left-color:#DCE4EE; border-right:1px solid #DCE4EE; background:#F7F9FC; box-shadow:none; }
       .compact-team { font-size:12px; }
       .compact-score { font-size:15px; }
-      .compact-fixture-detail { color:#5E6B80; font-size:11px; }
+      .compact-fixture-detail { color:#5E6B80; font-size:12px; }
       .now-playing { grid-template-columns:64px minmax(0,1fr) 48px; margin-top:13px; }
       .artwork { width:64px; height:64px; background:linear-gradient(145deg,#1463E8,#00A887); }
       .now-playing h2 { font-size:17px; }
