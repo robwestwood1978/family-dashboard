@@ -6978,10 +6978,14 @@ export class FamilyHubCard extends HTMLElementBase {
         .home-segments { width:100%; max-width:100%; overflow-x:auto; }
         .home-overview { height:auto; grid-template-rows:auto auto; }
         .home-summary-links,.home-summary-links[data-summary-count="2"] { grid-template-columns:1fr; }
-        .calendar-view { grid-template-rows:auto minmax(0,1fr); }
+        .calendar-view { grid-template-rows:auto auto minmax(0,1fr); }
         .calendar-toolbar { align-items:stretch; flex-direction:column; }
+        .calendar-toolbar-actions { width:100%; display:grid; grid-template-columns:1fr; }
+        .calendar-add-event { width:100%; justify-content:center; }
         .calendar-modes { width:100%; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
         .calendar-modes .segment { justify-content:center; }
+        .family-planner-slot { overflow:auto; scrollbar-gutter:stable; }
+        .family-planner-grid:not(.is-day) { min-width:980px; }
         .whole-home-grid,.heating-grid,.cover-grid { grid-template-columns:1fr; height:auto; }
         .heating-grid,.heating-grid[data-zone-count="6"] { grid-template-columns:1fr; }
         .cleaning-panel { height:auto; display:flex; flex-direction:column; }
