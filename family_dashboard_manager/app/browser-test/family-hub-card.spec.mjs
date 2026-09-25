@@ -793,7 +793,7 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   await expect(card.locator(".preview-pill")).toHaveCount(0);
   await expect(card).not.toContainText(/Controlled live|mapped rooms|fixtures loaded/i);
   await expect(card.locator(".hub-nav-button")).toHaveCount(8);
-  await expect(card.locator(".hub-nav-button")).toContainText(["Today", "Calendar", "Home", "Family", "Security", "Music", "Energy", "Football"]);
+  await expect(card.locator(".hub-nav-button")).toContainText(["Today", "Calendar", "Home", "Tasks", "Security", "Music", "Energy", "Football"]);
   await expectNoRootOverflow(page);
 
   for (const view of ["calendar", "rooms", "family", "entry", "music", "energy", "football", "today"]) {
@@ -814,31 +814,17 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   await card.locator('[data-calendar-mode="day"]').click();
   await expect(card.locator(".family-planner-grid.is-day .family-planner-day")).toHaveCount(1);
   await card.locator('[data-calendar-mode="month"]').click();
-  const daylight = card.locator('[data-card-type="custom:daylight-calendar-card"]');
-  await expect(daylight).toBeVisible();
-  await expect(daylight).toHaveAttribute("data-event-management", "false");
-  await expect(daylight).toHaveAttribute("data-show-header-controls", "true");
-  await expect(daylight).toHaveAttribute("data-hide-navigation-buttons", "false");
-  await expect(daylight).toHaveAttribute("data-hide-calendars", "false");
-  await expect(daylight).toHaveAttribute("data-calendar-protocol-reads", "6");
-  await expect(daylight).toHaveAttribute("data-default-view", "month");
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveCount(0);
+  await expect(card.locator(".planner-month-grid .planner-month-day")).toHaveCount(42);
   await expect(card.locator("[data-calendar-nav]")).toHaveCount(3);
   await card.locator('[data-calendar-nav="next"]').click();
-  await expect(card.locator("[data-calendar-range]")).toHaveText("31 August–6 September 2026");
+  await expect(card.locator("[data-calendar-range]")).toHaveText("September 2026");
   await card.locator('[data-calendar-nav="today"]').click();
-  await expect(card.locator("[data-calendar-range]")).toHaveText("24–30 August 2026");
-  await expect.poll(() => page.evaluate(() => window.__wsCalls.filter((message) => message.type === "calendar/events").map((message) => message.entity_id))).toEqual([
-    "calendar.family",
-    "calendar.school",
-    "calendar.parent",
-    "calendar.parent_two",
-    "calendar.child_one",
-    "calendar.child_two"
-  ]);
+  await expect(card.locator("[data-calendar-range]")).toHaveText("August 2026");
+  await expect.poll(() => page.evaluate(() => window.__wsCalls.filter((message) => message.type === "calendar/events"))).toEqual([]);
   await card.locator('[data-calendar-mode="agenda"]').click();
-  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-default-view", "agenda");
-  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-rolling-days-schedule", "");
-  await card.locator('[data-mock-calendar-write]').evaluate((button) => button.click());
+  await expect(card.locator(".planner-agenda-list")).toBeVisible();
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
 
   await card.locator('[data-view="today"]').first().click();
@@ -861,6 +847,7 @@ test("creates one Apple calendar event and a point-free Ready checklist inside t
   await card.locator('[data-planner-field="end"]').fill("19:00");
   await card.locator('[data-planner-field="location"]').fill("Community pitch");
   await card.locator('[data-planner-field="template"]').selectOption("football");
+  await card.locator('[data-planner-field="custom-items"]').fill("Mouthguard\nClean socks");
   await card.locator("[data-planner-save]").click();
 
   await expect(card.locator(".planner-add-modal")).toHaveCount(0);
@@ -877,22 +864,25 @@ test("creates one Apple calendar event and a point-free Ready checklist inside t
     }
   }]);
   const preparationCalls = calls.filter((entry) => entry.domain === "todo" && entry.service === "add_item");
-  expect(preparationCalls).toHaveLength(5);
+  expect(preparationCalls).toHaveLength(7);
   expect(preparationCalls.map((entry) => entry.data.item)).toEqual([
     "Football kit",
     "Shin pads",
     "Boots",
     "Snack pack",
-    "Water bottle"
+    "Water bottle",
+    "Mouthguard",
+    "Clean socks"
   ]);
   expect(preparationCalls.every((entry) => entry.data.entity_id === "todo.family_prep"
-    && entry.data.description.includes("Person: child_one")
-    && entry.data.description.includes("Template: football"))).toBe(true);
+    && entry.data.description.includes("Person: child_one"))).toBe(true);
+  expect(preparationCalls.slice(0, 5).every((entry) => entry.data.description.includes("Template: football"))).toBe(true);
+  expect(preparationCalls.slice(5).every((entry) => entry.data.description.includes("Template: custom"))).toBe(true);
   expect(calls.some((entry) => entry.domain === "choreops")).toBe(false);
   expect(pageErrors).toEqual([]);
 });
 
-test("isolates the dashboard rail and mode controls from Daylight light-DOM styles", async ({ page }) => {
+test("keeps the first-party month planner isolated from dashboard navigation", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
   const railButtons = card.locator(".hub-nav-button");
@@ -911,11 +901,9 @@ test("isolates the dashboard rail and mode controls from Daylight light-DOM styl
   const inactiveColourBefore = await card.locator('.hub-nav-button[data-view="rooms"]').evaluate((button) => getComputedStyle(button).color);
   await card.locator('.hub-nav-button[data-view="calendar"]').click();
   await card.locator('[data-calendar-mode="month"]').click();
-  const calendar = card.locator('[data-card-type="custom:daylight-calendar-card"]');
-  await expect(calendar).toBeVisible();
-  expect(await calendar.evaluate((element) => element.shadowRoot)).toBe(null);
+  await expect(card.locator(".planner-month-grid")).toBeVisible();
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveCount(0);
   await expect(card.locator(".hub-navigation .nav-button")).toHaveCount(0);
-  await expect(calendar.locator(".nav-button")).toHaveCount(2);
   await expect(card.locator(".hub-navigation")).toBeVisible();
   await expect(card.locator(".hub-content")).toBeVisible();
   await expect(card.locator(".hub-topbar")).toBeVisible();
@@ -2308,7 +2296,7 @@ test("fails Security unavailable states safely without presenting them as clear 
 test("keeps the family map private and spotlights both requested clubs", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
-  await expect(card.locator(".today-family")).toContainText("Jobs & rewards");
+  await expect(card.locator(".today-family")).toContainText("Tasks, jobs & rewards");
   const todayFavourites = card.locator(".today-football .compact-fixture[data-favourite-code]");
   await expect(todayFavourites).toHaveCount(2);
   expect(await todayFavourites.evaluateAll((items) => items.map((item) => [item.dataset.favouriteCode, item.dataset.fixtureId]))).toEqual([
@@ -2524,8 +2512,8 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await card.locator('.hub-nav-button[data-view="calendar"]').click();
   await expect(card.locator(".calendar-add-event")).toHaveCount(0);
   await card.locator('[data-calendar-mode="month"]').click();
-  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveAttribute("data-read-only-guard", "service-boundary");
-  await card.locator('[data-mock-calendar-write]').evaluate((button) => button.click());
+  await expect(card.locator(".planner-month-grid")).toBeVisible();
+  await expect(card.locator('[data-card-type="custom:daylight-calendar-card"]')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
 
   await card.locator('.hub-nav-button[data-view="entry"]').click();
@@ -2655,7 +2643,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
 
   await card.locator('.hub-nav-button[data-view="family"]').click();
   await expect(card.locator(".family-rhythm")).toHaveCount(0);
-  await expect(card.locator(".family-dashboard-heading")).toContainText("Jobs & rewards");
+  await expect(card.locator(".family-dashboard-heading")).toContainText("Tasks, jobs & rewards");
   await expect(card.locator(".family-dashboard-heading")).not.toContainText(/test|preview/i);
   await expect(card.locator(".choreops-link")).toHaveCount(0);
   await expect(card.locator(".family-summary-grid")).toHaveCount(2);
@@ -3024,7 +3012,7 @@ async function auditApprovalTextZoom(page, testInfo, name) {
       "Today",
       "Calendar",
       "Home",
-      "Family",
+      "Tasks",
       "Security",
       "Music",
       "Energy",
@@ -3128,6 +3116,7 @@ async function auditApprovalTextZoom(page, testInfo, name) {
         for (const rect of entry.rects) {
           let horizontalScrollReach = false;
           let verticalScrollReach = false;
+          let intentionalEllipsis = false;
           for (let ancestor = entry.parent; ancestor; ancestor = composedParent(ancestor)) {
             if (ancestor.nodeType !== Node.ELEMENT_NODE) continue;
             const style = getComputedStyle(ancestor);
@@ -3136,7 +3125,8 @@ async function auditApprovalTextZoom(page, testInfo, name) {
             const bounds = ancestor.getBoundingClientRect();
             const scrollableX = ["auto", "scroll"].includes(overflowX) && ancestor.scrollWidth > ancestor.clientWidth + 1;
             const scrollableY = ["auto", "scroll"].includes(overflowY) && ancestor.scrollHeight > ancestor.clientHeight + 1;
-            if (["hidden", "clip"].includes(overflowX) && !horizontalScrollReach && (rect.left < bounds.left - 1 || rect.right > bounds.right + 1)) {
+            intentionalEllipsis ||= style.textOverflow === "ellipsis";
+            if (["hidden", "clip"].includes(overflowX) && !horizontalScrollReach && !intentionalEllipsis && (rect.left < bounds.left - 1 || rect.right > bounds.right + 1)) {
               const key = `${entry.text}|${nodeLabel(ancestor)}|x`;
               if (!clippedKeys.has(key)) clipped.push({ text: entry.text, ancestor: nodeLabel(ancestor), axis: "horizontal" });
               clippedKeys.add(key);
@@ -3355,7 +3345,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
     }
     if (view === "family") {
       await expect(card.locator(".family-rhythm,.location-off-badge")).toHaveCount(0);
-      await expect(card.locator(".family-dashboard-heading")).toContainText("Jobs & rewards");
+      await expect(card.locator(".family-dashboard-heading")).toContainText("Tasks, jobs & rewards");
       await expect(card.locator(".choreops-link")).toHaveAttribute("href", "/choreops");
       await expect(card.locator(".family-people-grid .family-person")).toHaveCount(2);
       await expect(card.locator(".family-people-grid .family-person-heading h2")).toHaveText(["Today’s jobs", "Today’s jobs"]);

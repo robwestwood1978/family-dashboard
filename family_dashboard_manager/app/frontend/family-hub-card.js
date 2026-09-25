@@ -2,7 +2,7 @@ const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null },
   { id: "calendar", label: "Calendar", icon: "mdi:calendar-month", feature: "calendar" },
   { id: "rooms", label: "Home", icon: "mdi:floor-plan", feature: "rooms" },
-  { id: "family", label: "Family", icon: "mdi:account-group", feature: "family" },
+  { id: "family", label: "Tasks", icon: "mdi:clipboard-check-outline", feature: "family" },
   { id: "entry", label: "Security", icon: "mdi:shield-home", feature: "entry" },
   { id: "music", label: "Music", icon: "mdi:music-circle", feature: "music" },
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
@@ -1050,13 +1050,10 @@ export function preparationProgress(items = [], eventKey, personIds = []) {
 
 export function isPreparationWindowEvent(event, lookaheadDays = 7, now = new Date(), timeZone = "Europe/London") {
   if (!isCurrentOrFutureCalendarEvent(event, now, timeZone)) return false;
-  const start = calendarEventStart(event);
-  const startDate = /^\d{4}-\d{2}-\d{2}$/.test(String(start || ""))
-    ? new Date(`${start}T23:59:59Z`)
-    : new Date(start);
-  const nowDate = now instanceof Date ? now : new Date(now);
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(nowDate.getTime())) return false;
-  return startDate.getTime() <= nowDate.getTime() + Math.max(1, Number(lookaheadDays) || 7) * 86_400_000;
+  const eventDate = dateKey(calendarEventStart(event), timeZone);
+  const today = dateKey(now, timeZone);
+  const lastVisibleDate = shiftDateKey(today, Math.max(1, Number(lookaheadDays) || 7));
+  return Boolean(eventDate && today && lastVisibleDate && eventDate >= today && eventDate <= lastVisibleDate);
 }
 
 export function isAllowedPlannerAction(domain, service, targetEntity, config = {}) {
@@ -1069,7 +1066,7 @@ export function isAllowedPlannerAction(domain, service, targetEntity, config = {
   if (domain === "calendar" && service === "create_event") {
     return config.calendar.entities.some((entry) => entry.allow_create === true && entry.entity_id === targetEntity);
   }
-  if (domain === "todo" && ["add_item", "update_item"].includes(service)) {
+  if (domain === "todo" && ["add_item", "update_item", "remove_item"].includes(service)) {
     return config.calendar.preparation?.enabled === true
       && config.calendar.preparation.todo_entity === targetEntity;
   }
@@ -1126,20 +1123,41 @@ function compactClubName(team = {}) {
 }
 
 function calendarWindow(locale, timeZone, count = 7, now = new Date()) {
-  const today = dateKey(now, timeZone);
-  const [year, month, day] = today.split("-").map(Number);
+  const anchor = dateKey(now, timeZone);
+  const today = dateKey(new Date(), timeZone);
+  const [year, month, day] = anchor.split("-").map(Number);
   const base = Date.UTC(year, month - 1, day, 12);
   return Array.from({ length: count }, (_, offset) => {
     const date = new Date(base + offset * 86_400_000);
     const key = date.toISOString().slice(0, 10);
     return {
       key,
-      isToday: offset === 0,
+      isToday: key === today,
       weekday: new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: "UTC" }).format(date),
       day: new Intl.DateTimeFormat(locale, { day: "numeric", timeZone: "UTC" }).format(date),
       month: new Intl.DateTimeFormat(locale, { month: "short", timeZone: "UTC" }).format(date)
     };
   });
+}
+
+function shiftDateKey(value, days) {
+  const [year, month, day] = String(value || "").split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days, 12));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+}
+
+function mondayForDateKey(value) {
+  const [year, month, day] = String(value || "").split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day, 12));
+  if (Number.isNaN(date.getTime())) return value;
+  const weekday = date.getUTCDay() || 7;
+  return shiftDateKey(value, 1 - weekday);
+}
+
+function monthGridStart(value) {
+  const [year, month] = String(value || "").split("-").map(Number);
+  if (!year || !month) return value;
+  return mondayForDateKey(`${year}-${String(month).padStart(2, "0")}-01`);
 }
 
 export function normaliseChoreStatus(state, entityId = "") {
@@ -1802,6 +1820,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarError = null;
     this._calendarRequestKey = "";
     this._calendarRequest = 0;
+    this._calendarAnchorKey = null;
+    this._calendarLastLoadedAt = 0;
     this._calendarPersonFilter = "all";
     this._plannerModal = null;
     this._preparationItems = [];
@@ -1827,6 +1847,7 @@ export class FamilyHubCard extends HTMLElementBase {
         this._closeActiveCamera({ render: false, invalidate: true });
       } else {
         this._scheduleRender(true);
+        if (this._view === "calendar") void this._loadCalendarEvents(true);
         this._armFreshnessTimer();
         this._armPhotoFrameIdleTimer();
       }
@@ -1894,6 +1915,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._view = config.display.default_view || "today";
     this._homeSection = config.home.default_section || "rooms";
     this._calendarMode = config.calendar.initial_view || "week";
+    this._calendarAnchorKey = dateKey(new Date(), config.product?.timezone || "Europe/London");
+    this._calendarLastLoadedAt = 0;
     this._calendarPersonFilter = "all";
     this._plannerModal = null;
     this._preparationItems = [];
@@ -2233,6 +2256,11 @@ export class FamilyHubCard extends HTMLElementBase {
       }
       return;
     }
+    if (this._view === "calendar") {
+      void this._loadCalendarEvents();
+      void this._loadPreparationItems();
+      return;
+    }
     this._scheduleRender();
   }
 
@@ -2241,11 +2269,61 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _calendarWindow() {
+    const today = dateKey(new Date(), this._config.product.timezone);
+    const anchor = this._calendarAnchorKey || today;
+    const start = this._calendarMode === "day"
+      ? anchor
+      : this._calendarMode === "month"
+        ? monthGridStart(anchor)
+        : mondayForDateKey(anchor);
+    const count = this._calendarMode === "day"
+      ? 1
+      : this._calendarMode === "month"
+        ? 42
+        : this._calendarMode === "agenda"
+          ? Math.max(14, this._config.calendar.rolling_days)
+          : 7;
     return calendarWindow(
       this._config.product.locale,
       this._config.product.timezone,
-      this._config.calendar.rolling_days
+      count,
+      new Date(`${start}T12:00:00Z`)
     );
+  }
+
+  _calendarRangeLabel() {
+    const days = this._calendarWindow();
+    if (!days.length) return "";
+    const locale = this._config.product.locale;
+    const start = new Date(`${days[0].key}T12:00:00Z`);
+    const end = new Date(`${days[days.length - 1].key}T12:00:00Z`);
+    if (this._calendarMode === "month") {
+      const anchor = new Date(`${this._calendarAnchorKey}T12:00:00Z`);
+      return new Intl.DateTimeFormat(locale, { month: "long", year: "numeric", timeZone: "UTC" }).format(anchor);
+    }
+    const startMonth = new Intl.DateTimeFormat(locale, { month: "short", timeZone: "UTC" }).format(start);
+    const endMonth = new Intl.DateTimeFormat(locale, { month: "short", timeZone: "UTC" }).format(end);
+    const year = new Intl.DateTimeFormat(locale, { year: "numeric", timeZone: "UTC" }).format(end);
+    return startMonth === endMonth
+      ? `${days[0].day}–${days[days.length - 1].day} ${endMonth} ${year}`
+      : `${days[0].day} ${startMonth}–${days[days.length - 1].day} ${endMonth} ${year}`;
+  }
+
+  _moveCalendar(direction) {
+    const today = dateKey(new Date(), this._config.product.timezone);
+    if (direction === "today") {
+      this._calendarAnchorKey = today;
+    } else if (this._calendarMode === "month") {
+      const [year, month] = String(this._calendarAnchorKey || today).split("-").map(Number);
+      const offset = direction === "next" ? 1 : -1;
+      this._calendarAnchorKey = new Date(Date.UTC(year, month - 1 + offset, 1, 12)).toISOString().slice(0, 10);
+    } else {
+      const step = this._calendarMode === "day" ? 1 : 7;
+      this._calendarAnchorKey = shiftDateKey(this._calendarAnchorKey || today, direction === "next" ? step : -step);
+    }
+    this._calendarRequestKey = "";
+    this._scheduleRender(true);
+    void this._loadCalendarEvents(true);
   }
 
   _calendarFallbackEvents() {
@@ -2267,7 +2345,7 @@ export class FamilyHubCard extends HTMLElementBase {
     return nextSchoolCalendarEvent(this._config, events, personId, now);
   }
 
-  async _loadCalendarEvents() {
+  async _loadCalendarEvents(force = false) {
     if (!this._config?.features?.calendar || !this._hass) return;
     if (typeof this._hass.callApi !== "function") {
       if (!this._calendarEvents.length) this._calendarEvents = this._calendarFallbackEvents();
@@ -2278,15 +2356,15 @@ export class FamilyHubCard extends HTMLElementBase {
       const state = this._hass.states?.[calendar.entity_id];
       return `${calendar.entity_id}:${state?.last_updated || state?.last_changed || "unknown"}`;
     }).join("|");
-    const requestKey = `${days[0]?.key || ""}:${stateVersion}`;
-    if (requestKey === this._calendarRequestKey) return;
+    const requestKey = `${days[0]?.key || ""}:${days[days.length - 1]?.key || ""}:${stateVersion}`;
+    if (!force && requestKey === this._calendarRequestKey && Date.now() - this._calendarLastLoadedAt < 60_000) return;
     this._calendarRequestKey = requestKey;
     this._calendarLoading = true;
     this._calendarError = null;
     const requestId = ++this._calendarRequest;
     this._scheduleRender();
-    const start = new Date(Date.now() - 43_200_000).toISOString();
-    const end = new Date(Date.now() + (this._config.calendar.rolling_days + 1) * 86_400_000).toISOString();
+    const start = `${days[0].key}T00:00:00`;
+    const end = `${shiftDateKey(days[days.length - 1].key, 1)}T00:00:00`;
     try {
       const groups = await Promise.all(this._config.calendar.entities.map(async (calendar) => {
         const path = `calendars/${encodeURIComponent(calendar.entity_id)}?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
@@ -2297,6 +2375,7 @@ export class FamilyHubCard extends HTMLElementBase {
       this._calendarEvents = groups.flat().sort((left, right) => {
         return new Date(calendarEventStart(left) || 0) - new Date(calendarEventStart(right) || 0);
       });
+      this._calendarLastLoadedAt = Date.now();
     } catch (error) {
       if (requestId !== this._calendarRequest) return;
       this._calendarEvents = this._calendarFallbackEvents();
@@ -2638,11 +2717,11 @@ export class FamilyHubCard extends HTMLElementBase {
       ...(securitySummary ? [`<button type="button" data-view="entry"><ha-icon icon="${securitySummary.icon}"></ha-icon><span><strong>${escapeHtml(securitySummary.title)}</strong><small>${escapeHtml(securitySummary.detail)}</small></span></button>`] : []),
       ...(energyCompact ? [`<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energyCompact.value)}</strong><small>${escapeHtml(energyCompact.detail)}</small></span></button>`] : [])
     ];
-    const familyHeading = features.chores ? "Jobs & rewards" : features.school ? "School" : "Family overview";
+    const familyHeading = features.chores ? "Tasks, jobs & rewards" : features.school ? "School & tasks" : "Tasks";
     const secondaryCards = [
       ...(features.family ? [`
         <article class="surface children-panel today-family today-secondary">
-          <div class="section-heading"><div><p class="eyebrow">Family</p><h2>${familyHeading}</h2></div><button type="button" data-view="family">Open</button></div>
+          <div class="section-heading"><div><p class="eyebrow">To-do</p><h2>${familyHeading}</h2></div><button type="button" data-view="family">Open</button></div>
           <div class="person-summary-list">${this._renderChildSummaries()}</div>
         </article>
       `] : []),
@@ -2828,7 +2907,6 @@ export class FamilyHubCard extends HTMLElementBase {
       { id: "agenda", label: "Agenda", icon: "mdi:format-list-bulleted" }
     ];
     const modeButtons = modes.map((mode) => `<button type="button" class="segment ${mode.id === this._calendarMode ? "is-selected" : ""}" data-calendar-mode="${mode.id}" aria-pressed="${mode.id === this._calendarMode}"><ha-icon icon="${mode.icon}" aria-hidden="true"></ha-icon>${mode.label}</button>`).join("");
-    const plannerMode = ["day", "week"].includes(this._calendarMode);
     const canCreate = !this._config.display.read_only
       && this._config.calendar.entities.some((entry) => entry.allow_create === true);
     const personFilters = [
@@ -2842,11 +2920,40 @@ export class FamilyHubCard extends HTMLElementBase {
           <div class="calendar-toolbar-actions">${canCreate ? '<button type="button" class="calendar-add-event" data-planner-add-event><ha-icon icon="mdi:plus"></ha-icon>Add event</button>' : ""}<div class="segments calendar-modes" role="group" aria-label="Choose calendar view">${modeButtons}</div></div>
         </div>
         <div class="calendar-person-filters" role="group" aria-label="Filter by family member">${personFilters}</div>
-        ${plannerMode
-          ? `<div class="family-planner-slot">${this._renderFamilyPlanner()}</div>`
-          : `<div id="calendar-card-slot" class="child-card-slot calendar-card-slot">${this._renderCalendarFallback()}</div>`}
+        <div class="calendar-navigation">
+          <button type="button" data-calendar-nav="previous" aria-label="Previous period"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+          <button type="button" data-calendar-nav="today">Today</button>
+          <strong data-calendar-range>${escapeHtml(this._calendarRangeLabel())}</strong>
+          <button type="button" data-calendar-refresh aria-label="Refresh calendars"><ha-icon icon="mdi:refresh"></ha-icon></button>
+          <button type="button" data-calendar-nav="next" aria-label="Next period"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+        </div>
+        <div class="family-planner-slot">${this._calendarMode === "month"
+          ? this._renderPlannerMonth()
+          : this._calendarMode === "agenda"
+            ? this._renderPlannerAgenda()
+            : this._renderFamilyPlanner()}</div>
       </section>
     `;
+  }
+
+  _filteredCalendarEvents() {
+    const source = this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents();
+    return this._calendarPersonFilter === "all"
+      ? source
+      : source.filter((event) => event?._calendar?.person_ids?.includes(this._calendarPersonFilter));
+  }
+
+  _renderPlannerEventButton(event, compact = false) {
+    const calendar = event._calendar || this._config.calendar.entities[0];
+    const people = familyPlannerPeople(event, this._config.people).filter((person) => person.role !== "household");
+    const progress = preparationProgress(this._preparationItems, familyPlannerEventKey(event));
+    const personLabel = calendar.category === "family" ? calendar.label : people.map((person) => person.name).join(" · ") || calendar.label;
+    return `<button type="button" class="family-planner-event ${compact ? "is-compact" : ""} ${progress.ready ? "is-ready" : ""}" data-planner-event="${escapeHtml(familyPlannerEventKey(event))}" style="--calendar-colour:${escapeHtml(calendar.colour)}">
+      <span class="planner-event-time">${isAllDayCalendarEvent(event) ? "All day" : escapeHtml(formatTime(calendarEventStart(event), this._config.product.locale, this._config.product.timezone))}</span>
+      <strong>${escapeHtml(event.summary || calendar.label)}</strong>
+      ${compact ? "" : `<small>${escapeHtml(personLabel)}</small>`}
+      ${progress.total ? `<span class="planner-ready-state"><ha-icon icon="${progress.ready ? "mdi:check-circle" : "mdi:bag-personal-outline"}"></ha-icon>${progress.ready ? "Ready" : `${progress.complete}/${progress.total}`}</span>` : ""}
+    </button>`;
   }
 
   _plannerEventByKey(eventKey) {
@@ -2859,10 +2966,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const days = this._calendarMode === "day" ? allDays.slice(0, 1) : allDays.slice(0, 7);
     const timeZone = this._config.product.timezone;
     const locale = this._config.product.locale;
-    const sourceEvents = this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents();
-    const events = this._calendarPersonFilter === "all"
-      ? sourceEvents
-      : sourceEvents.filter((event) => event?._calendar?.person_ids?.includes(this._calendarPersonFilter));
+    const events = this._filteredCalendarEvents();
     const columns = days.map((day) => {
       const dayEvents = events.filter((event) => dateKey(calendarEventStart(event), timeZone) === day.key);
       const activePeople = this._config.people.filter((person) => person.role !== "household"
@@ -2877,22 +2981,40 @@ export class FamilyHubCard extends HTMLElementBase {
           <header><div><span>${escapeHtml(day.weekday)}</span><strong>${escapeHtml(day.day)}</strong><small>${escapeHtml(day.month)}</small></div><div class="day-people" aria-label="Family members with events">${activePeople.map((person) => `<i style="--person-colour:${escapeHtml(person.colour)}" title="${escapeHtml(person.name)}">${escapeHtml(person.name.slice(0, 1))}</i>`).join("")}</div></header>
           <div class="family-planner-events">
             ${dayEvents.map((event) => {
-              const calendar = event._calendar || this._config.calendar.entities[0];
-              const people = familyPlannerPeople(event, this._config.people).filter((person) => person.role !== "household");
-              const progress = preparationProgress(this._preparationItems, familyPlannerEventKey(event));
-              const personLabel = calendar.category === "family" ? calendar.label : people.map((person) => person.name).join(" · ") || calendar.label;
-              return `<button type="button" class="family-planner-event ${progress.ready ? "is-ready" : ""}" data-planner-event="${escapeHtml(familyPlannerEventKey(event))}" style="--calendar-colour:${escapeHtml(calendar.colour)}">
-                <span class="planner-event-time">${isAllDayCalendarEvent(event) ? "All day" : escapeHtml(formatTime(calendarEventStart(event), locale, timeZone))}</span>
-                <strong>${escapeHtml(event.summary || calendar.label)}</strong>
-                <small>${escapeHtml(personLabel)}</small>
-                ${progress.total ? `<span class="planner-ready-state"><ha-icon icon="${progress.ready ? "mdi:check-circle" : "mdi:bag-personal-outline"}"></ha-icon>${progress.ready ? "Ready" : `${progress.complete}/${progress.total}`}</span>` : ""}
-              </button>`;
+              return this._renderPlannerEventButton(event);
             }).join("") || '<p class="family-planner-empty">Clear day</p>'}
           </div>
           ${prepItems.length ? `<footer class="day-ready ${prepComplete === prepItems.length ? "is-ready" : ""}"><ha-icon icon="${prepComplete === prepItems.length ? "mdi:check-circle" : "mdi:bag-personal-outline"}"></ha-icon>${prepComplete === prepItems.length ? "Ready" : `${prepComplete} of ${prepItems.length} packed`}</footer>` : ""}
         </section>`;
     }).join("");
     return `${this._calendarLoading || this._preparationLoading ? `<div class="calendar-loading"><span></span>${this._calendarLoading ? "Refreshing the family week…" : "Refreshing Ready lists…"}</div>` : ""}${this._calendarError ? `<p class="calendar-warning">${escapeHtml(this._calendarError)}</p>` : ""}${this._preparationError ? `<p class="calendar-warning preparation-warning">${escapeHtml(this._preparationError)}</p>` : ""}<div class="family-planner-grid ${this._calendarMode === "day" ? "is-day" : ""}">${columns}</div>`;
+  }
+
+  _renderPlannerMonth() {
+    const days = this._calendarWindow();
+    const events = this._filteredCalendarEvents();
+    const anchorMonth = String(this._calendarAnchorKey || "").slice(0, 7);
+    const headings = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+      .map((day) => `<span>${day}</span>`).join("");
+    const cells = days.map((day) => {
+      const dayEvents = events.filter((event) => dateKey(calendarEventStart(event), this._config.product.timezone) === day.key);
+      return `<section class="planner-month-day ${day.isToday ? "is-today" : ""} ${day.key.slice(0, 7) !== anchorMonth ? "is-outside" : ""}">
+        <header><strong>${escapeHtml(day.day)}</strong></header>
+        <div>${dayEvents.slice(0, 2).map((event) => this._renderPlannerEventButton(event, true)).join("")}${dayEvents.length > 2 ? `<span class="planner-month-more">+${dayEvents.length - 2} more</span>` : ""}</div>
+      </section>`;
+    }).join("");
+    return `${this._calendarLoading ? '<div class="calendar-loading"><span></span>Refreshing month…</div>' : ""}<div class="planner-month-headings">${headings}</div><div class="planner-month-grid">${cells}</div>`;
+  }
+
+  _renderPlannerAgenda() {
+    const days = this._calendarWindow();
+    const events = this._filteredCalendarEvents();
+    const rows = days.map((day) => {
+      const dayEvents = events.filter((event) => dateKey(calendarEventStart(event), this._config.product.timezone) === day.key);
+      if (!dayEvents.length) return "";
+      return `<section class="planner-agenda-day ${day.isToday ? "is-today" : ""}"><header><strong>${escapeHtml(day.weekday)} ${escapeHtml(day.day)} ${escapeHtml(day.month)}</strong></header><div>${dayEvents.map((event) => this._renderPlannerEventButton(event)).join("")}</div></section>`;
+    }).join("");
+    return `${this._calendarLoading ? '<div class="calendar-loading"><span></span>Refreshing agenda…</div>' : ""}<div class="planner-agenda-list">${rows || '<p class="family-planner-empty">Nothing planned in this period</p>'}</div>`;
   }
 
   _renderCalendarFallback() {
@@ -2924,7 +3046,7 @@ export class FamilyHubCard extends HTMLElementBase {
     return `
       <div class="calendar-fallback" aria-label="Built-in calendar fallback">
         ${this._calendarLoading ? '<div class="calendar-loading"><span></span>Refreshing the family week…</div>' : ""}
-        ${this._calendarError ? '<p class="calendar-warning">Daylight is unavailable, so this safe built-in agenda is being shown.</p>' : ""}
+        ${this._calendarError ? '<p class="calendar-warning">Calendar events are temporarily unavailable.</p>' : ""}
         <div class="hub-agenda-board">${columns}</div>
       </div>
     `;
@@ -3594,19 +3716,21 @@ export class FamilyHubCard extends HTMLElementBase {
     const items = this._preparationItems.filter((item) => item?._preparation?.eventKey === eventKey);
     const progress = preparationProgress(items, eventKey);
     const suggestion = matchPreparationTemplate(event, this._config.calendar.preparation?.templates || []);
+    const templates = this._config.calendar.preparation?.templates || [];
     const checklist = items.length ? `<div class="planner-checklist">
       <div class="planner-checklist-heading"><div><p class="eyebrow">Get ready</p><h3>${progress.ready ? "Ready" : `${progress.complete} of ${progress.total} complete`}</h3></div><span class="${progress.ready ? "is-ready" : ""}"><ha-icon icon="${progress.ready ? "mdi:check-circle" : "mdi:bag-personal-outline"}"></ha-icon></span></div>
       ${items.map((item) => {
         const completed = String(item.status).toLocaleLowerCase() === "completed";
         const person = this._config.people.find((entry) => entry.id === item._preparation.personId);
         const itemId = item.uid || item.id || item.summary;
-        return `<button type="button" class="planner-check-item ${completed ? "is-complete" : ""}" data-prep-item="${escapeHtml(itemId)}" data-prep-status="${completed ? "needs_action" : "completed"}"><span><ha-icon icon="${completed ? "mdi:check" : "mdi:circle-outline"}"></ha-icon></span><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong>${person ? `<small style="--person-colour:${escapeHtml(person.colour)}">${escapeHtml(person.name)}</small>` : ""}</button>`;
+        return `<div class="planner-check-item ${completed ? "is-complete" : ""}"><button type="button" data-prep-item="${escapeHtml(itemId)}" data-prep-status="${completed ? "needs_action" : "completed"}" aria-label="${completed ? "Mark not ready" : "Mark ready"}" ${this._config.display.read_only ? "disabled" : ""}><span><ha-icon icon="${completed ? "mdi:check" : "mdi:circle-outline"}"></ha-icon></span><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong>${person ? `<small style="--person-colour:${escapeHtml(person.colour)}">${escapeHtml(person.name)}</small>` : ""}</button>${this._config.display.read_only ? "" : `<button type="button" class="planner-remove-item" data-remove-prep-item="${escapeHtml(itemId)}" aria-label="Remove ${escapeHtml(item.summary || item.item || "preparation item")}"><ha-icon icon="mdi:delete-outline"></ha-icon></button>`}</div>`;
       }).join("")}
-    </div>` : suggestion && children.length ? `<div class="planner-suggestion"><span><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon></span><div><p class="eyebrow">Suggested preparation</p><h3>${escapeHtml(suggestion.label)}</h3><p>${escapeHtml(suggestion.items.join(" · "))}</p><div>${children.map((person) => `<button type="button" data-add-preparation="${escapeHtml(eventKey)}" data-preparation-template="${escapeHtml(suggestion.id)}" data-preparation-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}">Add for ${escapeHtml(person.name)}</button>`).join("")}</div></div></div>` : '<p class="planner-no-prep">No preparation checklist is linked to this event.</p>';
+    </div>` : suggestion && children.length ? `<div class="planner-suggestion"><span><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon></span><div><p class="eyebrow">Suggested preparation</p><h3>${escapeHtml(suggestion.label)}</h3><p>${escapeHtml(suggestion.items.join(" · "))}</p><div>${children.map((person) => `<button type="button" data-add-preparation="${escapeHtml(eventKey)}" data-preparation-template="${escapeHtml(suggestion.id)}" data-preparation-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}">Add for ${escapeHtml(person.name)}</button>`).join("")}</div></div></div>` : '<p class="planner-no-prep">No preparation checklist is linked to this event yet.</p>';
+    const checklistEditor = children.length && !this._config.display.read_only ? `<section class="planner-checklist-editor"><p class="eyebrow">Change the Ready list</p><div class="planner-editor-row"><select data-planner-field="event-person" aria-label="Family member">${children.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)}</option>`).join("")}</select><select data-planner-field="event-template" aria-label="Ready template"><option value="">Choose a template</option>${templates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.label)}</option>`).join("")}</select><button type="button" data-add-event-template="${escapeHtml(eventKey)}">Add template</button></div><div class="planner-editor-row"><input data-planner-field="event-custom-item" type="text" maxlength="120" autocomplete="off" placeholder="Add present, card, water bottle…"/><button type="button" data-add-event-custom="${escapeHtml(eventKey)}">Add item</button></div></section>` : "";
     return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal" role="dialog" aria-modal="true" aria-labelledby="planner-event-title">
       <header style="--calendar-colour:${escapeHtml(calendar.colour)}"><button type="button" class="planner-modal-close" data-planner-close aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">${escapeHtml(people.map((person) => person.name).join(" · ") || calendar.label)}</p><h2 id="planner-event-title">${escapeHtml(event.summary || calendar.label)}</h2><p>${escapeHtml(formatDay(calendarEventStart(event), this._config.product.locale, this._config.product.timezone))}${isAllDayCalendarEvent(event) ? " · All day" : ` · ${escapeHtml(formatTime(calendarEventStart(event), this._config.product.locale, this._config.product.timezone))}`}</p></header>
-      <div class="planner-modal-body">${event.location ? `<p class="planner-event-location"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(event.location)}</p>` : ""}${event.description ? `<p class="planner-event-description">${escapeHtml(event.description)}</p>` : ""}${checklist}</div>
-      <footer><span><ha-icon icon="mdi:apple"></ha-icon>Calendar details stay in Apple Calendar</span></footer>
+      <div class="planner-modal-body">${event.location ? `<p class="planner-event-location"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(event.location)}</p>` : ""}${event.description ? `<p class="planner-event-description">${escapeHtml(event.description)}</p>` : ""}${checklist}${checklistEditor}</div>
+      <footer><span><ha-icon icon="mdi:apple"></ha-icon>Edit the event itself in Apple Calendar, then press Refresh</span></footer>
     </section></div>`;
   }
 
@@ -3627,6 +3751,7 @@ export class FamilyHubCard extends HTMLElementBase {
         <label><span>Ends</span><input data-planner-field="end" type="time" value="${escapeHtml(endTime)}" /></label>
         <label class="is-wide"><span>Location</span><input data-planner-field="location" type="text" maxlength="160" autocomplete="off" placeholder="Optional" /></label>
         <label class="is-wide"><span>Get ready template</span><select data-planner-field="template"><option value="">No checklist</option>${templates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.label)}</option>`).join("")}</select></label>
+        <label class="is-wide"><span>Extra Ready items</span><textarea data-planner-field="custom-items" maxlength="600" placeholder="One item per line, for example:&#10;Birthday present&#10;Birthday card"></textarea><small>These are added alongside any template you choose.</small></label>
         <p class="planner-form-error" role="alert">${escapeHtml(this._plannerModal.error || "")}</p>
       </div>
       <footer><button type="button" data-planner-close>Cancel</button><button type="button" class="planner-save" data-planner-save ${this._plannerModal.saving ? "disabled" : ""}>${this._plannerModal.saving ? "Adding…" : "Add to calendar"}</button></footer>
@@ -3636,12 +3761,12 @@ export class FamilyHubCard extends HTMLElementBase {
   _renderFamily() {
     const locationEnabled = this._config.features.location_map;
     const choresEnabled = this._config.features.chores === true;
-    const familyTitle = choresEnabled ? "Jobs & rewards" : this._config.features.school ? "School" : "Family overview";
+    const familyTitle = choresEnabled ? "Tasks, jobs & rewards" : this._config.features.school ? "School & tasks" : "Tasks";
     const children = this._config.people.filter((person) => person.role === "child");
     if (!locationEnabled) {
       return `
         <section class="family-dashboard">
-          <header class="family-dashboard-heading"><div><p class="eyebrow">Family</p><h2>${familyTitle}</h2></div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
+          <header class="family-dashboard-heading"><div><p class="eyebrow">To-do</p><h2>${familyTitle}</h2></div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
           <div class="family-people-grid">${children.map((person) => this._renderFamilyPerson(person)).join("")}</div>
         </section>
       `;
@@ -3693,7 +3818,7 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _renderPersonPreparation(person) {
     if (!this._config.calendar?.preparation?.enabled) return "";
-    const lookaheadDays = this._config.calendar.preparation.lookahead_days || 7;
+    const lookaheadDays = Math.min(1, this._config.calendar.preparation.lookahead_days || 1);
     const events = (this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents())
       .filter((event) => event?._calendar?.person_ids?.includes(person.id))
       .filter((event) => isPreparationWindowEvent(event, lookaheadDays, new Date(), this._config.product.timezone));
@@ -3771,13 +3896,13 @@ export class FamilyHubCard extends HTMLElementBase {
       : classroomStale
         ? `<div class="assignment is-stale"><ha-icon icon="mdi:cloud-alert-outline"></ha-icon><div><strong>Classroom update delayed</strong><small>${escapeHtml(classroomError)}${lastSuccessfulLabel ? ` · Last updated ${escapeHtml(lastSuccessfulLabel)}` : ""}</small></div></div>`
       : !schoolEnabled
-        ? '<div class="assignment classroom-locked"><ha-icon icon="mdi:school-outline"></ha-icon><div><strong>Classroom ready after consent</strong><small>Read-only access will be connected separately for each child. No password belongs in this dashboard.</small></div></div>'
+        ? ""
         : !classroom
           ? '<div class="assignment is-stale"><ha-icon icon="mdi:school-alert-outline"></ha-icon><div><strong>Classroom not connected</strong><small>This child still needs a separate read-only connection.</small></div></div>'
         : '<div class="assignment"><ha-icon icon="mdi:school-check-outline"></ha-icon><div><strong>No open assignments</strong><small>Google Classroom is up to date.</small></div></div>';
     const presence = this._config.features.location_map && person.location_entity
       ? titleCase(states[person.location_entity]?.state || "Location unavailable")
-      : choresEnabled ? "Today’s jobs" : schoolEnabled ? "School" : "Family overview";
+      : choresEnabled ? "Today’s jobs" : schoolEnabled ? "School" : "Tasks";
     const choreRows = (chore?.status_entities || []).map((entityId) => {
       const state = states[entityId];
       const presentation = normaliseChoreStatus(state, entityId);
@@ -4160,53 +4285,6 @@ export class FamilyHubCard extends HTMLElementBase {
   _mountChildCards() {
     if (!this._hass || !globalThis.loadCardHelpers) return;
     this._pruneInactiveChildCards();
-    if (this._view === "calendar" && ["month", "agenda"].includes(this._calendarMode)) {
-      const viewMap = {
-        day: "schedule",
-        week: "week-compact",
-        month: "month",
-        agenda: "agenda"
-      };
-      const calendarNames = Object.fromEntries(this._config.calendar.entities.map((entry) => [entry.entity_id, entry.label]));
-      const colours = Object.fromEntries(this._config.calendar.entities.map((entry) => [entry.entity_id, entry.colour]));
-      const calendarIcons = Object.fromEntries(this._config.calendar.entities.map((entry) => [
-        entry.entity_id,
-        /school/i.test(`${entry.label} ${entry.entity_id}`) ? "mdi:school-outline" : "mdi:home-heart"
-      ]));
-      this._ensureChildCard(`calendar:${this._calendarMode}`, {
-        type: this._config.calendar.card_type,
-        title: "",
-        entities: this._config.calendar.entities.map((entry) => entry.entity_id),
-        calendar_names: calendarNames,
-        calendar_badge_icons: calendarIcons,
-        colors: colours,
-        default_view: viewMap[this._calendarMode] || "week-compact",
-        ...(this._calendarMode === "day" ? { rolling_days_schedule: 1 } : {}),
-        rolling_days_agenda: this._config.calendar.rolling_days,
-        first_day_of_week: 1,
-        week_days: [0, 1, 2, 3, 4, 5, 6],
-        use_24hr_schedule: true,
-        shorten_event_times: true,
-        show_event_location: true,
-        show_current_time_bar: true,
-        past_event_mode: "muted",
-        show_header_controls: true,
-        hide_navigation_buttons: false,
-        hide_calendars: false,
-        hide_view_selector: true,
-        hide_add_event_button: true,
-        hide_dark_mode_toggle: true,
-        enable_event_management: false,
-        readonly_calendars: this._config.calendar.entities.map((entry) => entry.entity_id),
-        preference_storage_key: this._config.calendar.preference_storage_key,
-        compact_header: true,
-        compact_height: true,
-        color_scheme: "light",
-        language: this._config.product.locale.split("-")[0],
-        locale: this._config.product.locale,
-        time_zone: this._config.product.timezone
-      }, "calendar-card-slot");
-    }
     if (this._view === "family" && this._config.features.location_map) {
       this._ensureChildCard("map", {
         type: "map",
@@ -4620,7 +4698,7 @@ export class FamilyHubCard extends HTMLElementBase {
         return;
       }
       if (event.key === "Tab") {
-        const controls = [...this.shadowRoot.querySelectorAll('.planner-modal button:not([disabled]),.planner-modal input:not([disabled]),.planner-modal select:not([disabled])')];
+        const controls = [...this.shadowRoot.querySelectorAll('.planner-modal button:not([disabled]),.planner-modal input:not([disabled]),.planner-modal select:not([disabled]),.planner-modal textarea:not([disabled])')];
         if (!controls.length) return;
         const first = controls[0];
         const last = controls[controls.length - 1];
@@ -4718,6 +4796,25 @@ export class FamilyHubCard extends HTMLElementBase {
     }
   }
 
+  async _addCustomPreparationForEvent(eventKey, personId, itemText) {
+    const event = this._plannerEventByKey(eventKey);
+    const item = String(itemText || "").trim();
+    if (!event || !item || !event?._calendar?.person_ids?.includes(personId)) return;
+    try {
+      await this._createPreparationItems(event, { id: "custom", items: [item] }, [personId]);
+    } catch (error) {
+      this._preparationError = error?.message || "The Ready item could not be added.";
+      this._scheduleRender(true);
+    }
+  }
+
+  _createdEventMatch(calendar, summary, start) {
+    const expectedDate = dateKey(start, this._config.product.timezone);
+    return [...this._calendarEvents].reverse().find((event) => event?._calendar?.entity_id === calendar.entity_id
+      && String(event.summary || "").trim().toLocaleLowerCase() === summary.trim().toLocaleLowerCase()
+      && dateKey(calendarEventStart(event), this._config.product.timezone) === expectedDate) || null;
+  }
+
   async _togglePreparationItem(itemId, status) {
     const entityId = this._config.calendar.preparation?.todo_entity;
     const item = this._preparationItems.find((entry) => String(entry.uid || entry.id || entry.summary) === itemId);
@@ -4736,6 +4833,20 @@ export class FamilyHubCard extends HTMLElementBase {
     }
   }
 
+  async _removePreparationItem(itemId) {
+    const entityId = this._config.calendar.preparation?.todo_entity;
+    const item = this._preparationItems.find((entry) => String(entry.uid || entry.id || entry.summary) === itemId);
+    if (!entityId || !item) return;
+    try {
+      await this._callPlannerAction("todo", "remove_item", entityId, { item: itemId });
+      this._preparationRequestKey = "";
+      await this._loadPreparationItems(true);
+    } catch (error) {
+      this._preparationError = error?.message || "The Ready item could not be removed.";
+      this._scheduleRender(true);
+    }
+  }
+
   async _savePlannerEvent() {
     if (this._plannerModal?.type !== "add" || this._plannerModal.saving) return;
     const field = (name) => this.shadowRoot.querySelector(`[data-planner-field="${name}"]`)?.value?.trim?.() || "";
@@ -4745,6 +4856,9 @@ export class FamilyHubCard extends HTMLElementBase {
     const date = field("date");
     const startTime = field("start");
     const endTime = field("end");
+    const location = field("location");
+    const templateId = field("template");
+    const customItems = field("custom-items").split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean).slice(0, 20);
     if (!calendar || !summary || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(startTime) || !/^\d{2}:\d{2}$/.test(endTime)) {
       this._plannerModal.error = "Choose a calendar and enter the event, date, start and end time.";
       this._scheduleRender(true);
@@ -4761,22 +4875,25 @@ export class FamilyHubCard extends HTMLElementBase {
     this._plannerModal.error = "";
     this._scheduleRender(true);
     try {
-      const location = field("location");
       await this._callPlannerAction("calendar", "create_event", calendar.entity_id, {
         summary,
         start_date_time: start,
         end_date_time: end,
         ...(location ? { location } : {})
       });
-      const event = { summary, start, end, location, _calendar: calendar };
-      const template = this._config.calendar.preparation?.templates?.find((entry) => entry.id === field("template"));
-      if (template) {
-        const childIds = calendar.person_ids.filter((personId) => this._config.people.some((person) => person.id === personId && person.role === "child"));
+      const syntheticEvent = { summary, start, end, location, _calendar: calendar };
+      this._calendarRequestKey = "";
+      await this._loadCalendarEvents(true);
+      const event = this._createdEventMatch(calendar, summary, start) || syntheticEvent;
+      const template = this._config.calendar.preparation?.templates?.find((entry) => entry.id === templateId);
+      const childIds = calendar.person_ids.filter((personId) => this._config.people.some((person) => person.id === personId && person.role === "child"));
+      if (template && childIds.length) {
         await this._createPreparationItems(event, template, childIds);
       }
+      if (customItems.length && childIds.length) await this._createPreparationItems(event, { id: "custom", items: customItems }, childIds);
       this._plannerModal = null;
       this._calendarRequestKey = "";
-      await this._loadCalendarEvents();
+      await this._loadCalendarEvents(true);
       this._scheduleRender(true);
     } catch (error) {
       this._plannerModal.saving = false;
@@ -4797,12 +4914,26 @@ export class FamilyHubCard extends HTMLElementBase {
       if (target.dataset.plannerClose !== undefined) {
         this._plannerModal = null;
         this._scheduleRender(true);
+        void this._loadCalendarEvents(true);
       } else if (target.dataset.plannerSave !== undefined) {
         void this._savePlannerEvent();
       } else if (target.dataset.prepItem) {
         void this._togglePreparationItem(target.dataset.prepItem, target.dataset.prepStatus);
+      } else if (target.dataset.removePrepItem) {
+        void this._removePreparationItem(target.dataset.removePrepItem);
       } else if (target.dataset.addPreparation) {
         void this._addPreparationForEvent(target.dataset.addPreparation, target.dataset.preparationTemplate, target.dataset.preparationPerson);
+      } else if (target.dataset.addEventTemplate) {
+        const templateId = this.shadowRoot.querySelector('[data-planner-field="event-template"]')?.value || "";
+        const personId = this.shadowRoot.querySelector('[data-planner-field="event-person"]')?.value || "";
+        if (templateId && personId) void this._addPreparationForEvent(target.dataset.addEventTemplate, templateId, personId);
+      } else if (target.dataset.addEventCustom) {
+        const input = this.shadowRoot.querySelector('[data-planner-field="event-custom-item"]');
+        const personId = this.shadowRoot.querySelector('[data-planner-field="event-person"]')?.value || "";
+        if (input?.value?.trim() && personId) {
+          void this._addCustomPreparationForEvent(target.dataset.addEventCustom, personId, input.value);
+          input.value = "";
+        }
       }
       return;
     }
@@ -4820,6 +4951,15 @@ export class FamilyHubCard extends HTMLElementBase {
       const allowed = new Set(["all", ...this._config.people.map((person) => person.id)]);
       if (allowed.has(target.dataset.calendarPerson)) this._calendarPersonFilter = target.dataset.calendarPerson;
       this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.calendarNav) {
+      this._moveCalendar(target.dataset.calendarNav);
+      return;
+    }
+    if (target.dataset.calendarRefresh !== undefined) {
+      this._calendarRequestKey = "";
+      void this._loadCalendarEvents(true);
       return;
     }
     if (target.dataset.prepItem) {
@@ -4840,6 +4980,11 @@ export class FamilyHubCard extends HTMLElementBase {
       if (!this._enabledViews().some((view) => view.id === target.dataset.view)) return;
       if (this._view === "entry" && target.dataset.view !== "entry") this._closeActiveCamera({ render: false, invalidate: true });
       this._view = target.dataset.view;
+      if (this._view === "calendar") {
+        this._calendarAnchorKey = this._calendarAnchorKey || dateKey(new Date(), this._config.product.timezone);
+        this._calendarRequestKey = "";
+        void this._loadCalendarEvents(true);
+      }
       this._childMountGeneration += 1;
       this._pruneInactiveChildCards();
       this._scheduleRender(true);
@@ -4862,9 +5007,11 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     if (target.dataset.calendarMode) {
       this._calendarMode = target.dataset.calendarMode;
+      this._calendarRequestKey = "";
       this._childMountGeneration += 1;
       this._pruneInactiveChildCards();
       this._scheduleRender(true);
+      void this._loadCalendarEvents(true);
       return;
     }
     if (target.dataset.floor) {
@@ -6206,7 +6353,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .league-table th,.league-table td { padding:7px 8px; text-align:right; border-bottom:1px solid color-mix(in srgb,var(--hub-muted) 12%,transparent); }
       .league-table th:nth-child(2),.league-table td:nth-child(2) { text-align:left; }
       .league-table tr.is-spotlight { background:color-mix(in srgb,var(--hub-accent) 9%,var(--hub-surface)); }
-      .calendar-view { position:relative; display:grid; grid-template-rows:58px 50px minmax(0,1fr); gap:9px; background:linear-gradient(155deg,rgba(250,246,245,.94),rgba(235,230,242,.91)); }
+      .calendar-view { position:relative; display:grid; grid-template-rows:58px 50px 48px minmax(0,1fr); gap:9px; background:linear-gradient(155deg,rgba(250,246,245,.94),rgba(235,230,242,.91)); }
       .calendar-toolbar { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:14px; }
       .calendar-toolbar-actions { display:flex; align-items:center; gap:9px; }
       .calendar-add-event { min-height:48px; padding:0 12px; border:0; border-radius:11px; background:#1463E8; color:#fff; display:flex; align-items:center; gap:5px; font-size:12px; font-weight:800; cursor:pointer; }
@@ -6223,6 +6370,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .calendar-person-filter { flex:0 0 auto; min-height:48px; padding:4px 12px 4px 5px; border:1px solid rgba(26,45,78,.11); border-radius:999px; background:rgba(255,255,255,.7); color:#445069; display:flex; align-items:center; gap:7px; font-size:12px; font-weight:800; cursor:pointer; }
       .calendar-person-filter > span { width:32px; height:32px; display:grid; place-items:center; border-radius:50%; background:var(--person-colour); color:#fff; }
       .calendar-person-filter.is-selected { border-color:var(--person-colour); background:color-mix(in srgb,var(--person-colour) 11%,#fff); color:#14213A; box-shadow:0 4px 12px color-mix(in srgb,var(--person-colour) 17%,transparent); }
+      .calendar-navigation { min-width:0; display:grid; grid-template-columns:48px 66px minmax(0,1fr) 48px 48px; gap:7px; align-items:center; }
+      .calendar-navigation button { min-width:48px; min-height:48px; border:1px solid rgba(26,45,78,.12); border-radius:11px; background:#fff; color:#31405C; font-weight:850; cursor:pointer; }
+      .calendar-navigation strong { min-width:0; text-align:center; color:#24314A; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       .family-planner-slot { position:relative; min-height:0; overflow:hidden; }
       .family-planner-grid { height:100%; min-height:0; display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:7px; }
       .family-planner-grid.is-day { grid-template-columns:minmax(0,1fr); }
@@ -6244,10 +6394,27 @@ export class FamilyHubCard extends HTMLElementBase {
       .planner-ready-state { margin-top:3px; display:flex; align-items:center; gap:3px; color:#7A5720; font-size:12px; font-weight:850; }
       .planner-ready-state ha-icon { --mdc-icon-size:12px; }
       .family-planner-event.is-ready .planner-ready-state { color:#167451; }
+      .family-planner-event.is-compact { min-height:20px; padding:2px 4px 2px 8px; gap:0; border-radius:6px; }
+      .family-planner-event.is-compact .planner-event-time { display:none; }
+      .family-planner-event.is-compact strong { font-size:10px; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+      .family-planner-event.is-compact .planner-ready-state { display:none; }
       .family-planner-empty { margin:auto; color:#9BA4B4; font-size:12px; }
       .day-ready { padding:6px 7px; border-top:1px solid rgba(38,50,77,.07); background:#FFF8E9; color:#7B581D; display:flex; align-items:center; gap:4px; font-size:12px; font-weight:850; }
       .day-ready ha-icon { --mdc-icon-size:13px; }
       .day-ready.is-ready { background:#ECF9F3; color:#167451; }
+      .planner-month-headings { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:5px; margin-bottom:5px; color:#6D7890; font-size:10px; font-weight:850; text-align:center; text-transform:uppercase; }
+      .planner-month-grid { height:calc(100% - 21px); min-height:0; display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); grid-template-rows:repeat(6,minmax(0,1fr)); gap:5px; }
+      .planner-month-day { min-width:0; min-height:0; padding:5px; border:1px solid rgba(38,50,77,.09); border-radius:10px; background:rgba(255,255,255,.76); overflow:hidden; }
+      .planner-month-day.is-outside { opacity:.48; }
+      .planner-month-day.is-today { border-color:#1463E8; box-shadow:inset 0 0 0 1px #1463E8; }
+      .planner-month-day > header { height:21px; color:#536078; font-size:11px; }
+      .planner-month-day > div { display:grid; gap:3px; }
+      .planner-month-more { color:#68748A; font-size:9px; font-weight:800; }
+      .planner-agenda-list { height:100%; min-height:0; display:grid; gap:9px; overflow:auto; }
+      .planner-agenda-day { display:grid; grid-template-columns:110px minmax(0,1fr); gap:10px; padding:10px; border:1px solid rgba(38,50,77,.09); border-radius:14px; background:rgba(255,255,255,.72); }
+      .planner-agenda-day.is-today { border-color:#1463E8; }
+      .planner-agenda-day > header { color:#30405F; font-size:12px; }
+      .planner-agenda-day > div { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
       .calendar-card-slot .embedded-card { height:100%; min-height:0; overflow:auto; }
       .calendar-fallback { position:relative; height:100%; min-height:0; padding:10px; }
       .calendar-legends { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:7px 13px; }
@@ -6282,12 +6449,14 @@ export class FamilyHubCard extends HTMLElementBase {
       .planner-checklist-heading h3 { margin:3px 0 0; font-size:17px; }
       .planner-checklist-heading > span { width:38px; height:38px; display:grid; place-items:center; border-radius:13px; background:#FFF2D8; color:#9A681C; }
       .planner-checklist-heading > span.is-ready { background:#E7F7EF; color:#167451; }
-      .planner-check-item { width:100%; min-height:48px; padding:7px 10px; border:1px solid #E1E7EF; border-radius:12px; background:#fff; color:#17233A; display:grid; grid-template-columns:27px minmax(0,1fr) auto; align-items:center; gap:8px; text-align:left; cursor:pointer; }
-      .planner-check-item > span { width:26px; height:26px; display:grid; place-items:center; border-radius:9px; background:#EFF3F8; color:#718097; }
+      .planner-check-item { width:100%; min-height:48px; border:1px solid #E1E7EF; border-radius:12px; background:#fff; color:#17233A; display:grid; grid-template-columns:minmax(0,1fr) 48px; align-items:center; overflow:hidden; }
+      .planner-check-item > button:first-child { min-width:0; min-height:48px; padding:7px 10px; border:0; background:transparent; color:inherit; display:grid; grid-template-columns:27px minmax(0,1fr) auto; align-items:center; gap:8px; text-align:left; cursor:pointer; }
+      .planner-check-item > button:first-child > span { width:26px; height:26px; display:grid; place-items:center; border-radius:9px; background:#EFF3F8; color:#718097; }
       .planner-check-item strong { font-size:12px; }
       .planner-check-item small { padding:4px 7px; border-radius:999px; background:color-mix(in srgb,var(--person-colour) 12%,#fff); color:var(--person-colour); font-size:12px; font-weight:850; }
+      .planner-remove-item { width:48px; height:48px; border:0; border-left:1px solid #E8EDF3; background:transparent; color:#8B5260; cursor:pointer; }
       .planner-check-item.is-complete { background:#F2FAF6; border-color:#CCEBDD; }
-      .planner-check-item.is-complete > span { background:#1B9A6B; color:#fff; }
+      .planner-check-item.is-complete > button:first-child > span { background:#1B9A6B; color:#fff; }
       .planner-check-item.is-complete strong { color:#668074; text-decoration:line-through; }
       .planner-suggestion { padding:15px; border:1px solid #F0DCB2; border-radius:15px; background:#FFF9EC; display:grid; grid-template-columns:38px minmax(0,1fr); gap:11px; }
       .planner-suggestion > span { width:38px; height:38px; display:grid; place-items:center; border-radius:12px; background:#FFE9B9; color:#A26B17; }
@@ -6296,6 +6465,11 @@ export class FamilyHubCard extends HTMLElementBase {
       .planner-suggestion div > div { display:flex; gap:7px; margin-top:11px; }
       .planner-suggestion button { min-height:48px; padding:8px 11px; border:0; border-radius:10px; background:var(--person-colour); color:#fff; font-size:12px; font-weight:850; cursor:pointer; }
       .planner-no-prep { margin:0; padding:15px; border-radius:14px; background:#EFF3F8; color:#68748A; font-size:12px; }
+      .planner-checklist-editor { margin-top:14px; padding-top:14px; border-top:1px solid #E1E7EF; display:grid; gap:8px; }
+      .planner-editor-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:7px; }
+      .planner-editor-row + .planner-editor-row { grid-template-columns:minmax(0,1fr) auto; }
+      .planner-editor-row input,.planner-editor-row select { min-width:0; height:48px; padding:0 10px; border:1px solid #D9E1EC; border-radius:10px; background:#fff; color:#152139; font:inherit; font-size:12px; }
+      .planner-editor-row button { min-height:48px; padding:0 12px; border:0; border-radius:10px; background:#1463E8; color:#fff; font-size:12px; font-weight:850; cursor:pointer; }
       .planner-modal > footer { min-height:58px; padding:10px 25px; border-top:1px solid #E4E9F1; background:#fff; display:flex; justify-content:space-between; align-items:center; gap:10px; }
       .planner-modal > footer > span { display:flex; align-items:center; gap:5px; color:#68748A; font-size:12px; }
       .planner-add-modal { width:min(700px,94%); }
@@ -6303,7 +6477,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .planner-event-form label { display:grid; gap:5px; }
       .planner-event-form label.is-wide { grid-column:1/-1; }
       .planner-event-form label > span { color:#536078; font-size:12px; font-weight:850; text-transform:uppercase; letter-spacing:.04em; }
-      .planner-event-form input,.planner-event-form select { min-width:0; height:48px; padding:0 11px; border:1px solid #D9E1EC; border-radius:11px; background:#fff; color:#152139; font:inherit; font-size:12px; }
+      .planner-event-form input,.planner-event-form select,.planner-event-form textarea { min-width:0; height:48px; padding:0 11px; border:1px solid #D9E1EC; border-radius:11px; background:#fff; color:#152139; font:inherit; font-size:12px; }
+      .planner-event-form textarea { height:84px; padding:10px 11px; resize:vertical; }
+      .planner-event-form label > small { color:#758096; font-size:11px; }
       .planner-form-error { grid-column:1/-1; min-height:15px; margin:0; color:#B83C4A; font-size:12px; font-weight:750; }
       .planner-add-modal > footer button { min-width:110px; min-height:48px; border:1px solid #D9E1EC; border-radius:11px; background:#fff; color:#42506A; font-weight:850; cursor:pointer; }
       .planner-add-modal > footer { justify-content:flex-end; }
@@ -6986,6 +7162,7 @@ export class FamilyHubCard extends HTMLElementBase {
         .calendar-modes .segment { justify-content:center; }
         .family-planner-slot { overflow:auto; scrollbar-gutter:stable; }
         .family-planner-grid:not(.is-day) { min-width:980px; }
+        .day-people { display:none; }
         .whole-home-grid,.heating-grid,.cover-grid { grid-template-columns:1fr; height:auto; }
         .heating-grid,.heating-grid[data-zone-count="6"] { grid-template-columns:1fr; }
         .cleaning-panel { height:auto; display:flex; flex-direction:column; }

@@ -108,6 +108,8 @@ test("extracts and totals only bounded Family Planner checklist items", () => {
 test("shows preparation only inside the configured upcoming window", () => {
   const now = new Date("2026-09-24T10:00:00Z");
   assert.equal(isPreparationWindowEvent({ start: "2026-09-25T17:30:00Z" }, 7, now), true);
+  assert.equal(isPreparationWindowEvent({ start: "2026-09-25T22:30:00Z" }, 1, now), true);
+  assert.equal(isPreparationWindowEvent({ start: "2026-09-26T08:00:00Z" }, 1, now), false);
   assert.equal(isPreparationWindowEvent({ start: "2026-10-05T17:30:00Z" }, 7, now), false);
   assert.equal(isPreparationWindowEvent({ start: "2026-09-23T17:30:00Z", end: "2026-09-23T19:00:00Z" }, 7, now), false);
 });
@@ -127,12 +129,63 @@ test("allows only configured Family Planner calendar and checklist actions", () 
   assert.equal(isAllowedPlannerAction("calendar", "create_event", "calendar.ernie", config), true);
   assert.equal(isAllowedPlannerAction("calendar", "create_event", "calendar.school", config), false);
   assert.equal(isAllowedPlannerAction("todo", "add_item", "todo.family_prep", config), true);
+  assert.equal(isAllowedPlannerAction("todo", "remove_item", "todo.family_prep", config), true);
   assert.equal(isAllowedPlannerAction("todo", "delete_item", "todo.family_prep", config), false);
   assert.equal(isAllowedPlannerAction("todo", "add_item", "todo.other", config), false);
   config.display.read_only = true;
   assert.equal(isAllowedPlannerAction("calendar", "create_event", "calendar.ernie", config), false);
   assert.equal(isAllowedPlannerAction("todo", "update_item", "todo.family_prep", config), false);
+  assert.equal(isAllowedPlannerAction("todo", "remove_item", "todo.family_prep", config), false);
   assert.equal(isAllowedPlannerAction("todo", "get_items", "todo.family_prep", config), true);
+});
+
+test("captures the selected Ready template and custom items before the saving render", async () => {
+  const card = Object.create(FamilyHubCard.prototype);
+  const values = {
+    calendar: "calendar.ernie",
+    summary: "Birthday party",
+    date: "2026-11-15",
+    start: "13:30",
+    end: "16:00",
+    location: "Campaign Paintball",
+    template: "birthday_party",
+    "custom-items": "Warm coat\nThank-you card"
+  };
+  card._plannerModal = { type: "add", saving: false, error: "" };
+  card._config = {
+    display: { read_only: false },
+    features: { calendar: true },
+    product: { timezone: "Europe/London" },
+    people: [{ id: "ernie", role: "child" }],
+    calendar: {
+      entities: [{ entity_id: "calendar.ernie", allow_create: true, person_ids: ["ernie"] }],
+      preparation: {
+        todo_entity: "todo.family_prep",
+        templates: [{ id: "birthday_party", items: ["Birthday present", "Birthday card"] }]
+      }
+    }
+  };
+  card._calendarEvents = [];
+  card.shadowRoot = { querySelector: (selector) => {
+    const name = selector.match(/data-planner-field="([^"]+)"/)?.[1];
+    return { value: values[name] || "" };
+  } };
+  card._scheduleRender = () => {
+    values.template = "";
+    values["custom-items"] = "";
+  };
+  card._callPlannerAction = async () => undefined;
+  card._loadCalendarEvents = async () => undefined;
+  const created = [];
+  card._createPreparationItems = async (_event, template, people) => created.push({ template, people });
+
+  await card._savePlannerEvent();
+
+  assert.equal(card._plannerModal, null);
+  assert.deepEqual(created, [
+    { template: { id: "birthday_party", items: ["Birthday present", "Birthday card"] }, people: ["ernie"] },
+    { template: { id: "custom", items: ["Warm coat", "Thank-you card"] }, people: ["ernie"] }
+  ]);
 });
 
 test("keeps kiosk photos inside the private Home Assistant media source", () => {
@@ -3164,7 +3217,7 @@ test("keeps unauthorised Classroom assignments out of the Family view", () => {
   };
 
   const html = card._renderFamilyPerson({ id: "child_one", name: "Child one", colour: "#1463E8" });
-  assert.match(html, /Classroom ready after consent/);
+  assert.doesNotMatch(html, /Classroom ready after consent|Classroom not connected|Classroom unavailable/);
   assert.doesNotMatch(html, /assignments/);
   assert.doesNotMatch(html, /Stale private assignment|Example/);
 });

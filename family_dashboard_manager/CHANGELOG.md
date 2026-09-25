@@ -1,3 +1,12 @@
+## 0.11.1
+
+- Replace the failing Month and Agenda child-card mounts with first-party views that share the same family colours, event detail, filtering and bounded calendar API as Day and Week.
+- Add Previous, Today, Next and explicit Refresh controls. Refresh bypasses the short event cache so Apple-side edits and deletions can be read without waiting for an entity timestamp change.
+- Fix the event-creation race that reset the selected Ready template while the Apple Calendar write was in flight; the complete form is now captured before rendering the saving state.
+- Let an adult add template and one-off Ready items during event creation or later from the event, and remove individual Ready items from the one configured local to-do list.
+- Rename the Family navigation surface to **Tasks**, show Ready items from the calendar day before they are due, and omit the Classroom placeholder while School is disabled.
+- Expand the public example with birthday, swimming, sleepover and day-out templates while keeping arbitrary per-event items available.
+
 ## 0.11.0
 
 - Replace the Day and Week calendar surfaces with a first-party Family Planner that makes each person's colour and daily commitments visible at a glance while retaining the installed Daylight card for Month and Agenda.
