@@ -44,6 +44,33 @@ test("keeps Energy and the preferred Home room optional for existing schema-v6 h
   assert.equal(validateConfig(config).schema_version, CURRENT_SCHEMA_VERSION);
 });
 
+test("bounds Family Planner creation and preparation configuration", () => {
+  const config = structuredClone(example);
+  assert.equal(validateConfig(config).calendar.preparation.todo_entity, "todo.family_prep");
+
+  const invalidCreate = structuredClone(example);
+  invalidCreate.calendar.entities[0].allow_create = "yes";
+  assert.throws(() => validateConfig(invalidCreate), /allow_create/);
+
+  const wrongList = structuredClone(example);
+  wrongList.calendar.preparation.todo_entity = "sensor.family_prep";
+  assert.throws(() => validateConfig(wrongList), /todo domain/);
+
+  const duplicateTemplate = structuredClone(example);
+  duplicateTemplate.calendar.preparation.templates.push(structuredClone(duplicateTemplate.calendar.preparation.templates[0]));
+  assert.throws(() => validateConfig(duplicateTemplate), /templates\[\]\.id: must be unique/);
+
+  const duplicateItem = structuredClone(example);
+  duplicateItem.calendar.preparation.templates[0].items.push("boots");
+  duplicateItem.calendar.preparation.templates[0].items.push("Boots");
+  assert.throws(() => validateConfig(duplicateItem), /items: must be unique/);
+
+  const hiddenCalendar = structuredClone(example);
+  hiddenCalendar.features.calendar = false;
+  hiddenCalendar.features.school = false;
+  assert.throws(() => validateConfig(hiddenCalendar), /preparation\.enabled: requires Calendar/);
+});
+
 test("requires a complete, unique sensor mapping only when Energy is configured", () => {
   const missing = structuredClone(example);
   delete missing.energy;

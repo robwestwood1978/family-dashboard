@@ -19,6 +19,7 @@ views:
               "card_type": "custom:daylight-calendar-card",
               "entities": [
                 {
+                  "allow_create": true,
                   "category": "family",
                   "colour": "#5B5BD6",
                   "entity_id": "calendar.family",
@@ -26,13 +27,15 @@ views:
                   "label": "Family",
                   "person_ids": [
                     "parent",
+                    "parent_two",
                     "child_one",
                     "child_two"
                   ]
                 },
                 {
+                  "allow_create": false,
                   "category": "school",
-                  "colour": "#E76F51",
+                  "colour": "#D97945",
                   "entity_id": "calendar.school",
                   "id": "school",
                   "label": "School",
@@ -40,10 +43,92 @@ views:
                     "child_one",
                     "child_two"
                   ]
+                },
+                {
+                  "allow_create": true,
+                  "category": "personal",
+                  "colour": "#5B5BD6",
+                  "entity_id": "calendar.parent",
+                  "id": "parent",
+                  "label": "Parent",
+                  "person_ids": [
+                    "parent"
+                  ]
+                },
+                {
+                  "allow_create": true,
+                  "category": "personal",
+                  "colour": "#E4B93F",
+                  "entity_id": "calendar.parent_two",
+                  "id": "parent_two",
+                  "label": "Parent two",
+                  "person_ids": [
+                    "parent_two"
+                  ]
+                },
+                {
+                  "allow_create": true,
+                  "category": "personal",
+                  "colour": "#E76F51",
+                  "entity_id": "calendar.child_one",
+                  "id": "child_one",
+                  "label": "Child one",
+                  "person_ids": [
+                    "child_one"
+                  ]
+                },
+                {
+                  "allow_create": true,
+                  "category": "personal",
+                  "colour": "#2A9D8F",
+                  "entity_id": "calendar.child_two",
+                  "id": "child_two",
+                  "label": "Child two",
+                  "person_ids": [
+                    "child_two"
+                  ]
                 }
               ],
               "initial_view": "week",
               "preference_storage_key": "family_dashboard_example_calendar",
+              "preparation": {
+                "enabled": true,
+                "lookahead_days": 7,
+                "templates": [
+                  {
+                    "id": "football",
+                    "items": [
+                      "Football kit",
+                      "Shin pads",
+                      "Boots",
+                      "Snack pack",
+                      "Water bottle"
+                    ],
+                    "keywords": [
+                      "football",
+                      "training",
+                      "match"
+                    ],
+                    "label": "Football"
+                  },
+                  {
+                    "id": "school_trip",
+                    "items": [
+                      "School uniform",
+                      "Waterproof coat",
+                      "Snack pack",
+                      "Water bottle"
+                    ],
+                    "keywords": [
+                      "school trip",
+                      "river walk",
+                      "museum"
+                    ],
+                    "label": "School trip"
+                  }
+                ],
+                "todo_entity": "todo.family_prep"
+              },
               "rolling_days": 7
             },
             "chores": {
@@ -368,6 +453,13 @@ views:
                 "id": "parent",
                 "location_entity": "person.example_parent",
                 "name": "Parent",
+                "role": "parent"
+              },
+              {
+                "colour": "#E4B93F",
+                "id": "parent_two",
+                "location_entity": "person.example_parent_two",
+                "name": "Parent two",
                 "role": "parent"
               },
               {

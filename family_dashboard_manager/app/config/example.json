@@ -45,6 +45,13 @@
       "location_entity": "person.example_parent"
     },
     {
+      "id": "parent_two",
+      "name": "Parent two",
+      "role": "parent",
+      "colour": "#E4B93F",
+      "location_entity": "person.example_parent_two"
+    },
+    {
       "id": "child_one",
       "name": "Child one",
       "role": "child",
@@ -85,18 +92,75 @@
         "entity_id": "calendar.family",
         "label": "Family",
         "colour": "#5B5BD6",
-        "person_ids": ["parent", "child_one", "child_two"],
-        "category": "family"
+        "person_ids": ["parent", "parent_two", "child_one", "child_two"],
+        "category": "family",
+        "allow_create": true
       },
       {
         "id": "school",
         "entity_id": "calendar.school",
         "label": "School",
-        "colour": "#E76F51",
+        "colour": "#D97945",
         "person_ids": ["child_one", "child_two"],
-        "category": "school"
+        "category": "school",
+        "allow_create": false
+      },
+      {
+        "id": "parent",
+        "entity_id": "calendar.parent",
+        "label": "Parent",
+        "colour": "#5B5BD6",
+        "person_ids": ["parent"],
+        "category": "personal",
+        "allow_create": true
+      },
+      {
+        "id": "parent_two",
+        "entity_id": "calendar.parent_two",
+        "label": "Parent two",
+        "colour": "#E4B93F",
+        "person_ids": ["parent_two"],
+        "category": "personal",
+        "allow_create": true
+      },
+      {
+        "id": "child_one",
+        "entity_id": "calendar.child_one",
+        "label": "Child one",
+        "colour": "#E76F51",
+        "person_ids": ["child_one"],
+        "category": "personal",
+        "allow_create": true
+      },
+      {
+        "id": "child_two",
+        "entity_id": "calendar.child_two",
+        "label": "Child two",
+        "colour": "#2A9D8F",
+        "person_ids": ["child_two"],
+        "category": "personal",
+        "allow_create": true
       }
-    ]
+    ],
+    "preparation": {
+      "enabled": true,
+      "todo_entity": "todo.family_prep",
+      "lookahead_days": 7,
+      "templates": [
+        {
+          "id": "football",
+          "label": "Football",
+          "keywords": ["football", "training", "match"],
+          "items": ["Football kit", "Shin pads", "Boots", "Snack pack", "Water bottle"]
+        },
+        {
+          "id": "school_trip",
+          "label": "School trip",
+          "keywords": ["school trip", "river walk", "museum"],
+          "items": ["School uniform", "Waterproof coat", "Snack pack", "Water bottle"]
+        }
+      ]
+    }
   },
   "weather": {
     "entity_id": "weather.home"

@@ -1,3 +1,11 @@
+## 0.11.0
+
+- Replace the Day and Week calendar surfaces with a first-party Family Planner that makes each person's colour and daily commitments visible at a glance while retaining the installed Daylight card for Month and Agenda.
+- Add confirmation-free event creation only for explicitly writable `calendar.*` mappings. New events use Home Assistant's bounded `calendar.create_event` service and therefore flow to the selected Apple CalDAV calendar without exposing Apple credentials to the dashboard.
+- Add keyword-matched preparation templates and a dedicated `todo.*` checklist. Event-linked items are shown in the planner and alongside each child's existing ChoreOps jobs, can be ticked off as **Ready**, and do not create ChoreOps points or disposable chores.
+- Keep Classroom optional, preserve the private kiosk photo frame and floorplans, and retain the manager-wide read-only switch. Read-only mode can display planner/checklist data but blocks every planner write.
+- Add schema, action-boundary, stable event-key, checklist parsing and progress regression coverage using generic public fixtures only.
+
 ## 0.10.1
 
 - Keep the active kiosk photo image mounted across ordinary Home Assistant state updates so its reveal animation cannot restart and pulse between the configured slide changes.
