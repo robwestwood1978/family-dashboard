@@ -46,6 +46,8 @@ export function isControlAction(dataset = {}) {
     || dataset.vacuumAction
     || dataset.alarmAction
     || dataset.secureCoverAction
+    || dataset.choreClaim
+    || dataset.rewardClaim
   );
 }
 
@@ -1207,12 +1209,34 @@ export function normaliseChoreStatus(state, entityId = "") {
   const [label, tone] = presentations[raw] || [titleCase(raw), "standby"];
   const fallbackName = String(entityId).split("_chore_status_")[1] || String(entityId).split(".")[1] || "Chore";
   return {
+    status: raw,
     name: state?.attributes?.chore_name || titleCase(fallbackName),
     label,
     tone,
     points: safeNumber(state?.attributes?.default_points, NaN),
     due: state?.attributes?.due_date || state?.attributes?.due_at || null
   };
+}
+
+export function choreClaimEntityId(statusEntityId = "") {
+  const match = String(statusEntityId).match(/^sensor\.([a-z0-9_]+)_choreops_chore_status_([a-z0-9_]+)$/);
+  return match ? `button.${match[1]}_choreops_claim_chore_${match[2]}` : null;
+}
+
+export function rewardClaimEntityId(statusEntityId = "") {
+  const match = String(statusEntityId).match(/^sensor\.([a-z0-9_]+)_choreops_reward_status_([a-z0-9_]+)$/);
+  return match ? `button.${match[1]}_choreops_claim_reward_${match[2]}` : null;
+}
+
+function choreIcon(name = "") {
+  const value = String(name).toLowerCase();
+  if (/teeth|tooth/.test(value)) return "mdi:toothbrush";
+  if (/dress|uniform|clothes/.test(value)) return "mdi:tshirt-crew-outline";
+  if (/bed|sleep/.test(value)) return "mdi:bed-clock";
+  if (/tidy|clean|sweep|vacuum/.test(value)) return "mdi:broom";
+  if (/school|homework|read/.test(value)) return "mdi:book-open-page-variant-outline";
+  if (/dish|table|kitchen/.test(value)) return "mdi:silverware-clean";
+  return "mdi:star-circle-outline";
 }
 
 const CHOREOPS_SUMMARY_KINDS = Object.freeze({
@@ -1357,6 +1381,7 @@ export function normaliseChoreOpsSummary(state, entityId = "", kind = "reward") 
     name: choreOpsSummaryName(state, entityId, summaryKind),
     label,
     tone,
+    status,
     icon: presentation.icon,
     kind: summaryKind
   };
@@ -1724,6 +1749,10 @@ function relevantEntityIds(config) {
     else add(value);
   };
   walk(config);
+  for (const user of config.chores?.users || []) {
+    for (const entityId of user.status_entities || []) add(choreClaimEntityId(entityId));
+    for (const entityId of user.reward_status_entities || []) add(rewardClaimEntityId(entityId));
+  }
   for (let gameweek = 1; gameweek <= 38; gameweek += 1) {
     ids.add(`${config.football.gameweek_entity_prefix}${gameweek}`);
   }
@@ -1852,6 +1881,9 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarLastLoadedAt = 0;
     this._calendarPersonFilter = "all";
     this._plannerModal = null;
+    this._familyPersonId = null;
+    this._pendingChoreClaims = new Set();
+    this._choreClaimFeedback = null;
     this._preparationItems = [];
     this._preparationLoading = false;
     this._preparationError = null;
@@ -1947,6 +1979,10 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarLastLoadedAt = 0;
     this._calendarPersonFilter = "all";
     this._plannerModal = null;
+    this._familyPersonId = config.people?.find((person) => person.role === "child")?.id || null;
+    this._pendingChoreClaims ||= new Set();
+    this._pendingChoreClaims.clear();
+    this._choreClaimFeedback = null;
     this._preparationItems = [];
     this._preparationLoading = false;
     this._preparationError = null;
@@ -3819,10 +3855,14 @@ export class FamilyHubCard extends HTMLElementBase {
     const familyTitle = choresEnabled ? "Tasks, jobs & rewards" : this._config.features.school ? "School & tasks" : "Tasks";
     const children = this._config.people.filter((person) => person.role === "child");
     if (!locationEnabled) {
+      const selected = children.find((person) => person.id === this._familyPersonId) || children[0];
+      const tabs = children.map((person) => `<button type="button" class="family-kid-tab ${selected?.id === person.id ? "is-selected" : ""}" data-family-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}" aria-pressed="${selected?.id === person.id}"><span>${escapeHtml(person.name.slice(0, 1))}</span><strong>${escapeHtml(person.name)}</strong></button>`).join("");
       return `
         <section class="family-dashboard">
           <header class="family-dashboard-heading"><div><p class="eyebrow">To-do</p><h2>${familyTitle}</h2></div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
-          <div class="family-people-grid">${children.map((person) => this._renderFamilyPerson(person)).join("")}</div>
+          ${children.length > 1 ? `<div class="family-kid-switcher" role="group" aria-label="Choose family member">${tabs}</div>` : ""}
+          ${this._choreClaimFeedback ? `<p class="chore-claim-feedback" role="status"><ha-icon icon="mdi:check-circle"></ha-icon>${escapeHtml(this._choreClaimFeedback)}</p>` : ""}
+          <div class="family-kid-stage">${selected ? this._renderFamilyPerson(selected, { kidMode: true }) : '<p class="hub-empty-state large">Add a child in Family Dashboard Admin to connect ChoreOps.</p>'}</div>
         </section>
       `;
     }
@@ -3844,16 +3884,16 @@ export class FamilyHubCard extends HTMLElementBase {
   _renderChoreOpsLink(extraClass = "") {
     if (this._config.display.read_only || !this._config.features.chores) return "";
     const path = safeInternalDashboardPath(this._config.chores?.dashboard_path);
-    if (!path) return "";
-    return `<a class="choreops-link ${extraClass}" href="${escapeHtml(path)}" data-choreops-link="native"><ha-icon icon="mdi:arrow-right" aria-hidden="true"></ha-icon>Open ChoreOps</a>`;
+    if (!path || path === "/choreops") return "";
+    return `<a class="choreops-link ${extraClass}" href="${escapeHtml(path)}" data-choreops-link="native"><ha-icon icon="mdi:cog-outline" aria-hidden="true"></ha-icon>Parent controls</a>`;
   }
 
-  _renderChoreOpsSummary(chore) {
+  _renderChoreOpsSummary(chore, points = NaN, personId = "") {
     if (!chore) return "";
     const states = this._hass?.states || {};
     const firstSummary = (entityIds, kind) => {
       const entityId = entityIds?.[0];
-      return entityId ? normaliseChoreOpsSummary(states[entityId], entityId, kind) : null;
+      return entityId ? { ...normaliseChoreOpsSummary(states[entityId], entityId, kind), entityId, state: states[entityId] } : null;
     };
     const items = [
       firstSummary(chore.reward_status_entities, "reward"),
@@ -3862,12 +3902,32 @@ export class FamilyHubCard extends HTMLElementBase {
     ].filter(Boolean);
     if (!items.length) return "";
     const labels = { reward: "Reward", badge: "Badge", achievement: "Achievement" };
-    const rows = items.map((item) => `
+    const rows = items.map((item) => {
+      const attributes = item.state?.attributes || {};
+      const rewardCost = firstFiniteNumber([attributes.reward_cost, attributes.cost, attributes.points_required]);
+      const percentageLabel = item.label.match(/([0-9.]+)%/);
+      const countLabel = item.label.match(/([0-9.]+) of ([0-9.]+)/);
+      const progress = item.kind === "reward" && Number.isFinite(points) && Number.isFinite(rewardCost) && rewardCost > 0
+        ? Math.min(100, Math.max(0, points / rewardCost * 100))
+        : percentageLabel
+          ? Number(percentageLabel[1])
+          : countLabel && Number(countLabel[2]) > 0
+            ? Math.min(100, Number(countLabel[1]) / Number(countLabel[2]) * 100)
+            : item.tone === "done" ? 100 : 0;
+      const claimEntity = item.kind === "reward" ? rewardClaimEntityId(item.entityId) : null;
+      const pending = claimEntity && this._pendingChoreClaims.has(claimEntity);
+      const canClaim = item.kind === "reward" && item.status === "available" && claimEntity
+        && isCommandEntityAvailable(states[claimEntity]) && !this._config.display.read_only && !pending;
+      const claimAction = canClaim || pending
+        ? `<button type="button" class="reward-claim" ${canClaim ? `data-reward-claim="${escapeHtml(claimEntity)}" data-reward-status="${escapeHtml(item.entityId)}" data-person-id="${escapeHtml(personId)}"` : "disabled"}>${pending ? "Requesting…" : "Claim reward"}</button>`
+        : "";
+      return `
       <div class="family-summary-item is-${escapeHtml(item.tone)}">
         <span><ha-icon icon="${escapeHtml(item.icon)}" aria-hidden="true"></ha-icon></span>
-        <div><p>${labels[item.kind]}</p><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.label)}</small></div>
+        <div><p>${labels[item.kind]}</p><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.label)}</small><i class="family-progress"><b style="width:${Math.round(progress)}%"></b></i>${claimAction}</div>
       </div>
-    `).join("");
+    `;
+    }).join("");
     return `<section class="family-summary-grid" aria-label="Rewards and progress">${rows}</section>`;
   }
 
@@ -3892,7 +3952,7 @@ export class FamilyHubCard extends HTMLElementBase {
     return `<section class="family-preparation ${ready ? "is-ready" : ""}" aria-label="Get ready for upcoming events"><div class="chore-heading"><p class="eyebrow">Get ready</p><span>${ready ? "Ready" : `${complete} of ${items.length}`}</span></div><div class="family-prep-list">${rows}</div>${items.length > 6 ? `<button type="button" class="family-prep-more" data-view="calendar">Open planner for ${items.length - 6} more</button>` : ""}</section>`;
   }
 
-  _renderFamilyPerson(person) {
+  _renderFamilyPerson(person, { kidMode = false } = {}) {
     const states = this._hass?.states || {};
     const choresEnabled = this._config.features.chores === true;
     const schoolEnabled = this._config.features.school === true;
@@ -3961,15 +4021,21 @@ export class FamilyHubCard extends HTMLElementBase {
     const choreRows = (chore?.status_entities || []).map((entityId) => {
       const state = states[entityId];
       const presentation = normaliseChoreStatus(state, entityId);
+      const claimEntity = choreClaimEntityId(entityId);
+      const claimableStatus = ["pending", "due", "overdue", "missed"].includes(presentation.status);
+      const actionAvailable = claimableStatus && claimEntity && isCommandEntityAvailable(states[claimEntity]);
+      const pending = claimEntity && this._pendingChoreClaims.has(claimEntity);
+      const interactive = kidMode && !this._config.display.read_only && actionAvailable && !pending;
       return `
-        <li class="chore-row is-${escapeHtml(presentation.tone)}">
-          <span class="chore-check"><ha-icon icon="${presentation.tone === "done" ? "mdi:check" : presentation.tone === "overdue" ? "mdi:alert" : "mdi:circle-small"}" aria-hidden="true"></ha-icon></span>
-          <span><strong>${escapeHtml(presentation.name)}</strong><small>${escapeHtml(presentation.label)}${presentation.due ? ` · ${escapeHtml(formatTime(presentation.due, this._config.product.locale, this._config.product.timezone))}` : ""}</small></span>
+        <li class="chore-row ${kidMode ? "is-kid-card" : ""} is-${escapeHtml(presentation.tone)} ${interactive ? "is-actionable" : ""}">
+          <span class="chore-check"><ha-icon icon="${escapeHtml(kidMode ? choreIcon(presentation.name) : presentation.tone === "done" ? "mdi:check" : presentation.tone === "overdue" ? "mdi:alert" : "mdi:circle-small")}" aria-hidden="true"></ha-icon></span>
+          <span><strong>${escapeHtml(presentation.name)}</strong><small>${escapeHtml(pending ? "Marking as done…" : presentation.label)}${presentation.due ? ` · ${escapeHtml(formatTime(presentation.due, this._config.product.locale, this._config.product.timezone))}` : ""}</small></span>
           ${Number.isFinite(presentation.points) ? `<b>+${presentation.points}</b>` : ""}
+          ${kidMode ? `<button type="button" class="chore-claim-action" ${interactive ? `data-chore-claim="${escapeHtml(claimEntity)}" data-chore-status="${escapeHtml(entityId)}" data-person-id="${escapeHtml(person.id)}"` : "disabled"}>${pending ? "Saving…" : presentation.tone === "done" ? "Done" : presentation.tone === "waiting" ? "Waiting for a grown-up" : interactive ? "Mark as done" : presentation.label}</button>` : ""}
         </li>
       `;
     }).join("");
-    const choreOpsSummary = choresEnabled ? this._renderChoreOpsSummary(chore) : "";
+    const choreOpsSummary = choresEnabled ? this._renderChoreOpsSummary(chore, safeNumber(points, NaN), person.id) : "";
     const choreHeading = choresEnabled && this._config.features.location_map
       ? `<div class="chore-heading"><p class="eyebrow">Today’s jobs</p><span>${choreRows ? `${(chore?.status_entities || []).length} jobs` : "None yet"}</span></div>`
       : "";
@@ -3982,7 +4048,7 @@ export class FamilyHubCard extends HTMLElementBase {
         : [])
     ].join("");
     return `
-      <article class="surface family-person" style="--person-colour:${escapeHtml(person.colour)}">
+      <article class="surface family-person ${kidMode ? "is-kid-mode" : ""}" style="--person-colour:${escapeHtml(person.colour)}">
         <div class="family-person-heading"><span>${escapeHtml(person.name.slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person.name)}</p><h2>${escapeHtml(presence)}</h2></div></div>
         ${factItems ? `<div class="family-facts">${factItems}</div>` : ""}
         ${choresEnabled && !chore ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps is not connected for this child.</p>' : choresEnabled && (!pointsAvailable || !choresSummaryAvailable) ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps data is currently unavailable.</p>' : ""}
@@ -4023,7 +4089,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const { index, gameweekState, table } = this._footballState();
     if (!isEntityAvailable(index) || !isEntityAvailable(gameweekState)) {
       return {
-        title: "Spurs & Villa",
+        title: this._config.football.spotlight_team_codes.join(" & "),
         html: this._config.football.spotlight_team_codes
           .map((code) => this._renderCompactUnavailableFavourite(code))
           .join("")
@@ -4110,7 +4176,13 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _clubPresentation(code) {
-    return FOOTBALL_CLUB_PRESENTATION[code] || { label: code, primary: "#0C315D", accent: "#8FD8CB" };
+    if (FOOTBALL_CLUB_PRESENTATION[code]) return FOOTBALL_CLUB_PRESENTATION[code];
+    const hue = [...String(code || "CLB")].reduce((total, character, index) => total + character.charCodeAt(0) * (index + 3), 0) % 360;
+    return {
+      label: code,
+      primary: `hsl(${hue} 58% 28%)`,
+      accent: `hsl(${(hue + 48) % 360} 72% 76%)`
+    };
   }
 
   _renderFavouriteHero(model) {
@@ -4243,8 +4315,8 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!events.length) return `
       <div class="football-empty">
         <span class="football-orbit"><ha-icon icon="mdi:soccer" aria-hidden="true"></ha-icon></span>
-        <div><p class="eyebrow">Between matchweeks</p><h3>No fixtures yet</h3><p>We’ll show the next Spurs or Aston Villa match here as soon as it is announced.</p></div>
-        <div class="empty-clubs"><span>TOT</span><i></i><span>AVL</span></div>
+        <div><p class="eyebrow">Between matchweeks</p><h3>No fixtures yet</h3><p>We’ll show the next match for your favourite clubs here as soon as it is announced.</p></div>
+        <div class="empty-clubs"><span>${escapeHtml(this._config.football.spotlight_team_codes[0])}</span><i></i><span>${escapeHtml(this._config.football.spotlight_team_codes[1])}</span></div>
       </div>
     `;
     const grouped = new Map();
@@ -5023,6 +5095,14 @@ export class FamilyHubCard extends HTMLElementBase {
       void this._togglePreparationItem(target.dataset.prepItem, target.dataset.prepStatus);
       return;
     }
+    if (target.dataset.familyPerson) {
+      if (this._config.people.some((person) => person.id === target.dataset.familyPerson && person.role === "child")) {
+        this._familyPersonId = target.dataset.familyPerson;
+        this._choreClaimFeedback = null;
+        this._scheduleRender(true);
+      }
+      return;
+    }
     if (this._pendingConfirmation && !target.dataset.confirmAction) return;
     if (target.dataset.homeTarget) {
       if (!this._enabledViews().some((view) => view.id === "rooms")) return;
@@ -5125,6 +5205,14 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     if (this._config.display.read_only && (isControlAction(target.dataset) || target.dataset.moreInfo)) return;
+    if (target.dataset.choreClaim) {
+      void this._claimChore(target.dataset.personId, target.dataset.choreStatus, target.dataset.choreClaim);
+      return;
+    }
+    if (target.dataset.rewardClaim) {
+      void this._claimReward(target.dataset.personId, target.dataset.rewardStatus, target.dataset.rewardClaim);
+      return;
+    }
     if (target.dataset.alarmAction && target.dataset.entity) {
       if (!this._config.features.entry
         || target.dataset.entity !== this._controlPolicy.alarm
@@ -5234,6 +5322,60 @@ export class FamilyHubCard extends HTMLElementBase {
         });
       }
     }
+  }
+
+  async _claimChore(personId, statusEntityId, claimEntityId) {
+    const user = this._config.chores?.users?.find((entry) => entry.person_id === personId);
+    const allowed = user?.status_entities?.includes(statusEntityId)
+      && claimEntityId === choreClaimEntityId(statusEntityId)
+      && isCommandEntityAvailable(this._hass?.states?.[claimEntityId]);
+    if (!allowed || this._config.display.read_only || this._pendingChoreClaims.has(claimEntityId)) return;
+    this._pendingChoreClaims.add(claimEntityId);
+    this._choreClaimFeedback = null;
+    this._scheduleRender(true);
+    let successful = false;
+    try {
+      await this._hass.callService("button", "press", { entity_id: claimEntityId });
+      successful = true;
+      this._choreClaimFeedback = "Nice work — a grown-up can approve that job now.";
+    } catch {
+      this._choreClaimFeedback = "That job could not be saved. Please ask a grown-up to try again.";
+    } finally {
+      if (successful) this._releaseClaimCooldown(claimEntityId);
+      else this._pendingChoreClaims.delete(claimEntityId);
+      this._scheduleRender(true);
+    }
+  }
+
+  async _claimReward(personId, statusEntityId, claimEntityId) {
+    const user = this._config.chores?.users?.find((entry) => entry.person_id === personId);
+    const allowed = user?.reward_status_entities?.includes(statusEntityId)
+      && claimEntityId === rewardClaimEntityId(statusEntityId)
+      && isCommandEntityAvailable(this._hass?.states?.[claimEntityId]);
+    if (!allowed || this._config.display.read_only || this._pendingChoreClaims.has(claimEntityId)) return;
+    this._pendingChoreClaims.add(claimEntityId);
+    this._choreClaimFeedback = null;
+    this._scheduleRender(true);
+    let successful = false;
+    try {
+      await this._hass.callService("button", "press", { entity_id: claimEntityId });
+      successful = true;
+      this._choreClaimFeedback = "Reward requested — a grown-up can approve it now.";
+    } catch {
+      this._choreClaimFeedback = "That reward could not be requested. Please ask a grown-up to try again.";
+    } finally {
+      if (successful) this._releaseClaimCooldown(claimEntityId);
+      else this._pendingChoreClaims.delete(claimEntityId);
+      this._scheduleRender(true);
+    }
+  }
+
+  _releaseClaimCooldown(claimEntityId) {
+    const timer = setTimeout(() => {
+      this._pendingChoreClaims.delete(claimEntityId);
+      this._scheduleRender(true);
+    }, 2500);
+    timer?.unref?.();
   }
 
   async _openCamera(cameraId) {
@@ -6583,6 +6725,16 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-dashboard { height:100%; min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr); gap:10px; }
       .family-dashboard-heading { min-height:48px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 2px; }
       .family-dashboard-heading h2 { margin:3px 0 0; color:var(--hub-text); font-size:22px; }
+      .family-kid-switcher { display:flex; gap:9px; overflow-x:auto; padding:2px; }
+      .family-kid-tab { min-width:150px; min-height:58px; padding:8px 14px; display:flex; align-items:center; gap:10px; border:2px solid transparent; border-radius:17px; background:var(--hub-surface); color:var(--hub-text); box-shadow:0 6px 18px rgba(11,24,48,.08); cursor:pointer; }
+      .family-kid-tab > span { width:36px; height:36px; display:grid; place-items:center; border-radius:50%; background:var(--person-colour); color:#fff; font-weight:900; }
+      .family-kid-tab strong { font-size:14px; }
+      .family-kid-tab.is-selected { border-color:var(--person-colour); background:color-mix(in srgb,var(--person-colour) 8%,var(--hub-surface)); }
+      .family-kid-stage { min-height:0; overflow:auto; }
+      .family-kid-stage .family-person { min-height:100%; overflow:visible; }
+      .family-kid-stage .family-person.is-kid-mode { padding:22px; }
+      .chore-claim-feedback { margin:0; padding:10px 14px; display:flex; align-items:center; gap:8px; border:1px solid #A9DCC1; border-radius:13px; background:#F1FAF5; color:#18794E; font-size:13px; font-weight:800; }
+      .chore-claim-feedback ha-icon { --mdc-icon-size:19px; }
       .choreops-link { min-height:48px; padding:0 14px; display:inline-flex; align-items:center; justify-content:center; gap:7px; border:1px solid color-mix(in srgb,var(--hub-accent) 24%,transparent); border-radius:14px; background:color-mix(in srgb,var(--hub-accent) 8%,var(--hub-surface)); color:var(--hub-accent); font-size:12px; font-weight:800; text-decoration:none; }
       .choreops-link ha-icon { --mdc-icon-size:18px; }
       .family-sidebar-link { flex:0 0 auto; align-self:flex-end; }
@@ -6620,6 +6772,15 @@ export class FamilyHubCard extends HTMLElementBase {
       .chore-row.is-overdue { border-color:#e9978f; background:#fff0ef; }
       .chore-row.is-overdue .chore-check { background:#f9d5d1; color:#a9362d; }
       .chore-row.is-waiting .chore-check { background:#fff0cf; color:#8b5b00; }
+      .family-person.is-kid-mode .chore-list { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+      .chore-row.is-kid-card { min-height:126px; grid-template-columns:50px minmax(0,1fr) auto; grid-template-rows:1fr auto; padding:15px; border-width:2px; border-radius:20px; }
+      .chore-row.is-kid-card .chore-check { width:48px; height:48px; border-radius:15px; }
+      .chore-row.is-kid-card .chore-check ha-icon { --mdc-icon-size:27px; }
+      .chore-row.is-kid-card strong { font-size:16px; white-space:normal; }
+      .chore-row.is-kid-card small { margin-top:5px; font-size:12px; white-space:normal; }
+      .chore-row.is-kid-card > b { align-self:start; padding:5px 8px; border-radius:999px; background:color-mix(in srgb,var(--person-colour) 12%,#fff); font-size:12px; }
+      .chore-claim-action { grid-column:1/-1; min-height:46px; border:0; border-radius:13px; background:var(--person-colour); color:#fff; font-size:13px; font-weight:900; cursor:pointer; }
+      .chore-claim-action:disabled { background:#E5EAF0; color:#65738A; opacity:1; }
       .family-summary-grid { min-width:0; margin-top:12px; display:grid; grid-template-columns:repeat(auto-fit,minmax(105px,1fr)); gap:7px; }
       .family-summary-item { min-width:0; min-height:72px; padding:8px; display:grid; grid-template-columns:26px minmax(0,1fr); gap:6px; align-items:center; border:1px solid color-mix(in srgb,var(--person-colour) 16%,transparent); border-radius:13px; background:color-mix(in srgb,var(--person-colour) 4%,var(--hub-surface)); }
       .family-summary-item > span { width:26px; height:26px; display:grid; place-items:center; border-radius:8px; background:color-mix(in srgb,var(--person-colour) 11%,var(--hub-surface)); color:var(--person-colour); }
@@ -6631,6 +6792,10 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-summary-item.is-done > span { background:#dff3e8; color:#18794e; }
       .family-summary-item.is-unavailable { opacity:.7; }
       .family-summary-item.is-unavailable > span { background:color-mix(in srgb,var(--hub-muted) 10%,var(--hub-surface)); color:var(--hub-muted); }
+      .family-progress { height:6px; margin-top:7px; display:block; overflow:hidden; border-radius:999px; background:color-mix(in srgb,var(--person-colour) 10%,#DCE4EE); }
+      .family-progress b { height:100%; display:block; border-radius:inherit; background:var(--person-colour); }
+      .reward-claim { min-height:34px; margin-top:8px; padding:0 10px; border:0; border-radius:10px; background:var(--person-colour); color:#fff; font-size:11px; font-weight:900; cursor:pointer; }
+      .reward-claim:disabled { background:#E5EAF0; color:#65738A; opacity:1; }
       .football-empty { min-height:0; height:100%; display:grid; grid-template-columns:90px minmax(0,1fr) auto; gap:20px; align-items:center; padding:26px; border:1px dashed color-mix(in srgb,var(--hub-accent) 32%,transparent); border-radius:18px; background:linear-gradient(145deg,color-mix(in srgb,var(--hub-accent) 7%,#fff),rgba(255,255,255,.5)); }
       .football-orbit { width:82px; height:82px; display:grid; place-items:center; border-radius:50%; background:radial-gradient(circle,#fff 34%,color-mix(in srgb,var(--hub-accent) 18%,#fff) 35% 58%,transparent 59%); color:var(--hub-accent); box-shadow:0 12px 28px rgba(31,36,57,.12); }
       .football-orbit ha-icon { --mdc-icon-size:34px; }
@@ -7270,6 +7435,7 @@ export class FamilyHubCard extends HTMLElementBase {
         .family-sidebar { display:flex; flex-direction:column; overflow:visible; padding-right:0; scrollbar-gutter:auto; }
         .family-scroll-cue { position:static; }
         .family-summary-grid { grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); }
+        .family-person.is-kid-mode .chore-list { grid-template-columns:1fr; }
         .security-main { display:flex; flex-direction:column; }
         .security-stage { min-height:0; }
         .security-stage-media { width:100%; height:auto; min-height:280px; place-self:auto; }

@@ -2,7 +2,7 @@
 
 Family Dashboard is a Home Assistant-native family display for calendars, room controls, music, chores, football and school information. It is designed for a landscape tablet and keeps household configuration separate from the public installation code.
 
-The release workflow renders the current v0.10 component at both supported iPad
+The release workflow renders the current v0.12 component at both supported iPad
 sizes. The older synthetic SVGs in `app/preview` are retained only as deterministic
 compiler fixtures; they are not current design previews.
 
@@ -28,7 +28,7 @@ This public repository contains generic source, schemas, tests and release packa
 
 HACS remains the installer for the Daylight/legacy Skylight calendar, Mediocre Multi Media Player Card and kiosk-mode dependencies. The Family Hub shell, floorplan engine, Home controls, family summaries, Security boundary and football presentation are bundled with the manager itself; private household artwork stays outside this repository.
 
-Version 0.11.2 retains the accepted schema-v6 family operating surface, colour-coded Family Planner and private Home Assistant media-source photo frame. It adds a direct **Ready next** queue to Today, repairs the Spurs/Villa derby treatment and normalises touch selectors. Live controls remain on validated entity allow-lists, alarm and garage changes still require a fresh second confirmation, Classroom stays read-only, and no child or bedroom camera can enter Security.
+Version 0.12 adds a Home Assistant administrator-only household editor backed by the same full-schema validation, exact hashes and rollback snapshots as managed deployments. It also turns Tasks into a child-friendly ChoreOps claim surface and makes the two favourite Premier League clubs household-configurable. Live controls remain on validated entity allow-lists, alarm and garage changes still require a fresh second confirmation, Classroom stays read-only, and no child or bedroom camera can enter Security.
 
 ## Development
 

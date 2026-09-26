@@ -84,14 +84,14 @@ test("normalises 38 matchweeks, scorers, the table and both spotlight clubs", ()
     id: 1,
     code: "TOT",
     short_name: "TOT",
-    name: "Tottenham Hotspur",
+    name: "Club TOT",
     crest_url: "https://resources.premierleague.com/premierleague/badges/70/t6.png"
   });
   assert.deepEqual(data.gameweeks[1][0].away, {
     id: 2,
     code: "AVL",
     short_name: "AVL",
-    name: "Aston Villa",
+    name: "Club AVL",
     crest_url: "https://resources.premierleague.com/premierleague/badges/70/t7.png"
   });
   assert.deepEqual(data.gameweeks[1][0].home_scorers, ["Spurs scorer ×2"]);

@@ -24,6 +24,10 @@ The manager is intentionally narrower than a general Home Assistant administrati
 
 Deployment and rollback require `confirm=true` plus the exact validation or active hash.
 
+## Administrator ingress
+
+Home Assistant Supervisor exposes the static Admin page only through the app's administrator-only panel. The Manager additionally requires the documented Supervisor ingress source and ingress-path header. Read returns only the schema, active non-secret configuration, hashes, private-asset metadata and sanitised inventory. Preview requires the active hash; deploy additionally requires the exact preview hash and confirmation. Changes to security, floorplan, location or school require a protected-change acknowledgement. The separate floorplan endpoints retain the fixed two-file inert SVG contract.
+
 ## Explicitly excluded
 
 - general shell or arbitrary file access;
@@ -38,4 +42,4 @@ Schema v6 may reference an explicitly supplied safe exterior camera entity and b
 
 ## Files and connection
 
-The MCP endpoint binds to `127.0.0.1` inside the Home Assistant app. Optional OpenAI Secure MCP Tunnel connects outbound only. Filesystem policy grants writes to `/config/family-dashboard`, the fixed manager file names under `/config/www/family-dashboard`, the fixed `/config/custom_components/family_dashboard_classroom` integration plus its bounded staging and recovery paths, and private `/data` state/snapshots. It grants no access to Home Assistant's `.storage` directory. Unknown household assets in the frontend directory are preserved.
+The HTTP server listens on the app's internal ingress port without publishing a host port. Admin routes require the Supervisor ingress boundary; the `/mcp` route separately enforces a localhost Host header for the existing in-container OpenAI Secure MCP Tunnel, which connects outbound only. Filesystem policy grants writes to `/config/family-dashboard`, the fixed manager file names under `/config/www/family-dashboard`, the fixed `/config/custom_components/family_dashboard_classroom` integration plus its bounded staging and recovery paths, and private `/data` state/snapshots. It grants no access to Home Assistant's `.storage` directory. Unknown household assets in the frontend directory are preserved.

@@ -1,8 +1,8 @@
 # Family Dashboard Manager
 
-Version 0.11.2 polishes the existing Family Planner and football presentation in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
+Version 0.12 adds the Manager-backed household Admin and child-first ChoreOps Tasks experience in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
 
-This release adds the colour-coded Family Planner and **Ready** checklist described in [the v0.11 rollout note](./app/docs/v011-family-planner.md). It retains the private kiosk photo frame and calendar-only School fallback from v0.10. All controlled-live and rollback boundaries below remain in force.
+The Admin design and direct-claim boundary are described in [the v0.12 rollout note](./app/docs/v012-manager-admin.md). The colour-coded Family Planner, **Ready** checklist, private kiosk photo frame and calendar-only School fallback remain intact. All controlled-live and rollback boundaries below remain in force.
 
 The accepted schema-v6 dashboard runs in controlled live mode. First-party actions are restricted to exact validated household entities and fixed services. Calendar creation is allowed only on entries marked `allow_create: true`, and preparation items can be added or ticked only on the configured to-do entity. Classroom, camera presentation cards and the vacuum map remain read-only, while every alarm and garage change still asks for a second confirmation.
 
@@ -12,11 +12,17 @@ This release requires Home Assistant OS 2026.8.0 or newer.
 
 1. Create a Home Assistant backup.
 2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
-3. Update the installed **Family Dashboard Manager** to v0.11.2; do not uninstall it.
+3. Update the installed **Family Dashboard Manager** to v0.12.0; do not uninstall it.
 4. Keep the existing Secure MCP Tunnel options unchanged and restart the app.
-5. Confirm the manager reconnects through the existing tunnel and reports v0.11.2.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.12.0.
 
-The app exposes no host port. Its manager endpoint remains on the private loopback interface inside the same app container.
+The app exposes no host port. Home Assistant Supervisor reaches the internal ingress port and restricts the Admin panel to administrators; the MCP route retains its independent localhost host check for the existing in-container tunnel.
+
+## Family Dashboard Admin
+
+Open **Family Dashboard Admin** from Home Assistant's app/ingress panel on an administrator device. The shared kiosk does not receive an Admin link. The page can edit the complete non-secret household setup, including people, colours, calendars, Ready templates, features, ChoreOps mappings, football clubs, kiosk/photos, theme, rooms/devices, music, energy, weather, lists and cleaning.
+
+Security, floorplan, location and school mappings are visibly protected and need an extra acknowledgement. Every save validates the whole configuration, rejects stale active hashes, displays the exact leaf changes and creates a rollback snapshot. OAuth credentials, Home Assistant tokens, app options and Secure MCP Tunnel settings are never returned to the page.
 
 ## Existing Home Assistant registration
 
@@ -37,7 +43,7 @@ lovelace:
 Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.11.2
+/local/family-dashboard/family-hub-card.js?v=0.12.0
 ```
 
 The stock Home Assistant Overview remains available to administrators.
@@ -71,7 +77,7 @@ The schema-v6 household configuration retains the existing panel path and explic
 
 Run `validate_household_config` first. Validation is read-only and returns the exact configuration hash required by `deploy_household_config` with `confirm=true`. Deployment writes only the existing Family Dashboard configuration and fixed frontend allow-list after creating a raw, hash-verified snapshot. Private floorplans are preserved separately.
 
-Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.11.2, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
+Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.12.0, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
 
 ## Household mappings retained from v0.9
 
@@ -91,9 +97,11 @@ ChoreOps dashboard helper, points, chores summary and the individual
 `status_entities` used for Today’s jobs. Family may additionally feature at most
 one entry in each of `reward_status_entities`, `badge_progress_entities` and
 `achievement_progress_entities` per child. `chores.dashboard_path` is optional and
-must be the exact generated native ChoreOps dashboard path verified in that Home
-Assistant instance; do not guess it. Creating, editing, claiming and approving
-work stays in native ChoreOps.
+must be an exact deeper native ChoreOps dashboard path verified in that Home
+Assistant instance; the generic `/choreops` route is hidden because it can resolve
+to Overview. Children may claim only their configured pending jobs or available
+reward through exact derived ChoreOps claim buttons. Creating, editing, scheduling,
+approving and rejecting work stays in native ChoreOps.
 
 After Classroom consent, map each generated child-owned
 `sensor.*_classroom_open_assignments` to that same child under
@@ -108,7 +116,7 @@ partial mappings.
 - Alarm actions accept only the configured alarm entity and the three presented arm-home, arm-away and disarm services. Unavailable entities and unsupported arm modes remain disabled, and confirmation expires if the alarm state changes.
 - Garage actions accept only the configured garage cover, require its advertised open/close feature, and still require confirmation. A moving or unavailable garage never offers an enabled action, and confirmation expires if its state changes.
 - Security opens on authenticated Home Assistant stills and never starts a stream merely by opening the view. Tapping a still starts the exact configured exterior-camera Start route and mounts Home Assistant's native live `picture-entity` for that same camera. The Home Assistant object supplied directly to that card is a least-privilege facade: its ordinary calls accept only the same camera's signed snapshot path and current/legacy camera protocol messages, and deliberately provide no generic signed go2rtc socket. Home Assistant cards share the page and may consume framework connection context, so this facade prevents accidental or unsupported calls but is not a browser sandbox; only trusted, administrator-installed native/custom cards are supported. **Live** appears only after a ready video frame and returns to loading if playback stalls. Start/Stop controls must be configured as an exact pair. The native camera-service fallback is used only when that configured button pair exists but is unavailable; garage RTSP buttons remain preferred where proven, while the existing front-door P2P pair remains a physical-acceptance risk until an RTSP-capable route is verified. Only one viewer may exist at once. Close, camera switching, leaving Security, page hiding and the hard two-minute expiry tear down the viewer and issue the bounded Stop route immediately, even if Start has not returned. One viewer recreation is allowed without restarting Eufy; failure returns to the still with an explicit retry. A signals-only or unavailable camera causes no camera write.
-- Family Planner may call only `calendar.create_event` for an explicitly writable mapped calendar and `todo.add_item`/`todo.update_item` for the one mapped preparation list. It has no event edit/delete, to-do delete or generic service bridge. Classroom remains read-only. Embedded camera views and the vacuum map receive a least-privilege facade for normal card API use; this is an accidental-operation guard, not isolation from same-page component code.
+- Family Planner may call only `calendar.create_event` for an explicitly writable mapped calendar and `todo.add_item`/`todo.update_item` for the one mapped preparation list. Tasks may call only `button.press` on the exact ChoreOps claim button derived from a status entity mapped to that child; approve and disapprove buttons are never exposed. The dashboard has no event edit/delete, generic to-do delete or generic service bridge. Classroom remains read-only. Embedded camera views and the vacuum map receive a least-privilege facade for normal card API use; this is an accidental-operation guard, not isolation from same-page component code.
 - Exterior-camera validation continues to reject child, nursery and bedroom hints. Sanitised inventory still omits all camera entities.
 
 ## Physical acceptance
@@ -126,7 +134,7 @@ On the target iPad, confirm:
 - each exterior camera opens successfully from its current still five consecutive times; a real frame—not a timer—changes the viewer to **Live**, and close, camera switch and iPad backgrounding each stop the session;
 - Classroom shows only each authorised child's bounded assignment sensor, and location remains disabled unless separately opted in;
 - electricity and gas are labelled **today so far**, report delayed/unavailable readings honestly, and never imply live power without a configured source;
-- Tottenham and Aston Villa each receive equal favourite treatment, with one shared card for a head-to-head fixture.
+- both configured favourite clubs receive equal treatment, with one shared card for a head-to-head fixture.
 
 Test alarm and garage actions deliberately with an adult present. Home Assistant permissions and any configured alarm PIN remain authoritative; no PIN belongs in dashboard configuration.
 
@@ -142,4 +150,4 @@ Test alarm and garage actions deliberately with an adult present. Home Assistant
 
 Classroom stays disabled until the bundled first-party custom integration is installed at its fixed path and each child completes a separate Google read-only authorization flow. It requests exactly `classroom.courses.readonly` and `classroom.coursework.me.readonly`, polls every 15 minutes and caps assignment attributes at 20 while retaining the complete open count. No child password or OAuth token may be written to household configuration, generated YAML, snapshots or logs. See [app/docs/classroom-integration.md](./app/docs/classroom-integration.md) for hash-guarded installation, rollback and one-consent-entry-per-child setup.
 
-The browser does not call Fantasy Premier League directly. The manager provides a server-side, last-good-cache feed covering all 38 Premier League matchweeks with Tottenham and Aston Villa spotlights. Team objects include fixed-origin official Premier League crest URLs derived only from FPL's numeric club code; the UI retains the three-letter code as its fallback. The feed refreshes immediately after startup, then every three minutes around live fixtures, every 15 minutes on a fixture day and hourly between matchdays. When neither the source nor the last-good cache can provide an update, the existing football index reports a bounded stale state without replacing Manager deployment or rollback errors.
+The browser does not call Fantasy Premier League directly. The manager provides a server-side, last-good-cache feed covering all 38 Premier League matchweeks for the two configured household favourites. Team objects include fixed-origin official Premier League crest URLs derived only from FPL's numeric club code; the UI retains the three-letter code as its fallback. The feed refreshes immediately after startup, then every three minutes around live fixtures, every 15 minutes on a fixture day and hourly between matchdays. When neither the source nor the last-good cache can provide an update, the existing football index reports a bounded stale state without replacing Manager deployment or rollback errors.

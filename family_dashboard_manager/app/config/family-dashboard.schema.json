@@ -484,10 +484,7 @@
           "maxItems": 2,
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[A-Z]{3}$" },
-          "allOf": [
-            { "contains": { "const": "TOT" } },
-            { "contains": { "const": "AVL" } }
-          ]
+          "description": "Two distinct Premier League short codes, for example TOT and AVL."
         },
         "index_entity": { "$ref": "#/$defs/sensorEntityId" },
         "gameweek_entity_prefix": {

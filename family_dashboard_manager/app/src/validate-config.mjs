@@ -565,11 +565,6 @@ export function validateConfig(config) {
     }
   });
   validateUnique(teamCodes, "config.football.spotlight_team_codes");
-  for (const requiredCode of ["TOT", "AVL"]) {
-    if (!teamCodes.includes(requiredCode)) {
-      fail("config.football.spotlight_team_codes", `must include ${requiredCode}`);
-    }
-  }
   validateEntityId(football.index_entity, "config.football.index_entity", "sensor");
   if (typeof football.gameweek_entity_prefix !== "string" || !FOOTBALL_PREFIX.test(football.gameweek_entity_prefix)) {
     fail("config.football.gameweek_entity_prefix", "must be a sensor entity prefix ending in underscore");

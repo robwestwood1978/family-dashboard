@@ -1,5 +1,5 @@
 name: Family Dashboard Manager
-version: "0.11.2"
+version: "0.12.0"
 slug: family_dashboard_manager
 description: Safely validates, deploys and rolls back the Family Dashboard.
 url: https://github.com/robwestwood1978/family-dashboard/tree/main/family_dashboard_manager
@@ -12,6 +12,11 @@ boot: auto
 stage: experimental
 homeassistant: "2026.8.0"
 homeassistant_api: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:home-edit-outline
+panel_title: Family Dashboard Admin
+panel_admin: true
 map:
   - type: homeassistant_config
     read_only: false

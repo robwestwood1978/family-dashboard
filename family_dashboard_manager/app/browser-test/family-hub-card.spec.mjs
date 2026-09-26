@@ -121,12 +121,20 @@ function fixtureStates() {
     "sensor.child_two_choreops_chore_status_brush_teeth": state("sensor.child_two_choreops_chore_status_brush_teeth", "overdue", { chore_name: "Brush teeth", default_points: 3 }),
     "sensor.child_two_choreops_chore_status_get_dressed": state("sensor.child_two_choreops_chore_status_get_dressed", "pending", { chore_name: "Get dressed", default_points: 4 }),
     "sensor.child_two_choreops_chore_status_go_to_bed_at_bedtime": state("sensor.child_two_choreops_chore_status_go_to_bed_at_bedtime", "completed", { chore_name: "Bedtime", default_points: 5 }),
+    "button.child_one_choreops_claim_chore_brush_teeth": state("button.child_one_choreops_claim_chore_brush_teeth", "unknown"),
+    "button.child_one_choreops_claim_chore_get_dressed": state("button.child_one_choreops_claim_chore_get_dressed", "unknown"),
+    "button.child_one_choreops_claim_chore_go_to_bed_at_bedtime": state("button.child_one_choreops_claim_chore_go_to_bed_at_bedtime", "unknown"),
+    "button.child_two_choreops_claim_chore_brush_teeth": state("button.child_two_choreops_claim_chore_brush_teeth", "unknown"),
+    "button.child_two_choreops_claim_chore_get_dressed": state("button.child_two_choreops_claim_chore_get_dressed", "unknown"),
+    "button.child_two_choreops_claim_chore_go_to_bed_at_bedtime": state("button.child_two_choreops_claim_chore_go_to_bed_at_bedtime", "unknown"),
     "sensor.child_one_choreops_reward_status_weekend_movie": state("sensor.child_one_choreops_reward_status_weekend_movie", "available", { reward_name: "Weekend movie", cost: 50 }),
     "sensor.child_one_choreops_badge_progress_starlight": state("sensor.child_one_choreops_badge_progress_starlight", "65", { badge_name: "Starlight", status: "active", unit_of_measurement: "%", overall_progress: 0.65 }),
     "sensor.child_one_choreops_achievement_progress_stayed_in_bed": state("sensor.child_one_choreops_achievement_progress_stayed_in_bed", "43", { achievement_name: "Stayed in bed", unit_of_measurement: "%", raw_progress: 3, target_value: 7 }),
     "sensor.child_two_choreops_reward_status_weekend_movie": state("sensor.child_two_choreops_reward_status_weekend_movie", "claimed", { reward_name: "Weekend movie", points_required: 50 }),
     "sensor.child_two_choreops_badge_progress_starlight": state("sensor.child_two_choreops_badge_progress_starlight", "100", { badge_name: "Starlight", status: "earned", unit_of_measurement: "%", overall_progress: 1 }),
     "sensor.child_two_choreops_achievement_progress_stayed_in_bed": state("sensor.child_two_choreops_achievement_progress_stayed_in_bed", "71", { achievement_name: "Stayed in bed", unit_of_measurement: "%", raw_progress: 5, target_value: 7 }),
+    "button.child_one_choreops_claim_reward_weekend_movie": state("button.child_one_choreops_claim_reward_weekend_movie", "unknown"),
+    "button.child_two_choreops_claim_reward_weekend_movie": state("button.child_two_choreops_claim_reward_weekend_movie", "unknown"),
     "sensor.child_one_classroom_open_assignments": state("sensor.child_one_classroom_open_assignments", "1", { assignments: [{ title: "Science revision", course: "Science", due_at: "2026-08-12T15:00:00Z" }] }),
     "sensor.child_two_classroom_open_assignments": state("sensor.child_two_classroom_open_assignments", "1", { assignments: [{ title: "Read chapter four", course: "English", due_at: "2026-08-13T15:00:00Z" }] }),
     "sensor.family_dashboard_premier_league": state("sensor.family_dashboard_premier_league", "1", { current_gameweek: 1, available_gameweeks: Array.from({ length: 38 }, (_, index) => index + 1), last_updated: "2026-08-10T08:00:00Z" })
@@ -2351,7 +2359,7 @@ test("keeps the family map private and spotlights both requested clubs", async (
   await expect(card.locator(".family-summary-item")).toHaveCount(6);
   await expect(card.locator(".family-person")).toContainText(["Weekend movie", "Starlight"]);
   await expect(card.locator(".family-person")).toContainText(["65% complete", "5 of 7"]);
-  await expect(card.locator(".choreops-link")).toHaveAttribute("href", "/choreops");
+  await expect(card.locator(".choreops-link")).toHaveCount(0);
 
   await card.locator('.hub-nav-button[data-view="football"]').click();
   const favouriteHeroes = card.locator(".favourite-hero-card");
@@ -2429,6 +2437,27 @@ test("suppresses an unsafe direct-card ChoreOps link and escapes generic summary
   await expect(card.locator(".choreops-link")).toHaveCount(0);
   await expect(card.locator(".family-summary-grid").first()).toContainText(maliciousName);
   await expect(card.locator(".family-summary-item img")).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
+});
+
+test("gives each child a large direct ChoreOps claim surface without approval authority", async ({ page }) => {
+  const pageErrors = await mount(page, locationDisabledConfig());
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="family"]').click();
+  await expect(card.locator(".family-kid-tab")).toHaveCount(2);
+  await expect(card.locator(".family-kid-stage .family-person")).toHaveCount(1);
+  await expect(card.locator(".chore-row.is-kid-card")).toHaveCount(3);
+  await card.locator('[data-chore-claim="button.child_one_choreops_claim_chore_brush_teeth"]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([{
+    domain: "button",
+    service: "press",
+    data: { entity_id: "button.child_one_choreops_claim_chore_brush_teeth" }
+  }]);
+  await expect(card.locator(".chore-claim-feedback")).toContainText("grown-up can approve");
+  await card.locator('[data-family-person="child_two"]').click();
+  await expect(card.locator('.family-kid-tab[data-family-person="child_two"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(card.locator('[data-chore-claim="button.child_two_choreops_claim_chore_get_dressed"]')).toBeVisible();
+  await expect(card.locator('[data-chore-claim*="approve"], [data-chore-claim*="disapprove"]')).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });
 
@@ -2687,9 +2716,10 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect(card.locator(".family-dashboard-heading")).toContainText("Tasks, jobs & rewards");
   await expect(card.locator(".family-dashboard-heading")).not.toContainText(/test|preview/i);
   await expect(card.locator(".choreops-link")).toHaveCount(0);
-  await expect(card.locator(".family-summary-grid")).toHaveCount(2);
-  await expect(card.locator(".family-summary-item")).toHaveCount(6);
-  await expect(card.locator(".chore-row")).toHaveCount(6);
+  await expect(card.locator(".family-kid-tab")).toHaveCount(2);
+  await expect(card.locator(".family-summary-grid")).toHaveCount(1);
+  await expect(card.locator(".family-summary-item")).toHaveCount(3);
+  await expect(card.locator(".chore-row")).toHaveCount(3);
   await expect(card.locator('[data-card-type="map"]')).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });
@@ -3387,19 +3417,21 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
     if (view === "family") {
       await expect(card.locator(".family-rhythm,.location-off-badge")).toHaveCount(0);
       await expect(card.locator(".family-dashboard-heading")).toContainText("Tasks, jobs & rewards");
-      await expect(card.locator(".choreops-link")).toHaveAttribute("href", "/choreops");
-      await expect(card.locator(".family-people-grid .family-person")).toHaveCount(2);
-      await expect(card.locator(".family-people-grid .family-person-heading h2")).toHaveText(["Today’s jobs", "Today’s jobs"]);
-      await expect(card.locator(".family-summary-grid")).toHaveCount(2);
-      await expect(card.locator(".family-summary-item")).toHaveCount(6);
+      await expect(card.locator(".choreops-link")).toHaveCount(0);
+      await expect(card.locator(".family-kid-tab")).toHaveCount(2);
+      await expect(card.locator(".family-kid-stage .family-person")).toHaveCount(1);
+      await expect(card.locator(".family-kid-stage .family-person-heading h2")).toHaveText("Today’s jobs");
+      await expect(card.locator(".family-summary-grid")).toHaveCount(1);
+      await expect(card.locator(".family-summary-item")).toHaveCount(3);
+      await expect(card.locator(".chore-row.is-kid-card")).toHaveCount(3);
       await expect(card.locator(".map-panel,.family-sidebar,[data-card-type='map']")).toHaveCount(0);
-      const truncatedFamilyDetails = await card.locator(".family-people-grid .chore-row strong,.family-people-grid .chore-row small,.family-people-grid .family-summary-item strong,.family-people-grid .family-summary-item small").evaluateAll((nodes) => {
+      const truncatedFamilyDetails = await card.locator(".family-kid-stage .chore-row strong,.family-kid-stage .chore-row small,.family-kid-stage .family-summary-item strong,.family-kid-stage .family-summary-item small").evaluateAll((nodes) => {
         return nodes
           .filter((node) => node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1)
           .map((node) => node.textContent.trim());
       });
       expect(truncatedFamilyDetails).toEqual([]);
-      const overwrappedFamilyDetails = await card.locator(".family-people-grid .chore-row strong,.family-people-grid .chore-row small,.family-people-grid .family-summary-item strong,.family-people-grid .family-summary-item small").evaluateAll((nodes) => {
+      const overwrappedFamilyDetails = await card.locator(".family-kid-stage .chore-row strong,.family-kid-stage .chore-row small,.family-kid-stage .family-summary-item strong,.family-kid-stage .family-summary-item small").evaluateAll((nodes) => {
         return nodes
           .map((node) => {
             const range = document.createRange();
@@ -3410,14 +3442,6 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
           .filter(({ lines }) => lines > 2);
       });
       expect(overwrappedFamilyDetails).toEqual([]);
-      const internallyScrollablePeople = await card.locator(".family-people-grid .family-person").evaluateAll((people) => people
-        .filter((person) => person.scrollHeight > person.clientHeight + 1 || person.scrollWidth > person.clientWidth + 1)
-        .map((person) => ({
-          name: person.querySelector(".eyebrow")?.textContent?.trim() || "Unknown person",
-          horizontalDelta: person.scrollWidth - person.clientWidth,
-          verticalDelta: person.scrollHeight - person.clientHeight
-        })));
-      expect(internallyScrollablePeople).toEqual([]);
       await expectContrast(card, [
         { foreground: ".chore-row small", background: ".chore-row", minimum: 4.5 },
         { foreground: ".family-facts span", background: ".family-facts span", minimum: 4.5 },
@@ -3425,7 +3449,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
         { foreground: ".chore-row b", background: ".chore-row", minimum: 4.5 },
         { foreground: ".family-summary-item p", background: ".family-summary-item", minimum: 4.5 },
         { foreground: ".family-summary-item small", background: ".family-summary-item", minimum: 4.5 },
-        { foreground: ".choreops-link", background: ".choreops-link", minimum: 4.5 }
+        { foreground: ".chore-claim-action:not(:disabled)", background: ".chore-claim-action:not(:disabled)", minimum: 4.5 }
       ]);
     }
     if (view === "music") {

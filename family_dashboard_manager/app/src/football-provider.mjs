@@ -15,10 +15,6 @@ export const FOOTBALL_POLLING_INTERVALS = Object.freeze({
 });
 const NEAR_KICKOFF_BEFORE_MS = 90 * 60 * 1000;
 const NEAR_KICKOFF_AFTER_MS = 3 * 60 * 60 * 1000;
-const CANONICAL_TEAM_NAMES = Object.freeze({
-  TOT: "Tottenham Hotspur",
-  AVL: "Aston Villa"
-});
 
 function requireToken(token) {
   if (typeof token !== "string" || token.length < 10) {
@@ -95,7 +91,7 @@ function normaliseTeam(team) {
     id: asInteger(team.id),
     code,
     short_name: code,
-    name: CANONICAL_TEAM_NAMES[code] || String(team.name || code),
+    name: String(team.name || code),
     crest_url: premierLeagueCrestUrl(team.code)
   };
 }
@@ -305,7 +301,7 @@ export async function publishHomeAssistantState(state, {
 
 async function fetchJson(url, fetchImpl, timeoutMs) {
   const response = await fetchImpl(url, {
-    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.11.2" },
+    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.12.0" },
     signal: AbortSignal.timeout(timeoutMs)
   });
   if (!response.ok) throw new Error(`football source returned HTTP ${response.status}`);

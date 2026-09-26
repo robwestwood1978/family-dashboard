@@ -36,9 +36,9 @@ test("the schema rejects older contracts and unknown fields", () => {
   unknown.display.unrecognised = true;
   assert.equal(validate(unknown), false);
 
-  const missingSpotlight = structuredClone(example);
-  missingSpotlight.football.spotlight_team_codes = ["TOT", "ARS"];
-  assert.equal(validate(missingSpotlight), false);
+  const otherFamilySpotlights = structuredClone(example);
+  otherFamilySpotlights.football.spotlight_team_codes = ["ARS", "LIV"];
+  assert.equal(validate(otherFamilySpotlights), true);
 
   const unsafeCameraRole = structuredClone(example);
   unsafeCameraRole.entry.cameras[0].role = "other";

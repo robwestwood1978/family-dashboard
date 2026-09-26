@@ -37,7 +37,9 @@ test("serves health and the bounded MCP tool surface", async (context) => {
 
   const health = await fetch(`http://127.0.0.1:${port}/healthz`);
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: "ok", version: "0.11.2" });
+  assert.deepEqual(await health.json(), { status: "ok", version: "0.12.0" });
+  const blockedAdmin = await fetch(`http://127.0.0.1:${port}/`);
+  assert.equal(blockedAdmin.status, 403);
 
   const client = new Client({ name: "family-dashboard-test", version: "1.0.0" });
   const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
@@ -106,4 +108,32 @@ test("serves health and the bounded MCP tool surface", async (context) => {
     arguments: { assets: approvedSizeAssets }
   });
   assert.match(approvedSizeValidation.structuredContent.asset_set_hash, /^[a-f0-9]{64}$/);
+});
+
+test("serves Admin only through an authorised ingress boundary and protects mutations", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "family-dashboard-admin-server-"));
+  const store = new DashboardStore({
+    configDir: join(root, "config"),
+    dataDir: join(root, "data"),
+    resourceDir: join(root, "www", "family-dashboard")
+  });
+  const app = createManagerApp({ store, authorizeAdmin: () => true });
+  const listener = app.listen(0, "127.0.0.1");
+  await once(listener, "listening");
+  const { port } = listener.address();
+  context.after(async () => {
+    listener.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const page = await fetch(`http://127.0.0.1:${port}/`);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /Family Dashboard Admin/);
+  assert.match(page.headers.get("content-security-policy"), /default-src 'self'/);
+  const mutation = await fetch(`http://127.0.0.1:${port}/api/admin/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({})
+  });
+  assert.equal(mutation.status, 403);
+  assert.deepEqual(await mutation.json(), { error: "Admin mutation header required" });
 });

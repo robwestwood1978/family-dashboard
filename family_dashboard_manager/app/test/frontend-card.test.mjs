@@ -7,6 +7,7 @@ import {
   cameraControlRoute,
   cameraSessionPresentation,
   cameraStreamPhase,
+  choreClaimEntityId,
   classroomAssignmentPresentation,
   createControlledMediaHass,
   deriveRoomState,
@@ -54,6 +55,7 @@ import {
   parsePreparationDescription,
   preparationDescription,
   preparationProgress,
+  rewardClaimEntityId,
   todayPreparationPreview,
   safeClassroomLink,
   schoolDataSource,
@@ -3151,7 +3153,10 @@ test("presents football freshness without exposing provider internals", () => {
 });
 
 test("normalises ChoreOps state sensors into readable job states", () => {
+  assert.equal(choreClaimEntityId("sensor.ernie_choreops_chore_status_pack_bag"), "button.ernie_choreops_claim_chore_pack_bag");
+  assert.equal(rewardClaimEntityId("sensor.ernie_choreops_reward_status_movie_night"), "button.ernie_choreops_claim_reward_movie_night");
   assert.deepEqual(normaliseChoreStatus({ state: "claimed", attributes: { chore_name: "Brush teeth", default_points: 3 } }, "sensor.child_choreops_chore_status_brush_teeth"), {
+    status: "claimed",
     name: "Brush teeth",
     label: "Awaiting approval",
     tone: "waiting",
@@ -3159,6 +3164,33 @@ test("normalises ChoreOps state sensors into readable job states", () => {
     due: null
   });
   assert.equal(normaliseChoreStatus({ state: "overdue", attributes: {} }, "sensor.child_choreops_chore_status_get_dressed").name, "Get Dressed");
+});
+
+test("lets a child claim only their configured ChoreOps job and suppresses double taps", async () => {
+  let release;
+  const calls = [];
+  const card = Object.create(FamilyHubCard.prototype);
+  card._config = {
+    display: { read_only: false },
+    chores: { users: [{ person_id: "child_one", status_entities: ["sensor.child_one_choreops_chore_status_pack_bag"], reward_status_entities: [] }] }
+  };
+  card._hass = {
+    states: { "button.child_one_choreops_claim_chore_pack_bag": { state: "unknown", attributes: {} } },
+    callService(domain, service, data) {
+      calls.push([domain, service, data]);
+      return new Promise((resolve) => { release = resolve; });
+    }
+  };
+  card._pendingChoreClaims = new Set();
+  card._scheduleRender = () => undefined;
+
+  const first = card._claimChore("child_one", "sensor.child_one_choreops_chore_status_pack_bag", "button.child_one_choreops_claim_chore_pack_bag");
+  await card._claimChore("child_one", "sensor.child_one_choreops_chore_status_pack_bag", "button.child_one_choreops_claim_chore_pack_bag");
+  await card._claimChore("child_one", "sensor.child_one_choreops_chore_status_pack_bag", "button.child_one_choreops_approve_chore_pack_bag");
+  assert.deepEqual(calls, [["button", "press", { entity_id: "button.child_one_choreops_claim_chore_pack_bag" }]]);
+  release();
+  await first;
+  assert.match(card._choreClaimFeedback, /grown-up can approve/);
 });
 
 test("normalises generic ChoreOps reward and progress sensors without assuming actions", () => {
@@ -3172,6 +3204,7 @@ test("normalises generic ChoreOps reward and progress sensors without assuming a
     name: "Weekend movie",
     label: "Available · 50 pts",
     tone: "available",
+    status: "available",
     icon: "mdi:gift-outline",
     kind: "reward"
   });
@@ -3182,6 +3215,7 @@ test("normalises generic ChoreOps reward and progress sensors without assuming a
     name: "Starlight",
     label: "65% complete",
     tone: "progress",
+    status: "active",
     icon: "mdi:medal-outline",
     kind: "badge"
   });
@@ -3204,6 +3238,7 @@ test("normalises generic ChoreOps reward and progress sensors without assuming a
     name: "Stayed in bed",
     label: "3 of 7",
     tone: "progress",
+    status: "43",
     icon: "mdi:trophy-outline",
     kind: "achievement"
   });
@@ -3211,6 +3246,7 @@ test("normalises generic ChoreOps reward and progress sensors without assuming a
     name: "Starlight",
     label: "Unavailable",
     tone: "unavailable",
+    status: "unavailable",
     icon: "mdi:medal-outline",
     kind: "badge"
   });
