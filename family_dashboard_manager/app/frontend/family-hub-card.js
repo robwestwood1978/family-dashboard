@@ -6779,7 +6779,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .chore-row.is-kid-card strong { font-size:16px; white-space:normal; }
       .chore-row.is-kid-card small { margin-top:5px; font-size:12px; white-space:normal; }
       .chore-row.is-kid-card > b { align-self:start; padding:5px 8px; border-radius:999px; background:color-mix(in srgb,var(--person-colour) 12%,#fff); font-size:12px; }
-      .chore-claim-action { grid-column:1/-1; min-height:46px; border:0; border-radius:13px; background:var(--person-colour); color:#fff; font-size:13px; font-weight:900; cursor:pointer; }
+      .chore-claim-action { grid-column:1/-1; min-height:46px; border:0; border-radius:13px; background:color-mix(in srgb,var(--person-colour) 35%,#10233D); color:#fff; font-size:13px; font-weight:900; cursor:pointer; }
       .chore-claim-action:disabled { background:#E5EAF0; color:#65738A; opacity:1; }
       .family-summary-grid { min-width:0; margin-top:12px; display:grid; grid-template-columns:repeat(auto-fit,minmax(105px,1fr)); gap:7px; }
       .family-summary-item { min-width:0; min-height:72px; padding:8px; display:grid; grid-template-columns:26px minmax(0,1fr); gap:6px; align-items:center; border:1px solid color-mix(in srgb,var(--person-colour) 16%,transparent); border-radius:13px; background:color-mix(in srgb,var(--person-colour) 4%,var(--hub-surface)); }
