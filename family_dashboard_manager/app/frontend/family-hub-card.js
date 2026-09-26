@@ -6779,7 +6779,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .chore-row.is-kid-card strong { font-size:16px; white-space:normal; }
       .chore-row.is-kid-card small { margin-top:5px; font-size:12px; white-space:normal; }
       .chore-row.is-kid-card > b { align-self:start; padding:5px 8px; border-radius:999px; background:color-mix(in srgb,var(--person-colour) 12%,#fff); font-size:12px; }
-      .chore-claim-action { grid-column:1/-1; min-height:46px; border:0; border-radius:13px; background:color-mix(in srgb,var(--person-colour) 35%,#10233D); color:#fff; font-size:13px; font-weight:900; cursor:pointer; }
+      .chore-claim-action { grid-column:1/-1; min-height:48px; border:0; border-radius:13px; background:color-mix(in srgb,var(--person-colour) 35%,#10233D); color:#fff; font-size:13px; font-weight:900; cursor:pointer; }
       .chore-claim-action:disabled { background:#E5EAF0; color:#65738A; opacity:1; }
       .family-summary-grid { min-width:0; margin-top:12px; display:grid; grid-template-columns:repeat(auto-fit,minmax(105px,1fr)); gap:7px; }
       .family-summary-item { min-width:0; min-height:72px; padding:8px; display:grid; grid-template-columns:26px minmax(0,1fr); gap:6px; align-items:center; border:1px solid color-mix(in srgb,var(--person-colour) 16%,transparent); border-radius:13px; background:color-mix(in srgb,var(--person-colour) 4%,var(--hub-surface)); }
@@ -6794,7 +6794,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-summary-item.is-unavailable > span { background:color-mix(in srgb,var(--hub-muted) 10%,var(--hub-surface)); color:var(--hub-muted); }
       .family-progress { height:6px; margin-top:7px; display:block; overflow:hidden; border-radius:999px; background:color-mix(in srgb,var(--person-colour) 10%,#DCE4EE); }
       .family-progress b { height:100%; display:block; border-radius:inherit; background:var(--person-colour); }
-      .reward-claim { min-height:34px; margin-top:8px; padding:0 10px; border:0; border-radius:10px; background:color-mix(in srgb,var(--person-colour) 35%,#10233D); color:#fff; font-size:12px; font-weight:900; cursor:pointer; }
+      .reward-claim { min-height:48px; margin-top:8px; padding:0 10px; border:0; border-radius:10px; background:color-mix(in srgb,var(--person-colour) 35%,#10233D); color:#fff; font-size:12px; font-weight:900; cursor:pointer; }
       .reward-claim:disabled { background:#E5EAF0; color:#65738A; opacity:1; }
       .football-empty { min-height:0; height:100%; display:grid; grid-template-columns:90px minmax(0,1fr) auto; gap:20px; align-items:center; padding:26px; border:1px dashed color-mix(in srgb,var(--hub-accent) 32%,transparent); border-radius:18px; background:linear-gradient(145deg,color-mix(in srgb,var(--hub-accent) 7%,#fff),rgba(255,255,255,.5)); }
       .football-orbit { width:82px; height:82px; display:grid; place-items:center; border-radius:50%; background:radial-gradient(circle,#fff 34%,color-mix(in srgb,var(--hub-accent) 18%,#fff) 35% 58%,transparent 59%); color:var(--hub-accent); box-shadow:0 12px 28px rgba(31,36,57,.12); }
