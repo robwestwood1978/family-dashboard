@@ -37,6 +37,7 @@ RUN npm ci --omit=dev --ignore-scripts \
 COPY app/src ./src
 COPY app/config ./config
 COPY app/frontend ./frontend
+COPY app/admin ./admin
 COPY app/integrations/family_dashboard_classroom ./integrations/family_dashboard_classroom
 
 COPY rootfs /
@@ -44,8 +45,8 @@ RUN chmod a+x \
     /etc/services.d/family-dashboard-manager/run \
     /etc/services.d/family-dashboard-tunnel/run
 
-ENV APP_VERSION=0.11.2 \
-    MANAGER_HOST=127.0.0.1 \
+ENV APP_VERSION=0.12.0 \
+    MANAGER_HOST=0.0.0.0 \
     MANAGER_PORT=8099 \
     MANAGER_CONFIG_DIR=/config/family-dashboard \
     MANAGER_DATA_DIR=/data \

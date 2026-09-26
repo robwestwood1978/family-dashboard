@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Family Dashboard Admin</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="brand"><span>FD</span><div><strong>Family Dashboard</strong><small>Household Admin</small></div></div>
+      <nav id="section-nav" aria-label="Settings sections"></nav>
+      <div class="sidebar-footer"><span id="version">v0.12.0</span><small>Validated · rollback protected</small></div>
+    </aside>
+    <main>
+      <header class="topbar">
+        <div><p>HOUSEHOLD SETTINGS</p><h1 id="page-title">Loading…</h1></div>
+        <div class="topbar-user"><span id="user-name">Home Assistant administrator</span><small>Admin session</small></div>
+      </header>
+      <section id="status" class="notice is-loading" role="status">Loading the active household configuration…</section>
+      <section id="editor" class="editor" aria-live="polite"></section>
+      <footer class="save-bar">
+        <div><strong id="change-count">No unsaved changes</strong><small>Saving validates and snapshots the complete dashboard.</small></div>
+        <button id="discard" type="button" class="secondary" disabled>Discard changes</button>
+        <button id="review" type="button" class="primary" disabled>Review &amp; save</button>
+      </footer>
+    </main>
+  </div>
+  <dialog id="review-dialog">
+    <form method="dialog" class="review-card">
+      <header><div><p>VALIDATED CHANGE</p><h2>Review household update</h2></div><button value="cancel" aria-label="Close">×</button></header>
+      <div id="review-summary"></div>
+      <label id="protected-ack" class="protected-ack" hidden><input type="checkbox"> <span><strong>I have checked the protected mappings</strong><small>Security, location, school or floorplan settings are changing.</small></span></label>
+      <footer><button value="cancel" class="secondary">Cancel</button><button id="deploy" value="default" type="button" class="primary">Save with rollback</button></footer>
+    </form>
+  </dialog>
+  <script type="module" src="admin.js"></script>
+</body>
+</html>

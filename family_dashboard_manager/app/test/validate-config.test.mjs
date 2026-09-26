@@ -338,15 +338,15 @@ test("requires location cards to use explicitly opted-in person entities", () =>
   assert.throws(() => validateConfig(config), /must match one explicitly configured person location entity/);
 });
 
-test("requires the requested Premier League spotlights to be unique team codes", () => {
+test("allows any family's two unique Premier League spotlight codes", () => {
   assert.deepEqual(example.football.spotlight_team_codes, ["TOT", "AVL"]);
   const config = structuredClone(example);
   config.football.spotlight_team_codes = ["TOT", "TOT"];
   assert.throws(() => validateConfig(config), /must be unique/);
 
-  const missingVilla = structuredClone(example);
-  missingVilla.football.spotlight_team_codes = ["TOT", "ARS"];
-  assert.throws(() => validateConfig(missingVilla), /must include AVL/);
+  const anotherFamily = structuredClone(example);
+  anotherFamily.football.spotlight_team_codes = ["ARS", "LIV"];
+  assert.equal(validateConfig(anotherFamily).football.spotlight_team_codes.join(","), "ARS,LIV");
 
   const extraClub = structuredClone(example);
   extraClub.football.spotlight_team_codes = ["TOT", "AVL", "ARS"];

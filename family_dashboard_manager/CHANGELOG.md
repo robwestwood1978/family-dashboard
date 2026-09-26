@@ -1,3 +1,12 @@
+## 0.12.0
+
+- Add **Family Dashboard Admin** as an administrator-only Home Assistant ingress panel. It edits the Manager's canonical non-secret household configuration, validates the whole candidate, shows an exact leaf-level diff and deploys only after a rollback snapshot and hash checks.
+- Make the complete household setup editable without source changes: people and colours, features, calendars and Ready templates, ChoreOps mappings, favourite football clubs, kiosk/photo-frame behaviour, theme, rooms and devices, music, energy, weather, lists and cleaning.
+- Keep security, floorplan, location and school mappings behind an additional protected-change acknowledgement. OAuth credentials, Home Assistant tokens, app options and Secure MCP Tunnel settings never enter the Admin payload.
+- Turn Tasks into a child-first ChoreOps surface with a per-child switcher, large job cards, progress and reward summaries, and direct claim buttons derived only from each configured status sensor. Approval, rejection, points, schedules and chore definitions remain in ChoreOps for adults.
+- Hide the generic `/choreops` link that resolves to Home Assistant Overview; show **Parent controls** only when an administrator configures a verified deeper ChoreOps path.
+- Allow any two distinct three-letter Premier League club codes instead of requiring Tottenham and Aston Villa, while retaining the current household's club-specific presentation.
+
 ## 0.11.2
 
 - Put event-linked **Ready next** items on Today when they are due today or tomorrow, with direct tick-off through the existing bounded local to-do service and compact ChoreOps summaries retained underneath.

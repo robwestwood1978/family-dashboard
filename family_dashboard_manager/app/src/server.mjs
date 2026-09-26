@@ -1,4 +1,4 @@
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -8,10 +8,17 @@ import { ClassroomIntegrationStore } from "./classroom-integration-store.mjs";
 import { startFootballPolling } from "./football-provider.mjs";
 import { DashboardStore } from "./manager-store.mjs";
 import { getSanitisedHomeAssistantInventory } from "./ha-client.mjs";
+import {
+  buildAdminBootstrap,
+  deployAdminCandidate,
+  previewAdminCandidate
+} from "./admin-policy.mjs";
 
 const CONFIG_SCHEMA = z.record(z.string(), z.unknown());
-const APP_VERSION = process.env.APP_VERSION || "0.11.2";
+const APP_VERSION = process.env.APP_VERSION || "0.12.0";
 const MCP_JSON_BODY_LIMIT_BYTES = 1_500_000;
+const DEFAULT_ADMIN_DIR = fileURLToPath(new URL("../admin/", import.meta.url));
+const SUPERVISOR_INGRESS_SOURCE = [172, 30, 32, 2].join(".");
 const FLOORPLAN_ASSET_SCHEMA = z.object({
   filename: z.enum(["ground-floor.svg", "first-floor.svg"]),
   content: z.string().min(1).max(600_000)
@@ -255,12 +262,26 @@ export function createFamilyDashboardMcpServer({
 }
 
 export function createManagerApp(dependencies = {}) {
+  const store = dependencies.store || new DashboardStore();
+  const inventory = dependencies.inventory || getSanitisedHomeAssistantInventory;
+  const adminDir = dependencies.adminDir || DEFAULT_ADMIN_DIR;
+  const authorizeAdmin = dependencies.authorizeAdmin || ((request) => {
+    const remote = String(request.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+    return remote === SUPERVISOR_INGRESS_SOURCE
+      && Boolean(request.get("X-Ingress-Path"));
+  });
+  const authorizeConnection = dependencies.authorizeConnection || ((request) => {
+    const remote = String(request.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+    return ["127.0.0.1", "::1", SUPERVISOR_INGRESS_SOURCE].includes(remote);
+  });
   const app = express();
   app.use(express.json({ limit: MCP_JSON_BODY_LIMIT_BYTES }));
-  app.use(localhostHostValidation());
+  app.use((request, response, next) => authorizeConnection(request)
+    ? next()
+    : response.status(403).json({ error: "Private app connection required" }));
   app.get("/healthz", (_request, response) => response.json({ status: "ok", version: APP_VERSION }));
-  app.post("/mcp", async (request, response) => {
-    const server = createFamilyDashboardMcpServer(dependencies);
+  app.post("/mcp", localhostHostValidation(), async (request, response) => {
+    const server = createFamilyDashboardMcpServer({ ...dependencies, store, inventory });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true
@@ -286,6 +307,79 @@ export function createManagerApp(dependencies = {}) {
   });
   app.get("/mcp", (_request, response) => response.status(405).set("Allow", "POST").send("Method Not Allowed"));
   app.delete("/mcp", (_request, response) => response.status(405).set("Allow", "POST").send("Method Not Allowed"));
+
+  const adminOnly = (request, response, next) => {
+    if (!authorizeAdmin(request)) return response.status(403).json({ error: "Administrator ingress session required" });
+    response.set({
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'",
+      "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff"
+    });
+    next();
+  };
+  const userFromRequest = (request) => ({
+    id: String(request.get("X-Remote-User-Id") || ""),
+    name: String(request.get("X-Remote-User-Display-Name") || request.get("X-Remote-User-Name") || "Home Assistant administrator").slice(0, 100)
+  });
+  const requireMutationHeader = (request, response, next) => request.get("X-Family-Dashboard-Admin") === "1"
+    ? next()
+    : response.status(403).json({ error: "Admin mutation header required" });
+  const sendAdminError = async (operation, error, response) => {
+    await store.recordError(operation, error);
+    response.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  };
+
+  app.get("/api/admin/bootstrap", adminOnly, async (request, response) => {
+    try {
+      response.json(await buildAdminBootstrap({ store, inventory, user: userFromRequest(request) }));
+    } catch (error) {
+      await sendAdminError("admin_bootstrap", error, response);
+    }
+  });
+  app.post("/api/admin/preview", adminOnly, requireMutationHeader, async (request, response) => {
+    try {
+      response.json(await previewAdminCandidate({
+        store,
+        candidate: request.body?.config,
+        expectedActiveHash: request.body?.expected_active_config_hash
+      }));
+    } catch (error) {
+      await sendAdminError("admin_preview", error, response);
+    }
+  });
+  app.post("/api/admin/deploy", adminOnly, requireMutationHeader, async (request, response) => {
+    try {
+      response.json(await deployAdminCandidate({
+        store,
+        candidate: request.body?.config,
+        expectedActiveHash: request.body?.expected_active_config_hash,
+        expectedConfigHash: request.body?.expected_config_hash,
+        confirm: request.body?.confirm,
+        acknowledgeProtected: request.body?.acknowledge_protected
+      }));
+    } catch (error) {
+      await sendAdminError("admin_deploy", error, response);
+    }
+  });
+  app.post("/api/admin/floorplans/preview", adminOnly, requireMutationHeader, async (request, response) => {
+    try {
+      response.json(store.validateFloorplanAssets(request.body?.assets));
+    } catch (error) {
+      await sendAdminError("admin_floorplan_preview", error, response);
+    }
+  });
+  app.post("/api/admin/floorplans/deploy", adminOnly, requireMutationHeader, async (request, response) => {
+    try {
+      response.json(await store.deployFloorplanAssets(request.body?.assets, {
+        expectedAssetSetHash: request.body?.expected_asset_set_hash,
+        confirm: request.body?.confirm
+      }));
+    } catch (error) {
+      await sendAdminError("admin_floorplan_deploy", error, response);
+    }
+  });
+  app.use("/", adminOnly, express.static(adminDir, { index: "index.html", etag: false, maxAge: 0 }));
   return app;
 }
 
@@ -296,14 +390,14 @@ export function startManagerServer({
 } = {}) {
   const app = createManagerApp({ store });
   const stopFootballPolling = startPolling({ store });
-  const listener = app.listen(port, "127.0.0.1", (error) => {
+  const listener = app.listen(port, process.env.MANAGER_HOST || "0.0.0.0", (error) => {
     if (error) {
       stopFootballPolling();
       console.error("Family Dashboard Manager failed to start", error);
       process.exitCode = 1;
       return;
     }
-    console.log(`Family Dashboard Manager listening on 127.0.0.1:${port}`);
+    console.log(`Family Dashboard Manager listening on ${process.env.MANAGER_HOST || "0.0.0.0"}:${port}`);
   });
   listener.once("close", stopFootballPolling);
   return listener;

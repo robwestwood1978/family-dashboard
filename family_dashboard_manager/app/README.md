@@ -2,7 +2,7 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.11.2 provides:
+Version 0.12.0 provides:
 
 - a secret-rejecting schema-v6 household contract;
 - a private Home Assistant media-source kiosk photo frame with camera-motion return;
@@ -16,8 +16,10 @@ Version 0.11.2 provides:
 - bounded event creation on explicitly writable Apple CalDAV calendar entities plus event-linked template and one-off preparation checklists stored in one configured Home Assistant to-do entity, with urgent Ready items directly tickable from Today;
 - immediate authenticated stills for doorbell, driveway and garden cameras, with the image itself opening a single native Home Assistant live camera card; **Live** requires a ready video frame, stalls return to loading, sessions expire after two minutes, teardown is enforced on close/switch/navigation/backgrounding, and bounded recovery never disguises a failed stream;
 - Eufy vacuum status and bounded controls, while authenticated map images remain inside Home Assistant;
-- named ChoreOps jobs, one optional featured reward, badge and achievement summary per child, an optional live-mode link to the native ChoreOps dashboard, plus a first-party per-child Google Classroom integration with exactly two read-only scopes, a 15-minute coordinator and no more than 20 assignment attributes;
-- the configured Mediocre Spotify/Sonos card and an adaptive, last-good-cache Fantasy Premier League provider with live freshness, provisional full-time handling, Home Assistant Core restart recovery at the next three-, 15- or 60-minute polling boundary, fixed-origin club crests, and Tottenham and Aston Villa spotlights;
+- named ChoreOps jobs, a child switcher, direct exact-entity job/reward claims, and one optional featured reward, badge and achievement summary per child; adult approval, points and scheduling remain in native ChoreOps;
+- an administrator-only ingress editor for the full non-secret household contract, with sanitised entity choices, exact diffs, protected-section acknowledgement, hash-locked deployment and rollback;
+- a first-party per-child Google Classroom integration with exactly two read-only scopes, a 15-minute coordinator and no more than 20 assignment attributes;
+- the configured Mediocre Spotify/Sonos card and an adaptive, last-good-cache Fantasy Premier League provider with live freshness, provisional full-time handling, Home Assistant Core restart recovery at the next three-, 15- or 60-minute polling boundary, fixed-origin club crests, and two configurable household favourites;
 - fixed allow-list deployment, inert private floorplan validation and raw hash-verified rollback compatible with older installed schemas;
 - sanitised inventory that excludes camera entities, people, trackers, states, history, addresses, credentials and arbitrary attributes;
 - deterministic `1112×834` and `1024×768` tablet checks.

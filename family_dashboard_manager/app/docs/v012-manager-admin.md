@@ -1,25 +1,30 @@
-# Manager-backed Admin design
+# v0.12 household Admin and child Tasks
 
-The Family Dashboard needs an administrator-only place for household choices that should not require source edits. The first scope is **Ready templates**: add, rename, reorder and remove templates; edit their keyword matches; and edit the checklist items applied to an event.
+Family Dashboard Admin is a Home Assistant administrator-only app ingress panel. It edits the Manager's canonical non-secret schema-v6 household configuration; it is not tablet-local storage and it does not write Lovelace storage directly.
 
-This must be a Manager-backed surface, not browser local storage and not a dashboard card rewriting Lovelace storage. The Manager owns the canonical household configuration, schema validation, exact deployment hash and rollback snapshots. Saving an Admin change must therefore follow the same sequence:
+An administrator can manage:
 
-1. Require a Home Assistant administrator through authenticated app ingress.
-2. Read only the non-secret household configuration already owned by the Manager.
-3. Edit a strict allow-list of household-preference fields.
-4. Validate the complete candidate against schema v6.
-5. Present the exact bounded diff and require one Save confirmation.
-6. Create a rollback snapshot, deploy the validated hash and reload the existing dashboard resource.
-7. Verify the new active hashes while preserving private floorplans and unrelated mappings.
+- household name, locale and timezone;
+- people, roles, colours and optional presence mappings;
+- enabled dashboard experiences;
+- calendar sources, creation rights, Ready list and preparation templates;
+- ChoreOps child mappings and a verified parent dashboard path;
+- two favourite Premier League clubs;
+- default view, kiosk and private photo-frame behaviour;
+- theme, rooms, floorplans, media, energy, weather, cleaning and security mappings.
 
-The initial editable fields should be:
+OAuth credentials, Home Assistant tokens, app options and Secure MCP Tunnel settings are never sent to the Admin browser. Private floorplan files use their separate inert two-file validator and deploy route. Security, floorplan, location and school edits are labelled protected and require a second acknowledgement in the review dialog.
 
-- Ready template label, keyword triggers, checklist items and display order;
-- family member display colour;
-- writable calendar choice and label;
-- Ready look-ahead window;
-- kiosk photo-frame timing and clock choice.
+Every save is one transaction:
 
-Device/entity mappings, Secure MCP Tunnel settings, OAuth credentials, secrets, private floorplans, camera routes, alarm controls and garage controls stay outside this page. They require the existing managed deployment path because a mistaken value could remove controls, expose private data or weaken a protected action boundary.
+1. Require Home Assistant's administrator-only panel and Supervisor ingress source.
+2. Read the active non-secret configuration and its exact hash.
+3. Validate the complete candidate against schema v6.
+4. Reject managed identity changes and stale Admin sessions.
+5. Show the exact bounded leaf-level diff.
+6. Require one Save confirmation, plus protected acknowledgement when applicable.
+7. Snapshot and deploy through the existing Manager hash contract.
 
-The shared kiosk must not display Admin. An administrator reaches the page from Home Assistant on their own authenticated device. The dashboard may show an Admin link only when Home Assistant reports `user.is_admin === true`; the actual Manager route must still independently enforce ingress authentication.
+Tasks is child-first when location sharing is off. Each child gets a large, colour-coded job surface. A direct claim is available only when the configured ChoreOps status sensor has the exact derived claim button and the job is pending, due, overdue or missed. The dashboard calls only `button.press` on that exact claim entity, prevents double submission and never exposes approve or disapprove buttons. ChoreOps remains authoritative for chore definitions, recurrence, points, adult approval and rejection.
+
+The generic `/choreops` route is intentionally hidden because it can resolve to Home Assistant Overview. **Parent controls** appears only for a separately verified deeper internal path configured by an administrator.
