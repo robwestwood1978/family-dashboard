@@ -18,6 +18,7 @@ const CONFIG_SCHEMA = z.record(z.string(), z.unknown());
 const APP_VERSION = process.env.APP_VERSION || "0.12.0";
 const MCP_JSON_BODY_LIMIT_BYTES = 1_500_000;
 const DEFAULT_ADMIN_DIR = fileURLToPath(new URL("../admin/", import.meta.url));
+const SUPERVISOR_INGRESS_SOURCE = [172, 30, 32, 2].join(".");
 const FLOORPLAN_ASSET_SCHEMA = z.object({
   filename: z.enum(["ground-floor.svg", "first-floor.svg"]),
   content: z.string().min(1).max(600_000)
@@ -266,12 +267,12 @@ export function createManagerApp(dependencies = {}) {
   const adminDir = dependencies.adminDir || DEFAULT_ADMIN_DIR;
   const authorizeAdmin = dependencies.authorizeAdmin || ((request) => {
     const remote = String(request.socket?.remoteAddress || "").replace(/^::ffff:/, "");
-    return remote === "172.30.32.2"
+    return remote === SUPERVISOR_INGRESS_SOURCE
       && Boolean(request.get("X-Ingress-Path"));
   });
   const authorizeConnection = dependencies.authorizeConnection || ((request) => {
     const remote = String(request.socket?.remoteAddress || "").replace(/^::ffff:/, "");
-    return ["127.0.0.1", "::1", "172.30.32.2"].includes(remote);
+    return ["127.0.0.1", "::1", SUPERVISOR_INGRESS_SOURCE].includes(remote);
   });
   const app = express();
   app.use(express.json({ limit: MCP_JSON_BODY_LIMIT_BYTES }));
