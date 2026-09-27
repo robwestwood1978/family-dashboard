@@ -3420,6 +3420,13 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       await expect(card.locator(".choreops-link")).toHaveCount(0);
       await expect(card.locator(".family-kid-tab")).toHaveCount(2);
       await expect(card.locator(".family-kid-stage .family-person")).toHaveCount(1);
+      const familyRows = await card.locator(".family-dashboard").evaluate((dashboard) => {
+        const switcher = dashboard.querySelector(".family-kid-switcher").getBoundingClientRect();
+        const stage = dashboard.querySelector(".family-kid-stage").getBoundingClientRect();
+        return { switcherHeight: switcher.height, switcherBottom: switcher.bottom, stageTop: stage.top };
+      });
+      expect(familyRows.switcherHeight).toBeGreaterThanOrEqual(58);
+      expect(familyRows.switcherBottom).toBeLessThanOrEqual(familyRows.stageTop + 1);
       await expect(card.locator(".family-kid-stage .family-person-heading h2")).toHaveText("Today’s jobs");
       await expect(card.locator(".family-summary-grid")).toHaveCount(1);
       await expect(card.locator(".family-summary-item")).toHaveCount(3);

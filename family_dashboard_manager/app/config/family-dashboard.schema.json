@@ -266,7 +266,10 @@
         "default_section": {
           "enum": ["rooms", "lights", "heating", "covers", "cleaning"]
         },
-        "default_room": { "$ref": "#/$defs/id" }
+        "default_room": {
+          "$ref": "#/$defs/id",
+          "description": "The room opened first on the configured default floor."
+        }
       }
     },
     "floorplan": {

@@ -1,3 +1,10 @@
+## 0.12.1
+
+- Keep the Tasks child selector in its own visible row on landscape tablets so switching between children never depends on rotating the iPad.
+- Let every Admin settings group use the available page width, including nested objects such as Photo Frame and Energy mappings, instead of compressing them into repeated half-width columns.
+- Replace the Home default-room free-text field with a dropdown built from the household's configured rooms and floor names.
+- Turn the Admin section navigation into a touch-friendly horizontal strip on portrait tablets while retaining the desktop sidebar on wider screens.
+
 ## 0.12.0
 
 - Add **Family Dashboard Admin** as an administrator-only Home Assistant ingress panel. It edits the Manager's canonical non-secret household configuration, validates the whole candidate, shows an exact leaf-level diff and deploys only after a rollback snapshot and hash checks.

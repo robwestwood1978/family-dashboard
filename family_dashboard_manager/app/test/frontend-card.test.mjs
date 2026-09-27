@@ -230,6 +230,13 @@ test("gives the kiosk photo frame a stable block containing card", () => {
   assert.doesNotMatch(card._styles(), /\.photo-frame img \{[^}]*animation:/);
 });
 
+test("reserves a separate Tasks row for the child switcher", () => {
+  const card = Object.create(FamilyHubCard.prototype);
+  const styles = card._styles();
+  assert.match(styles, /\.family-dashboard\.has-kid-switcher \{ grid-template-rows:auto auto minmax\(0,1fr\); \}/);
+  assert.match(styles, /\.family-dashboard\.has-kid-switcher \{ grid-template-rows:auto auto auto; \}/);
+});
+
 test("does not schedule incidental renders while the kiosk photo frame owns the surface", () => {
   const card = Object.create(FamilyHubCard.prototype);
   Object.defineProperty(card, "isConnected", { value: true });

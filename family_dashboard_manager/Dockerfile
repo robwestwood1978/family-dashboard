@@ -45,7 +45,7 @@ RUN chmod a+x \
     /etc/services.d/family-dashboard-manager/run \
     /etc/services.d/family-dashboard-tunnel/run
 
-ENV APP_VERSION=0.12.0 \
+ENV APP_VERSION=0.12.1 \
     MANAGER_HOST=0.0.0.0 \
     MANAGER_PORT=8099 \
     MANAGER_CONFIG_DIR=/config/family-dashboard \
