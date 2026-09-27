@@ -52,12 +52,14 @@ test("keeps Admin readable in iPad portrait and offers configured rooms", async 
       editorWidth: editor.getBoundingClientRect().width,
       rootWidth: root.getBoundingClientRect().width,
       navDisplay: getComputedStyle(nav).display,
-      navOverflow: nav.scrollWidth > nav.clientWidth
+      navOverflowX: getComputedStyle(nav).overflowX,
+      navButtonHeight: nav.querySelector("button").getBoundingClientRect().height
     };
   });
   expect(layout.rootWidth / layout.editorWidth).toBeGreaterThan(0.95);
   expect(layout.navDisplay).toBe("flex");
-  expect(layout.navOverflow).toBe(true);
+  expect(layout.navOverflowX).toBe("auto");
+  expect(layout.navButtonHeight).toBeGreaterThanOrEqual(44);
 
   await page.getByRole("button", { name: "Kiosk & photos" }).click();
   const groupWidths = await page.locator("#editor").evaluate((editor) => {
