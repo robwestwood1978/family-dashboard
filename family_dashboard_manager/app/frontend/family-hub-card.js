@@ -3858,7 +3858,7 @@ export class FamilyHubCard extends HTMLElementBase {
       const selected = children.find((person) => person.id === this._familyPersonId) || children[0];
       const tabs = children.map((person) => `<button type="button" class="family-kid-tab ${selected?.id === person.id ? "is-selected" : ""}" data-family-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}" aria-pressed="${selected?.id === person.id}"><span>${escapeHtml(person.name.slice(0, 1))}</span><strong>${escapeHtml(person.name)}</strong></button>`).join("");
       return `
-        <section class="family-dashboard">
+        <section class="family-dashboard${children.length > 1 ? " has-kid-switcher" : ""}${this._choreClaimFeedback ? " has-claim-feedback" : ""}">
           <header class="family-dashboard-heading"><div><p class="eyebrow">To-do</p><h2>${familyTitle}</h2></div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
           ${children.length > 1 ? `<div class="family-kid-switcher" role="group" aria-label="Choose family member">${tabs}</div>` : ""}
           ${this._choreClaimFeedback ? `<p class="chore-claim-feedback" role="status"><ha-icon icon="mdi:check-circle"></ha-icon>${escapeHtml(this._choreClaimFeedback)}</p>` : ""}
@@ -6723,6 +6723,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .hub-agenda-empty { margin:12px 4px; color:#8a8f9d; font-size:9px; line-height:1.4; }
       .hub-agenda-more { margin:auto 4px 2px; color:var(--hub-accent); font-size:9px; font-weight:750; }
       .family-dashboard { height:100%; min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr); gap:10px; }
+      .family-dashboard.has-kid-switcher { grid-template-rows:auto auto minmax(0,1fr); }
+      .family-dashboard.has-claim-feedback { grid-template-rows:auto auto minmax(0,1fr); }
+      .family-dashboard.has-kid-switcher.has-claim-feedback { grid-template-rows:auto auto auto minmax(0,1fr); }
       .family-dashboard-heading { min-height:48px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 2px; }
       .family-dashboard-heading h2 { margin:3px 0 0; color:var(--hub-text); font-size:22px; }
       .family-kid-switcher { display:flex; gap:9px; overflow-x:auto; padding:2px; }
@@ -7430,6 +7433,9 @@ export class FamilyHubCard extends HTMLElementBase {
         .energy-hero { align-items:flex-start; flex-direction:column; }
         .energy-meter-grid { grid-template-columns:1fr; }
         .family-dashboard { height:auto; grid-template-rows:auto auto; }
+        .family-dashboard.has-kid-switcher { grid-template-rows:auto auto auto; }
+        .family-dashboard.has-claim-feedback { grid-template-rows:auto auto auto; }
+        .family-dashboard.has-kid-switcher.has-claim-feedback { grid-template-rows:auto auto auto auto; }
         .family-dashboard-heading { align-items:flex-start; flex-wrap:wrap; }
         .family-people-grid { grid-template-columns:1fr; }
         .family-sidebar { display:flex; flex-direction:column; overflow:visible; padding-right:0; scrollbar-gutter:auto; }
