@@ -1,3 +1,9 @@
+## 0.13.1
+
+- Populate all six household heating schedules with their exact Tuya Local text, auto-schedule and refresh entities so the master and room editors are enabled.
+- Show an explicit **Not configured** value for empty Admin entity mappings instead of visually selecting the first unrelated Home Assistant entity.
+- Limit heating Admin choices to genuine temperature sensors, schedule text entities, auto-schedule selectors and refresh-schedule buttons, with area and entity IDs shown for disambiguation.
+
 ## 0.13.0
 
 - Add per-room light group actions and one bounded whole-house internal-lights-off action that excludes configured exterior lights.

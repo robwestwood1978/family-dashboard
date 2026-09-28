@@ -7,6 +7,24 @@ import { fileURLToPath } from "node:url";
 const config = JSON.parse(await readFile(new URL("../config/example.json", import.meta.url), "utf8"));
 const schema = JSON.parse(await readFile(new URL("../config/family-dashboard.schema.json", import.meta.url), "utf8"));
 const adminDirectory = fileURLToPath(new URL("../admin/", import.meta.url));
+const inventory = {
+  schema_version: 1,
+  areas: [
+    { id: "living_room", name: "Living room" },
+    { id: "kitchen", name: "Kitchen" },
+    { id: "hallway", name: "Hallway" }
+  ],
+  entities: [
+    { entity_id: "sensor.app_armor_version", name: "AppArmor version", domain: "sensor" },
+    { entity_id: "sensor.living_room_temperature", name: "Living room temperature", area_id: "living_room", device_class: "temperature", domain: "sensor" },
+    { entity_id: "sensor.kitchen_temperature", name: "Kitchen temperature", area_id: "kitchen", device_class: "temperature", domain: "sensor" },
+    { entity_id: "text.living_room_schedule", name: "Living room Schedule", area_id: "living_room", domain: "text" },
+    { entity_id: "select.daddy_choreops_helper", name: "Daddy ChoreOps helper", domain: "select" },
+    { entity_id: "select.living_room_auto_schedule", name: "Living room Auto schedule", area_id: "living_room", domain: "select" },
+    { entity_id: "button.blinds_identify", name: "Blinds Identify", domain: "button" },
+    { entity_id: "button.living_room_refresh_schedule", name: "Living room Refresh schedule", area_id: "living_room", domain: "button" }
+  ]
+};
 
 let server;
 let baseUrl;
@@ -14,10 +32,10 @@ let baseUrl;
 test.beforeAll(async () => {
   const app = express();
   app.get("/api/admin/bootstrap", (_request, response) => response.json({
-    version: "0.13.0",
+    version: "0.13.1",
     config,
     schema,
-    inventory: { schema_version: 1, areas: [], entities: [] },
+    inventory,
     active_config_hash: "a".repeat(64),
     private_assets: {},
     user: { id: "admin", name: "Household owner" }
@@ -71,4 +89,24 @@ test("keeps Admin readable in iPad portrait and offers configured rooms", async 
     };
   });
   expect(groupWidths.nested / groupWidths.root).toBeGreaterThan(0.85);
+});
+
+test("does not present unrelated entities as empty heating mappings", async ({ page }) => {
+  await page.goto(baseUrl);
+  await expect(page.locator("#status")).toContainText("Active configuration loaded");
+  await page.getByRole("button", { name: "Rooms & devices" }).click();
+
+  const hallway = page.locator('input[value="hallway"]').locator('xpath=ancestor::div[contains(@class,"array-item")][1]');
+  const emptyTemperature = hallway.locator("label.field").filter({ hasText: "Temperature Sensor" }).locator("select");
+  await expect(emptyTemperature).toHaveValue("");
+  await expect(emptyTemperature.locator("option").first()).toHaveText("Not configured");
+  await expect(emptyTemperature.locator('option[value="sensor.app_armor_version"]')).toHaveCount(0);
+
+  const livingRoom = page.locator('input[value="living_room"]').locator('xpath=ancestor::div[contains(@class,"array-item")][1]');
+  const mode = livingRoom.locator("label.field").filter({ hasText: "Mode Entity" }).locator("select");
+  const refresh = livingRoom.locator("label.field").filter({ hasText: "Refresh Entity" }).locator("select");
+  await expect(mode).toHaveValue("select.living_room_auto_schedule");
+  await expect(mode.locator('option[value="select.daddy_choreops_helper"]')).toHaveCount(0);
+  await expect(refresh).toHaveValue("button.living_room_refresh_schedule");
+  await expect(refresh.locator('option[value="button.blinds_identify"]')).toHaveCount(0);
 });
