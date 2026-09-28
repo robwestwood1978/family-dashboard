@@ -7611,9 +7611,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .heating-schedule summary > span { min-width:0; display:grid; grid-template-columns:22px minmax(0,1fr); align-items:center; gap:1px 6px; }
       .heating-schedule summary > span ha-icon { grid-row:1/3; --mdc-icon-size:19px; color:#1463E8; }
       .heating-schedule summary strong { color:inherit; font-size:12px; }
-      .heating-schedule summary small { color:#5E6B80; font-size:11px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+      .heating-schedule summary small { color:#5E6B80; font-size:12px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
       .schedule-editor { padding:9px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; border-top:1px solid #DCE4EE; }
-      .schedule-editor label { min-width:0; display:grid; grid-template-columns:1fr 86px; gap:5px; align-items:center; color:#33445C; font-size:11px; font-weight:800; }
+      .schedule-editor label { min-width:0; display:grid; grid-template-columns:1fr 86px; gap:5px; align-items:center; color:#33445C; font-size:12px; font-weight:800; }
       .schedule-editor input { min-width:0; width:100%; height:38px; padding:0 6px; border:1px solid #DCE4EE; border-radius:10px; background:#fff; color:#0B1830; }
       .schedule-temp { display:flex; align-items:center; gap:2px; }
       .schedule-editor > button { grid-column:1/-1; min-height:42px; }
