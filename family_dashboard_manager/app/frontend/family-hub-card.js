@@ -7641,7 +7641,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .kid-mission-orbit { width:50px; height:50px; display:grid; place-items:center; border-radius:50%; background:rgba(255,255,255,.14); }
       .kid-mission-orbit ha-icon { --mdc-icon-size:28px; color:#fff; }
       .kid-mission p,.kid-mission strong { display:block; margin:0; color:#fff; }
-      .kid-mission p { font-size:11px; font-weight:850; letter-spacing:.08em; text-transform:uppercase; }
+      .kid-mission p { font-size:12px; font-weight:850; letter-spacing:.08em; text-transform:uppercase; }
       .kid-mission strong { margin-top:3px; font-size:16px; }
       .kid-mission i { height:7px; margin-top:9px; display:block; overflow:hidden; border-radius:999px; background:rgba(255,255,255,.18); }
       .kid-mission i b { height:100%; display:block; border-radius:inherit; background:#fff; transition:width .35s ease; }
