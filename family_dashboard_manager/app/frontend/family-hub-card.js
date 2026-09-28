@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 119334)
-Total output lines: 7797
-
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
   { id: "calendar", label: "Calendar", icon: "mdi:calendar-month", feature: "calendar" },
@@ -3934,7 +3931,1244 @@ export class FamilyHubCard extends HTMLElementBase {
     const event = this._plannerEventByKey(this._plannerModal.eventKey);
     if (!event) return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal" role="dialog" aria-modal="true" aria-labelledby="planner-event-missing-title">
       <header><button type="button" class="planner-modal-close" data-planner-close aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">Family planner</p><h2 id="planner-event-missing-title">Event no longer available</h2></header>
-      <div class="…19334 tokens truncated…ot.querySelector(`[data-planner-field="${name}"]`)?.value?.trim?.() || "";
+      <div class="planner-modal-body"><p class="planner-no-prep">The calendar changed while this event was open.</p></div>
+      <footer><span>Close this window to refresh the planner.</span><button type="button" data-planner-close>Close</button></footer>
+    </section></div>`;
+    const calendar = event._calendar || this._config.calendar.entities[0];
+    const people = familyPlannerPeople(event, this._config.people).filter((person) => person.role !== "household");
+    const children = people.filter((person) => person.role === "child");
+    const eventKey = familyPlannerEventKey(event);
+    const items = this._preparationItems.filter((item) => item?._preparation?.eventKey === eventKey);
+    const progress = preparationProgress(items, eventKey);
+    const suggestion = matchPreparationTemplate(event, this._config.calendar.preparation?.templates || []);
+    const templates = this._config.calendar.preparation?.templates || [];
+    const checklist = items.length ? `<div class="planner-checklist">
+      <div class="planner-checklist-heading"><div><p class="eyebrow">Get ready</p><h3>${progress.ready ? "Ready" : `${progress.complete} of ${progress.total} complete`}</h3></div><span class="${progress.ready ? "is-ready" : ""}"><ha-icon icon="${progress.ready ? "mdi:check-circle" : "mdi:bag-personal-outline"}"></ha-icon></span></div>
+      ${items.map((item) => {
+        const completed = String(item.status).toLocaleLowerCase() === "completed";
+        const person = this._config.people.find((entry) => entry.id === item._preparation.personId);
+        const itemId = item.uid || item.id || item.summary;
+        return `<div class="planner-check-item ${completed ? "is-complete" : ""}"><button type="button" data-prep-item="${escapeHtml(itemId)}" data-prep-status="${completed ? "needs_action" : "completed"}" aria-label="${completed ? "Mark not ready" : "Mark ready"}" ${this._config.display.read_only ? "disabled" : ""}><span><ha-icon icon="${completed ? "mdi:check" : "mdi:circle-outline"}"></ha-icon></span><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong>${person ? `<small style="--person-colour:${escapeHtml(person.colour)}">${escapeHtml(person.name)}</small>` : ""}</button>${this._config.display.read_only ? "" : `<button type="button" class="planner-remove-item" data-remove-prep-item="${escapeHtml(itemId)}" aria-label="Remove ${escapeHtml(item.summary || item.item || "preparation item")}"><ha-icon icon="mdi:delete-outline"></ha-icon></button>`}</div>`;
+      }).join("")}
+    </div>` : suggestion && children.length ? `<div class="planner-suggestion"><span><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon></span><div><p class="eyebrow">Suggested preparation</p><h3>${escapeHtml(suggestion.label)}</h3><p>${escapeHtml(suggestion.items.join(" · "))}</p><div>${children.map((person) => `<button type="button" data-add-preparation="${escapeHtml(eventKey)}" data-preparation-template="${escapeHtml(suggestion.id)}" data-preparation-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}">Add for ${escapeHtml(person.name)}</button>`).join("")}</div></div></div>` : '<p class="planner-no-prep">No preparation checklist is linked to this event yet.</p>';
+    const checklistEditor = children.length && !this._config.display.read_only ? `<section class="planner-checklist-editor"><p class="eyebrow">Change the Ready list</p><div class="planner-editor-row"><span class="select-shell"><select data-planner-field="event-person" aria-label="Family member">${children.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span><span class="select-shell"><select data-planner-field="event-template" aria-label="Ready template"><option value="">Choose a template</option>${templates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.label)}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span><button type="button" data-add-event-template="${escapeHtml(eventKey)}">Add template</button></div><div class="planner-editor-row"><input data-planner-field="event-custom-item" type="text" maxlength="120" autocomplete="off" placeholder="Add present, card, water bottle…"/><button type="button" data-add-event-custom="${escapeHtml(eventKey)}">Add item</button></div></section>` : "";
+    return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal" role="dialog" aria-modal="true" aria-labelledby="planner-event-title">
+      <header style="--calendar-colour:${escapeHtml(calendar.colour)}"><button type="button" class="planner-modal-close" data-planner-close aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">${escapeHtml(people.map((person) => person.name).join(" · ") || calendar.label)}</p><h2 id="planner-event-title">${escapeHtml(event.summary || calendar.label)}</h2><p>${escapeHtml(formatDay(calendarEventStart(event), this._config.product.locale, this._config.product.timezone))}${isAllDayCalendarEvent(event) ? " · All day" : ` · ${escapeHtml(formatTime(calendarEventStart(event), this._config.product.locale, this._config.product.timezone))}`}</p></header>
+      <div class="planner-modal-body">${event.location ? `<p class="planner-event-location"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(event.location)}</p>` : ""}${event.description ? `<p class="planner-event-description">${escapeHtml(event.description)}</p>` : ""}${checklist}${checklistEditor}</div>
+      <footer><span><ha-icon icon="mdi:apple"></ha-icon>Edit the event itself in Apple Calendar, then press Refresh</span></footer>
+    </section></div>`;
+  }
+
+  _renderPlannerAddModal() {
+    const now = new Date(Date.now() + 3_600_000);
+    const date = dateKey(now, this._config.product.timezone);
+    const startTime = formatTimeInput(now, this._config.product.timezone);
+    const endTime = formatTimeInput(new Date(now.getTime() + 3_600_000), this._config.product.timezone);
+    const calendars = this._config.calendar.entities.filter((entry) => entry.allow_create === true);
+    const templates = this._config.calendar.preparation?.templates || [];
+    return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal planner-add-modal" role="dialog" aria-modal="true" aria-labelledby="planner-add-title">
+      <header><button type="button" class="planner-modal-close" data-planner-close aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">Family planner</p><h2 id="planner-add-title">Add an event</h2><p>This will be added to the selected Apple calendar.</p></header>
+      <div class="planner-event-form">
+        <label><span>Who is it for?</span><span class="select-shell"><select data-planner-field="calendar">${calendars.map((calendar) => `<option value="${escapeHtml(calendar.entity_id)}">${escapeHtml(calendar.label)}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span></label>
+        <label class="is-wide"><span>Event</span><input data-planner-field="summary" type="text" maxlength="120" autocomplete="off" placeholder="Football training" /></label>
+        <label><span>Date</span><input data-planner-field="date" type="date" value="${escapeHtml(date)}" /></label>
+        <label><span>Starts</span><input data-planner-field="start" type="time" value="${escapeHtml(startTime)}" /></label>
+        <label><span>Ends</span><input data-planner-field="end" type="time" value="${escapeHtml(endTime)}" /></label>
+        <label class="is-wide"><span>Location</span><input data-planner-field="location" type="text" maxlength="160" autocomplete="off" placeholder="Optional" /></label>
+        <label class="is-wide"><span>Get ready template</span><span class="select-shell"><select data-planner-field="template"><option value="">No checklist</option>${templates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.label)}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span></label>
+        <label class="is-wide"><span>Extra Ready items</span><textarea data-planner-field="custom-items" maxlength="600" placeholder="One item per line, for example:&#10;Birthday present&#10;Birthday card"></textarea><small>These are added alongside any template you choose.</small></label>
+        <p class="planner-form-error" role="alert">${escapeHtml(this._plannerModal.error || "")}</p>
+      </div>
+      <footer><button type="button" data-planner-close>Cancel</button><button type="button" class="planner-save" data-planner-save ${this._plannerModal.saving ? "disabled" : ""}>${this._plannerModal.saving ? "Adding…" : "Add to calendar"}</button></footer>
+    </section></div>`;
+  }
+
+  _renderFamily() {
+    const locationEnabled = this._config.features.location_map;
+    const choresEnabled = this._config.features.chores === true;
+    const familyTitle = choresEnabled ? "Tasks, jobs & rewards" : this._config.features.school ? "School & tasks" : "Tasks";
+    const children = this._config.people.filter((person) => person.role === "child");
+    if (!locationEnabled) {
+      const selected = children.find((person) => person.id === this._familyPersonId) || children[0];
+      const tabs = children.map((person) => `<button type="button" class="family-kid-tab ${selected?.id === person.id ? "is-selected" : ""}" data-family-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}" aria-pressed="${selected?.id === person.id}"><span>${escapeHtml(person.name.slice(0, 1))}</span><strong>${escapeHtml(person.name)}</strong></button>`).join("");
+      return `
+        <section class="family-dashboard${children.length > 1 ? " has-kid-switcher" : ""}${this._choreClaimFeedback ? " has-claim-feedback" : ""}">
+          <header class="family-dashboard-heading"><div><p class="eyebrow">To-do</p><h2>${familyTitle}</h2></div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
+          ${children.length > 1 ? `<div class="family-kid-switcher" role="group" aria-label="Choose family member">${tabs}</div>` : ""}
+          ${this._choreClaimFeedback ? `<p class="chore-claim-feedback" role="status"><ha-icon icon="mdi:check-circle"></ha-icon>${escapeHtml(this._choreClaimFeedback)}</p>` : ""}
+          <div class="family-kid-stage">${selected ? this._renderFamilyPerson(selected, { kidMode: true }) : '<p class="hub-empty-state large">Add a child in Family Dashboard Admin to connect ChoreOps.</p>'}</div>
+        </section>
+      `;
+    }
+    return `
+      <section class="family-layout">
+        <article class="surface map-panel">
+          <div class="section-heading"><div><p class="eyebrow">${locationEnabled ? "Family map" : "Family overview"}</p><h2>${locationEnabled ? "Presence & location" : "Private family summary"}</h2></div><span>${locationEnabled ? "Private to Home Assistant" : "Location sharing off"}</span></div>
+          ${locationEnabled ? '<div id="map-card-slot" class="child-card-slot map-slot"></div>' : '<p class="hub-empty-state">Location sharing is disabled.</p>'}
+        </article>
+        <aside class="family-sidebar" aria-label="${choresEnabled ? "Family jobs and rewards" : "Family details"}">
+          <div class="family-scroll-cue"><strong>${familyTitle}</strong><span><ha-icon icon="mdi:swap-vertical" aria-hidden="true"></ha-icon>Swipe for everyone</span></div>
+          ${choresEnabled ? this._renderChoreOpsLink("family-sidebar-link") : ""}
+          ${children.map((person) => this._renderFamilyPerson(person)).join("")}
+        </aside>
+      </section>
+    `;
+  }
+
+  _renderChoreOpsLink(extraClass = "") {
+    if (this._config.display.read_only || !this._config.features.chores) return "";
+    const path = safeInternalDashboardPath(this._config.chores?.dashboard_path);
+    if (!path || path === "/choreops") return "";
+    return `<a class="choreops-link ${extraClass}" href="${escapeHtml(path)}" data-choreops-link="native"><ha-icon icon="mdi:cog-outline" aria-hidden="true"></ha-icon>Parent controls</a>`;
+  }
+
+  _renderChoreOpsSummary(chore, points = NaN, personId = "") {
+    if (!chore) return "";
+    const states = this._hass?.states || {};
+    const firstSummary = (entityIds, kind) => {
+      const entityId = entityIds?.[0];
+      return entityId ? { ...normaliseChoreOpsSummary(states[entityId], entityId, kind), entityId, state: states[entityId] } : null;
+    };
+    const items = [
+      firstSummary(chore.reward_status_entities, "reward"),
+      firstSummary(chore.badge_progress_entities, "badge"),
+      firstSummary(chore.achievement_progress_entities, "achievement")
+    ].filter(Boolean);
+    if (!items.length) return "";
+    const labels = { reward: "Reward", badge: "Badge", achievement: "Achievement" };
+    const rows = items.map((item) => {
+      const attributes = item.state?.attributes || {};
+      const rewardCost = firstFiniteNumber([attributes.reward_cost, attributes.cost, attributes.points_required]);
+      const percentageLabel = item.label.match(/([0-9.]+)%/);
+      const countLabel = item.label.match(/([0-9.]+) of ([0-9.]+)/);
+      const progress = item.kind === "reward" && Number.isFinite(points) && Number.isFinite(rewardCost) && rewardCost > 0
+        ? Math.min(100, Math.max(0, points / rewardCost * 100))
+        : percentageLabel
+          ? Number(percentageLabel[1])
+          : countLabel && Number(countLabel[2]) > 0
+            ? Math.min(100, Number(countLabel[1]) / Number(countLabel[2]) * 100)
+            : item.tone === "done" ? 100 : 0;
+      const claimEntity = item.kind === "reward" ? rewardClaimEntityId(item.entityId) : null;
+      const pending = claimEntity && this._pendingChoreClaims.has(claimEntity);
+      const canClaim = item.kind === "reward" && item.status === "available" && claimEntity
+        && isCommandEntityAvailable(states[claimEntity]) && !this._config.display.read_only && !pending;
+      const claimAction = canClaim || pending
+        ? `<button type="button" class="reward-claim" ${canClaim ? `data-reward-claim="${escapeHtml(claimEntity)}" data-reward-status="${escapeHtml(item.entityId)}" data-person-id="${escapeHtml(personId)}"` : "disabled"}>${pending ? "Requesting…" : "Claim reward"}</button>`
+        : "";
+      return `
+      <div class="family-summary-item is-${escapeHtml(item.tone)}">
+        <span><ha-icon icon="${escapeHtml(item.icon)}" aria-hidden="true"></ha-icon></span>
+        <div><p>${labels[item.kind]}</p><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.label)}</small><i class="family-progress"><b style="width:${Math.round(progress)}%"></b></i>${claimAction}</div>
+      </div>
+    `;
+    }).join("");
+    return `<section class="family-summary-grid" aria-label="Rewards and progress">${rows}</section>`;
+  }
+
+  _renderPersonPreparation(person) {
+    if (!this._config.calendar?.preparation?.enabled) return "";
+    const lookaheadDays = Math.min(1, this._config.calendar.preparation.lookahead_days || 1);
+    const events = (this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents())
+      .filter((event) => event?._calendar?.person_ids?.includes(person.id))
+      .filter((event) => isPreparationWindowEvent(event, lookaheadDays, new Date(), this._config.product.timezone));
+    const eventMap = new Map(events.map((event) => [familyPlannerEventKey(event), event]));
+    const items = this._preparationItems.filter((item) => item?._preparation?.personId === person.id
+      && eventMap.has(item._preparation.eventKey));
+    if (!items.length) return "";
+    const complete = items.filter((item) => String(item.status).toLocaleLowerCase() === "completed").length;
+    const ready = complete === items.length;
+    const rows = items.slice(0, 6).map((item) => {
+      const completed = String(item.status).toLocaleLowerCase() === "completed";
+      const event = eventMap.get(item._preparation.eventKey);
+      const itemId = item.uid || item.id || item.summary;
+      return `<button type="button" class="family-prep-item ${completed ? "is-complete" : ""}" data-prep-item="${escapeHtml(itemId)}" data-prep-status="${completed ? "needs_action" : "completed"}"><span><ha-icon icon="${completed ? "mdi:check" : "mdi:circle-outline"}"></ha-icon></span><div><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong><small>${escapeHtml(event?.summary || "Upcoming event")}</small></div></button>`;
+    }).join("");
+    return `<section class="family-preparation ${ready ? "is-ready" : ""}" aria-label="Get ready for upcoming events"><div class="chore-heading"><p class="eyebrow">Get ready</p><span>${ready ? "Ready" : `${complete} of ${items.length}`}</span></div><div class="family-prep-list">${rows}</div>${items.length > 6 ? `<button type="button" class="family-prep-more" data-view="calendar">Open planner for ${items.length - 6} more</button>` : ""}</section>`;
+  }
+
+  _renderFamilyPerson(person, { kidMode = false } = {}) {
+    const states = this._hass?.states || {};
+    const choresEnabled = this._config.features.chores === true;
+    const schoolEnabled = this._config.features.school === true;
+    const schoolSource = schoolDataSource(this._config);
+    const chore = choresEnabled ? this._config.chores.users.find((entry) => entry.person_id === person.id) : null;
+    const classroom = schoolEnabled && schoolSource === "classroom"
+      ? this._config.school.classroom_students.find((entry) => entry.person_id === person.id)
+      : null;
+    const classroomState = classroom ? states[classroom.assignments_entity] : null;
+    const classroomData = classroomAssignmentPresentation(classroomState);
+    const assignments = classroomData.assignments;
+    const assignmentCount = classroomData.available ? classroomData.count : NaN;
+    const assignmentsTruncated = classroomData.truncated;
+    const classroomStale = classroomState?.attributes?.data_stale === true;
+    const pointsState = chore ? states[chore.points_entity] : null;
+    const choresState = chore ? states[chore.chores_entity] : null;
+    const pointsAvailable = isEntityAvailable(pointsState);
+    const choresSummaryAvailable = isEntityAvailable(choresState);
+    const points = pointsAvailable ? pointsState.state : null;
+    const due = choresSummaryAvailable
+      ? safeNumber(choresState.attributes?.chore_stat_current_due_today, 0)
+      : NaN;
+    const nextAssignment = assignments[0];
+    const classroomLink = safeClassroomLink(nextAssignment?.alternate_link);
+    const assignmentTitle = classroomLink
+      ? `<a href="${escapeHtml(classroomLink)}" target="_blank" rel="noopener noreferrer" data-classroom-person="${escapeHtml(person.id)}">${escapeHtml(nextAssignment.title || "Assignment")}</a>`
+      : `<strong>${escapeHtml(nextAssignment?.title || "Assignment")}</strong>`;
+    const assignmentDue = nextAssignment?.due_at
+      ? formatClassroomDueDay(nextAssignment.due_at, this._config.product.locale, this._config.product.timezone)
+      : "No due date";
+    const lastSuccessfulUpdate = classroomState?.attributes?.last_successful_update;
+    const lastSuccessfulLabel = lastSuccessfulUpdate
+      ? `${formatDay(lastSuccessfulUpdate, this._config.product.locale, this._config.product.timezone)} at ${formatTime(lastSuccessfulUpdate, this._config.product.locale, this._config.product.timezone)}`
+      : null;
+    const classroomError = String(classroomState?.attributes?.last_error || "Classroom update delayed").slice(0, 160);
+    const schoolEvent = schoolEnabled && schoolSource === "calendar"
+      ? this._nextSchoolCalendarEvent(person.id)
+      : null;
+    const schoolEventStart = calendarEventStart(schoolEvent);
+    const schoolEventWhen = schoolEventStart
+      ? `${formatClassroomDueDay(schoolEventStart, this._config.product.locale, this._config.product.timezone)} · ${formatTime(schoolEventStart, this._config.product.locale, this._config.product.timezone)}`
+      : "Date to be confirmed";
+    const classroomHealth = classroomStale
+      ? `<span class="classroom-health is-stale"><ha-icon icon="mdi:cloud-alert-outline" aria-hidden="true"></ha-icon>${escapeHtml(classroomError)}${lastSuccessfulLabel ? ` · Last updated ${escapeHtml(lastSuccessfulLabel)}` : ""}</span>`
+      : assignmentsTruncated
+        ? `<span class="classroom-health"><ha-icon icon="mdi:format-list-numbered" aria-hidden="true"></ha-icon>Showing the next ${assignments.length} of ${assignmentCount} assignments</span>`
+        : "";
+    const classroomStatus = schoolEnabled && schoolSource === "calendar"
+      ? schoolEvent
+        ? `<div class="assignment school-calendar-fallback"><ha-icon icon="mdi:calendar-school-outline"></ha-icon><div><strong>${escapeHtml(schoolEvent.summary || schoolEvent._calendar?.label || "School event")}</strong><small>${escapeHtml(schoolEventWhen)}${schoolEvent.location ? ` · ${escapeHtml(schoolEvent.location)}` : ""}</small><span class="classroom-health"><ha-icon icon="mdi:shield-check-outline" aria-hidden="true"></ha-icon>Calendar-only fallback · Classroom remains disconnected</span></div></div>`
+        : '<div class="assignment school-calendar-fallback"><ha-icon icon="mdi:calendar-blank-outline"></ha-icon><div><strong>No upcoming school dates</strong><small>The calendar-only fallback is active. Classroom assignments are not being read.</small></div></div>'
+      : classroom && !classroomData.available
+      ? '<div class="assignment is-stale"><ha-icon icon="mdi:school-outline"></ha-icon><div><strong>Classroom unavailable</strong><small>The last update could not be read. Home Assistant will retry.</small></div></div>'
+      : nextAssignment
+      ? `<div class="assignment ${classroomStale ? "is-stale" : ""}"><ha-icon icon="${ICONS.school}"></ha-icon><div>${assignmentTitle}<small>${escapeHtml(nextAssignment.course || "Google Classroom")} · ${escapeHtml(assignmentDue)}</small>${classroomHealth}</div></div>`
+      : classroomStale
+        ? `<div class="assignment is-stale"><ha-icon icon="mdi:cloud-alert-outline"></ha-icon><div><strong>Classroom update delayed</strong><small>${escapeHtml(classroomError)}${lastSuccessfulLabel ? ` · Last updated ${escapeHtml(lastSuccessfulLabel)}` : ""}</small></div></div>`
+      : !schoolEnabled
+        ? ""
+        : !classroom
+          ? '<div class="assignment is-stale"><ha-icon icon="mdi:school-alert-outline"></ha-icon><div><strong>Classroom not connected</strong><small>This child still needs a separate read-only connection.</small></div></div>'
+        : '<div class="assignment"><ha-icon icon="mdi:school-check-outline"></ha-icon><div><strong>No open assignments</strong><small>Google Classroom is up to date.</small></div></div>';
+    const presence = this._config.features.location_map && person.location_entity
+      ? titleCase(states[person.location_entity]?.state || "Location unavailable")
+      : choresEnabled ? "Today’s jobs" : schoolEnabled ? "School" : "Tasks";
+    const jobPresentations = (chore?.status_entities || []).map((entityId) => ({ entityId, presentation: normaliseChoreStatus(states[entityId], entityId) }));
+    const completedJobs = jobPresentations.filter(({ presentation }) => presentation.tone === "done").length;
+    const totalJobs = jobPresentations.length;
+    const missionProgress = totalJobs ? Math.round(completedJobs / totalJobs * 100) : 0;
+    const choreRows = jobPresentations.map(({ entityId, presentation }) => {
+      const state = states[entityId];
+      const claimEntity = choreClaimEntityId(entityId);
+      const claimableStatus = ["pending", "due", "overdue", "missed"].includes(presentation.status);
+      const actionAvailable = claimableStatus && claimEntity && isCommandEntityAvailable(states[claimEntity]);
+      const pending = claimEntity && this._pendingChoreClaims.has(claimEntity);
+      const interactive = kidMode && !this._config.display.read_only && actionAvailable && !pending;
+      return `
+        <li class="chore-row ${kidMode ? "is-kid-card" : ""} is-${escapeHtml(presentation.tone)} ${interactive ? "is-actionable" : ""}">
+          <span class="chore-check"><ha-icon icon="${escapeHtml(kidMode ? choreIcon(presentation.name) : presentation.tone === "done" ? "mdi:check" : presentation.tone === "overdue" ? "mdi:alert" : "mdi:circle-small")}" aria-hidden="true"></ha-icon></span>
+          <span><strong>${escapeHtml(presentation.name)}</strong><small>${escapeHtml(pending ? "Marking as done…" : presentation.label)}${presentation.due ? ` · ${escapeHtml(formatTime(presentation.due, this._config.product.locale, this._config.product.timezone))}` : ""}</small></span>
+          ${Number.isFinite(presentation.points) ? `<b>+${presentation.points}</b>` : ""}
+          ${kidMode ? `<button type="button" class="chore-claim-action" ${interactive ? `data-chore-claim="${escapeHtml(claimEntity)}" data-chore-status="${escapeHtml(entityId)}" data-person-id="${escapeHtml(person.id)}"` : "disabled"}>${pending ? "Saving…" : presentation.tone === "done" ? "Done" : presentation.tone === "waiting" ? "Waiting for a grown-up" : interactive ? "Mark as done" : presentation.label}</button>` : ""}
+        </li>
+      `;
+    }).join("");
+    const choreOpsSummary = choresEnabled ? this._renderChoreOpsSummary(chore, safeNumber(points, NaN), person.id) : "";
+    const choreHeading = choresEnabled && this._config.features.location_map
+      ? `<div class="chore-heading"><p class="eyebrow">Today’s jobs</p><span>${choreRows ? `${(chore?.status_entities || []).length} jobs` : "None yet"}</span></div>`
+      : "";
+    const factItems = [
+      ...(choresEnabled && chore ? [`<span><strong>${pointsAvailable ? escapeHtml(formatPoints(points, this._config.product.locale)) : "—"}</strong> points</span>`, `<span><strong>${Number.isFinite(due) ? due : "—"}</strong> due today</span>`] : []),
+      ...(schoolEnabled
+        ? schoolSource === "calendar"
+          ? [`<span><strong>${schoolEventStart ? escapeHtml(formatClassroomDueDay(schoolEventStart, this._config.product.locale, this._config.product.timezone)) : "—"}</strong> next school date</span>`]
+          : [`<span><strong>${Number.isFinite(assignmentCount) ? assignmentCount : "—"}</strong> assignments</span>`]
+        : [])
+    ].join("");
+    return `
+      <article class="surface family-person ${kidMode ? "is-kid-mode" : ""}" style="--person-colour:${escapeHtml(person.colour)}">
+        <div class="family-person-heading"><span>${escapeHtml(person.name.slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person.name)}</p><h2>${escapeHtml(presence)}</h2></div></div>
+        ${kidMode && choresEnabled && chore ? `<section class="kid-mission ${completedJobs === totalJobs && totalJobs ? "is-complete" : ""}"><span class="kid-mission-orbit"><ha-icon icon="${completedJobs === totalJobs && totalJobs ? "mdi:trophy" : "mdi:rocket-launch"}"></ha-icon></span><div><p>${completedJobs === totalJobs && totalJobs ? "Mission complete!" : "Today’s mission"}</p><strong>${completedJobs} of ${totalJobs} jobs finished</strong><i><b style="width:${missionProgress}%"></b></i></div><em>${missionProgress}%</em></section>` : ""}
+        ${factItems ? `<div class="family-facts">${factItems}</div>` : ""}
+        ${choresEnabled && !chore ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps is not connected for this child.</p>' : choresEnabled && (!pointsAvailable || !choresSummaryAvailable) ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps data is currently unavailable.</p>' : ""}
+        ${this._renderPersonPreparation(person)}
+        ${choreHeading}
+        ${choresEnabled && chore ? choreRows ? `<ul class="chore-list" aria-label="Today’s jobs">${choreRows}</ul>` : '<p class="hub-empty-state compact">No jobs are due yet.</p>' : ""}
+        ${choreOpsSummary}
+        ${classroomStatus}
+      </article>
+    `;
+  }
+
+  _renderMusic() {
+    const readOnly = this._config.display.read_only;
+    return `
+      <section class="music-experience">
+        <article class="surface media-player-panel">
+          <div class="section-heading music-heading"><div><p class="eyebrow">Spotify · Sonos</p><h2>${readOnly ? "Your full music player" : "Browse, group and play"}</h2></div><span class="music-meta">${this._config.media.players.length} rooms${readOnly ? ' · <ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon> playback locked' : ""}</span></div>
+          <div class="media-player-stage ${readOnly ? "is-read-only" : ""}">
+            <div id="music-card-slot" class="child-card-slot"></div>
+          </div>
+        </article>
+      </section>
+    `;
+  }
+
+  _footballState() {
+    const states = this._hass?.states || {};
+    const index = states[this._config.football.index_entity];
+    const suggested = safeNumber(index?.attributes?.current_gameweek || index?.attributes?.next_gameweek || index?.state, 1);
+    const gameweek = Math.max(1, Math.min(38, this._gameweek || suggested || 1));
+    const gameweekState = states[`${this._config.football.gameweek_entity_prefix}${gameweek}`];
+    const table = states[this._config.football.table_entity];
+    return { index, gameweek, gameweekState, table };
+  }
+
+  _featuredFixtures() {
+    const { index, gameweekState, table } = this._footballState();
+    if (!isEntityAvailable(index) || !isEntityAvailable(gameweekState)) {
+      return {
+        title: this._config.football.spotlight_team_codes.join(" & "),
+        html: this._config.football.spotlight_team_codes
+          .map((code) => this._renderCompactUnavailableFavourite(code))
+          .join("")
+      };
+    }
+    const fixtures = gameweekState?.attributes?.events || [];
+    const models = buildFavouriteClubModels(
+      fixtures,
+      this._config.football.spotlight_team_codes,
+      isEntityAvailable(table) ? table.attributes?.rows || [] : []
+    );
+    const derby = favouriteDerbyFixture(models);
+    const html = derby
+      ? this._renderCompactFixture(derby, { derby: true })
+      : models.map((model) => this._renderCompactFavourite(model)).join("");
+    return {
+      title: this._favouriteTitle(models),
+      html: html || '<p class="hub-empty-state">No favourite clubs are configured yet.</p>'
+    };
+  }
+
+  _renderCompactFixture(fixture, { favouriteCode = "", derby = false } = {}) {
+    const status = normaliseFixtureStatus(fixture);
+    const score = status === "upcoming"
+      ? formatTime(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)
+      : `${fixture.home_score ?? "–"}–${fixture.away_score ?? "–"}`;
+    const favouriteAttribute = derby
+      ? this._config.football.spotlight_team_codes.join(" ")
+      : favouriteCode;
+    return `
+      <button type="button" class="compact-fixture ${derby ? "is-derby" : ""}" data-view="football" data-fixture-id="${escapeHtml(fixture.id ?? "")}"${favouriteAttribute ? ` data-favourite-code="${escapeHtml(favouriteAttribute)}"` : ""}>
+        <span class="compact-team" title="${escapeHtml(fixture.home?.name || "Home")}">${this._renderTeamMark(fixture.home, "small")}<span>${escapeHtml(compactClubName(fixture.home))}</span></span>
+        <strong class="compact-score">${escapeHtml(score)}</strong>
+        <span class="compact-team is-away" title="${escapeHtml(fixture.away?.name || "Away")}"><span>${escapeHtml(compactClubName(fixture.away))}</span>${this._renderTeamMark(fixture.away, "small")}</span>
+        <small class="compact-fixture-detail">${escapeHtml(derby ? `Family derby · ${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)}` : status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone))}</small>
+      </button>
+    `;
+  }
+
+  _renderCompactFavourite(model) {
+    if (model.fixture) return this._renderCompactFixture(model.fixture, { favouriteCode: model.code });
+    return `
+      <button type="button" class="compact-fixture is-empty" data-view="football" data-favourite-code="${escapeHtml(model.code)}">
+        <span class="compact-favourite-name">${escapeHtml(compactClubName(model.team))}</span><strong>—</strong><span>No match</span>
+        <small>No fixture this matchweek</small>
+      </button>
+    `;
+  }
+
+  _renderCompactUnavailableFavourite(code) {
+    const presentation = this._clubPresentation(code);
+    return `
+      <button type="button" class="compact-fixture is-empty is-unavailable" data-view="football" data-favourite-code="${escapeHtml(code)}">
+        <span class="compact-favourite-name">${escapeHtml(presentation.label)}</span><strong>—</strong><span>Waiting</span>
+        <small>Fixture data unavailable</small>
+      </button>
+    `;
+  }
+
+  _renderTeamMark(team, size = "small") {
+    const crest = teamCrest(team);
+    const code = team?.short_name || team?.code || String(team?.name || "?").slice(0, 3).toUpperCase();
+    return `<span class="team-mark is-${escapeHtml(size)}"><strong aria-hidden="${crest ? "true" : "false"}">${escapeHtml(code)}</strong>${crest ? `<img data-team-crest src="${escapeHtml(crest)}" alt="${escapeHtml(`${team?.name || code} crest`)}">` : ""}</span>`;
+  }
+
+  _favouriteTitle(models) {
+    return models.map((model) => (
+      FOOTBALL_CLUB_PRESENTATION[model.code]?.label || compactClubName(model.team)
+    )).join(" & ") || "Family football";
+  }
+
+  _footballMatchValue(fixture, status) {
+    if (!fixture) return "—";
+    return status === "upcoming"
+      ? formatTime(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)
+      : `${fixture.home_score ?? "–"} — ${fixture.away_score ?? "–"}`;
+  }
+
+  _footballMatchDetail(fixture, status) {
+    if (!fixture) return "No fixture this matchweek";
+    if (status === "live") return `LIVE · ${fixture.minutes || 0}'`;
+    if (status === "finished") return "Full time";
+    return formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone);
+  }
+
+  _clubPresentation(code) {
+    if (FOOTBALL_CLUB_PRESENTATION[code]) return FOOTBALL_CLUB_PRESENTATION[code];
+    const hue = [...String(code || "CLB")].reduce((total, character, index) => total + character.charCodeAt(0) * (index + 3), 0) % 360;
+    return {
+      label: code,
+      primary: `hsl(${hue} 58% 28%)`,
+      accent: `hsl(${(hue + 48) % 360} 72% 76%)`
+    };
+  }
+
+  _renderFavouriteHero(model) {
+    const presentation = this._clubPresentation(model.code);
+    const statusLabel = model.status === "live" ? `LIVE · ${model.fixture?.minutes || 0}'` : model.status === "finished" ? "FULL TIME" : model.status === "upcoming" ? "UP NEXT" : "NO MATCH";
+    const venue = model.fixture ? model.is_home ? "Home against" : "Away at" : "This matchweek";
+    return `
+      <article class="favourite-hero-card is-${escapeHtml(model.status)}" data-favourite-code="${escapeHtml(model.code)}" data-fixture-id="${escapeHtml(model.fixture?.id ?? "")}" style="--club-primary:${presentation.primary};--club-accent:${presentation.accent}">
+        <header class="favourite-club-heading">
+          <div class="favourite-club-identity">${this._renderTeamMark(model.team, "favourite")}<div><small>Family favourite</small><strong>${escapeHtml(presentation.label)}</strong></div></div>
+          <span class="favourite-match-status">${escapeHtml(statusLabel)}</span>
+        </header>
+        ${model.fixture ? `<div class="favourite-fixture-summary">
+          <div class="favourite-opponent"><small>${escapeHtml(venue)}</small><strong>${escapeHtml(compactClubName(model.opponent))}</strong></div>
+          ${this._renderTeamMark(model.opponent, "small")}
+          <div class="favourite-result"><strong>${escapeHtml(this._footballMatchValue(model.fixture, model.status))}</strong><small>${escapeHtml(this._footballMatchDetail(model.fixture, model.status))}</small></div>
+        </div>` : `<div class="favourite-fixture-summary is-empty"><ha-icon icon="mdi:calendar-blank-outline" aria-hidden="true"></ha-icon><div><strong>No fixture this matchweek</strong><small>${escapeHtml(`${presentation.label} remain pinned here.`)}</small></div></div>`}
+      </article>
+    `;
+  }
+
+  _renderUnavailableFavourite(code) {
+    const presentation = this._clubPresentation(code);
+    const team = { short_name: code, code, name: FOOTBALL_CLUB_NAMES[code] || code };
+    return `
+      <article class="favourite-hero-card is-unavailable" data-favourite-code="${escapeHtml(code)}" style="--club-primary:${presentation.primary};--club-accent:${presentation.accent}">
+        <header class="favourite-club-heading">
+          <div class="favourite-club-identity">${this._renderTeamMark(team, "favourite")}<div><small>Family favourite</small><strong>${escapeHtml(presentation.label)}</strong></div></div>
+          <span class="favourite-match-status">WAITING</span>
+        </header>
+        <div class="favourite-fixture-summary is-empty"><ha-icon icon="mdi:cloud-alert-outline" aria-hidden="true"></ha-icon><div><strong>Fixture data unavailable</strong><small>Home Assistant will retry automatically.</small></div></div>
+      </article>
+    `;
+  }
+
+  _renderDerbyHero(models, fixture) {
+    const status = normaliseFixtureStatus(fixture);
+    const statusLabel = status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "FULL TIME" : "UP NEXT";
+    return `
+      <article class="favourite-hero-card is-derby is-${escapeHtml(status)}" data-favourite-code="${escapeHtml(models.map((model) => model.code).join(" "))}" data-fixture-id="${escapeHtml(fixture.id ?? "")}">
+        <header class="derby-heading"><div><small>Family derby</small><strong>${escapeHtml(this._favouriteTitle(models))}</strong></div><span class="favourite-match-status">${escapeHtml(statusLabel)}</span></header>
+        <div class="derby-fixture">
+          <div class="derby-team">${this._renderTeamMark(fixture.home, "favourite")}<strong>${escapeHtml(compactClubName(fixture.home))}</strong></div>
+          <div class="favourite-result"><strong>${escapeHtml(this._footballMatchValue(fixture, status))}</strong><small>${escapeHtml(this._footballMatchDetail(fixture, status))}</small></div>
+          <div class="derby-team is-away">${this._renderTeamMark(fixture.away, "favourite")}<strong>${escapeHtml(compactClubName(fixture.away))}</strong></div>
+        </div>
+      </article>
+    `;
+  }
+
+  _renderFavouriteStandings(models) {
+    return `
+      <article class="surface favourite-standings">
+        <div><p class="eyebrow">Where they stand</p><h2>Premier League</h2></div>
+        <div class="favourite-standing-list">${models.map((model) => {
+          const presentation = this._clubPresentation(model.code);
+          const position = safeNumber(model.standing?.position, NaN);
+          const points = safeNumber(model.standing?.points, NaN);
+          const goalDifference = safeNumber(model.standing?.goal_difference, NaN);
+          const detail = Number.isFinite(points) && Number.isFinite(goalDifference)
+            ? `${formatPoints(points, this._config.product.locale)} pts · ${goalDifference > 0 ? "+" : ""}${goalDifference} GD`
+            : "Table position pending";
+          return `<div class="favourite-standing" data-favourite-code="${escapeHtml(model.code)}" style="--club-primary:${presentation.primary};--club-accent:${presentation.accent}">${this._renderTeamMark(model.team)}<div><strong>${escapeHtml(presentation.label)}</strong><small>${escapeHtml(detail)}</small></div><b>${Number.isFinite(position) ? `#${position}` : "—"}</b></div>`;
+        }).join("")}</div>
+      </article>
+    `;
+  }
+
+  _renderFplTeams() {
+    const entries = this._config.football.entries || [];
+    if (!entries.length) return '<div class="football-empty"><span class="football-orbit"><ha-icon icon="mdi:trophy-outline"></ha-icon></span><div><p class="eyebrow">Our FPL teams</p><h3>Add Rob and Ernie’s team IDs in Admin</h3><p>The IDs are the number in each team’s FPL URL. No password or FPL login is needed.</p></div></div>';
+    const cards = entries.map((entry) => {
+      const person = this._config.people.find((candidate) => candidate.id === entry.person_id);
+      const state = this._hass?.states?.[`sensor.family_dashboard_fpl_${entry.person_id}`];
+      const available = isEntityAvailable(state);
+      const attributes = state?.attributes || {};
+      const rank = safeNumber(attributes.overall_rank, NaN);
+      const eventPoints = safeNumber(attributes.gameweek_points, NaN);
+      const leagues = Array.isArray(attributes.leagues) ? attributes.leagues : [];
+      return `<article class="surface fpl-team-card" style="--person-colour:${escapeHtml(person?.colour || this._config.theme.accent)}"><header><span>${escapeHtml((person?.name || entry.person_id).slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person?.name || entry.person_id)}</p><h3>${escapeHtml(available ? attributes.team_name || "FPL team" : "Waiting for FPL")}</h3></div><ha-icon icon="mdi:trophy"></ha-icon></header><div class="fpl-scoreboard"><span><strong>${available ? escapeHtml(formatPoints(state.state, this._config.product.locale)) : "—"}</strong><small>Total points</small></span><span><strong>${Number.isFinite(eventPoints) ? eventPoints : "—"}</strong><small>GW ${attributes.gameweek || "—"}</small></span><span><strong>${Number.isFinite(rank) ? `#${escapeHtml(formatPoints(rank, this._config.product.locale))}` : "—"}</strong><small>Overall rank</small></span></div>${leagues.length ? `<div class="fpl-leagues"><p class="eyebrow">Leagues</p>${leagues.map((league) => `<span><strong>${escapeHtml(league.name)}</strong><b>${league.rank ? `#${escapeHtml(formatPoints(league.rank, this._config.product.locale))}` : "—"}</b></span>`).join("")}</div>` : '<p class="hub-empty-state compact">League positions will appear after the next manager refresh.</p>'}</article>`;
+    }).join("");
+    return `<div class="fpl-team-grid">${cards}</div>`;
+  }
+
+  _renderFootball() {
+    const { index, gameweek, gameweekState, table } = this._footballState();
+    const events = gameweekState?.attributes?.events || [];
+    const available = index?.attributes?.available_gameweeks || Array.from({ length: 38 }, (_, position) => position + 1);
+    const fixtureDataAvailable = isEntityAvailable(index) && isEntityAvailable(gameweekState);
+    const favouriteModels = buildFavouriteClubModels(
+      events,
+      this._config.football.spotlight_team_codes,
+      isEntityAvailable(table) ? table.attributes?.rows || [] : []
+    );
+    const derbyFixture = favouriteDerbyFixture(favouriteModels);
+    const hasLiveFavourite = favouriteModels.some((model) => model.status === "live");
+    const indexFreshness = footballFreshness(index);
+    const freshness = !isEntityAvailable(index)
+      ? indexFreshness
+      : !isEntityAvailable(gameweekState)
+        ? {
+          status: "waiting",
+          title: "Waiting for fixtures",
+          detail: "The selected matchweek has not arrived yet."
+        }
+        : indexFreshness;
+    const checkedLabel = index?.attributes?.last_checked
+      ? `Checked ${formatTime(index.attributes.last_checked, this._config.product.locale, this._config.product.timezone)}`
+      : "Awaiting first check";
+    this._gameweek = gameweek;
+    return `
+      <section class="football-experience">
+        <article class="football-favourites-stage ${hasLiveFavourite ? "is-live" : ""}">
+          <div class="football-hero-heading"><div><p class="eyebrow">Premier League · Matchweek ${gameweek}</p><h2>${escapeHtml(this._favouriteTitle(favouriteModels))}</h2></div><span class="football-freshness is-${freshness.status}"><i></i><span><strong>${escapeHtml(freshness.title)}</strong><small>${escapeHtml(freshness.status === "live" ? `${freshness.detail} ${checkedLabel}.` : `${checkedLabel}.`)}</small></span></span></div>
+          ${freshness.status === "live" ? "" : `<p class="football-health-note is-${freshness.status}" role="status">${escapeHtml(freshness.detail)}</p>`}
+          <div class="favourite-hero-grid">${fixtureDataAvailable
+            ? derbyFixture ? this._renderDerbyHero(favouriteModels, derbyFixture) : favouriteModels.map((model) => this._renderFavouriteHero(model)).join("")
+            : this._config.football.spotlight_team_codes.map((code) => this._renderUnavailableFavourite(code)).join("")}</div>
+        </article>
+        <div class="football-layout">
+          <article class="surface football-main">
+          <div class="football-toolbar">
+            <div><p class="eyebrow">Match centre</p><h2>Matchweek ${gameweek}</h2></div>
+            <div class="matchweek-controls">
+              <button type="button" data-gameweek="${Math.max(1, gameweek - 1)}" ${gameweek <= 1 ? "disabled" : ""} aria-label="Previous matchweek"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+              <label><span class="sr-only">Choose matchweek</span><span class="select-shell"><select data-gameweek-select>${available.map((entry) => `<option value="${entry}" ${entry === gameweek ? "selected" : ""}>MW ${entry}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span></label>
+              <button type="button" data-gameweek="${Math.min(38, gameweek + 1)}" ${gameweek >= 38 ? "disabled" : ""} aria-label="Next matchweek"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+            </div>
+            <div class="segments football-tabs" role="group" aria-label="Football view">
+              <button type="button" class="segment ${this._footballTab === "fixtures" ? "is-selected" : ""}" data-football-tab="fixtures" aria-pressed="${this._footballTab === "fixtures"}">Fixtures</button>
+              <button type="button" class="segment ${this._footballTab === "table" ? "is-selected" : ""}" data-football-tab="table" aria-pressed="${this._footballTab === "table"}">Table</button>
+              <button type="button" class="segment ${this._footballTab === "fpl" ? "is-selected" : ""}" data-football-tab="fpl" aria-pressed="${this._footballTab === "fpl"}">Our FPL</button>
+            </div>
+          </div>
+          ${this._footballTab === "fpl" ? this._renderFplTeams() : this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(events, fixtureDataAvailable)}
+          </article>
+          <aside class="football-sidebar">
+            ${this._renderFavouriteStandings(favouriteModels)}
+          </aside>
+        </div>
+      </section>
+    `;
+  }
+
+  _renderFixtures(events, available = true) {
+    if (!available) return '<p class="hub-empty-state large">Fixture data is unavailable. Home Assistant will retry.</p>';
+    if (!events.length) return `
+      <div class="football-empty">
+        <span class="football-orbit"><ha-icon icon="mdi:soccer" aria-hidden="true"></ha-icon></span>
+        <div><p class="eyebrow">Between matchweeks</p><h3>No fixtures yet</h3><p>We’ll show the next match for your favourite clubs here as soon as it is announced.</p></div>
+        <div class="empty-clubs"><span>${escapeHtml(this._config.football.spotlight_team_codes[0])}</span><i></i><span>${escapeHtml(this._config.football.spotlight_team_codes[1])}</span></div>
+      </div>
+    `;
+    const grouped = new Map();
+    for (const fixture of events) {
+      const key = formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone);
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(fixture);
+    }
+    return `<div class="fixture-groups">${[...grouped.entries()].map(([day, fixtures]) => `
+      <section class="fixture-day"><h3>${escapeHtml(day)}</h3>${fixtures.map((fixture) => this._renderFixture(fixture)).join("")}</section>
+    `).join("")}</div>`;
+  }
+
+  _renderFixture(fixture) {
+    const status = normaliseFixtureStatus(fixture);
+    const score = status === "upcoming"
+      ? formatTime(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)
+      : `${fixture.home_score ?? "–"} — ${fixture.away_score ?? "–"}`;
+    const scorers = [
+      ...(fixture.home_scorers || []).map((name) => `${name} (H)`),
+      ...(fixture.away_scorers || []).map((name) => `${name} (A)`)
+    ];
+    const favouriteCodes = this._config.football.spotlight_team_codes.filter((code) => fixtureIncludesTeam(fixture, code));
+    return `
+      <div class="fixture ${fixture.spotlight ? "is-spotlight" : ""} ${status === "live" ? "is-live" : ""} ${favouriteCodes.length > 1 ? "is-family-derby" : ""}"${favouriteCodes.length ? ` data-favourite-code="${escapeHtml(favouriteCodes.join(" "))}"` : ""}>
+        <span class="team home-team">${this._renderTeamMark(fixture.home)}<span>${escapeHtml(fixture.home?.name || "Home")}</span></span>
+        <strong class="fixture-score">${escapeHtml(score)}<small>${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "FT" : ""}</small></strong>
+        <span class="team away-team"><span>${escapeHtml(fixture.away?.name || "Away")}</span>${this._renderTeamMark(fixture.away)}</span>
+        ${scorers.length ? `<span class="scorers">${escapeHtml(scorers.join(" · "))}</span>` : ""}
+      </div>
+    `;
+  }
+
+  _renderLeagueTable(tableState) {
+    if (!isEntityAvailable(tableState)) return '<p class="hub-empty-state large">League table data is unavailable. Home Assistant will retry.</p>';
+    const rows = tableState?.attributes?.rows || [];
+    if (!rows.length) return '<p class="hub-empty-state large">The league table will appear after the first results.</p>';
+    return `
+      <div class="league-table-wrap"><table class="league-table"><thead><tr><th>#</th><th>Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody>
+        ${rows.map((row) => `<tr class="${row.spotlight ? "is-spotlight" : ""}"><td>${row.position}</td><td><strong>${escapeHtml(row.name)}</strong></td><td>${row.played}</td><td>${row.won}</td><td>${row.drawn}</td><td>${row.lost}</td><td>${row.goal_difference > 0 ? "+" : ""}${row.goal_difference}</td><td><strong>${row.points}</strong></td></tr>`).join("")}
+      </tbody></table></div>
+    `;
+  }
+
+  _activeChildCardKeys() {
+    const keys = new Set();
+    if (!this._config) return keys;
+    if (this._view === "calendar" && this._config.features?.calendar !== false) {
+      keys.add(`calendar:${this._calendarMode}`);
+    }
+    if (this._view === "family" && this._config.features?.location_map) keys.add("map");
+    if (this._view === "music" && this._config.features?.music !== false) keys.add("music");
+    if (this._view === "energy" && this._config.features?.energy !== false) {
+      keys.add("energy:electricity");
+      keys.add("energy:gas");
+    }
+    if (this._view === "rooms"
+      && this._homeSection === "cleaning"
+      && this._config.features?.cleaning
+      && this._config.cleaning?.map_entity) keys.add("vacuum-map");
+    if (this._view === "entry" && this._config.features?.entry !== false) {
+      const cameras = this._config.entry?.cameras || [];
+      for (const camera of cameras) {
+        if (camera.still_entity_id) keys.add(`camera-poster:tile:${camera.id}`);
+      }
+      const selectedId = this._cameraSession?.id
+        || this._securityCameraId
+        || this._config.entry?.primary_camera_id
+        || cameras[0]?.id;
+      if (cameras.some((camera) => camera.id === selectedId && camera.still_entity_id)) {
+        keys.add(`camera-poster:stage:${selectedId}`);
+      }
+      const liveCamera = cameras.find((camera) => camera.id === this._activeCameraId);
+      if (liveCamera?.entity_id
+        && ["buffering", "viewing"].includes(this._cameraSession?.phase)
+        && cameraStreamPhase(this._hass?.states?.[liveCamera.entity_id]) === "streaming") {
+        keys.add(`camera:${liveCamera.id}`);
+      }
+    }
+    return keys;
+  }
+
+  _removeChildCard(key) {
+    const child = this._childCards?.get?.(key);
+    this._invalidateChildHass(key);
+    child?.__familyCameraObserverCleanup?.();
+    child?.remove?.();
+    this._childCards?.delete?.(key);
+  }
+
+  _pruneInactiveChildCards() {
+    if (!(this._childCards instanceof Map)) return;
+    const activeKeys = this._activeChildCardKeys();
+    for (const key of [...this._childCards.keys()]) {
+      if (!activeKeys.has(key)) this._removeChildCard(key);
+    }
+  }
+
+  _mountChildCards() {
+    if (!this._hass || !globalThis.loadCardHelpers) return;
+    this._pruneInactiveChildCards();
+    if (this._view === "family" && this._config.features.location_map) {
+      this._ensureChildCard("map", {
+        type: "map",
+        auto_fit: true,
+        fit_zones: true,
+        hours_to_show: this._config.location.hours_to_show,
+        entities: this._config.location.entities
+      }, "map-card-slot");
+    }
+    if (this._view === "music") {
+      const mediaPlayers = this._config.media.players.map((player) => ({
+        ...player,
+        ...(player.ma_entity_id ? {
+          media_browser: player.media_browser || [{ entity_id: player.ma_entity_id, name: "Spotify & Music" }]
+        } : {})
+      }));
+      this._ensureChildCard("music", {
+        type: this._config.media.card_type,
+        size: "large",
+        mode: "in-card",
+        entity_id: this._config.media.initial_player,
+        media_players: mediaPlayers,
+        options: {
+          player_is_active_when: "playing_or_paused",
+          show_volume_step_buttons: true,
+          default_tab: "massive",
+          transparent_background_on_home: false
+        }
+      }, "music-card-slot");
+    }
+    if (this._view === "rooms" && this._homeSection === "cleaning" && this._config.cleaning.map_entity) {
+      this._ensureChildCard("vacuum-map", {
+        type: "picture-entity",
+        entity: this._config.cleaning.map_entity,
+        camera_view: "auto",
+        show_name: false,
+        show_state: false
+      }, "vacuum-map-card-slot");
+    }
+    if (this._view === "energy") {
+      for (const fuel of ["electricity", "gas"]) {
+        const entityId = this._config.energy?.[fuel]?.usage_today_entity;
+        if (!entityId) continue;
+        this._ensureChildCard(`energy:${fuel}`, {
+          type: "history-graph",
+          hours_to_show: 24,
+          entities: [entityId]
+        }, `energy-history-${fuel}`);
+      }
+    }
+    if (this._view === "entry") {
+      const posterConfig = (camera) => ({
+        type: "picture-entity",
+        entity: camera.still_entity_id,
+        camera_view: "auto",
+        aspect_ratio: "16:9",
+        fit_mode: "cover",
+        show_name: false,
+        show_state: false,
+        tap_action: { action: "none" },
+        hold_action: { action: "none" },
+        double_tap_action: { action: "none" }
+      });
+      for (const camera of this._config.entry.cameras || []) {
+        if (!camera.still_entity_id) continue;
+        this._ensureChildCard(
+          `camera-poster:tile:${camera.id}`,
+          posterConfig(camera),
+          `camera-poster-tile-${camera.id}`
+        );
+      }
+      const selectedId = this._cameraSession?.id
+        || this._securityCameraId
+        || this._config.entry.primary_camera_id
+        || this._config.entry.cameras?.[0]?.id;
+      const selected = this._config.entry.cameras.find((camera) => camera.id === selectedId);
+      if (selected?.still_entity_id) {
+        this._ensureChildCard(
+          `camera-poster:stage:${selected.id}`,
+          posterConfig(selected),
+          `camera-poster-stage-${selected.id}`
+        );
+      }
+    }
+    if (this._view === "entry"
+      && ["buffering", "viewing"].includes(this._cameraSession?.phase)
+      && this._activeCameraId) {
+      const camera = this._config.entry.cameras.find((entry) => entry.id === this._activeCameraId);
+      if (camera?.entity_id && cameraStreamPhase(this._hass.states?.[camera.entity_id]) === "streaming") {
+        this._ensureChildCard(`camera:${camera.id}`, {
+          type: "picture-entity",
+          entity: camera.entity_id,
+          camera_view: "live",
+          aspect_ratio: "16:9",
+          fit_mode: "cover",
+          show_name: false,
+          show_state: false,
+          tap_action: { action: "none" },
+          hold_action: { action: "none" },
+          double_tap_action: { action: "none" }
+        }, `camera-card-slot-${camera.id}`);
+      }
+    }
+  }
+
+  async _ensureChildCard(key, cardConfig, slotId) {
+    const slot = this.shadowRoot.getElementById(slotId);
+    const mountGeneration = this._childMountGeneration;
+    if (!slot || !this.isConnected || !this._activeChildCardKeys().has(key)) return;
+    let child = this._childCards.get(key);
+    if (!child) {
+      try {
+        const helpers = await globalThis.loadCardHelpers();
+        if (!this.isConnected
+          || this._childMountGeneration !== mountGeneration
+          || !this._activeChildCardKeys().has(key)
+          || !this._isCurrentCameraSlot(key, slotId, slot)) return;
+        child = helpers.createCardElement(cardConfig);
+        child.classList.add("embedded-card");
+        this._childCards.set(key, child);
+      } catch (error) {
+        const message = key.startsWith("camera:")
+          ? "The secure live view could not load. Please try again."
+          : key.startsWith("camera-poster:")
+            ? "The latest camera still is unavailable."
+            : `This Home Assistant card could not load: ${escapeHtml(error?.message || error)}`;
+        slot.innerHTML = `<p class="hub-empty-state">${message}</p>`;
+        return;
+      }
+    }
+    if (!this.isConnected
+      || this._childMountGeneration !== mountGeneration
+      || !this._activeChildCardKeys().has(key)
+      || !this._isCurrentCameraSlot(key, slotId, slot)) return;
+    if (key === "music") {
+      const readOnly = this._config.display.read_only === true;
+      child.inert = false;
+      if (readOnly) {
+        child.setAttribute("aria-disabled", "true");
+        child.dataset.readOnlyGuard = "service-boundary";
+      } else {
+        child.removeAttribute("aria-disabled");
+        delete child.dataset.readOnlyGuard;
+      }
+    }
+    if (key.startsWith("calendar:") || key.startsWith("camera-poster:") || key === "vacuum-map") {
+      child.inert = false;
+      child.setAttribute("data-read-only-guard", "service-boundary");
+      child.setAttribute("aria-label", key.startsWith("calendar:") ? "Read-only family calendar" : "Latest camera still");
+      if (key.startsWith("camera-poster:")) child.inert = true;
+    }
+    if (key.startsWith("camera:")) {
+      const buffering = this._cameraSession?.phase === "buffering";
+      child.inert = buffering;
+      child.setAttribute("data-read-only-guard", "service-boundary");
+      child.setAttribute("aria-label", "Read-only camera view");
+      if (buffering) child.setAttribute("aria-hidden", "true");
+      else child.removeAttribute("aria-hidden");
+    }
+    child.hass = this._hassForChild(key);
+    if (key.startsWith("camera:")) {
+      child.slot = `camera-${key.slice("camera:".length)}`;
+      if (child.parentElement !== this) this.append(child);
+      const cameraId = key.slice("camera:".length);
+      const sessionToken = this._cameraSession?.token;
+      if (child.__familyCameraObserverToken !== sessionToken) {
+        child.__familyCameraObserverCleanup?.();
+        this._observeCameraMedia(child, cameraId, sessionToken);
+      }
+    } else {
+      slot.replaceChildren(child);
+    }
+  }
+
+  _isCurrentCameraSlot(key, slotId, slot) {
+    if (this.shadowRoot.getElementById(slotId) !== slot) return false;
+    if (!key.startsWith("camera:")) return true;
+    const cameraId = key.slice("camera:".length);
+    return this._view === "entry"
+      && this._cameraSession?.id === cameraId
+      && ["buffering", "viewing"].includes(this._cameraSession?.phase)
+      && cameraStreamPhase(this._hass?.states?.[this._controlPolicy.cameras.get(cameraId)?.entity]) === "streaming"
+      && this.shadowRoot.getElementById(slotId) === slot;
+  }
+
+  _observeCameraMedia(child, cameraId, sessionToken) {
+    let closed = false;
+    let frameReady = false;
+    let readyMediaElement = null;
+    let scanTimer = null;
+    const observedRoots = new Map();
+    const mediaReady = (media) => {
+      if (media?.tagName === "VIDEO") return media.readyState >= 2;
+      return false;
+    };
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (scanTimer !== null) clearTimeout(scanTimer);
+      for (const [root, observer] of observedRoots) {
+        observer?.disconnect();
+        root.removeEventListener("load", markReady, true);
+        root.removeEventListener("loadeddata", markReady, true);
+        root.removeEventListener("playing", markReady, true);
+        root.removeEventListener("canplay", markReady, true);
+        root.removeEventListener("stalled", markLost, true);
+        root.removeEventListener("waiting", markLost, true);
+        root.removeEventListener("ended", markLost, true);
+        root.removeEventListener("emptied", markLost, true);
+        root.removeEventListener("error", markLost, true);
+      }
+      observedRoots.clear();
+    };
+    const markReady = (event) => {
+      const media = event?.target;
+      if (!mediaReady(media)) return;
+      frameReady = true;
+      readyMediaElement = media;
+      this._markCameraFrameReady(cameraId, sessionToken, child);
+    };
+    const reportLost = (terminal = false) => {
+      if (!frameReady) return;
+      frameReady = false;
+      readyMediaElement = null;
+      this._markCameraMediaLost(cameraId, sessionToken, child, { terminal });
+    };
+    const markLost = (event) => {
+      if (event?.target?.tagName !== "VIDEO") return;
+      reportLost(["ended", "emptied", "error"].includes(event.type));
+    };
+    const scheduleScan = (delay = 100) => {
+      if (closed) return;
+      if (scanTimer !== null) clearTimeout(scanTimer);
+      scanTimer = setTimeout(() => {
+        scanTimer = null;
+        inspect();
+      }, delay);
+    };
+    const observeRoot = (root) => {
+      if (!root || observedRoots.has(root)) return;
+      root.addEventListener("load", markReady, true);
+      root.addEventListener("loadeddata", markReady, true);
+      root.addEventListener("playing", markReady, true);
+      root.addEventListener("canplay", markReady, true);
+      root.addEventListener("stalled", markLost, true);
+      root.addEventListener("waiting", markLost, true);
+      root.addEventListener("ended", markLost, true);
+      root.addEventListener("emptied", markLost, true);
+      root.addEventListener("error", markLost, true);
+      const observer = typeof MutationObserver === "function"
+        ? new MutationObserver(() => scheduleScan(0))
+        : null;
+      observer?.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
+      observedRoots.set(root, observer);
+    };
+    const inspectRoot = (root) => {
+      if (!root || closed) return null;
+      observeRoot(root);
+      if (root.shadowRoot) {
+        const readyInOwnShadow = inspectRoot(root.shadowRoot);
+        if (readyInOwnShadow) return readyInOwnShadow;
+      }
+      for (const element of root.querySelectorAll?.("*") || []) {
+        if (mediaReady(element)) return element;
+        if (element.shadowRoot) {
+          const readyInNestedShadow = inspectRoot(element.shadowRoot);
+          if (readyInNestedShadow) return readyInNestedShadow;
+        }
+      }
+      return null;
+    };
+    const inspect = () => {
+      if (closed) return;
+      const readyMedia = inspectRoot(child);
+      if (readyMedia) {
+        markReady({ target: readyMedia });
+        return;
+      }
+      if (frameReady && (!readyMediaElement?.isConnected || !mediaReady(readyMediaElement))) reportLost(false);
+      scheduleScan();
+    };
+    child.__familyCameraObserverToken = sessionToken;
+    child.__familyCameraObserverCleanup = cleanup;
+    inspect();
+  }
+
+  _invalidateChildHass(key = null) {
+    if (!(this._childHassTokens instanceof Map)) this._childHassTokens = new Map();
+    if (key === null) {
+      for (const activeKey of [...this._childHassTokens.keys()]) this._invalidateChildHass(activeKey);
+      this._childHassTokens.clear();
+      this._readOnlyHassSource = null;
+      this._readOnlyHass = new Map();
+      this._musicHassSource = null;
+      this._musicHass = null;
+      return;
+    }
+    const token = this._childHassTokens.get(key);
+    if (token) {
+      token.active = false;
+      for (const cleanup of token.cleanups || []) {
+        try { cleanup(); } catch { /* Child subscriptions are best-effort cleanup. */ }
+      }
+      token.cleanups?.clear?.();
+    }
+    this._childHassTokens.delete(key);
+    this._readOnlyHass?.delete?.(key);
+    if (key === "music") {
+      this._musicHassSource = null;
+      this._musicHass = null;
+    }
+  }
+
+  _childHassGuard(key) {
+    if (!(this._childHassTokens instanceof Map)) this._childHassTokens = new Map();
+    const token = { active: true, cleanups: new Set() };
+    this._childHassTokens.set(key, token);
+    const guard = () => token.active && this._childHassTokens.get(key) === token;
+    guard.onRevoke = (cleanup) => {
+      if (typeof cleanup !== "function") return () => undefined;
+      if (!guard()) {
+        cleanup();
+        return () => undefined;
+      }
+      token.cleanups.add(cleanup);
+      return () => token.cleanups.delete(cleanup);
+    };
+    return guard;
+  }
+
+  _hassForChild(key) {
+    const forceReadOnly = key.startsWith("calendar:")
+      || key.startsWith("camera:")
+      || key.startsWith("camera-poster:")
+      || key === "map"
+      || key === "vacuum-map";
+    if (!this._hass) return this._hass;
+    if (key === "music" && !this._config?.display?.read_only) {
+      if (this._musicHassSource !== this._hass || !this._musicHass) {
+        this._invalidateChildHass(key);
+        this._musicHassSource = this._hass;
+        this._musicHass = createControlledMediaHass(
+          this._hass,
+          this._controlPolicy,
+          this._childHassGuard(key)
+        );
+      }
+      return this._musicHass;
+    }
+    if (!forceReadOnly && key !== "music") return this._hass;
+    if (this._readOnlyHassSource !== this._hass) {
+      for (const cachedKey of this._readOnlyHass?.keys?.() || []) this._invalidateChildHass(cachedKey);
+      this._readOnlyHassSource = this._hass;
+      this._readOnlyHass = new Map();
+    }
+    if (this._readOnlyHass.has(key)) return this._readOnlyHass.get(key);
+    this._invalidateChildHass(key);
+    const source = this._hass;
+    const isActive = this._childHassGuard(key);
+    const cameraId = key.startsWith("camera:")
+      ? key.slice("camera:".length)
+      : key.startsWith("camera-poster:")
+        ? key.split(":").at(-1)
+        : null;
+    const cameraEntity = key === "vacuum-map"
+      ? this._config.cleaning.map_entity || null
+      : cameraId
+        ? key.startsWith("camera-poster:")
+          ? this._controlPolicy.cameras.get(cameraId)?.stillEntity || null
+          : this._controlPolicy.cameras.get(cameraId)?.entity || null
+        : null;
+    const calendarEntities = new Set(key.startsWith("calendar:")
+      ? this._config.calendar.entities.map((entry) => entry.entity_id)
+      : []);
+    const allowMessage = (message) => isReadOnlyChildMessageAllowed(message, {
+      cameraEntity,
+      allowCameraStream: key.startsWith("camera:"),
+      calendarEntities
+    });
+    const scopedEntityIds = key.startsWith("calendar:")
+      ? this._config.calendar.entities.map((entry) => entry.entity_id)
+      : key === "map"
+        ? [
+            ...(this._config.location?.entities || []),
+            ...Object.keys(source.states || {}).filter((entityId) => entityId.startsWith("zone."))
+          ]
+        : cameraEntity ? [cameraEntity] : [];
+    const scopedStates = Object.freeze(Object.fromEntries(
+      [...new Set(scopedEntityIds)]
+        .filter((entityId) => source.states?.[entityId])
+        .map((entityId) => [entityId, source.states[entityId]])
+    ));
+    const connection = guardedChildConnection(source.connection, allowMessage, isActive);
+    const readOnlyHass = guardedChildHass(source, {
+      states: scopedStates,
+      callService: () => Promise.resolve(undefined),
+      // Native read-only cards use the guarded websocket protocol. Do not
+      // expose a generic REST GET bridge that could fetch another camera.
+      callApi: (method, path, ...args) => isActive() && isAllowedCalendarApiRequest(method, path, calendarEntities)
+        ? guardedChildResult(source.callApi?.(String(method || "GET").toUpperCase(), String(path), ...args), isActive)
+        : Promise.resolve(undefined),
+      callWS: (message, ...args) => {
+        const snapshot = snapshotChildObject(message);
+        return isActive() && snapshot && allowMessage(snapshot)
+          ? guardedChildResult(source.callWS?.(snapshot, ...args), isActive)
+          : Promise.resolve(undefined);
+      },
+      ...(connection ? { connection } : {})
+    }, isActive);
+    this._readOnlyHass.set(key, readOnlyHass);
+    return readOnlyHass;
+  }
+
+  _handleKeydown(event) {
+    if (this._photoFrameActive) {
+      event.preventDefault();
+      this._deactivatePhotoFrame();
+      return;
+    }
+    this._armPhotoFrameIdleTimer();
+    if (this._plannerModal) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this._plannerModal = null;
+        this._scheduleRender(true);
+        return;
+      }
+      if (event.key === "Tab") {
+        const controls = [...this.shadowRoot.querySelectorAll('.planner-modal button:not([disabled]),.planner-modal input:not([disabled]),.planner-modal select:not([disabled]),.planner-modal textarea:not([disabled])')];
+        if (!controls.length) return;
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        const active = this.shadowRoot.activeElement;
+        if (event.shiftKey && (active === first || !controls.includes(active))) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (active === last || !controls.includes(active))) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+      return;
+    }
+    if (this._pendingConfirmation) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this._pendingConfirmation = null;
+        this._scheduleRender(true);
+        return;
+      }
+      if (event.key === "Tab") {
+        const controls = [...this.shadowRoot.querySelectorAll('.confirmation-dialog button:not([disabled])')];
+        if (!controls.length) return;
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        const active = this.shadowRoot.activeElement;
+        if (event.shiftKey && (active === first || !controls.includes(active))) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (active === last || !controls.includes(active))) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+      return;
+    }
+    const target = event.target.closest?.("[data-room]");
+    if (!target || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    this._selectRoom(target.dataset.room);
+  }
+
+  _handleChange(event) {
+    this._armPhotoFrameIdleTimer();
+    const cleaningSelect = event.target.closest?.("[data-cleaning-select]");
+    if (cleaningSelect) {
+      const entityId = cleaningSelect.dataset.cleaningSelect;
+      const options = this._hass?.states?.[entityId]?.attributes?.options || [];
+      if (!this._config.display.read_only && this._controlPolicy.cleaningSelects.has(entityId) && options.includes(cleaningSelect.value)) {
+        this._hass?.callService?.("select", "select_option", { entity_id: entityId, option: cleaningSelect.value });
+      }
+      return;
+    }
+    const masterTemperature = event.target.closest?.("[data-master-temperature]");
+    if (masterTemperature) {
+      const value = Number(masterTemperature.value);
+      if (Number.isFinite(value) && value >= 5 && value <= 35) this._masterTemperature = Math.round(value * 2) / 2;
+      return;
+    }
+    const select = event.target.closest?.("[data-gameweek-select]");
+    if (select) {
+      this._gameweek = Math.max(1, Math.min(38, safeNumber(select.value, 1)));
+      this._scheduleRender(true);
+    }
+  }
+
+  async _callPlannerAction(domain, service, entityId, data = {}) {
+    if (!isAllowedPlannerAction(domain, service, entityId, this._config) || typeof this._hass?.callService !== "function") {
+      throw new Error("This Family Planner action is not allowed.");
+    }
+    return this._hass.callService(domain, service, data, { entity_id: entityId });
+  }
+
+  async _createPreparationItems(event, template, personIds) {
+    const entityId = this._config.calendar.preparation?.todo_entity;
+    if (!entityId || !template || !personIds.length) return;
+    const eventKey = familyPlannerEventKey(event);
+    const existingKeys = new Set(this._preparationItems
+      .filter((item) => item?._preparation?.eventKey === eventKey)
+      .map((item) => `${item._preparation.personId}|${String(item.summary || item.item || "").trim().toLocaleLowerCase()}`));
+    const dueValue = calendarEventStart(event);
+    for (const personId of personIds) {
+      const person = this._config.people.find((entry) => entry.id === personId && entry.role === "child");
+      if (!person) continue;
+      for (const item of template.items) {
+        const duplicateKey = `${personId}|${String(item).trim().toLocaleLowerCase()}`;
+        if (existingKeys.has(duplicateKey)) continue;
+        const data = {
+          item,
+          description: preparationDescription(event, personId, template.id),
+          ...(isAllDayCalendarEvent(event) ? { due_date: String(dueValue).slice(0, 10) } : { due_datetime: dueValue })
+        };
+        await this._callPlannerAction("todo", "add_item", entityId, data);
+        existingKeys.add(duplicateKey);
+      }
+    }
+    this._preparationRequestKey = "";
+    await this._loadPreparationItems(true);
+  }
+
+  async _addPreparationForEvent(eventKey, templateId, personId) {
+    const event = this._plannerEventByKey(eventKey);
+    const template = this._config.calendar.preparation?.templates?.find((entry) => entry.id === templateId);
+    if (!event || !template || !event?._calendar?.person_ids?.includes(personId)) return;
+    try {
+      await this._createPreparationItems(event, template, [personId]);
+    } catch (error) {
+      this._preparationError = error?.message || "The preparation checklist could not be created.";
+      this._scheduleRender(true);
+    }
+  }
+
+  async _addCustomPreparationForEvent(eventKey, personId, itemText) {
+    const event = this._plannerEventByKey(eventKey);
+    const item = String(itemText || "").trim();
+    if (!event || !item || !event?._calendar?.person_ids?.includes(personId)) return;
+    try {
+      await this._createPreparationItems(event, { id: "custom", items: [item] }, [personId]);
+    } catch (error) {
+      this._preparationError = error?.message || "The Ready item could not be added.";
+      this._scheduleRender(true);
+    }
+  }
+
+  _createdEventMatch(calendar, summary, start) {
+    const expectedDate = dateKey(start, this._config.product.timezone);
+    return [...this._calendarEvents].reverse().find((event) => event?._calendar?.entity_id === calendar.entity_id
+      && String(event.summary || "").trim().toLocaleLowerCase() === summary.trim().toLocaleLowerCase()
+      && dateKey(calendarEventStart(event), this._config.product.timezone) === expectedDate) || null;
+  }
+
+  async _togglePreparationItem(itemId, status) {
+    const entityId = this._config.calendar.preparation?.todo_entity;
+    const item = this._preparationItems.find((entry) => String(entry.uid || entry.id || entry.summary) === itemId);
+    if (!entityId || !item || !["completed", "needs_action"].includes(status)) return;
+    const previousStatus = item.status;
+    item.status = status;
+    this._scheduleRender(true);
+    try {
+      await this._callPlannerAction("todo", "update_item", entityId, { item: itemId, status });
+      this._preparationRequestKey = "";
+      await this._loadPreparationItems(true);
+    } catch (error) {
+      item.status = previousStatus;
+      this._preparationError = error?.message || "The checklist item could not be updated.";
+      this._scheduleRender(true);
+    }
+  }
+
+  async _removePreparationItem(itemId) {
+    const entityId = this._config.calendar.preparation?.todo_entity;
+    const item = this._preparationItems.find((entry) => String(entry.uid || entry.id || entry.summary) === itemId);
+    if (!entityId || !item) return;
+    try {
+      await this._callPlannerAction("todo", "remove_item", entityId, { item: itemId });
+      this._preparationRequestKey = "";
+      await this._loadPreparationItems(true);
+    } catch (error) {
+      this._preparationError = error?.message || "The Ready item could not be removed.";
+      this._scheduleRender(true);
+    }
+  }
+
+  async _savePlannerEvent() {
+    if (this._plannerModal?.type !== "add" || this._plannerModal.saving) return;
+    const field = (name) => this.shadowRoot.querySelector(`[data-planner-field="${name}"]`)?.value?.trim?.() || "";
     const calendarEntity = field("calendar");
     const calendar = this._config.calendar.entities.find((entry) => entry.entity_id === calendarEntity && entry.allow_create === true);
     const summary = field("summary");
