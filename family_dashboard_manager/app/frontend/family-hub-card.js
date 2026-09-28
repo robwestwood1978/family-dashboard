@@ -7606,6 +7606,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .heating-master .master-schedule { flex:0 1 310px; border-color:rgba(255,255,255,.18); background:rgba(255,255,255,.07); color:#fff; }
       .heating-card { height:max-content; }
       .heating-schedule { border:1px solid #DCE4EE; border-radius:14px; background:#F7F9FC; overflow:hidden; }
+      .heating-schedule[open] { overflow:visible; }
       .heating-schedule summary { min-height:48px; padding:7px 10px; display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:pointer; list-style:none; }
       .heating-schedule summary::-webkit-details-marker { display:none; }
       .heating-schedule summary > span { min-width:0; display:grid; grid-template-columns:22px minmax(0,1fr); align-items:center; gap:1px 6px; }
