@@ -14,7 +14,7 @@ let baseUrl;
 test.beforeAll(async () => {
   const app = express();
   app.get("/api/admin/bootstrap", (_request, response) => response.json({
-    version: "0.12.1",
+    version: "0.13.0",
     config,
     schema,
     inventory: { schema_version: 1, areas: [], entities: [] },

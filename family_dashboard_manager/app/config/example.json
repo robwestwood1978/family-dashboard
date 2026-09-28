@@ -1,6 +1,6 @@
 {
   "$schema": "./family-dashboard.schema.json",
-  "schema_version": 6,
+  "schema_version": 7,
   "product": {
     "title": "Family Dashboard",
     "locale": "en-GB",
@@ -210,7 +210,8 @@
   },
   "home": {
     "default_section": "rooms",
-    "default_room": "living_room"
+    "default_room": "living_room",
+    "exterior_lights": []
   },
   "floorplan": {
     "default_floor": "ground",
@@ -264,7 +265,12 @@
       "scenes": ["scene.living_room_relax"],
       "media_players": ["media_player.living_room"],
       "climate": "climate.living_room",
-      "temperature_sensor": "sensor.living_room_temperature"
+      "temperature_sensor": "sensor.living_room_temperature",
+      "heating_schedule": {
+        "entity_id": "text.living_room_schedule",
+        "mode_entity": "select.living_room_auto_schedule",
+        "refresh_entity": "button.living_room_refresh_schedule"
+      }
     },
     {
       "id": "kitchen",
@@ -337,7 +343,16 @@
     "map_entity": "camera.example_vacuum_map",
     "battery_entity": "sensor.example_robovac_battery",
     "task_entity": "sensor.example_robovac_task",
-    "dock_entity": "sensor.example_robovac_dock"
+    "dock_entity": "sensor.example_robovac_dock",
+    "room_entity": "select.example_robovac_clean_room",
+    "mode_entity": "select.example_robovac_cleaning_mode",
+    "suction_entity": "select.example_robovac_suction_level",
+    "mop_entity": "select.example_robovac_mop_intensity",
+    "water_entity": "select.example_robovac_water_level",
+    "cleaning_area_entity": "sensor.example_robovac_cleaning_area",
+    "cleaning_time_entity": "sensor.example_robovac_cleaning_time",
+    "consumable_entities": [],
+    "command_entities": []
   },
   "chores": {
     "profile": "choreops-status",

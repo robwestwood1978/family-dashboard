@@ -1,10 +1,10 @@
 # Family Dashboard Manager
 
-Version 0.12 adds the Manager-backed household Admin and child-first ChoreOps Tasks experience in place. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
+Version 0.13 adds whole-room controls, master heating and schedules, richer cleaning and energy, reliable on-demand cameras, FPL household entries and a more playful Tasks experience. It retains the same Home Assistant app slug, published image, configuration directory, frontend directory, dashboard path and Secure MCP Tunnel. Do not install a second app or create another tunnel.
 
 The Admin design and direct-claim boundary are described in [the v0.12 rollout note](./app/docs/v012-manager-admin.md). The colour-coded Family Planner, **Ready** checklist, private kiosk photo frame and calendar-only School fallback remain intact. All controlled-live and rollback boundaries below remain in force.
 
-The accepted schema-v6 dashboard runs in controlled live mode. First-party actions are restricted to exact validated household entities and fixed services. Calendar creation is allowed only on entries marked `allow_create: true`, and preparation items can be added or ticked only on the configured to-do entity. Classroom, camera presentation cards and the vacuum map remain read-only, while every alarm and garage change still asks for a second confirmation.
+The accepted schema-v7 dashboard runs in controlled live mode. First-party actions are restricted to exact validated household entities and fixed services. Calendar creation is allowed only on entries marked `allow_create: true`, and preparation items can be added or ticked only on the configured to-do entity. Classroom and camera presentation cards remain read-only, while every alarm and garage change still asks for a second confirmation.
 
 ## Upgrade the existing manager
 
@@ -12,9 +12,9 @@ This release requires Home Assistant OS 2026.8.0 or newer.
 
 1. Create a Home Assistant backup.
 2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
-3. Update the installed **Family Dashboard Manager** to v0.12.1; do not uninstall it.
+3. Update the installed **Family Dashboard Manager** to v0.13.0; do not uninstall it.
 4. Keep the existing Secure MCP Tunnel options unchanged and restart the app.
-5. Confirm the manager reconnects through the existing tunnel and reports v0.12.1.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.13.0.
 
 The app exposes no host port. Home Assistant Supervisor reaches the internal ingress port and restricts the Admin panel to administrators; the MCP route retains its independent localhost host check for the existing in-container tunnel.
 
@@ -43,7 +43,7 @@ lovelace:
 Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.12.1
+/local/family-dashboard/family-hub-card.js?v=0.13.0
 ```
 
 The stock Home Assistant Overview remains available to administrators.
@@ -63,11 +63,11 @@ The files are written only below `/config/www/family-dashboard/private/`.
 
 ## Controlled live deployment
 
-The schema-v6 household configuration retains the existing panel path and explicitly opts into live mode:
+The schema-v7 household configuration retains the existing panel path and explicitly opts into live mode:
 
 ```json
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "display": {
     "panel_path": "family-dashboard",
     "read_only": false
@@ -77,7 +77,7 @@ The schema-v6 household configuration retains the existing panel path and explic
 
 Run `validate_household_config` first. Validation is read-only and returns the exact configuration hash required by `deploy_household_config` with `confirm=true`. Deployment writes only the existing Family Dashboard configuration and fixed frontend allow-list after creating a raw, hash-verified snapshot. Private floorplans are preserved separately.
 
-Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.12.1, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
+Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.13.0, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
 
 ## Household mappings retained from v0.9
 

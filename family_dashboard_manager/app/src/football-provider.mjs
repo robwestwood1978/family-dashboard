@@ -5,6 +5,7 @@ import { CURRENT_SCHEMA_VERSION } from "./schema-version.mjs";
 
 const BOOTSTRAP_URL = "https://fantasy.premierleague.com/api/bootstrap-static/";
 const FIXTURES_URL = "https://fantasy.premierleague.com/api/fixtures/";
+const ENTRY_URL = "https://fantasy.premierleague.com/api/entry";
 const PREMIER_LEAGUE_BADGE_BASE_URL = "https://resources.premierleague.com/premierleague/badges/70";
 const DEFAULT_REST_URL = "http://supervisor/core/api";
 const GAMEWEEKS = Object.freeze(Array.from({ length: 38 }, (_, index) => index + 1));
@@ -226,6 +227,31 @@ export function normaliseFootballData({ bootstrap, fixtures, spotlightTeamCodes,
   };
 }
 
+export function normaliseFplEntry(config, profile, history) {
+  const currentEvent = asInteger(profile?.current_event, 0);
+  const current = requireArray(history?.current || [], "entry history.current")
+    .find((event) => asInteger(event.event) === currentEvent) || null;
+  const leagues = requireArray(profile?.leagues?.classic || [], "entry leagues.classic").slice(0, 8).map((league) => ({
+    id: asInteger(league.id),
+    name: String(league.name || "League").slice(0, 80),
+    rank: asInteger(league.entry_rank, 0) || null,
+    previous_rank: asInteger(league.entry_last_rank, 0) || null
+  }));
+  return {
+    person_id: config.person_id,
+    entry_id: config.entry_id,
+    team_name: String(profile?.name || `FPL team ${config.entry_id}`).slice(0, 80),
+    gameweek: currentEvent || null,
+    gameweek_points: current ? asInteger(current.points) : null,
+    total_points: asInteger(profile?.summary_overall_points, current?.total_points ?? 0),
+    overall_rank: asInteger(profile?.summary_overall_rank, current?.overall_rank ?? 0) || null,
+    last_rank: current ? asInteger(current.overall_rank, 0) || null : null,
+    transfers: current ? asInteger(current.event_transfers) : null,
+    transfer_cost: current ? asInteger(current.event_transfers_cost) : null,
+    leagues
+  };
+}
+
 export function buildFootballStates(data, footballConfig, {
   dataStatus = "live",
   checkedAt = data.fetched_at,
@@ -276,6 +302,19 @@ export function buildFootballStates(data, footballConfig, {
       rows: data.table
     }
   });
+  for (const entry of data.entries || []) {
+    states.push({
+      entity_id: `sensor.family_dashboard_fpl_${entry.person_id}`,
+      state: String(entry.total_points),
+      attributes: {
+        friendly_name: `${entry.person_id} FPL team`,
+        icon: "mdi:trophy-outline",
+        provider: "fpl",
+        ...entry,
+        last_updated: data.fetched_at
+      }
+    });
+  }
   return states;
 }
 
@@ -301,7 +340,7 @@ export async function publishHomeAssistantState(state, {
 
 async function fetchJson(url, fetchImpl, timeoutMs) {
   const response = await fetchImpl(url, {
-    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.12.1" },
+    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.13.0" },
     signal: AbortSignal.timeout(timeoutMs)
   });
   if (!response.ok) throw new Error(`football source returned HTTP ${response.status}`);
@@ -350,9 +389,17 @@ export class FootballProvider {
     let dataStatus = "live";
     const checkedAt = this.clock().toISOString();
     try {
-      const [bootstrap, fixtures] = await Promise.all([
+      const entryConfigs = Array.isArray(footballConfig.entries) ? footballConfig.entries : [];
+      const [bootstrap, fixtures, entries] = await Promise.all([
         fetchJson(BOOTSTRAP_URL, this.fetchImpl, this.timeoutMs),
-        fetchJson(FIXTURES_URL, this.fetchImpl, this.timeoutMs)
+        fetchJson(FIXTURES_URL, this.fetchImpl, this.timeoutMs),
+        Promise.all(entryConfigs.map(async (entry) => {
+          const [profile, history] = await Promise.all([
+            fetchJson(`${ENTRY_URL}/${entry.entry_id}/`, this.fetchImpl, this.timeoutMs),
+            fetchJson(`${ENTRY_URL}/${entry.entry_id}/history/`, this.fetchImpl, this.timeoutMs)
+          ]);
+          return normaliseFplEntry(entry, profile, history);
+        }))
       ]);
       data = normaliseFootballData({
         bootstrap,
@@ -360,6 +407,7 @@ export class FootballProvider {
         spotlightTeamCodes: footballConfig.spotlight_team_codes,
         fetchedAt: checkedAt
       });
+      data.entries = entries;
       await writeCache(this.cachePath, data);
     } catch (sourceError) {
       data = await readCache(this.cachePath);

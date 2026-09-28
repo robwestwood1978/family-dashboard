@@ -1,3 +1,14 @@
+## 0.13.0
+
+- Add per-room light group actions and one bounded whole-house internal-lights-off action that excludes configured exterior lights.
+- Add whole-house heating temperature and power controls, plus validated four-period Tuya Local schedule reading/editing for one room or every mapped zone.
+- Expand Cleaning with room, mode, suction, mop, water, area, duration, consumables and dock-command controls, and replace the empty map with an actionable integration-capability state.
+- Give Tasks a child-coloured mission meter and completion treatment while preserving exact-entity ChoreOps claim and adult-approval boundaries.
+- Stop mounting unavailable camera stills, show a deterministic live-on-demand state, and allow a separate configured snapshot camera without weakening the bounded stream lifecycle.
+- Fill Energy with Home Assistant 24-hour meter history and clearly separate DCC readings from unconfigured supplier-portal data.
+- Merge the duplicate Family/Today navigation affordance into one Today home button.
+- Add public FPL entry IDs in Admin and publish bounded team points, rank and classic-league positions without storing FPL credentials or manager identity.
+
 ## 0.12.1
 
 - Keep the Tasks child selector in its own visible row on landscape tablets so switching between children never depends on rotating the iPad.

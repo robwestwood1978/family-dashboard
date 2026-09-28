@@ -234,10 +234,19 @@ views:
             },
             "cleaning": {
               "battery_entity": "sensor.example_robovac_battery",
+              "cleaning_area_entity": "sensor.example_robovac_cleaning_area",
+              "cleaning_time_entity": "sensor.example_robovac_cleaning_time",
+              "command_entities": [],
+              "consumable_entities": [],
               "dock_entity": "sensor.example_robovac_dock",
               "map_entity": "camera.example_vacuum_map",
+              "mode_entity": "select.example_robovac_cleaning_mode",
+              "mop_entity": "select.example_robovac_mop_intensity",
+              "room_entity": "select.example_robovac_clean_room",
+              "suction_entity": "select.example_robovac_suction_level",
               "task_entity": "sensor.example_robovac_task",
-              "vacuum_entity": "vacuum.example_robovac"
+              "vacuum_entity": "vacuum.example_robovac",
+              "water_entity": "select.example_robovac_water_level"
             },
             "display": {
               "default_view": "today",
@@ -471,7 +480,8 @@ views:
             },
             "home": {
               "default_room": "living_room",
-              "default_section": "rooms"
+              "default_section": "rooms",
+              "exterior_lights": []
             },
             "lists": {
               "reminders_entity": "todo.reminders",
@@ -545,6 +555,11 @@ views:
                   "cover.living_room"
                 ],
                 "floor_id": "ground",
+                "heating_schedule": {
+                  "entity_id": "text.living_room_schedule",
+                  "mode_entity": "select.living_room_auto_schedule",
+                  "refresh_entity": "button.living_room_refresh_schedule"
+                },
                 "icon": "mdi:sofa-outline",
                 "id": "living_room",
                 "lights": [
@@ -632,7 +647,7 @@ views:
                 ]
               }
             ],
-            "schema_version": 6,
+            "schema_version": 7,
             "school": {
               "calendar_entities": [
                 "calendar.school"
