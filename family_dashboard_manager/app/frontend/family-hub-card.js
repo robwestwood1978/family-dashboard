@@ -7598,7 +7598,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .lighting-master h2,.heating-master h2 { margin:2px 0; color:#fff; font-size:22px; }
       .lighting-master span,.heating-master span { color:#B8C7D9; font-size:12px; }
       .lighting-master button,.heating-master-actions button,.schedule-editor > button { min-height:48px; padding:0 15px; border:1px solid rgba(255,255,255,.18); border-radius:14px; background:#1463E8; color:#fff; font-weight:800; }
-      .room-light-master { margin-left:auto; min-height:42px; padding:0 11px; border:1px solid #DCE4EE; border-radius:13px; background:#EAF2FF; color:#1463E8; display:flex; align-items:center; gap:5px; font-weight:800; }
+      .room-light-master { margin-left:auto; min-height:48px; padding:0 11px; border:1px solid #DCE4EE; border-radius:13px; background:#EAF2FF; color:#1463E8; display:flex; align-items:center; gap:5px; font-weight:800; }
       .room-light-master.is-on { border-color:#E8C67E; background:#FFF4D9; color:#765000; }
       .heating-master > label { display:grid; gap:4px; color:#fff; font-size:12px; font-weight:800; }
       .heating-master > label input { width:78px; height:46px; padding:0 10px; border:1px solid rgba(255,255,255,.2); border-radius:13px; background:rgba(255,255,255,.12); color:#fff; font:800 18px inherit; }
