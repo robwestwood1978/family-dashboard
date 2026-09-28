@@ -1544,7 +1544,7 @@ test("v0.13 heating keeps six zones accessible inside the bounded heating grid",
   expect(layout.cardsInsideHorizontalBounds).toBe(true);
   expect(layout.widthSpread).toBeLessThanOrEqual(1);
   if (testInfo.project.name.startsWith("approval-")) {
-    await captureApproval(page, testInfo, "home-heating-six");
+    await captureApproval(page, testInfo, "home-heating");
   }
   await card.locator('[data-climate-card="climate.upstairs_test"]').scrollIntoViewIfNeeded();
   await expect(card.locator('[data-climate-card="climate.upstairs_test"]')).toBeVisible();
@@ -3238,7 +3238,7 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     expect(audit.textCount, `${name} must audit all visible text at 200%`).toBeGreaterThan(0);
     expect(audit.clipped, `${name} has text clipped by its nearest non-scrollable ancestor at 200%`).toEqual([]);
     expect(audit.overlaps, `${name} has overlapping visible text at 200%`).toEqual([]);
-    if (name === "home-heating-six") {
+    if (name === "home-heating") {
       const heatingLayout = await page.locator("family-hub-card").locator(".heating-grid").evaluate((grid) => {
         const gridBounds = grid.getBoundingClientRect();
         const cards = [...grid.querySelectorAll(".heating-card")].map((item) => item.getBoundingClientRect());
