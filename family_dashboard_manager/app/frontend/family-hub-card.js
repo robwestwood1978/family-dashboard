@@ -2033,7 +2033,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const config = typeof cardConfig?.config_json === "string"
       ? JSON.parse(cardConfig.config_json)
       : cardConfig?.family_config;
-    if (!config || config.schema_version !== 6) {
+    if (!config || config.schema_version !== 7) {
       throw new Error("Family Hub requires a schema-v7 family configuration");
     }
     this._childMountGeneration += 1;
