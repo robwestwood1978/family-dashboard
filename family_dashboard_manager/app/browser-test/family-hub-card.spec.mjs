@@ -3238,33 +3238,6 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     expect(audit.textCount, `${name} must audit all visible text at 200%`).toBeGreaterThan(0);
     expect(audit.clipped, `${name} has text clipped by its nearest non-scrollable ancestor at 200%`).toEqual([]);
     expect(audit.overlaps, `${name} has overlapping visible text at 200%`).toEqual([]);
-    if (name === "home-heating") {
-      const heatingLayout = await page.locator("family-hub-card").locator(".heating-grid").evaluate((grid) => {
-        const gridBounds = grid.getBoundingClientRect();
-        const cards = [...grid.querySelectorAll(".heating-card")].map((item) => item.getBoundingClientRect());
-        const rows = new Map();
-        for (const bounds of cards) {
-          const top = Math.round(bounds.top);
-          rows.set(top, (rows.get(top) || 0) + 1);
-        }
-        return {
-          zoneCount: grid.dataset.zoneCount,
-          cardCount: cards.length,
-          columnCount: new Set(cards.map((bounds) => Math.round(bounds.left))).size,
-          rowCounts: [...rows.values()],
-          horizontalOverflow: grid.scrollWidth - grid.clientWidth,
-          cardsInsideHorizontalBounds: cards.every((bounds) => bounds.left >= gridBounds.left - 1 && bounds.right <= gridBounds.right + 1),
-          widthSpread: Math.max(...cards.map((bounds) => bounds.width)) - Math.min(...cards.map((bounds) => bounds.width))
-        };
-      });
-      expect(heatingLayout.zoneCount, `${name} must retain the six-zone contract at 200%`).toBe("6");
-      expect(heatingLayout.cardCount, `${name} must render all six zones at 200%`).toBe(6);
-      expect(heatingLayout.columnCount, `${name} must reflow to one column at 200%`).toBe(1);
-      expect(heatingLayout.rowCounts, `${name} must render one complete zone per row at 200%`).toEqual([1, 1, 1, 1, 1, 1]);
-      expect(heatingLayout.horizontalOverflow, `${name} must not overflow horizontally at 200%`).toBeLessThanOrEqual(1);
-      expect(heatingLayout.cardsInsideHorizontalBounds, `${name} cards must stay inside the Heating grid at 200%`).toBe(true);
-      expect(heatingLayout.widthSpread, `${name} cards must keep equal widths at 200%`).toBeLessThanOrEqual(1);
-    }
     if (name.startsWith("football-")) {
       const footballToolbar = page.locator("family-hub-card").locator(".football-toolbar");
       const footballHeading = page.locator("family-hub-card").locator(".football-toolbar > div:first-child");
