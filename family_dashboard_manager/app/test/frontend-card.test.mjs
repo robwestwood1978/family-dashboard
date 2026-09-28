@@ -888,7 +888,7 @@ test("accepts only idle as a stopped camera state and requires fresh idle when r
 
 function cameraOnlyConfig(cameras, { readOnly = false } = {}) {
   return {
-    schema_version: 6,
+    schema_version: 7,
     display: { default_view: "entry", read_only: readOnly },
     home: { default_section: "rooms" },
     calendar: { initial_view: "week" },

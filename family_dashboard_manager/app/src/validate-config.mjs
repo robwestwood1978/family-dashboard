@@ -690,7 +690,7 @@ export function validateConfig(config) {
     if (cameraIds.has(camera.id)) fail(`${path}.id`, "must be unique");
     cameraIds.add(camera.id);
     requireString(camera.name, `${path}.name`);
-    if (PRIVATE_CAMERA_HINT.test([camera.id, camera.name, camera.entity_id].filter(Boolean).join(" "))) {
+    if (PRIVATE_CAMERA_HINT.test([camera.id, camera.name, camera.entity_id, camera.still_entity_id].filter(Boolean).join(" "))) {
       fail(path, "private child or bedroom cameras are never allowed on the household Security surface");
     }
     if (camera.entity_id) validateEntityId(camera.entity_id, `${path}.entity_id`, "camera");

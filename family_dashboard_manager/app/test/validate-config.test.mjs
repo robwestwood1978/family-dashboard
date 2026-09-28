@@ -26,7 +26,7 @@ function withDeferredEntry() {
   return config;
 }
 
-test("accepts the public schema-v6 configuration", () => {
+test("accepts the public schema-v7 configuration", () => {
   assert.equal(validateConfig(structuredClone(example)).schema_version, CURRENT_SCHEMA_VERSION);
   const stale = structuredClone(example);
   stale.schema_version = CURRENT_SCHEMA_VERSION - 1;
@@ -36,7 +36,7 @@ test("accepts the public schema-v6 configuration", () => {
   );
 });
 
-test("keeps Energy and the preferred Home room optional for existing schema-v6 households", () => {
+test("keeps Energy and the preferred Home room optional for existing schema-v7 households", () => {
   const config = structuredClone(example);
   delete config.features.energy;
   delete config.energy;
@@ -411,6 +411,10 @@ test("blocks child and bedroom cameras from the household Security surface", () 
   config.entry.cameras[0].id = "child_bedroom";
   config.entry.primary_camera_id = "child_bedroom";
   assert.throws(() => validateConfig(config), /private child or bedroom cameras are never allowed/);
+
+  const privateStill = structuredClone(example);
+  privateStill.entry.cameras[0].still_entity_id = "camera.ernie_bedroom_snapshot";
+  assert.throws(() => validateConfig(privateStill), /private child or bedroom cameras are never allowed/);
 });
 
 test("requires camera, event and garage entities to use safe expected domains", () => {
