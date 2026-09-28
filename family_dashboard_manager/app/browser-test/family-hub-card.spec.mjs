@@ -3086,7 +3086,6 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     }));
     expect(navigationTargetGeometry.map(({ label }) => label), `${name} compact navigation must retain its semantic order`).toEqual([
       "Open Today",
-      "Today",
       "Calendar",
       "Home",
       "Tasks",
