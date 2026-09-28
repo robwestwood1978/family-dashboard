@@ -1,5 +1,5 @@
 const VIEW_DEFINITIONS = [
-  { id: "today", label: "Today", icon: "mdi:home-heart", feature: null },
+  { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
   { id: "calendar", label: "Calendar", icon: "mdi:calendar-month", feature: "calendar" },
   { id: "rooms", label: "Home", icon: "mdi:floor-plan", feature: "rooms" },
   { id: "family", label: "Tasks", icon: "mdi:clipboard-check-outline", feature: "family" },
@@ -48,6 +48,11 @@ export function isControlAction(dataset = {}) {
     || dataset.secureCoverAction
     || dataset.choreClaim
     || dataset.rewardClaim
+    || dataset.roomLights
+    || dataset.allInternalLights !== undefined
+    || dataset.climateMaster
+    || dataset.heatingScheduleApply
+    || dataset.cleaningCommand
   );
 }
 
@@ -364,6 +369,11 @@ export function buildControlPolicy(config = {}) {
     mediaPlayers: new Set(),
     covers: new Set(),
     climates: new Set(),
+    scheduleTexts: new Set(),
+    scheduleModes: new Set(),
+    scheduleRefreshButtons: new Set(),
+    cleaningSelects: new Set(),
+    cleaningButtons: new Set(),
     moreInfo: new Set(),
     cameras: new Map(),
     musicAssistantConfigEntries: new Set(),
@@ -385,6 +395,9 @@ export function buildControlPolicy(config = {}) {
     }
     for (const entityId of room.covers || []) addEntity(policy.covers, entityId);
     addEntity(policy.climates, room.climate);
+    addEntity(policy.scheduleTexts, room.heating_schedule?.entity_id);
+    addEntity(policy.scheduleModes, room.heating_schedule?.mode_entity);
+    addEntity(policy.scheduleRefreshButtons, room.heating_schedule?.refresh_entity);
   }
 
   for (const player of config.features?.music !== false ? config.media?.players || [] : []) {
@@ -393,10 +406,15 @@ export function buildControlPolicy(config = {}) {
     addEntity(policy.mediaPlayers, player.speaker_group_entity_id);
   }
   if (config.features?.weather !== false) addEntity(policy.moreInfo, config.weather?.entity_id);
+  for (const key of ["room_entity", "mode_entity", "suction_entity", "mop_entity", "water_entity"]) {
+    addEntity(policy.cleaningSelects, config.cleaning?.[key]);
+  }
+  for (const entityId of config.cleaning?.command_entities || []) addEntity(policy.cleaningButtons, entityId);
 
   for (const camera of config.features?.entry !== false ? config.entry?.cameras || [] : []) {
     policy.cameras.set(camera.id, {
       entity: camera.entity_id || null,
+      ...(camera.still_entity_id ? { stillEntity: camera.still_entity_id } : {}),
       startButton: camera.start_stream_entity || null,
       stopButton: camera.stop_stream_entity || null
     });
@@ -915,6 +933,68 @@ function safeNumber(value, fallback = 0) {
   if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) return fallback;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+const DEFAULT_HEATING_SCHEDULE = Object.freeze([
+  { stage: 0, time: "07:00", temperature: 20 },
+  { stage: 1, time: "09:30", temperature: 16 },
+  { stage: 2, time: "17:30", temperature: 20 },
+  { stage: 3, time: "22:00", temperature: 17 }
+]);
+
+function bytesToBase64(bytes) {
+  return globalThis.btoa(String.fromCharCode(...bytes));
+}
+
+function base64ToBytes(value) {
+  try {
+    return Uint8Array.from(globalThis.atob(String(value || "")), (character) => character.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+export function encodeHeatingSchedule(periods, dayMask = 0x7f) {
+  if (!Array.isArray(periods) || periods.length !== 4 || !Number.isInteger(dayMask) || dayMask < 1 || dayMask > 0x7f) return null;
+  const bytes = [dayMask];
+  for (let stage = 0; stage < 4; stage += 1) {
+    const period = periods[stage] || {};
+    const match = String(period.time || "").match(/^(\d{2}):(\d{2})$/);
+    const temperature = Math.round(Number(period.temperature) * 10);
+    const hour = Number(match?.[1]);
+    const minute = Number(match?.[2]);
+    if (!match || hour > 23 || minute > 59 || temperature < 50 || temperature > 350) return null;
+    bytes.push(stage, hour, minute, temperature >> 8, temperature & 0xff);
+  }
+  return bytesToBase64(bytes);
+}
+
+export function decodeHeatingSchedule(value) {
+  const bytes = base64ToBytes(value);
+  if (!bytes || bytes.length !== 21 || bytes[0] < 1 || bytes[0] > 0x7f) return null;
+  const periods = [];
+  for (let offset = 1, stage = 0; stage < 4; stage += 1, offset += 5) {
+    if (bytes[offset] !== stage || bytes[offset + 1] > 23 || bytes[offset + 2] > 59) return null;
+    const temperature = (bytes[offset + 3] * 256 + bytes[offset + 4]) / 10;
+    if (temperature < 5 || temperature > 35) return null;
+    periods.push({
+      stage,
+      time: `${String(bytes[offset + 1]).padStart(2, "0")}:${String(bytes[offset + 2]).padStart(2, "0")}`,
+      temperature
+    });
+  }
+  return { dayMask: bytes[0], periods };
+}
+
+export function nextHeatingSchedulePeriod(periods, now = new Date(), timeZone = "Europe/London") {
+  if (!Array.isArray(periods) || periods.length !== 4) return null;
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone
+  }).formatToParts(now).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  const minutesNow = Number(parts.hour) * 60 + Number(parts.minute);
+  const sorted = periods.map((period) => ({ ...period, minutes: Number(period.time.slice(0, 2)) * 60 + Number(period.time.slice(3, 5)) }))
+    .sort((left, right) => left.minutes - right.minutes);
+  return sorted.find((period) => period.minutes > minutesNow) || { ...sorted[0], tomorrow: true };
 }
 
 function formatTemperature(value) {
@@ -1756,6 +1836,7 @@ function relevantEntityIds(config) {
   for (let gameweek = 1; gameweek <= 38; gameweek += 1) {
     ids.add(`${config.football.gameweek_entity_prefix}${gameweek}`);
   }
+  for (const entry of config.football?.entries || []) ids.add(`sensor.family_dashboard_fpl_${entry.person_id}`);
   return ids;
 }
 
@@ -1866,6 +1947,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._pendingConfirmation = null;
     this._confirmationReturnFocus = null;
     this._footballTab = "fixtures";
+    this._masterTemperature = 20;
     this._gameweek = null;
     this._entityIds = new Set();
     this._controlPolicy = buildControlPolicy();
@@ -1951,8 +2033,8 @@ export class FamilyHubCard extends HTMLElementBase {
     const config = typeof cardConfig?.config_json === "string"
       ? JSON.parse(cardConfig.config_json)
       : cardConfig?.family_config;
-    if (!config || config.schema_version !== 6) {
-      throw new Error("Family Hub requires a schema-v6 family configuration");
+    if (!config || config.schema_version !== 7) {
+      throw new Error("Family Hub requires a schema-v7 family configuration");
     }
     this._childMountGeneration += 1;
     this._invalidateChildHass();
@@ -2686,7 +2768,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderNavigation() {
-    const coreIds = new Set(["today", "calendar", "rooms", "family", "entry"]);
+    const coreIds = new Set(["calendar", "rooms", "family", "entry"]);
     const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
     const renderButtons = (views) => views.map((view) => `
       <button class="hub-nav-button ${this._view === view.id ? "is-active" : ""}" type="button" data-view="${view.id}" aria-label="${escapeHtml(view.label)}" aria-current="${this._view === view.id ? "page" : "false"}">
@@ -2694,10 +2776,10 @@ export class FamilyHubCard extends HTMLElementBase {
         <span>${escapeHtml(view.label)}</span>
       </button>
     `).join("");
-    const views = this._enabledViews();
+    const views = this._enabledViews().filter((view) => !view.primary);
     return `
       <nav class="hub-navigation" aria-label="Family Dashboard views"${confirmationGuard}>
-        <button class="hub-brand" type="button" data-view="today" aria-label="Open Today"><ha-icon icon="mdi:home-heart" aria-hidden="true"></ha-icon><span>Family</span></button>
+        <button class="hub-brand ${this._view === "today" ? "is-active" : ""}" type="button" data-view="today" aria-label="Open Today" aria-current="${this._view === "today" ? "page" : "false"}"><ha-icon icon="mdi:home-heart" aria-hidden="true"></ha-icon><span>Today</span></button>
         <div class="hub-nav-items hub-nav-core">${renderButtons(views.filter((view) => coreIds.has(view.id)))}</div>
         <div class="hub-nav-items hub-nav-utility" aria-label="More"><span class="hub-nav-divider" aria-hidden="true"></span>${renderButtons(views.filter((view) => !coreIds.has(view.id)))}</div>
       </nav>
@@ -2925,9 +3007,13 @@ export class FamilyHubCard extends HTMLElementBase {
           ${renderFuel("electricity", "Electricity", "mdi:lightning-bolt", summary.electricity)}
           ${renderFuel("gas", "Gas", "mdi:fire", summary.gas)}
         </div>
+        <div class="energy-history-grid">
+          <article class="surface energy-history-card"><div><p class="eyebrow">Last 24 hours</p><h2>Electricity trend</h2></div><div id="energy-history-electricity" class="child-card-slot energy-history-slot"></div></article>
+          <article class="surface energy-history-card"><div><p class="eyebrow">Last 24 hours</p><h2>Gas trend</h2></div><div id="energy-history-gas" class="child-card-slot energy-history-slot"></div></article>
+        </div>
         <article class="surface energy-truth-note">
           <ha-icon icon="mdi:information-outline" aria-hidden="true"></ha-icon>
-          <div><strong>Smart-meter totals, not live power</strong><span>These figures show today so far. Gas and electricity may refresh on different schedules.</span></div>
+          <div><strong>Smart-meter totals, not live power</strong><span>These figures and trends use Home Assistant’s DCC readings. Fuse provides half-hourly data in its app and website, but no supplier API is configured here, so the dashboard does not scrape your account.</span></div>
         </article>
       </section>
     `;
@@ -3237,6 +3323,9 @@ export class FamilyHubCard extends HTMLElementBase {
   _renderAllLights() {
     const states = this._hass?.states || {};
     const readOnly = this._config.display.read_only === true;
+    const exteriorLights = new Set(this._config.home?.exterior_lights || []);
+    const internalLights = this._config.rooms.flatMap((room) => room.lights).filter((entityId) => !exteriorLights.has(entityId));
+    const internalOn = internalLights.filter((entityId) => states[entityId]?.state === "on").length;
     const rooms = this._config.rooms.filter((room) => room.lights.length).map((room) => {
       const lightStates = room.lights.map((entityId) => states[entityId]);
       const onCount = lightStates.filter((state) => state?.state === "on").length;
@@ -3259,15 +3348,19 @@ export class FamilyHubCard extends HTMLElementBase {
         : availableCount < room.lights.length
           ? `${onCount} on · ${availableCount} of ${room.lights.length} reporting`
           : `${onCount} of ${room.lights.length} on`;
-      return `<article class="surface whole-home-card"><div class="whole-home-heading"><span><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><h3>${escapeHtml(room.name)}</h3><p>${status}</p></div></div><div class="whole-home-controls">${controls}</div></article>`;
+      const roomAction = onCount > 0 ? "turn_off" : "turn_on";
+      const roomDisabled = readOnly || availableCount === 0 ? ' disabled aria-disabled="true"' : "";
+      return `<article class="surface whole-home-card"><div class="whole-home-heading"><span><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><h3>${escapeHtml(room.name)}</h3><p>${status}</p></div><button type="button" class="room-light-master ${onCount ? "is-on" : ""}" data-room-lights="${escapeHtml(room.id)}" data-light-service="${roomAction}"${roomDisabled}><ha-icon icon="mdi:power"></ha-icon>${roomAction === "turn_off" ? "All off" : "All on"}</button></div><div class="whole-home-controls">${controls}</div></article>`;
     }).join("");
-    return `<div class="whole-home-grid">${rooms || '<p class="hub-empty-state">No room lights are available yet.</p>'}</div>`;
+    return `<section class="lights-experience"><article class="surface lighting-master"><div><p class="eyebrow">Whole house</p><h2>Internal lights</h2><span>${internalOn ? `${internalOn} currently on` : "Everything inside is off"}</span></div><button type="button" data-all-internal-lights data-light-service="turn_off" ${readOnly || internalOn === 0 ? 'disabled aria-disabled="true"' : ""}><ha-icon icon="mdi:lightbulb-group-off-outline"></ha-icon>Turn all internal lights off</button></article><div class="whole-home-grid">${rooms || '<p class="hub-empty-state">No room lights are available yet.</p>'}</div></section>`;
   }
 
   _renderAllHeating() {
     const states = this._hass?.states || {};
     const readOnly = this._config.display.read_only === true;
     const heatingRooms = this._config.rooms.filter((room) => room.climate);
+    const schedulableRooms = heatingRooms.filter((room) => room.heating_schedule?.entity_id);
+    const masterSchedule = schedulableRooms.map((room) => decodeHeatingSchedule(states[room.heating_schedule.entity_id]?.state)?.periods).find(Boolean) || DEFAULT_HEATING_SCHEDULE;
     const zones = heatingRooms.map((room) => {
       const state = states[room.climate];
       const current = roomTemperature(room, states);
@@ -3286,6 +3379,15 @@ export class FamilyHubCard extends HTMLElementBase {
       const targetDisabled = readOnly || !presentation.available || !Number.isFinite(target)
         ? ' disabled aria-disabled="true"'
         : "";
+      const decodedSchedule = room.heating_schedule?.entity_id
+        ? decodeHeatingSchedule(states[room.heating_schedule.entity_id]?.state)
+        : null;
+      const nextPeriod = decodedSchedule ? nextHeatingSchedulePeriod(decodedSchedule.periods, new Date(), this._config.product.timezone) : null;
+      const scheduleSummary = room.heating_schedule
+        ? nextPeriod
+          ? `Next ${formatTemperature(nextPeriod.temperature)} at ${nextPeriod.time}${nextPeriod.tomorrow ? " tomorrow" : ""}`
+          : "Schedule waiting for thermostat"
+        : "No schedule entity configured";
       return `
         <article class="surface heating-card is-${escapeHtml(presentation.tone)} ${presentation.available ? presentation.isOn ? "is-on" : "is-off" : "is-state-unavailable"}" data-climate-card="${escapeHtml(room.climate)}">
           <div class="heating-card-heading">
@@ -3304,10 +3406,17 @@ export class FamilyHubCard extends HTMLElementBase {
               </div>
             </div>
           </div>
+          <details class="heating-schedule"><summary><span><ha-icon icon="mdi:calendar-clock"></ha-icon><strong>Schedule</strong><small>${escapeHtml(scheduleSummary)}</small></span><ha-icon icon="mdi:chevron-down"></ha-icon></summary>${room.heating_schedule ? this._renderHeatingScheduleEditor(decodedSchedule?.periods || DEFAULT_HEATING_SCHEDULE, room.id, readOnly) : '<p class="hub-empty-state compact">Add this thermostat’s schedule entities in Admin to edit it here.</p>'}</details>
         </article>
       `;
     }).join("");
-    return `<div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="hub-empty-state">No heating controls are available yet.</p>'}</div>`;
+    const availableZones = heatingRooms.filter((room) => isEntityAvailable(states[room.climate])).length;
+    return `<section class="heating-experience"><article class="surface heating-master"><div><p class="eyebrow">Whole house</p><h2>Master heating</h2><span>${availableZones} of ${heatingRooms.length} zones available</span></div><label><span>Target</span><input type="number" min="5" max="35" step="0.5" value="${this._masterTemperature}" data-master-temperature ${readOnly ? "disabled" : ""}></label><div class="heating-master-actions"><button type="button" data-climate-master="set_temperature" ${readOnly || !availableZones ? "disabled" : ""}>Set all rooms</button><button type="button" data-climate-master="turn_on" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:radiator"></ha-icon>All on</button><button type="button" data-climate-master="turn_off" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:power"></ha-icon>All off</button></div><details class="heating-schedule master-schedule"><summary><span><ha-icon icon="mdi:calendar-sync"></ha-icon><strong>Set the same daily schedule</strong><small>Apply four temperature periods to every configured zone</small></span><ha-icon icon="mdi:chevron-down"></ha-icon></summary>${this._renderHeatingScheduleEditor(masterSchedule, "all", readOnly || schedulableRooms.length === 0)}</details></article><div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="hub-empty-state">No heating controls are available yet.</p>'}</div></section>`;
+  }
+
+  _renderHeatingScheduleEditor(periods, scope, disabled = false) {
+    const names = ["Wake", "Away", "Home", "Sleep"];
+    return `<div class="schedule-editor" data-schedule-editor="${escapeHtml(scope)}">${periods.map((period, index) => `<label><span>${names[index]}</span><input type="time" value="${escapeHtml(period.time)}" data-schedule-time="${index}" ${disabled ? "disabled" : ""}><span class="schedule-temp"><input type="number" min="5" max="35" step="0.5" value="${Number(period.temperature)}" data-schedule-temperature="${index}" ${disabled ? "disabled" : ""}>°C</span></label>`).join("")}<button type="button" data-heating-schedule-apply="${escapeHtml(scope)}" ${disabled ? "disabled" : ""}><ha-icon icon="mdi:content-save-outline"></ha-icon>${scope === "all" ? "Apply to all rooms" : "Save this room"}</button></div>`;
   }
 
   _renderAllCovers() {
@@ -3350,18 +3459,43 @@ export class FamilyHubCard extends HTMLElementBase {
     const battery = config.battery_entity ? states[config.battery_entity]?.state : vacuum?.attributes?.battery_level;
     const task = config.task_entity ? states[config.task_entity]?.state : vacuum?.state;
     const dock = config.dock_entity ? states[config.dock_entity]?.state : null;
+    const area = config.cleaning_area_entity ? states[config.cleaning_area_entity] : null;
+    const duration = config.cleaning_time_entity ? states[config.cleaning_time_entity] : null;
     const facts = [
       [Number.isFinite(Number(battery)) ? `${Number(battery)}%` : "—", "Battery"],
       [titleCase(task || "unavailable"), "Current task"],
       [titleCase(dock || vacuum?.state || "unavailable"), "Dock"]
+      , [area && isEntityAvailable(area) ? `${area.state}${area.attributes?.unit_of_measurement ? ` ${area.attributes.unit_of_measurement}` : ""}` : "—", "Area cleaned"]
+      , [duration && isEntityAvailable(duration) ? `${duration.state}${duration.attributes?.unit_of_measurement ? ` ${duration.attributes.unit_of_measurement}` : ""}` : "—", "Cleaning time"]
     ].map(([value, label]) => `<span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(label)}</small></span>`).join("");
+    const renderSelect = (entityId, label) => {
+      const state = states[entityId];
+      if (!entityId) return "";
+      const options = Array.isArray(state?.attributes?.options) ? state.attributes.options : [];
+      const selectDisabled = readOnly || !isEntityAvailable(state) || !options.length ? "disabled" : "";
+      return `<label><span>${escapeHtml(label)}</span><span class="select-shell"><select data-cleaning-select="${escapeHtml(entityId)}" ${selectDisabled}>${options.map((option) => `<option value="${escapeHtml(option)}" ${String(option) === String(state.state) ? "selected" : ""}>${escapeHtml(titleCase(option))}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down"></ha-icon></span></label>`;
+    };
+    const selectors = [
+      [config.room_entity, "Room"], [config.mode_entity, "Cleaning mode"], [config.suction_entity, "Suction"],
+      [config.mop_entity, "Mop intensity"], [config.water_entity, "Water level"]
+    ].map(([entityId, label]) => renderSelect(entityId, label)).join("");
+    const consumables = (config.consumable_entities || []).map((entityId) => {
+      const state = states[entityId];
+      return `<span><ha-icon icon="mdi:progress-wrench"></ha-icon><span><strong>${escapeHtml(entityName(state, titleCase(entityId.split(".")[1])))}</strong><small>${escapeHtml(isEntityAvailable(state) ? `${state.state}${state.attributes?.unit_of_measurement || ""}` : "Unavailable")}</small></span></span>`;
+    }).join("");
+    const commands = (config.command_entities || []).map((entityId) => {
+      const state = states[entityId];
+      return `<button type="button" data-cleaning-command="${escapeHtml(entityId)}" ${readOnly || !isCommandEntityAvailable(state) ? "disabled" : ""}><ha-icon icon="mdi:gesture-tap-button"></ha-icon>${escapeHtml(entityName(state, titleCase(entityId.split(".")[1])))}</button>`;
+    }).join("");
     return `
-      <article class="surface cleaning-panel">
+      <section class="cleaning-experience"><article class="surface cleaning-panel">
         <div class="cleaning-hero"><span><ha-icon icon="${ICONS.vacuum}"></ha-icon></span><div><p class="eyebrow">Whole-home cleaning</p><h2>${escapeHtml(entityName(vacuum, "Robot vacuum"))}</h2><p>${escapeHtml(titleCase(vacuum?.state || "unavailable"))}</p></div></div>
         <div class="cleaning-facts">${facts}</div>
         <div class="cleaning-actions"><button type="button" data-vacuum-action="start" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:play"></ha-icon>Start</button><button type="button" data-vacuum-action="pause" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:pause"></ha-icon>Pause</button><button type="button" data-vacuum-action="return_to_base" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:home-map-marker"></ha-icon>Return home</button></div>
-        ${config.map_entity ? '<div id="vacuum-map-card-slot" class="child-card-slot vacuum-map-slot"></div>' : '<div class="vacuum-map-placeholder"><ha-icon icon="mdi:map-outline"></ha-icon><span>The cleaning map is not available yet.</span></div>'}
-      </article>
+        ${selectors ? `<div class="cleaning-selectors">${selectors}</div>` : ""}
+        ${commands ? `<div class="cleaning-command-grid">${commands}</div>` : ""}
+        ${consumables ? `<div class="cleaning-consumables">${consumables}</div>` : ""}
+      </article><article class="surface cleaning-map-panel"><div class="section-heading"><div><p class="eyebrow">Room map</p><h2>Cleaning map</h2></div></div>${config.map_entity ? '<div id="vacuum-map-card-slot" class="child-card-slot vacuum-map-slot"></div>' : '<div class="vacuum-map-placeholder is-actionable"><ha-icon icon="mdi:map-marker-alert-outline"></ha-icon><strong>The robot integration has not exposed a map camera yet</strong><span>Your X10 Pro Omni supports a live map, but Home Assistant currently only reports the active map name. Update or reconfigure the Eufy Clean integration, then choose its camera…map entity in Admin.</span></div>'}</article></section>
     `;
   }
 
@@ -3671,7 +3805,7 @@ export class FamilyHubCard extends HTMLElementBase {
       return `
         <article class="surface security-camera ${item.camera.id === selected?.camera.id ? "is-selected" : ""}">
           <div class="camera-tile-media">
-            <div id="camera-poster-tile-${escapeHtml(item.camera.id)}" class="camera-poster-slot camera-tile-poster"><span class="camera-poster-fallback"><ha-icon icon="${item.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon>Still unavailable</span></div>
+            <div id="camera-poster-tile-${escapeHtml(item.camera.id)}" class="camera-poster-slot camera-tile-poster"><span class="camera-poster-fallback"><ha-icon icon="${item.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon>${item.camera.still_entity_id ? "Loading snapshot…" : "Ready for live view"}</span></div>
             <button type="button" class="camera-poster-action" data-camera-open="${escapeHtml(item.camera.id)}" aria-label="${actionLabel}" ${item.canOpen ? "" : 'disabled aria-disabled="true"'}><span><ha-icon icon="${actionIcon}"></ha-icon>${actionText}</span></button>
           </div>
           <div class="camera-tile-details">
@@ -3710,7 +3844,7 @@ export class FamilyHubCard extends HTMLElementBase {
       ? "mdi:lock-outline"
       : selected?.canOpen ? "mdi:play" : "mdi:camera-off-outline";
     const stageStatus = selected?.isStarting
-      ? { title: "Waking camera…", detail: `The latest ${selected.camera.name} still remains visible while the secure stream starts.`, icon: "mdi:loading" }
+      ? { title: "Waking camera…", detail: `Connecting to ${selected.camera.name}. This can take up to a minute.`, icon: "mdi:loading" }
       : selected?.isBuffering
         ? { title: selected.session?.viewerRecoveryAttempted ? "Reconnecting video…" : "Loading video…", detail: bufferingMessage, icon: "mdi:loading" }
         : selected?.isStopping
@@ -3737,12 +3871,12 @@ export class FamilyHubCard extends HTMLElementBase {
           ? selected?.cameraReady
             ? selected?.readOnlyStartBlocked
               ? "Read-only mode will not start this camera."
-              : "This is the latest available still; live video starts only when you tap."
+              : selected?.camera?.still_entity_id ? "Latest snapshot ready; live video starts only when you tap." : "Tap once to wake the camera and open a private live view."
             : "Live view cannot start while the camera is in its current state."
           : "This camera is currently unavailable.";
     const selectedStream = `
       <div class="camera-stage-stack ${selected?.isViewing ? "is-live" : "is-poster"} ${!selected?.session ? "security-stage-poster" : ""}" data-camera-phase="${escapeHtml(selected?.session?.phase || "idle")}" ${!selected?.session && selected?.cameraError ? 'role="alert"' : ""}>
-        <div id="camera-poster-stage-${escapeHtml(selected?.camera.id || "")}" class="camera-poster-slot camera-stage-poster-slot"><span class="camera-poster-fallback"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon>Latest still unavailable</span></div>
+        <div id="camera-poster-stage-${escapeHtml(selected?.camera.id || "")}" class="camera-poster-slot camera-stage-poster-slot"><span class="camera-poster-fallback"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon>${selected?.camera?.still_entity_id ? "Loading latest snapshot…" : "Camera ready · live on demand"}</span></div>
         ${selected?.hasMountedStream ? `<slot id="camera-card-slot-${escapeHtml(selected.camera.id)}" name="camera-${escapeHtml(selected.camera.id)}" class="child-card-slot camera-card-slot"></slot>` : ""}
         ${selected?.isViewing ? '<span class="camera-live-indicator" role="status"><span></span>Live</span>' : ""}
         ${stageStatus ? `<div class="camera-stream-overlay camera-is-${escapeHtml(selected.session?.phase || "waiting")}" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="${stageStatus.icon}"></ha-icon><div><strong>${escapeHtml(stageStatus.title)}</strong><small>${escapeHtml(stageStatus.detail)}</small></div></div>` : ""}
@@ -4018,9 +4152,12 @@ export class FamilyHubCard extends HTMLElementBase {
     const presence = this._config.features.location_map && person.location_entity
       ? titleCase(states[person.location_entity]?.state || "Location unavailable")
       : choresEnabled ? "Today’s jobs" : schoolEnabled ? "School" : "Tasks";
-    const choreRows = (chore?.status_entities || []).map((entityId) => {
+    const jobPresentations = (chore?.status_entities || []).map((entityId) => ({ entityId, presentation: normaliseChoreStatus(states[entityId], entityId) }));
+    const completedJobs = jobPresentations.filter(({ presentation }) => presentation.tone === "done").length;
+    const totalJobs = jobPresentations.length;
+    const missionProgress = totalJobs ? Math.round(completedJobs / totalJobs * 100) : 0;
+    const choreRows = jobPresentations.map(({ entityId, presentation }) => {
       const state = states[entityId];
-      const presentation = normaliseChoreStatus(state, entityId);
       const claimEntity = choreClaimEntityId(entityId);
       const claimableStatus = ["pending", "due", "overdue", "missed"].includes(presentation.status);
       const actionAvailable = claimableStatus && claimEntity && isCommandEntityAvailable(states[claimEntity]);
@@ -4050,6 +4187,7 @@ export class FamilyHubCard extends HTMLElementBase {
     return `
       <article class="surface family-person ${kidMode ? "is-kid-mode" : ""}" style="--person-colour:${escapeHtml(person.colour)}">
         <div class="family-person-heading"><span>${escapeHtml(person.name.slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person.name)}</p><h2>${escapeHtml(presence)}</h2></div></div>
+        ${kidMode && choresEnabled && chore ? `<section class="kid-mission ${completedJobs === totalJobs && totalJobs ? "is-complete" : ""}"><span class="kid-mission-orbit"><ha-icon icon="${completedJobs === totalJobs && totalJobs ? "mdi:trophy" : "mdi:rocket-launch"}"></ha-icon></span><div><p>${completedJobs === totalJobs && totalJobs ? "Mission complete!" : "Today’s mission"}</p><strong>${completedJobs} of ${totalJobs} jobs finished</strong><i><b style="width:${missionProgress}%"></b></i></div><em>${missionProgress}%</em></section>` : ""}
         ${factItems ? `<div class="family-facts">${factItems}</div>` : ""}
         ${choresEnabled && !chore ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps is not connected for this child.</p>' : choresEnabled && (!pointsAvailable || !choresSummaryAvailable) ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps data is currently unavailable.</p>' : ""}
         ${this._renderPersonPreparation(person)}
@@ -4251,6 +4389,22 @@ export class FamilyHubCard extends HTMLElementBase {
     `;
   }
 
+  _renderFplTeams() {
+    const entries = this._config.football.entries || [];
+    if (!entries.length) return '<div class="football-empty"><span class="football-orbit"><ha-icon icon="mdi:trophy-outline"></ha-icon></span><div><p class="eyebrow">Our FPL teams</p><h3>Add Rob and Ernie’s team IDs in Admin</h3><p>The IDs are the number in each team’s FPL URL. No password or FPL login is needed.</p></div></div>';
+    const cards = entries.map((entry) => {
+      const person = this._config.people.find((candidate) => candidate.id === entry.person_id);
+      const state = this._hass?.states?.[`sensor.family_dashboard_fpl_${entry.person_id}`];
+      const available = isEntityAvailable(state);
+      const attributes = state?.attributes || {};
+      const rank = safeNumber(attributes.overall_rank, NaN);
+      const eventPoints = safeNumber(attributes.gameweek_points, NaN);
+      const leagues = Array.isArray(attributes.leagues) ? attributes.leagues : [];
+      return `<article class="surface fpl-team-card" style="--person-colour:${escapeHtml(person?.colour || this._config.theme.accent)}"><header><span>${escapeHtml((person?.name || entry.person_id).slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person?.name || entry.person_id)}</p><h3>${escapeHtml(available ? attributes.team_name || "FPL team" : "Waiting for FPL")}</h3></div><ha-icon icon="mdi:trophy"></ha-icon></header><div class="fpl-scoreboard"><span><strong>${available ? escapeHtml(formatPoints(state.state, this._config.product.locale)) : "—"}</strong><small>Total points</small></span><span><strong>${Number.isFinite(eventPoints) ? eventPoints : "—"}</strong><small>GW ${attributes.gameweek || "—"}</small></span><span><strong>${Number.isFinite(rank) ? `#${escapeHtml(formatPoints(rank, this._config.product.locale))}` : "—"}</strong><small>Overall rank</small></span></div>${leagues.length ? `<div class="fpl-leagues"><p class="eyebrow">Leagues</p>${leagues.map((league) => `<span><strong>${escapeHtml(league.name)}</strong><b>${league.rank ? `#${escapeHtml(formatPoints(league.rank, this._config.product.locale))}` : "—"}</b></span>`).join("")}</div>` : '<p class="hub-empty-state compact">League positions will appear after the next manager refresh.</p>'}</article>`;
+    }).join("");
+    return `<div class="fpl-team-grid">${cards}</div>`;
+  }
+
   _renderFootball() {
     const { index, gameweek, gameweekState, table } = this._footballState();
     const events = gameweekState?.attributes?.events || [];
@@ -4298,9 +4452,10 @@ export class FamilyHubCard extends HTMLElementBase {
             <div class="segments football-tabs" role="group" aria-label="Football view">
               <button type="button" class="segment ${this._footballTab === "fixtures" ? "is-selected" : ""}" data-football-tab="fixtures" aria-pressed="${this._footballTab === "fixtures"}">Fixtures</button>
               <button type="button" class="segment ${this._footballTab === "table" ? "is-selected" : ""}" data-football-tab="table" aria-pressed="${this._footballTab === "table"}">Table</button>
+              <button type="button" class="segment ${this._footballTab === "fpl" ? "is-selected" : ""}" data-football-tab="fpl" aria-pressed="${this._footballTab === "fpl"}">Our FPL</button>
             </div>
           </div>
-          ${this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(events, fixtureDataAvailable)}
+          ${this._footballTab === "fpl" ? this._renderFplTeams() : this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(events, fixtureDataAvailable)}
           </article>
           <aside class="football-sidebar">
             ${this._renderFavouriteStandings(favouriteModels)}
@@ -4369,6 +4524,10 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     if (this._view === "family" && this._config.features?.location_map) keys.add("map");
     if (this._view === "music" && this._config.features?.music !== false) keys.add("music");
+    if (this._view === "energy" && this._config.features?.energy !== false) {
+      keys.add("energy:electricity");
+      keys.add("energy:gas");
+    }
     if (this._view === "rooms"
       && this._homeSection === "cleaning"
       && this._config.features?.cleaning
@@ -4376,13 +4535,13 @@ export class FamilyHubCard extends HTMLElementBase {
     if (this._view === "entry" && this._config.features?.entry !== false) {
       const cameras = this._config.entry?.cameras || [];
       for (const camera of cameras) {
-        if (camera.entity_id) keys.add(`camera-poster:tile:${camera.id}`);
+        if (camera.still_entity_id) keys.add(`camera-poster:tile:${camera.id}`);
       }
       const selectedId = this._cameraSession?.id
         || this._securityCameraId
         || this._config.entry?.primary_camera_id
         || cameras[0]?.id;
-      if (cameras.some((camera) => camera.id === selectedId && camera.entity_id)) {
+      if (cameras.some((camera) => camera.id === selectedId && camera.still_entity_id)) {
         keys.add(`camera-poster:stage:${selectedId}`);
       }
       const liveCamera = cameras.find((camera) => camera.id === this._activeCameraId);
@@ -4453,10 +4612,21 @@ export class FamilyHubCard extends HTMLElementBase {
         show_state: false
       }, "vacuum-map-card-slot");
     }
+    if (this._view === "energy") {
+      for (const fuel of ["electricity", "gas"]) {
+        const entityId = this._config.energy?.[fuel]?.usage_today_entity;
+        if (!entityId) continue;
+        this._ensureChildCard(`energy:${fuel}`, {
+          type: "history-graph",
+          hours_to_show: 24,
+          entities: [entityId]
+        }, `energy-history-${fuel}`);
+      }
+    }
     if (this._view === "entry") {
       const posterConfig = (camera) => ({
         type: "picture-entity",
-        entity: camera.entity_id,
+        entity: camera.still_entity_id,
         camera_view: "auto",
         aspect_ratio: "16:9",
         fit_mode: "cover",
@@ -4467,7 +4637,7 @@ export class FamilyHubCard extends HTMLElementBase {
         double_tap_action: { action: "none" }
       });
       for (const camera of this._config.entry.cameras || []) {
-        if (!camera.entity_id) continue;
+        if (!camera.still_entity_id) continue;
         this._ensureChildCard(
           `camera-poster:tile:${camera.id}`,
           posterConfig(camera),
@@ -4479,7 +4649,7 @@ export class FamilyHubCard extends HTMLElementBase {
         || this._config.entry.primary_camera_id
         || this._config.entry.cameras?.[0]?.id;
       const selected = this._config.entry.cameras.find((camera) => camera.id === selectedId);
-      if (selected?.entity_id) {
+      if (selected?.still_entity_id) {
         this._ensureChildCard(
           `camera-poster:stage:${selected.id}`,
           posterConfig(selected),
@@ -4769,7 +4939,11 @@ export class FamilyHubCard extends HTMLElementBase {
         : null;
     const cameraEntity = key === "vacuum-map"
       ? this._config.cleaning.map_entity || null
-      : cameraId ? this._controlPolicy.cameras.get(cameraId)?.entity || null : null;
+      : cameraId
+        ? key.startsWith("camera-poster:")
+          ? this._controlPolicy.cameras.get(cameraId)?.stillEntity || null
+          : this._controlPolicy.cameras.get(cameraId)?.entity || null
+        : null;
     const calendarEntities = new Set(key.startsWith("calendar:")
       ? this._config.calendar.entities.map((entry) => entry.entity_id)
       : []);
@@ -4873,10 +5047,26 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _handleChange(event) {
     this._armPhotoFrameIdleTimer();
+    const cleaningSelect = event.target.closest?.("[data-cleaning-select]");
+    if (cleaningSelect) {
+      const entityId = cleaningSelect.dataset.cleaningSelect;
+      const options = this._hass?.states?.[entityId]?.attributes?.options || [];
+      if (!this._config.display.read_only && this._controlPolicy.cleaningSelects.has(entityId) && options.includes(cleaningSelect.value)) {
+        this._hass?.callService?.("select", "select_option", { entity_id: entityId, option: cleaningSelect.value });
+      }
+      return;
+    }
+    const masterTemperature = event.target.closest?.("[data-master-temperature]");
+    if (masterTemperature) {
+      const value = Number(masterTemperature.value);
+      if (Number.isFinite(value) && value >= 5 && value <= 35) this._masterTemperature = Math.round(value * 2) / 2;
+      return;
+    }
     const select = event.target.closest?.("[data-gameweek-select]");
-    if (!select) return;
-    this._gameweek = Math.max(1, Math.min(38, safeNumber(select.value, 1)));
-    this._scheduleRender(true);
+    if (select) {
+      this._gameweek = Math.max(1, Math.min(38, safeNumber(select.value, 1)));
+      this._scheduleRender(true);
+    }
   }
 
   async _callPlannerAction(domain, service, entityId, data = {}) {
@@ -5162,6 +5352,7 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     if (target.dataset.footballTab) {
+      if (!new Set(["fixtures", "table", "fpl"]).has(target.dataset.footballTab)) return;
       this._footballTab = target.dataset.footballTab;
       this._scheduleRender(true);
       return;
@@ -5261,6 +5452,57 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     if (target.dataset.moreInfo) {
       if (this._controlPolicy.moreInfo.has(target.dataset.moreInfo)) this._showMoreInfo(target.dataset.moreInfo);
+      return;
+    }
+    if (target.dataset.roomLights) {
+      const room = this._config.rooms.find((entry) => entry.id === target.dataset.roomLights);
+      const service = target.dataset.lightService;
+      const entityIds = (room?.lights || []).filter((entityId) => this._controlPolicy.lights.has(entityId) && isEntityAvailable(this._hass?.states?.[entityId]));
+      if (["turn_on", "turn_off"].includes(service) && entityIds.length) this._hass?.callService?.("light", service, { entity_id: entityIds });
+      return;
+    }
+    if (target.dataset.allInternalLights !== undefined) {
+      const exterior = new Set(this._config.home?.exterior_lights || []);
+      const entityIds = [...this._controlPolicy.lights].filter((entityId) => !exterior.has(entityId) && isEntityAvailable(this._hass?.states?.[entityId]));
+      if (entityIds.length) this._hass?.callService?.("light", "turn_off", { entity_id: entityIds });
+      return;
+    }
+    if (target.dataset.climateMaster) {
+      const service = target.dataset.climateMaster;
+      const entityIds = [...this._controlPolicy.climates].filter((entityId) => isEntityAvailable(this._hass?.states?.[entityId]));
+      if (service === "set_temperature" && entityIds.length) {
+        const input = this.shadowRoot.querySelector("[data-master-temperature]");
+        const temperature = Math.round(Number(input?.value) * 2) / 2;
+        if (Number.isFinite(temperature) && temperature >= 5 && temperature <= 35) {
+          this._masterTemperature = temperature;
+          this._hass?.callService?.("climate", "set_temperature", { entity_id: entityIds, temperature });
+        }
+      } else if (CLIMATE_POWER_SERVICES.has(service) && entityIds.length) {
+        this._hass?.callService?.("climate", service, { entity_id: entityIds });
+      }
+      return;
+    }
+    if (target.dataset.heatingScheduleApply) {
+      const scope = target.dataset.heatingScheduleApply;
+      const editor = target.closest("[data-schedule-editor]");
+      const periods = [0, 1, 2, 3].map((stage) => ({
+        stage,
+        time: editor?.querySelector(`[data-schedule-time="${stage}"]`)?.value,
+        temperature: Number(editor?.querySelector(`[data-schedule-temperature="${stage}"]`)?.value)
+      }));
+      const encoded = encodeHeatingSchedule(periods);
+      if (!encoded) return;
+      const targets = this._config.rooms.filter((room) => scope === "all" || room.id === scope)
+        .map((room) => room.heating_schedule?.entity_id)
+        .filter((entityId) => entityId && this._controlPolicy.scheduleTexts.has(entityId));
+      for (const entityId of targets) this._hass?.callService?.("text", "set_value", { entity_id: entityId, value: encoded });
+      return;
+    }
+    if (target.dataset.cleaningCommand) {
+      const entityId = target.dataset.cleaningCommand;
+      if (this._controlPolicy.cleaningButtons.has(entityId) && isCommandEntityAvailable(this._hass?.states?.[entityId])) {
+        this._hass?.callService?.("button", "press", { entity_id: entityId });
+      }
       return;
     }
     if (target.dataset.toggle) {
@@ -7350,6 +7592,77 @@ export class FamilyHubCard extends HTMLElementBase {
       .league-table th,.league-table td { padding:9px 8px; border-color:#E1E8F0; }
       .league-table tr.is-spotlight { background:#F1F6FF; }
 
+      .lights-experience,.heating-experience { height:100%; min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr); gap:14px; }
+      .lighting-master,.heating-master { min-height:86px; padding:16px 20px; display:flex; align-items:center; gap:18px; border-color:#DCE4EE; background:linear-gradient(120deg,#061B3A,#0C315D); color:#fff; }
+      .lighting-master > div,.heating-master > div:first-child { flex:1; min-width:0; }
+      .lighting-master h2,.heating-master h2 { margin:2px 0; color:#fff; font-size:22px; }
+      .lighting-master span,.heating-master span { color:#B8C7D9; font-size:12px; }
+      .lighting-master button,.heating-master-actions button,.schedule-editor > button { min-height:48px; padding:0 15px; border:1px solid rgba(255,255,255,.18); border-radius:14px; background:#1463E8; color:#fff; font-weight:800; }
+      .room-light-master { margin-left:auto; min-height:48px; padding:0 11px; border:1px solid #DCE4EE; border-radius:13px; background:#EAF2FF; color:#1463E8; display:flex; align-items:center; gap:5px; font-weight:800; }
+      .room-light-master.is-on { border-color:#E8C67E; background:#FFF4D9; color:#765000; }
+      .heating-master > label { display:grid; gap:4px; color:#fff; font-size:12px; font-weight:800; }
+      .heating-master > label input { width:78px; height:46px; padding:0 10px; border:1px solid rgba(255,255,255,.2); border-radius:13px; background:rgba(255,255,255,.12); color:#fff; font:800 18px inherit; }
+      .heating-master-actions { display:flex; gap:7px; }
+      .heating-master .master-schedule { flex:0 1 310px; border-color:rgba(255,255,255,.18); background:rgba(255,255,255,.07); color:#fff; }
+      .heating-card { height:max-content; }
+      .heating-schedule { border:1px solid #DCE4EE; border-radius:14px; background:#F7F9FC; overflow:visible; }
+      .heating-schedule summary { min-height:48px; padding:7px 10px; display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:pointer; list-style:none; }
+      .heating-schedule summary::-webkit-details-marker { display:none; }
+      .heating-schedule summary > span { min-width:0; display:grid; grid-template-columns:22px minmax(0,1fr); align-items:center; gap:1px 6px; }
+      .heating-schedule summary > span ha-icon { grid-row:1/3; --mdc-icon-size:19px; color:#1463E8; }
+      .heating-schedule summary strong { color:inherit; font-size:12px; }
+      .heating-schedule summary small { color:#5E6B80; font-size:12px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+      .schedule-editor { padding:9px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; border-top:1px solid #DCE4EE; }
+      .schedule-editor label { min-width:0; display:grid; grid-template-columns:1fr 86px; gap:5px; align-items:center; color:#33445C; font-size:12px; font-weight:800; }
+      .schedule-editor input { min-width:0; width:100%; height:38px; padding:0 6px; border:1px solid #DCE4EE; border-radius:10px; background:#fff; color:#0B1830; }
+      .schedule-temp { display:flex; align-items:center; gap:2px; }
+      .schedule-editor > button { grid-column:1/-1; min-height:48px; }
+      .cleaning-experience { height:100%; min-height:0; display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr); gap:14px; }
+      .cleaning-experience .cleaning-panel { display:flex; flex-direction:column; overflow:auto; }
+      .cleaning-selectors { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+      .cleaning-selectors label { display:grid; gap:5px; color:#5E6B80; font-size:12px; font-weight:800; }
+      .cleaning-selectors select { width:100%; height:46px; border:1px solid #DCE4EE; border-radius:13px; background:#F7F9FC; color:#0B1830; padding:0 32px 0 10px; }
+      .cleaning-command-grid { display:flex; flex-wrap:wrap; gap:8px; }
+      .cleaning-command-grid button { min-height:44px; padding:0 12px; border:1px solid #DCE4EE; border-radius:13px; background:#F7F9FC; color:#1463E8; display:flex; align-items:center; gap:6px; font-weight:800; }
+      .cleaning-consumables { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+      .cleaning-consumables > span { min-height:52px; padding:8px 10px; border:1px solid #DCE4EE; border-radius:13px; display:flex; align-items:center; gap:8px; }
+      .cleaning-consumables strong,.cleaning-consumables small { display:block; font-size:11px; }
+      .cleaning-map-panel { min-height:0; padding:18px; display:grid; grid-template-rows:auto minmax(0,1fr); gap:10px; border-color:#DCE4EE; background:#fff; }
+      .vacuum-map-placeholder.is-actionable { padding:24px; display:flex; flex-direction:column; justify-content:center; text-align:center; }
+      .vacuum-map-placeholder.is-actionable ha-icon { --mdc-icon-size:44px; color:#1463E8; }
+      .vacuum-map-placeholder.is-actionable strong { color:#0B1830; font-size:16px; }
+      .vacuum-map-placeholder.is-actionable span { max-width:430px; line-height:1.5; }
+      .energy-view { grid-template-rows:auto auto minmax(190px,1fr) auto; overflow:auto; }
+      .energy-history-grid { min-height:190px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+      .energy-history-card { min-height:190px; padding:16px; border-color:#DCE4EE; background:#fff; }
+      .energy-history-card h2 { margin:2px 0 8px; color:#0B1830; font-size:17px; }
+      .energy-history-slot { min-height:130px; --ha-card-background:transparent; --card-background-color:transparent; }
+      .kid-mission { min-height:88px; padding:13px 15px; display:grid; grid-template-columns:54px minmax(0,1fr) auto; align-items:center; gap:12px; border-radius:18px; background:linear-gradient(120deg,color-mix(in srgb,var(--person-colour) 88%,#061B3A),#061B3A); color:#fff; overflow:hidden; }
+      .kid-mission-orbit { width:50px; height:50px; display:grid; place-items:center; border-radius:50%; background:rgba(255,255,255,.14); }
+      .kid-mission-orbit ha-icon { --mdc-icon-size:28px; color:#fff; }
+      .kid-mission p,.kid-mission strong { display:block; margin:0; color:#fff; }
+      .kid-mission p { font-size:12px; font-weight:850; letter-spacing:.08em; text-transform:uppercase; }
+      .kid-mission strong { margin-top:3px; font-size:16px; }
+      .kid-mission i { height:7px; margin-top:9px; display:block; overflow:hidden; border-radius:999px; background:rgba(255,255,255,.18); }
+      .kid-mission i b { height:100%; display:block; border-radius:inherit; background:#fff; transition:width .35s ease; }
+      .kid-mission em { font-style:normal; font-size:22px; font-weight:900; }
+      .kid-mission.is-complete { background:linear-gradient(120deg,#008C71,#0B6E58); animation:mission-pop .45s ease; }
+      .fpl-team-grid { height:100%; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; overflow:auto; }
+      .fpl-team-card { min-height:220px; padding:16px; border-top:5px solid var(--person-colour); }
+      .fpl-team-card header { display:flex; align-items:center; gap:10px; }
+      .fpl-team-card header > span { width:42px; height:42px; display:grid; place-items:center; border-radius:14px; background:var(--person-colour); color:#fff; font-size:18px; font-weight:900; }
+      .fpl-team-card header > div { flex:1; min-width:0; }
+      .fpl-team-card header h3 { margin:2px 0 0; overflow:hidden; color:#0B1830; font-size:17px; white-space:nowrap; text-overflow:ellipsis; }
+      .fpl-team-card header > ha-icon { color:#E7A93D; }
+      .fpl-scoreboard { margin-top:14px; display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+      .fpl-scoreboard span { padding:10px; border-radius:13px; background:#F1F6FF; text-align:center; }
+      .fpl-scoreboard strong,.fpl-scoreboard small { display:block; }
+      .fpl-scoreboard strong { color:#0B1830; font-size:19px; }
+      .fpl-scoreboard small { margin-top:2px; color:#5E6B80; font-size:10px; }
+      .fpl-leagues { margin-top:12px; }
+      .fpl-leagues > span { min-height:30px; display:flex; align-items:center; justify-content:space-between; gap:8px; border-top:1px solid #E1E8F0; color:#33445C; font-size:12px; }
+      @keyframes mission-pop { 50% { transform:scale(1.018); } }
+
       @keyframes spin { to { transform:rotate(360deg); } }
       @media (max-width:1030px) {
         .hub-shell { grid-template-columns:92px minmax(0,1fr); }
@@ -7462,7 +7775,10 @@ export class FamilyHubCard extends HTMLElementBase {
         .favourite-result strong { font-size:20px; }
         .football-main { min-height:620px; grid-template-rows:auto minmax(0,1fr); }
         .football-toolbar { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; gap:8px 10px; }
-        .football-tabs { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr; }
+        .football-tabs { grid-column:1/-1; display:grid; grid-template-columns:repeat(3,1fr); }
+        .lighting-master,.heating-master { align-items:stretch; flex-direction:column; }
+        .heating-master-actions { display:grid; grid-template-columns:repeat(3,1fr); }
+        .cleaning-experience,.energy-history-grid,.fpl-team-grid { grid-template-columns:1fr; height:auto; }
       }
       @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
     `;

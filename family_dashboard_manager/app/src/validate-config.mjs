@@ -134,7 +134,7 @@ function assertSchema(value) {
     segments.push(error.params.additionalProperty);
   }
   const path = ["config", ...segments].join(".");
-  fail(path, error?.message || "does not match schema v6");
+  fail(path, error?.message || "does not match schema v7");
 }
 
 function validateUnique(values, path, message = "must be unique") {
@@ -169,7 +169,7 @@ export function validateConfig(config) {
   }
   const viewNames = ["today", "calendar", "rooms", "family", "entry", "music", "energy", "football"];
   if (!viewNames.includes(display.default_view)) {
-    fail("config.display.default_view", "must name a schema-v6 dashboard view");
+    fail("config.display.default_view", "must name a schema-v7 dashboard view");
   }
   requireInteger(display.target_width, "config.display.target_width", 768, 2560);
   requireInteger(display.target_height, "config.display.target_height", 600, 1600);
@@ -355,12 +355,15 @@ export function validateConfig(config) {
 
   const home = requireObject(config.home, "config.home");
   if (!["rooms", "lights", "heating", "covers", "cleaning"].includes(home.default_section)) {
-    fail("config.home.default_section", "must name a schema-v6 Home section");
+    fail("config.home.default_section", "must name a schema-v7 Home section");
   }
   if (home.default_section === "cleaning" && !features.cleaning) {
     fail("config.home.default_section", "requires Cleaning to be enabled");
   }
   if (home.default_room !== undefined) validateId(home.default_room, "config.home.default_room");
+  const exteriorLights = home.exterior_lights === undefined ? [] : requireArray(home.exterior_lights, "config.home.exterior_lights");
+  exteriorLights.forEach((entityId, index) => validateEntityId(entityId, `config.home.exterior_lights[${index}]`, "light"));
+  validateUnique(exteriorLights, "config.home.exterior_lights");
 
   const floorplan = requireObject(config.floorplan, "config.floorplan");
   validateId(floorplan.default_floor, "config.floorplan.default_floor");
@@ -454,6 +457,13 @@ export function validateConfig(config) {
     if (room.temperature_sensor) {
       validateEntityId(room.temperature_sensor, `${path}.temperature_sensor`, "sensor");
     }
+    if (room.heating_schedule) {
+      const schedule = requireObject(room.heating_schedule, `${path}.heating_schedule`);
+      if (!room.climate) fail(`${path}.heating_schedule`, "requires a climate entity");
+      validateEntityId(schedule.entity_id, `${path}.heating_schedule.entity_id`, "text");
+      if (schedule.mode_entity) validateEntityId(schedule.mode_entity, `${path}.heating_schedule.mode_entity`, "select");
+      if (schedule.refresh_entity) validateEntityId(schedule.refresh_entity, `${path}.heating_schedule.refresh_entity`, "button");
+    }
   });
   if (features.rooms && rooms.length === 0) fail("config.rooms", "must not be empty when Rooms is enabled");
   if (home.default_room !== undefined) {
@@ -477,6 +487,9 @@ export function validateConfig(config) {
     if (roomLights.get(entityId) !== floorId) {
       fail("config.floorplan", `light overlay for ${entityId} is on the wrong floor`);
     }
+  }
+  for (const entityId of exteriorLights) {
+    if (!roomLights.has(entityId)) fail("config.home.exterior_lights", `references an unconfigured room light: ${entityId}`);
   }
 
   const media = requireObject(config.media, "config.media");
@@ -503,8 +516,16 @@ export function validateConfig(config) {
   const cleaning = requireObject(config.cleaning, "config.cleaning");
   validateEntityId(cleaning.vacuum_entity, "config.cleaning.vacuum_entity", "vacuum");
   if (cleaning.map_entity) validateVacuumMapCamera(cleaning.map_entity, "config.cleaning.map_entity");
-  for (const key of ["battery_entity", "task_entity", "dock_entity"]) {
+  for (const key of ["battery_entity", "task_entity", "dock_entity", "cleaning_area_entity", "cleaning_time_entity"]) {
     if (cleaning[key]) validateEntityId(cleaning[key], `config.cleaning.${key}`, "sensor");
+  }
+  for (const key of ["room_entity", "mode_entity", "suction_entity", "mop_entity", "water_entity"]) {
+    if (cleaning[key]) validateEntityId(cleaning[key], `config.cleaning.${key}`, "select");
+  }
+  for (const [key, domain] of [["consumable_entities", "sensor"], ["command_entities", "button"]]) {
+    const entities = cleaning[key] === undefined ? [] : requireArray(cleaning[key], `config.cleaning.${key}`);
+    entities.forEach((entityId, index) => validateEntityId(entityId, `config.cleaning.${key}[${index}]`, domain));
+    validateUnique(entities, `config.cleaning.${key}`);
   }
 
   const chores = requireObject(config.chores, "config.chores");
@@ -570,6 +591,19 @@ export function validateConfig(config) {
     fail("config.football.gameweek_entity_prefix", "must be a sensor entity prefix ending in underscore");
   }
   validateEntityId(football.table_entity, "config.football.table_entity", "sensor");
+  const fplEntries = football.entries === undefined ? [] : requireArray(football.entries, "config.football.entries");
+  const fplPeople = [];
+  const fplIds = [];
+  fplEntries.forEach((entry, index) => {
+    const path = `config.football.entries[${index}]`;
+    requireObject(entry, path);
+    if (!personIds.has(entry.person_id)) fail(`${path}.person_id`, `unknown person: ${entry.person_id}`);
+    requireInteger(entry.entry_id, `${path}.entry_id`, 1, 99999999);
+    fplPeople.push(entry.person_id);
+    fplIds.push(entry.entry_id);
+  });
+  validateUnique(fplPeople, "config.football.entries[].person_id");
+  validateUnique(fplIds, "config.football.entries[].entry_id");
 
   const school = requireObject(config.school, "config.school");
   const schoolSource = school.source === undefined ? "classroom" : school.source;
@@ -656,10 +690,11 @@ export function validateConfig(config) {
     if (cameraIds.has(camera.id)) fail(`${path}.id`, "must be unique");
     cameraIds.add(camera.id);
     requireString(camera.name, `${path}.name`);
-    if (PRIVATE_CAMERA_HINT.test([camera.id, camera.name, camera.entity_id].filter(Boolean).join(" "))) {
+    if (PRIVATE_CAMERA_HINT.test([camera.id, camera.name, camera.entity_id, camera.still_entity_id].filter(Boolean).join(" "))) {
       fail(path, "private child or bedroom cameras are never allowed on the household Security surface");
     }
     if (camera.entity_id) validateEntityId(camera.entity_id, `${path}.entity_id`, "camera");
+    if (camera.still_entity_id) validateEntityId(camera.still_entity_id, `${path}.still_entity_id`, "camera");
     if (!["doorbell", "driveway", "garden"].includes(camera.role)) fail(`${path}.role`, "unsupported household camera role");
     if (camera.motion_entity) validateEntityId(camera.motion_entity, `${path}.motion_entity`, "binary_sensor");
     if (camera.person_entity) validateEntityId(camera.person_entity, `${path}.person_entity`, "binary_sensor");

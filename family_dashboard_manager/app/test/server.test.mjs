@@ -37,7 +37,7 @@ test("serves health and the bounded MCP tool surface", async (context) => {
 
   const health = await fetch(`http://127.0.0.1:${port}/healthz`);
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: "ok", version: "0.12.1" });
+  assert.deepEqual(await health.json(), { status: "ok", version: "0.13.0" });
   const blockedAdmin = await fetch(`http://127.0.0.1:${port}/`);
   assert.equal(blockedAdmin.status, 403);
 

@@ -9,7 +9,7 @@ export const APPROVAL_VIEW_NAMES = Object.freeze([
   "today",
   "home-rooms",
   "home-lights",
-  "home-heating-six",
+  "home-heating",
   "energy-today",
   "calendar-controls",
   "family-location-off",

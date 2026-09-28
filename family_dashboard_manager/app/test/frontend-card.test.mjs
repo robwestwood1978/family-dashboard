@@ -11,9 +11,11 @@ import {
   classroomAssignmentPresentation,
   createControlledMediaHass,
   deriveRoomState,
+  decodeHeatingSchedule,
   energyCompactPresentation,
   energyFuelPresentation,
   energyOverviewPresentation,
+  encodeHeatingSchedule,
   escapeHtml,
   extractPreparationItems,
   familyPlannerEventKey,
@@ -46,6 +48,7 @@ import {
   isSafeResolvedPhotoUrl,
   isSecureCoverActionAllowed,
   nextFreshnessRefreshDelay,
+  nextHeatingSchedulePeriod,
   isSecureCoverActionSupported,
   normaliseChoreOpsSummary,
   normaliseChoreStatus,
@@ -429,6 +432,23 @@ test("presents heating state from the thermostat action without inferring demand
   assert.equal(heatingPresentation({ state: "cool", attributes: { hvac_action: "cooling" } }).label, "Cooling");
   assert.equal(heatingPresentation({ state: "heat_cool", attributes: {} }).label, "Auto");
   assert.equal(heatingPresentation({ state: "heat", attributes: { current_temperature: 12, temperature: 25 } }).label, "On");
+});
+
+test("round-trips the bounded four-period thermostat schedule and finds the next target", () => {
+  const periods = [
+    { stage: 0, time: "07:00", temperature: 20 },
+    { stage: 1, time: "09:30", temperature: 16 },
+    { stage: 2, time: "17:30", temperature: 20.5 },
+    { stage: 3, time: "22:00", temperature: 17 }
+  ];
+  const encoded = encodeHeatingSchedule(periods);
+  assert.equal(encoded, "fwAHAADIAQkeAKACER4AzQMWAACq");
+  assert.deepEqual(decodeHeatingSchedule(encoded), { dayMask: 127, periods });
+  assert.deepEqual(nextHeatingSchedulePeriod(periods, new Date("2026-09-28T15:00:00Z"), "Europe/London"), {
+    ...periods[2], minutes: 1050
+  });
+  assert.equal(encodeHeatingSchedule([{ time: "99:00", temperature: 20 }]), null);
+  assert.equal(decodeHeatingSchedule("not base64"), null);
 });
 
 test("formats smart-meter values without inventing unavailable readings", () => {
@@ -868,7 +888,7 @@ test("accepts only idle as a stopped camera state and requires fresh idle when r
 
 function cameraOnlyConfig(cameras, { readOnly = false } = {}) {
   return {
-    schema_version: 6,
+    schema_version: 7,
     display: { default_view: "entry", read_only: readOnly },
     home: { default_section: "rooms" },
     calendar: { initial_view: "week" },
@@ -2226,7 +2246,6 @@ test("keeps embedded read-only cards behind a default-deny Home Assistant capabi
   Object.getOwnPropertyDescriptor(posterHass, "connection").value.sendMessage({ type: "call_service", domain: "lock", service: "unlock" });
 
   assert.deepEqual(forwarded, [
-    ["ws", { type: "auth/sign_path", path: "/api/camera_proxy/camera.front_door" }],
     ["ws", { type: "camera/web_rtc_offer", entity_id: "camera.front_door" }],
     ["ws", { type: "camera/stream", entity_id: "camera.front_door" }],
     ["ws", { type: "auth/sign_path", path: "/api/camera_proxy/camera.front_door" }],

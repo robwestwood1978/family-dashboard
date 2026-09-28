@@ -9,6 +9,7 @@ import {
   buildFootballStates,
   createFootballPoller,
   footballRefreshInterval,
+  normaliseFplEntry,
   normaliseFootballData,
   publishHomeAssistantState
 } from "../src/football-provider.mjs";
@@ -70,6 +71,29 @@ const footballConfig = {
   gameweek_entity_prefix: "sensor.family_dashboard_premier_league_gw_",
   table_entity: "sensor.family_dashboard_premier_league_table"
 };
+
+test("normalises a configured household FPL entry without exposing manager identity", () => {
+  const entry = normaliseFplEntry(
+    { person_id: "ernie", entry_id: 12345 },
+    {
+      name: "Ernie XI",
+      current_event: 6,
+      summary_overall_points: 351,
+      summary_overall_rank: 120034,
+      player_first_name: "Private",
+      player_last_name: "Name",
+      leagues: { classic: [{ id: 9, name: "Family League", entry_rank: 2, entry_last_rank: 3 }] }
+    },
+    { current: [{ event: 6, points: 61, total_points: 351, overall_rank: 120034, event_transfers: 1, event_transfers_cost: 0 }] }
+  );
+  assert.deepEqual(entry, {
+    person_id: "ernie", entry_id: 12345, team_name: "Ernie XI", gameweek: 6,
+    gameweek_points: 61, total_points: 351, overall_rank: 120034, last_rank: 120034,
+    transfers: 1, transfer_cost: 0,
+    leagues: [{ id: 9, name: "Family League", rank: 2, previous_rank: 3 }]
+  });
+  assert.doesNotMatch(JSON.stringify(entry), /Private|Name/);
+});
 
 test("normalises 38 matchweeks, scorers, the table and both spotlight clubs", () => {
   const data = normaliseFootballData({
