@@ -1,3 +1,10 @@
+## 0.13.2
+
+- Publish the complete configured entry's classic-league list instead of silently truncating it after eight leagues.
+- Fetch each public entry's current-gameweek picks and add a tablet-first squad view with starting XI, bench, position, club, captain and vice-captain markers, availability warnings and contributed Gameweek points.
+- Keep public FPL entry IDs as the only account input: no FPL login, cookie or manager identity is stored or published.
+- Prefer the household's existing Tuya Local thermostat entities for dashboard temperature and power control while retaining the direct local schedule mappings.
+
 ## 0.13.1
 
 - Populate all six household heating schedules with their exact Tuya Local text, auto-schedule and refresh entities so the master and room editors are enabled.

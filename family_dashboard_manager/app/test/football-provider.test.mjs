@@ -90,9 +90,135 @@ test("normalises a configured household FPL entry without exposing manager ident
     person_id: "ernie", entry_id: 12345, team_name: "Ernie XI", gameweek: 6,
     gameweek_points: 61, total_points: 351, overall_rank: 120034, last_rank: 120034,
     transfers: 1, transfer_cost: 0,
-    leagues: [{ id: 9, name: "Family League", rank: 2, previous_rank: 3 }]
+    leagues: [{ id: 9, name: "Family League", rank: 2, previous_rank: 3 }],
+    active_chip: null,
+    points_on_bench: null,
+    squad: [],
+    automatic_subs: []
   });
   assert.doesNotMatch(JSON.stringify(entry), /Private|Name/);
+});
+
+test("keeps every classic league and exposes a bounded current-gameweek squad", () => {
+  const leagues = Array.from({ length: 12 }, (_, index) => ({
+    id: index + 1,
+    name: `League ${index + 1}`,
+    entry_rank: index + 10,
+    entry_last_rank: index + 20
+  }));
+  const squadBootstrap = {
+    teams,
+    elements: [
+      { id: 101, web_name: "Keeper", element_type: 1, team: 1, event_points: 4, status: "a", chance_of_playing_next_round: 100 },
+      { id: 202, web_name: "Captain", element_type: 4, team: 2, event_points: 6, status: "d", chance_of_playing_next_round: 75 },
+      { id: 303, web_name: "Bench", element_type: 3, team: 3, event_points: 8, status: "a", chance_of_playing_next_round: null }
+    ]
+  };
+  const entry = normaliseFplEntry(
+    { person_id: "rob", entry_id: 67890 },
+    { name: "Stranger Mings", current_event: 5, summary_overall_points: 379, summary_overall_rank: 85722, leagues: { classic: leagues } },
+    { current: [{ event: 5, points: 51, overall_rank: 85722, event_transfers: 0, event_transfers_cost: 0 }] },
+    {
+      active_chip: "wildcard",
+      entry_history: { points_on_bench: 8 },
+      picks: [
+        { element: 101, position: 1, multiplier: 1, is_captain: false, is_vice_captain: false },
+        { element: 202, position: 11, multiplier: 2, is_captain: true, is_vice_captain: false },
+        { element: 303, position: 12, multiplier: 0, is_captain: false, is_vice_captain: true }
+      ],
+      automatic_subs: [{ element_in: 303, element_out: 202, event: 5 }]
+    },
+    squadBootstrap
+  );
+
+  assert.equal(entry.leagues.length, 12);
+  assert.equal(entry.leagues.at(-1).name, "League 12");
+  assert.equal(entry.active_chip, "wildcard");
+  assert.equal(entry.points_on_bench, 8);
+  assert.deepEqual(entry.squad.map((player) => ({
+    name: player.name,
+    position: player.position,
+    bench: player.bench,
+    points: player.contribution_points,
+    captain: player.captain,
+    team_code: player.team_code,
+    availability: player.chance_of_playing
+  })), [
+    { name: "Keeper", position: "GKP", bench: false, points: 4, captain: false, team_code: "TOT", availability: 100 },
+    { name: "Captain", position: "FWD", bench: false, points: 12, captain: true, team_code: "AVL", availability: 75 },
+    { name: "Bench", position: "MID", bench: true, points: 8, captain: false, team_code: "ARS", availability: null }
+  ]);
+  assert.deepEqual(entry.automatic_subs, [{ in: 303, out: 202, event: 5 }]);
+});
+
+test("fetches current picks for every configured public FPL entry", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "family-dashboard-fpl-picks-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const requested = [];
+  const published = [];
+  const profile = {
+    name: "Stranger Mings",
+    current_event: 1,
+    summary_overall_points: 51,
+    summary_overall_rank: 4021221,
+    leagues: { classic: [{ id: 1, name: "League", entry_rank: 10, entry_last_rank: 10 }] }
+  };
+  const history = { current: [{ event: 1, points: 51, overall_rank: 4021221, event_transfers: 0, event_transfers_cost: 0 }] };
+  const picks = {
+    entry_history: { points_on_bench: 6 },
+    picks: [{ element: 101, position: 1, multiplier: 1, is_captain: false, is_vice_captain: false }],
+    automatic_subs: []
+  };
+  const provider = new FootballProvider({
+    fetchImpl: async (url) => {
+      requested.push(String(url));
+      let payload = fixtures;
+      if (String(url).includes("bootstrap-static")) payload = bootstrap;
+      else if (String(url).endsWith("/history/")) payload = history;
+      else if (String(url).includes("/event/1/picks/")) payload = picks;
+      else if (String(url).includes("/api/entry/12345/")) payload = profile;
+      return { ok: true, json: async () => payload };
+    },
+    publish: async (state) => published.push(state),
+    cachePath: join(root, "football-cache.json"),
+    clock: () => new Date("2026-08-10T08:00:00.000Z")
+  });
+
+  const result = await provider.refresh({ ...footballConfig, entries: [{ person_id: "rob", entry_id: 12345 }] });
+  assert.equal(result.published, 41);
+  assert.equal(requested.some((url) => url.endsWith("/api/entry/12345/event/1/picks/")), true);
+  const entryState = published.find((state) => state.entity_id === "sensor.family_dashboard_fpl_rob");
+  assert.equal(entryState.attributes.squad.length, 1);
+  assert.equal(entryState.attributes.points_on_bench, 6);
+});
+
+test("keeps core FPL scores live when the optional picks feed is unavailable", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "family-dashboard-fpl-core-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const published = [];
+  const provider = new FootballProvider({
+    fetchImpl: async (url) => {
+      const source = String(url);
+      if (source.includes("/event/1/picks/")) return { ok: false, status: 503 };
+      const payload = source.includes("bootstrap-static")
+        ? bootstrap
+        : source.endsWith("/history/")
+          ? { current: [{ event: 1, points: 51, overall_rank: 99, event_transfers: 0, event_transfers_cost: 0 }] }
+          : source.includes("/api/entry/12345/")
+            ? { name: "Team", current_event: 1, summary_overall_points: 51, summary_overall_rank: 99, leagues: { classic: [] } }
+            : fixtures;
+      return { ok: true, json: async () => payload };
+    },
+    publish: async (state) => published.push(state),
+    cachePath: join(root, "football-cache.json"),
+    clock: () => new Date("2026-08-10T08:00:00.000Z")
+  });
+
+  const result = await provider.refresh({ ...footballConfig, entries: [{ person_id: "rob", entry_id: 12345 }] });
+  assert.equal(result.data_status, "live");
+  const entryState = published.find((state) => state.entity_id === "sensor.family_dashboard_fpl_rob");
+  assert.equal(entryState.state, "51");
+  assert.deepEqual(entryState.attributes.squad, []);
 });
 
 test("normalises 38 matchweeks, scorers, the table and both spotlight clubs", () => {

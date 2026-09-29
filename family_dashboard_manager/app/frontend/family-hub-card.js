@@ -1947,6 +1947,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._pendingConfirmation = null;
     this._confirmationReturnFocus = null;
     this._footballTab = "fixtures";
+    this._fplEntryId = null;
     this._masterTemperature = 20;
     this._gameweek = null;
     this._entityIds = new Set();
@@ -4389,20 +4390,75 @@ export class FamilyHubCard extends HTMLElementBase {
     `;
   }
 
+  _renderFplPlayer(player) {
+    const bench = player?.bench === true;
+    const eventPoints = safeNumber(player?.event_points, 0);
+    const contributionPoints = safeNumber(player?.contribution_points, eventPoints);
+    const displayedPoints = bench ? eventPoints : contributionPoints;
+    const flagged = player?.status && player.status !== "a";
+    const badge = player?.captain ? "C" : player?.vice_captain ? "V" : "";
+    const name = player?.name || "Player";
+    const team = player?.team_code || player?.position || "FPL";
+    const crest = teamCrest(player);
+    return `<article class="fpl-player ${bench ? "is-bench" : ""} ${flagged ? "is-flagged" : ""}" title="${escapeHtml(`${name} · ${team} · ${displayedPoints} points`)}">
+      <span class="fpl-player-mark">${crest ? `<img src="${escapeHtml(crest)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true">` : ""}<b>${escapeHtml(team)}</b></span>
+      ${badge ? `<i class="fpl-player-badge" aria-label="${player.captain ? "Captain" : "Vice-captain"}">${badge}</i>` : ""}
+      ${flagged ? `<ha-icon class="fpl-player-warning" icon="mdi:alert" aria-label="Availability warning"></ha-icon>` : ""}
+      <strong>${escapeHtml(name)}</strong>
+      <small>${escapeHtml(player?.position || "")}</small>
+      <em>${displayedPoints}</em>
+    </article>`;
+  }
+
+  _renderFplSquad(squad) {
+    if (!squad.length) return '<p class="hub-empty-state large">The squad will appear after the next football refresh.</p>';
+    const starters = squad.filter((player) => !player.bench);
+    const bench = squad.filter((player) => player.bench);
+    const rows = ["GKP", "DEF", "MID", "FWD"].map((position) => {
+      const players = starters.filter((player) => player.position === position);
+      return players.length ? `<div class="fpl-pitch-row" data-position="${position}">${players.map((player) => this._renderFplPlayer(player)).join("")}</div>` : "";
+    }).join("");
+    return `<div class="fpl-pitch" aria-label="Starting eleven">${rows}</div><div class="fpl-bench"><p class="eyebrow">Bench</p><div>${bench.map((player) => this._renderFplPlayer(player)).join("")}</div></div>`;
+  }
+
   _renderFplTeams() {
     const entries = this._config.football.entries || [];
     if (!entries.length) return '<div class="football-empty"><span class="football-orbit"><ha-icon icon="mdi:trophy-outline"></ha-icon></span><div><p class="eyebrow">Our FPL teams</p><h3>Add Rob and Ernie’s team IDs in Admin</h3><p>The IDs are the number in each team’s FPL URL. No password or FPL login is needed.</p></div></div>';
-    const cards = entries.map((entry) => {
-      const person = this._config.people.find((candidate) => candidate.id === entry.person_id);
-      const state = this._hass?.states?.[`sensor.family_dashboard_fpl_${entry.person_id}`];
-      const available = isEntityAvailable(state);
-      const attributes = state?.attributes || {};
-      const rank = safeNumber(attributes.overall_rank, NaN);
-      const eventPoints = safeNumber(attributes.gameweek_points, NaN);
-      const leagues = Array.isArray(attributes.leagues) ? attributes.leagues : [];
-      return `<article class="surface fpl-team-card" style="--person-colour:${escapeHtml(person?.colour || this._config.theme.accent)}"><header><span>${escapeHtml((person?.name || entry.person_id).slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person?.name || entry.person_id)}</p><h3>${escapeHtml(available ? attributes.team_name || "FPL team" : "Waiting for FPL")}</h3></div><ha-icon icon="mdi:trophy"></ha-icon></header><div class="fpl-scoreboard"><span><strong>${available ? escapeHtml(formatPoints(state.state, this._config.product.locale)) : "—"}</strong><small>Total points</small></span><span><strong>${Number.isFinite(eventPoints) ? eventPoints : "—"}</strong><small>GW ${attributes.gameweek || "—"}</small></span><span><strong>${Number.isFinite(rank) ? `#${escapeHtml(formatPoints(rank, this._config.product.locale))}` : "—"}</strong><small>Overall rank</small></span></div>${leagues.length ? `<div class="fpl-leagues"><p class="eyebrow">Leagues</p>${leagues.map((league) => `<span><strong>${escapeHtml(league.name)}</strong><b>${league.rank ? `#${escapeHtml(formatPoints(league.rank, this._config.product.locale))}` : "—"}</b></span>`).join("")}</div>` : '<p class="hub-empty-state compact">League positions will appear after the next manager refresh.</p>'}</article>`;
+    if (!entries.some((entry) => entry.person_id === this._fplEntryId)) this._fplEntryId = entries[0].person_id;
+    const selected = entries.find((entry) => entry.person_id === this._fplEntryId) || entries[0];
+    const person = this._config.people.find((candidate) => candidate.id === selected.person_id);
+    const state = this._hass?.states?.[`sensor.family_dashboard_fpl_${selected.person_id}`];
+    const available = isEntityAvailable(state);
+    const attributes = state?.attributes || {};
+    const rank = safeNumber(attributes.overall_rank, NaN);
+    const eventPoints = safeNumber(attributes.gameweek_points, NaN);
+    const transfers = safeNumber(attributes.transfers, NaN);
+    const transferCost = safeNumber(attributes.transfer_cost, 0);
+    const leagues = Array.isArray(attributes.leagues) ? attributes.leagues : [];
+    const squad = Array.isArray(attributes.squad) ? attributes.squad : [];
+    const selectors = entries.map((entry) => {
+      const candidate = this._config.people.find((personEntry) => personEntry.id === entry.person_id);
+      const selectedEntry = entry.person_id === selected.person_id;
+      return `<button type="button" data-fpl-entry="${escapeHtml(entry.person_id)}" class="${selectedEntry ? "is-selected" : ""}" aria-pressed="${selectedEntry}"><span style="--person-colour:${escapeHtml(candidate?.colour || this._config.theme.accent)}">${escapeHtml((candidate?.name || entry.person_id).slice(0, 1))}</span>${escapeHtml(candidate?.name || entry.person_id)}</button>`;
     }).join("");
-    return `<div class="fpl-team-grid">${cards}</div>`;
+    const leagueRows = leagues.map((league) => {
+      const currentRank = safeNumber(league.rank, NaN);
+      const previousRank = safeNumber(league.previous_rank, NaN);
+      const movement = Number.isFinite(currentRank) && Number.isFinite(previousRank)
+        ? currentRank < previousRank ? "is-up" : currentRank > previousRank ? "is-down" : "is-level"
+        : "";
+      const movementIcon = movement === "is-up" ? "mdi:arrow-up" : movement === "is-down" ? "mdi:arrow-down" : "mdi:minus";
+      return `<span class="${movement}"><strong>${escapeHtml(league.name)}</strong><b>${Number.isFinite(currentRank) ? `#${escapeHtml(formatPoints(currentRank, this._config.product.locale))}` : "—"}</b><ha-icon icon="${movementIcon}" aria-hidden="true"></ha-icon></span>`;
+    }).join("");
+    return `<section class="fpl-detail" style="--person-colour:${escapeHtml(person?.colour || this._config.theme.accent)}">
+      <div class="fpl-entry-selector" role="group" aria-label="Choose fantasy team">${selectors}</div>
+      <article class="surface fpl-team-card"><header><span>${escapeHtml((person?.name || selected.person_id).slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person?.name || selected.person_id)}</p><h3>${escapeHtml(available ? attributes.team_name || "FPL team" : "Waiting for FPL")}</h3></div><ha-icon icon="mdi:trophy"></ha-icon></header>
+        <div class="fpl-scoreboard"><span><strong>${available ? escapeHtml(formatPoints(state.state, this._config.product.locale)) : "—"}</strong><small>Total points</small></span><span><strong>${Number.isFinite(eventPoints) ? eventPoints : "—"}</strong><small>GW ${attributes.gameweek || "—"}</small></span><span><strong>${Number.isFinite(rank) ? `#${escapeHtml(formatPoints(rank, this._config.product.locale))}` : "—"}</strong><small>Overall rank</small></span><span><strong>${Number.isFinite(transfers) ? transfers : "—"}</strong><small>Transfers${transferCost ? ` · −${transferCost}` : ""}</small></span></div>
+        ${attributes.active_chip ? `<p class="fpl-chip"><ha-icon icon="mdi:star-circle"></ha-icon>${escapeHtml(titleCase(attributes.active_chip))} active</p>` : ""}
+      </article>
+      <div class="fpl-detail-grid"><article class="surface fpl-squad-panel"><div class="section-heading"><div><p class="eyebrow">Gameweek ${attributes.gameweek || "—"}</p><h3>Squad points</h3></div>${Number.isFinite(safeNumber(attributes.points_on_bench, NaN)) ? `<span>${safeNumber(attributes.points_on_bench, 0)} on bench</span>` : ""}</div>${this._renderFplSquad(squad)}</article>
+      <article class="surface fpl-league-panel"><div class="section-heading"><div><p class="eyebrow">All competitions</p><h3>Leagues</h3></div><span>${leagues.length}</span></div>${leagues.length ? `<div class="fpl-leagues">${leagueRows}</div>` : '<p class="hub-empty-state compact">League positions will appear after the next manager refresh.</p>'}</article></div>
+    </section>`;
   }
 
   _renderFootball() {
@@ -4440,15 +4496,15 @@ export class FamilyHubCard extends HTMLElementBase {
             ? derbyFixture ? this._renderDerbyHero(favouriteModels, derbyFixture) : favouriteModels.map((model) => this._renderFavouriteHero(model)).join("")
             : this._config.football.spotlight_team_codes.map((code) => this._renderUnavailableFavourite(code)).join("")}</div>
         </article>
-        <div class="football-layout">
+        <div class="football-layout ${this._footballTab === "fpl" ? "is-fpl" : ""}">
           <article class="surface football-main">
           <div class="football-toolbar">
-            <div><p class="eyebrow">Match centre</p><h2>Matchweek ${gameweek}</h2></div>
-            <div class="matchweek-controls">
+            <div><p class="eyebrow">${this._footballTab === "fpl" ? "Fantasy Premier League" : "Match centre"}</p><h2>${this._footballTab === "fpl" ? "Our teams" : `Matchweek ${gameweek}`}</h2></div>
+            ${this._footballTab === "fpl" ? '<span class="football-toolbar-spacer"></span>' : `<div class="matchweek-controls">
               <button type="button" data-gameweek="${Math.max(1, gameweek - 1)}" ${gameweek <= 1 ? "disabled" : ""} aria-label="Previous matchweek"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
               <label><span class="sr-only">Choose matchweek</span><span class="select-shell"><select data-gameweek-select>${available.map((entry) => `<option value="${entry}" ${entry === gameweek ? "selected" : ""}>MW ${entry}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span></label>
               <button type="button" data-gameweek="${Math.min(38, gameweek + 1)}" ${gameweek >= 38 ? "disabled" : ""} aria-label="Next matchweek"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
-            </div>
+            </div>`}
             <div class="segments football-tabs" role="group" aria-label="Football view">
               <button type="button" class="segment ${this._footballTab === "fixtures" ? "is-selected" : ""}" data-football-tab="fixtures" aria-pressed="${this._footballTab === "fixtures"}">Fixtures</button>
               <button type="button" class="segment ${this._footballTab === "table" ? "is-selected" : ""}" data-football-tab="table" aria-pressed="${this._footballTab === "table"}">Table</button>
@@ -4457,9 +4513,9 @@ export class FamilyHubCard extends HTMLElementBase {
           </div>
           ${this._footballTab === "fpl" ? this._renderFplTeams() : this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(events, fixtureDataAvailable)}
           </article>
-          <aside class="football-sidebar">
+          ${this._footballTab === "fpl" ? "" : `<aside class="football-sidebar">
             ${this._renderFavouriteStandings(favouriteModels)}
-          </aside>
+          </aside>`}
         </div>
       </section>
     `;
@@ -5354,6 +5410,13 @@ export class FamilyHubCard extends HTMLElementBase {
     if (target.dataset.footballTab) {
       if (!new Set(["fixtures", "table", "fpl"]).has(target.dataset.footballTab)) return;
       this._footballTab = target.dataset.footballTab;
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.fplEntry) {
+      const allowedEntries = new Set((this._config.football?.entries || []).map((entry) => entry.person_id));
+      if (!allowedEntries.has(target.dataset.fplEntry)) return;
+      this._fplEntryId = target.dataset.fplEntry;
       this._scheduleRender(true);
       return;
     }
@@ -7647,20 +7710,53 @@ export class FamilyHubCard extends HTMLElementBase {
       .kid-mission i b { height:100%; display:block; border-radius:inherit; background:#fff; transition:width .35s ease; }
       .kid-mission em { font-style:normal; font-size:22px; font-weight:900; }
       .kid-mission.is-complete { background:linear-gradient(120deg,#008C71,#0B6E58); animation:mission-pop .45s ease; }
-      .fpl-team-grid { height:100%; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; overflow:auto; }
-      .fpl-team-card { min-height:220px; padding:16px; border-top:5px solid var(--person-colour); }
+      .football-layout.is-fpl { grid-template-columns:minmax(0,1fr); }
+      .football-layout.is-fpl .football-main { grid-template-rows:58px minmax(0,1fr); }
+      .football-toolbar-spacer { min-width:1px; }
+      .fpl-detail { min-height:0; display:grid; grid-template-rows:auto auto minmax(0,1fr); gap:10px; overflow:auto; padding-right:4px; }
+      .fpl-entry-selector { display:flex; gap:8px; }
+      .fpl-entry-selector button { min-height:48px; padding:0 14px; display:flex; align-items:center; gap:7px; border:1px solid #DCE4EE; border-radius:14px; background:#fff; color:#33445C; font-weight:850; cursor:pointer; }
+      .fpl-entry-selector button > span { width:28px; height:28px; display:grid; place-items:center; border-radius:9px; background:var(--person-colour); color:#fff; }
+      .fpl-entry-selector button.is-selected { border-color:var(--person-colour); background:color-mix(in srgb,var(--person-colour) 8%,#fff); color:#0B1830; }
+      .fpl-team-card { min-height:0; padding:14px 16px; border-top:5px solid var(--person-colour); }
       .fpl-team-card header { display:flex; align-items:center; gap:10px; }
       .fpl-team-card header > span { width:42px; height:42px; display:grid; place-items:center; border-radius:14px; background:var(--person-colour); color:#fff; font-size:18px; font-weight:900; }
       .fpl-team-card header > div { flex:1; min-width:0; }
       .fpl-team-card header h3 { margin:2px 0 0; overflow:hidden; color:#0B1830; font-size:17px; white-space:nowrap; text-overflow:ellipsis; }
       .fpl-team-card header > ha-icon { color:#E7A93D; }
-      .fpl-scoreboard { margin-top:14px; display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+      .fpl-scoreboard { margin-top:12px; display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
       .fpl-scoreboard span { padding:10px; border-radius:13px; background:#F1F6FF; text-align:center; }
       .fpl-scoreboard strong,.fpl-scoreboard small { display:block; }
       .fpl-scoreboard strong { color:#0B1830; font-size:19px; }
       .fpl-scoreboard small { margin-top:2px; color:#5E6B80; font-size:10px; }
-      .fpl-leagues { margin-top:12px; }
-      .fpl-leagues > span { min-height:30px; display:flex; align-items:center; justify-content:space-between; gap:8px; border-top:1px solid #E1E8F0; color:#33445C; font-size:12px; }
+      .fpl-chip { width:max-content; margin:9px 0 0; padding:5px 9px; display:flex; align-items:center; gap:5px; border-radius:999px; background:#E8F8F3; color:#087A61; font-size:11px; font-weight:850; }
+      .fpl-chip ha-icon { --mdc-icon-size:16px; }
+      .fpl-detail-grid { min-height:0; display:grid; grid-template-columns:minmax(0,1.65fr) minmax(250px,.75fr); gap:10px; }
+      .fpl-squad-panel,.fpl-league-panel { min-height:0; padding:14px; overflow:auto; }
+      .fpl-squad-panel .section-heading,.fpl-league-panel .section-heading { display:flex; justify-content:space-between; align-items:center; }
+      .fpl-squad-panel h3,.fpl-league-panel h3 { margin:2px 0 0; color:#0B1830; }
+      .fpl-squad-panel .section-heading > span,.fpl-league-panel .section-heading > span { padding:5px 8px; border-radius:999px; background:#EEF3FA; color:#5E6B80; font-size:10px; font-weight:800; }
+      .fpl-pitch { min-height:390px; margin-top:10px; padding:14px 10px; display:grid; align-content:space-around; gap:9px; border-radius:20px; background:linear-gradient(rgba(255,255,255,.07),rgba(255,255,255,.07)),repeating-linear-gradient(0deg,#079B4B 0,#079B4B 64px,#049246 64px,#049246 128px); box-shadow:inset 0 0 0 2px rgba(255,255,255,.72); }
+      .fpl-pitch-row { display:flex; justify-content:space-evenly; gap:7px; }
+      .fpl-player { position:relative; width:clamp(72px,8.5vw,104px); min-height:88px; padding:5px 4px 7px; display:grid; grid-template-columns:1fr auto; grid-template-rows:43px auto auto; place-items:center; border:1px solid rgba(255,255,255,.44); border-radius:12px; background:rgba(8,44,37,.42); color:#fff; text-align:center; box-shadow:0 5px 12px rgba(0,0,0,.13); }
+      .fpl-player-mark { grid-column:1/-1; position:relative; width:42px; height:42px; display:grid; place-items:center; overflow:hidden; border-radius:50%; background:#fff; color:#33445C; }
+      .fpl-player-mark img { position:absolute; inset:5px; width:32px; height:32px; object-fit:contain; }
+      .fpl-player-mark b { font-size:9px; }
+      .fpl-player strong { grid-column:1/-1; max-width:100%; padding:2px 5px; overflow:hidden; border-radius:4px; background:#fff; color:#0B1830; font-size:10px; white-space:nowrap; text-overflow:ellipsis; }
+      .fpl-player small { color:#DBF3E6; font-size:8px; }
+      .fpl-player em { min-width:24px; padding:2px 4px; border-radius:4px; background:#2E0A3C; color:#fff; font-size:10px; font-style:normal; font-weight:900; }
+      .fpl-player-badge { position:absolute; left:5px; top:5px; z-index:1; width:20px; height:20px; display:grid; place-items:center; border-radius:50%; background:#2E0A3C; color:#fff; font-size:10px; font-style:normal; font-weight:900; }
+      .fpl-player-warning { position:absolute; right:4px; top:4px; z-index:1; --mdc-icon-size:18px; padding:2px; border-radius:50%; background:#FFE178; color:#6C4A00; }
+      .fpl-bench { margin-top:9px; padding:9px; border-radius:14px; background:#EAF4EE; }
+      .fpl-bench > div { display:flex; justify-content:space-evenly; gap:7px; }
+      .fpl-player.is-bench { background:#3B6D5B; }
+      .fpl-leagues { margin-top:10px; overflow:auto; }
+      .fpl-leagues > span { min-height:42px; display:grid; grid-template-columns:minmax(0,1fr) auto 20px; align-items:center; gap:7px; border-top:1px solid #E1E8F0; color:#33445C; font-size:11px; }
+      .fpl-leagues > span strong { overflow-wrap:anywhere; }
+      .fpl-leagues > span b { color:#0B1830; font-size:12px; }
+      .fpl-leagues > span ha-icon { --mdc-icon-size:16px; color:#8794A8; }
+      .fpl-leagues > span.is-up ha-icon { color:#15945F; }
+      .fpl-leagues > span.is-down ha-icon { color:#D94C4C; }
       @keyframes mission-pop { 50% { transform:scale(1.018); } }
 
       @keyframes spin { to { transform:rotate(360deg); } }
@@ -7778,7 +7874,9 @@ export class FamilyHubCard extends HTMLElementBase {
         .football-tabs { grid-column:1/-1; display:grid; grid-template-columns:repeat(3,1fr); }
         .lighting-master,.heating-master { align-items:stretch; flex-direction:column; }
         .heating-master-actions { display:grid; grid-template-columns:repeat(3,1fr); }
-        .cleaning-experience,.energy-history-grid,.fpl-team-grid { grid-template-columns:1fr; height:auto; }
+        .cleaning-experience,.energy-history-grid,.fpl-detail-grid { grid-template-columns:1fr; height:auto; }
+        .fpl-scoreboard { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .fpl-player { width:clamp(60px,20vw,100px); }
       }
       @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
     `;

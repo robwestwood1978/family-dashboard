@@ -2,7 +2,7 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.13.1 provides:
+Version 0.13.2 provides:
 
 - a secret-rejecting schema-v7 household contract;
 - a private Home Assistant media-source kiosk photo frame with camera-motion return;
@@ -19,7 +19,7 @@ Version 0.13.1 provides:
 - named ChoreOps jobs, a child switcher, direct exact-entity job/reward claims, and one optional featured reward, badge and achievement summary per child; adult approval, points and scheduling remain in native ChoreOps;
 - an administrator-only ingress editor for the full non-secret household contract, with sanitised entity choices, exact diffs, protected-section acknowledgement, hash-locked deployment and rollback;
 - a first-party per-child Google Classroom integration with exactly two read-only scopes, a 15-minute coordinator and no more than 20 assignment attributes;
-- the configured Mediocre Spotify/Sonos card and an adaptive, last-good-cache Fantasy Premier League provider with live freshness, public household entry points/ranks/leagues, provisional full-time handling, Home Assistant Core restart recovery at the next three-, 15- or 60-minute polling boundary, fixed-origin club crests, and two configurable household favourites;
+- the configured Mediocre Spotify/Sonos card and an adaptive, last-good-cache Fantasy Premier League provider with live freshness, public household entry points/ranks, complete league lists, current-gameweek squads and player points, provisional full-time handling, Home Assistant Core restart recovery at the next three-, 15- or 60-minute polling boundary, fixed-origin club crests, and two configurable household favourites;
 - fixed allow-list deployment, inert private floorplan validation and raw hash-verified rollback compatible with older installed schemas;
 - sanitised inventory that excludes camera entities, people, trackers, states, history, addresses, credentials and arbitrary attributes;
 - deterministic `1112×834` and `1024×768` tablet checks.
