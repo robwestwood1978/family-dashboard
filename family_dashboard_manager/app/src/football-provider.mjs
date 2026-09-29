@@ -295,6 +295,7 @@ export function normaliseFplEntry(config, profile, history, picks = null, bootst
     transfers: current ? asInteger(current.event_transfers) : null,
     transfer_cost: current ? asInteger(current.event_transfers_cost) : null,
     leagues,
+    squad_status: Array.isArray(picks?.picks) ? "live" : "unavailable",
     active_chip: typeof picks?.active_chip === "string" ? picks.active_chip.slice(0, 30) : null,
     points_on_bench: picks?.entry_history ? asInteger(picks.entry_history.points_on_bench) : null,
     squad: normaliseFplSquad(picks, bootstrap),
@@ -390,11 +391,28 @@ export async function publishHomeAssistantState(state, {
 
 async function fetchJson(url, fetchImpl, timeoutMs) {
   const response = await fetchImpl(url, {
-    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.13.2" },
+    headers: {
+      Accept: "application/json",
+      Referer: "https://fantasy.premierleague.com/",
+      "User-Agent": "family-dashboard-manager/0.13.3"
+    },
     signal: AbortSignal.timeout(timeoutMs)
   });
   if (!response.ok) throw new Error(`football source returned HTTP ${response.status}`);
   return response.json();
+}
+
+async function fetchJsonWithRetry(url, fetchImpl, timeoutMs, wait, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetchJson(url, fetchImpl, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await wait(attempt * 500);
+    }
+  }
+  throw lastError;
 }
 
 async function writeCache(path, data) {
@@ -423,13 +441,15 @@ export class FootballProvider {
     publish = publishHomeAssistantState,
     cachePath = join(process.env.MANAGER_DATA_DIR || "/data", "football-cache.json"),
     clock = () => new Date(),
-    timeoutMs = 15000
+    timeoutMs = 15000,
+    wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
   } = {}) {
     this.fetchImpl = fetchImpl;
     this.publish = publish;
     this.cachePath = cachePath;
     this.clock = clock;
     this.timeoutMs = timeoutMs;
+    this.wait = wait;
     this.publishedHashes = new Map();
     this.lastIndexState = null;
   }
@@ -438,6 +458,12 @@ export class FootballProvider {
     let data;
     let dataStatus = "live";
     const checkedAt = this.clock().toISOString();
+    let previousData = null;
+    try {
+      previousData = await readCache(this.cachePath);
+    } catch {
+      // A damaged optional cache must not prevent a fresh provider update.
+    }
     try {
       const entryConfigs = Array.isArray(footballConfig.entries) ? footballConfig.entries : [];
       const [bootstrap, fixtures, entryPayloads] = await Promise.all([
@@ -448,21 +474,38 @@ export class FootballProvider {
             fetchJson(`${ENTRY_URL}/${entry.entry_id}/`, this.fetchImpl, this.timeoutMs),
             fetchJson(`${ENTRY_URL}/${entry.entry_id}/history/`, this.fetchImpl, this.timeoutMs)
           ]);
-          const currentEvent = asInteger(profile?.current_event, 0);
-          let picks = null;
-          if (currentEvent > 0) {
-            try {
-              picks = await fetchJson(`${ENTRY_URL}/${entry.entry_id}/event/${currentEvent}/picks/`, this.fetchImpl, this.timeoutMs);
-            } catch {
-              // Keep scores, rank and leagues live when the optional picks feed is temporarily unavailable.
-            }
-          }
-          return { entry, profile, history, picks };
+          return { entry, profile, history };
         }))
       ]);
-      const entries = entryPayloads.map(({ entry, profile, history, picks }) => (
-        normaliseFplEntry(entry, profile, history, picks, bootstrap)
-      ));
+      const entries = [];
+      for (const { entry, profile, history } of entryPayloads) {
+        const currentEvent = asInteger(profile?.current_event, 0);
+        let picks = null;
+        if (currentEvent > 0) {
+          try {
+            picks = await fetchJsonWithRetry(
+              `${ENTRY_URL}/${entry.entry_id}/event/${currentEvent}/picks/`,
+              this.fetchImpl,
+              this.timeoutMs,
+              this.wait
+            );
+          } catch {
+            // Scores, rank and leagues remain live while the squad feed retries independently.
+          }
+        }
+        const normalised = normaliseFplEntry(entry, profile, history, picks, bootstrap);
+        const previousEntry = previousData?.entries?.find((candidate) => (
+          candidate.person_id === entry.person_id && candidate.gameweek === currentEvent
+        ));
+        if (normalised.squad_status === "unavailable" && Array.isArray(previousEntry?.squad) && previousEntry.squad.length) {
+          normalised.squad = previousEntry.squad;
+          normalised.points_on_bench = previousEntry.points_on_bench ?? null;
+          normalised.active_chip = previousEntry.active_chip ?? null;
+          normalised.automatic_subs = Array.isArray(previousEntry.automatic_subs) ? previousEntry.automatic_subs : [];
+          normalised.squad_status = "cached";
+        }
+        entries.push(normalised);
+      }
       data = normaliseFootballData({
         bootstrap,
         fixtures,

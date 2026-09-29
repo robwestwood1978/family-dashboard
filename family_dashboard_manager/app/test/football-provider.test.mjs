@@ -91,6 +91,7 @@ test("normalises a configured household FPL entry without exposing manager ident
     gameweek_points: 61, total_points: 351, overall_rank: 120034, last_rank: 120034,
     transfers: 1, transfer_cost: 0,
     leagues: [{ id: 9, name: "Family League", rank: 2, previous_rank: 3 }],
+    squad_status: "unavailable",
     active_chip: null,
     points_on_bench: null,
     squad: [],
@@ -135,6 +136,7 @@ test("keeps every classic league and exposes a bounded current-gameweek squad", 
   assert.equal(entry.leagues.at(-1).name, "League 12");
   assert.equal(entry.active_chip, "wildcard");
   assert.equal(entry.points_on_bench, 8);
+  assert.equal(entry.squad_status, "live");
   assert.deepEqual(entry.squad.map((player) => ({
     name: player.name,
     position: player.position,
@@ -189,7 +191,47 @@ test("fetches current picks for every configured public FPL entry", async (conte
   assert.equal(requested.some((url) => url.endsWith("/api/entry/12345/event/1/picks/")), true);
   const entryState = published.find((state) => state.entity_id === "sensor.family_dashboard_fpl_rob");
   assert.equal(entryState.attributes.squad.length, 1);
+  assert.equal(entryState.attributes.squad_status, "live");
   assert.equal(entryState.attributes.points_on_bench, 6);
+});
+
+test("retries a transient picks failure before publishing the squad", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "family-dashboard-fpl-retry-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  let picksCalls = 0;
+  const published = [];
+  const provider = new FootballProvider({
+    fetchImpl: async (url) => {
+      const source = String(url);
+      if (source.includes("/event/1/picks/")) {
+        picksCalls += 1;
+        if (picksCalls < 3) return { ok: false, status: 503 };
+        return { ok: true, json: async () => ({
+          entry_history: { points_on_bench: 6 },
+          picks: [{ element: 101, position: 1, multiplier: 1, is_captain: false, is_vice_captain: false }],
+          automatic_subs: []
+        }) };
+      }
+      const payload = source.includes("bootstrap-static")
+        ? bootstrap
+        : source.endsWith("/history/")
+          ? { current: [{ event: 1, points: 51, overall_rank: 99, event_transfers: 0, event_transfers_cost: 0 }] }
+          : source.includes("/api/entry/12345/")
+            ? { name: "Team", current_event: 1, summary_overall_points: 51, summary_overall_rank: 99, leagues: { classic: [] } }
+            : fixtures;
+      return { ok: true, json: async () => payload };
+    },
+    publish: async (state) => published.push(state),
+    cachePath: join(root, "football-cache.json"),
+    clock: () => new Date("2026-08-10T08:00:00.000Z"),
+    wait: async () => {}
+  });
+
+  await provider.refresh({ ...footballConfig, entries: [{ person_id: "rob", entry_id: 12345 }] });
+  const entryState = published.find((state) => state.entity_id === "sensor.family_dashboard_fpl_rob");
+  assert.equal(picksCalls, 3);
+  assert.equal(entryState.attributes.squad_status, "live");
+  assert.equal(entryState.attributes.squad.length, 1);
 });
 
 test("keeps core FPL scores live when the optional picks feed is unavailable", async (context) => {
@@ -211,14 +253,56 @@ test("keeps core FPL scores live when the optional picks feed is unavailable", a
     },
     publish: async (state) => published.push(state),
     cachePath: join(root, "football-cache.json"),
-    clock: () => new Date("2026-08-10T08:00:00.000Z")
+    clock: () => new Date("2026-08-10T08:00:00.000Z"),
+    wait: async () => {}
   });
 
   const result = await provider.refresh({ ...footballConfig, entries: [{ person_id: "rob", entry_id: 12345 }] });
   assert.equal(result.data_status, "live");
   const entryState = published.find((state) => state.entity_id === "sensor.family_dashboard_fpl_rob");
   assert.equal(entryState.state, "51");
+  assert.equal(entryState.attributes.squad_status, "unavailable");
   assert.deepEqual(entryState.attributes.squad, []);
+});
+
+test("retains the last good current-gameweek squad when every retry fails", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "family-dashboard-fpl-squad-cache-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  let picksAvailable = true;
+  const published = [];
+  const provider = new FootballProvider({
+    fetchImpl: async (url) => {
+      const source = String(url);
+      if (source.includes("/event/1/picks/")) {
+        if (!picksAvailable) return { ok: false, status: 503 };
+        return { ok: true, json: async () => ({
+          entry_history: { points_on_bench: 6 },
+          picks: [{ element: 101, position: 1, multiplier: 1, is_captain: false, is_vice_captain: false }],
+          automatic_subs: []
+        }) };
+      }
+      const payload = source.includes("bootstrap-static")
+        ? bootstrap
+        : source.endsWith("/history/")
+          ? { current: [{ event: 1, points: 51, overall_rank: 99, event_transfers: 0, event_transfers_cost: 0 }] }
+          : source.includes("/api/entry/12345/")
+            ? { name: "Team", current_event: 1, summary_overall_points: 51, summary_overall_rank: 99, leagues: { classic: [] } }
+            : fixtures;
+      return { ok: true, json: async () => payload };
+    },
+    publish: async (state) => published.push(state),
+    cachePath: join(root, "football-cache.json"),
+    clock: () => new Date("2026-08-10T08:00:00.000Z"),
+    wait: async () => {}
+  });
+
+  await provider.refresh({ ...footballConfig, entries: [{ person_id: "rob", entry_id: 12345 }] });
+  picksAvailable = false;
+  await provider.refresh({ ...footballConfig, entries: [{ person_id: "rob", entry_id: 12345 }] });
+  const entryStates = published.filter((state) => state.entity_id === "sensor.family_dashboard_fpl_rob");
+  assert.equal(entryStates.at(-1).attributes.squad_status, "cached");
+  assert.equal(entryStates.at(-1).attributes.squad.length, 1);
+  assert.equal(entryStates.at(-1).attributes.points_on_bench, 6);
 });
 
 test("normalises 38 matchweeks, scorers, the table and both spotlight clubs", () => {

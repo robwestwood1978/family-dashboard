@@ -1,3 +1,8 @@
+## 0.13.3
+
+- Retry each current-gameweek squad request after the core FPL profile and fixture feeds complete, avoiding a transient optional request failure that could leave the squad panel blank while leagues remained current.
+- Retain the last good current-gameweek squad when the picks endpoint is temporarily unavailable and publish an explicit bounded squad status instead of silently replacing it with an empty list.
+
 ## 0.13.2
 
 - Publish the complete configured entry's classic-league list instead of silently truncating it after eight leagues.
