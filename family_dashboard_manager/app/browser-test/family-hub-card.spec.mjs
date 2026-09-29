@@ -83,11 +83,11 @@ function fixtureStates() {
     "sensor.example_robovac_battery": state("sensor.example_robovac_battery", "88"),
     "sensor.example_robovac_task": state("sensor.example_robovac_task", "idle"),
     "sensor.example_robovac_dock": state("sensor.example_robovac_dock", "ready"),
-    "light.living_room": state("light.living_room", "on", { friendly_name: "Living room", brightness: 184, rgb_color: [255, 187, 112] }),
-    "light.kitchen": state("light.kitchen", "off", { friendly_name: "Kitchen" }),
+    "light.living_room": state("light.living_room", "on", { friendly_name: "Living room", brightness: 184, rgb_color: [255, 187, 112], supported_color_modes: ["hs"] }),
+    "light.kitchen": state("light.kitchen", "off", { friendly_name: "Kitchen", supported_color_modes: ["brightness"] }),
     "light.hallway": state("light.hallway", "off", { friendly_name: "Hallway" }),
     "light.child_one_room": state("light.child_one_room", "off", { friendly_name: "Child one room" }),
-    "light.child_two_room": state("light.child_two_room", "on", { friendly_name: "Child two room", brightness: 90 }),
+    "light.child_two_room": state("light.child_two_room", "on", { friendly_name: "Child two room", brightness: 90, supported_color_modes: ["brightness"] }),
     "scene.living_room_relax": state("scene.living_room_relax", "scening", { friendly_name: "Relax" }),
     "scene.kitchen_bright": state("scene.kitchen_bright", "scening", { friendly_name: "Kitchen bright" }),
     "scene.child_one_bedtime": state("scene.child_one_bedtime", "scening", { friendly_name: "Bedtime" }),
@@ -1394,6 +1394,77 @@ test("balances six lighting rooms as a contained three-by-two tablet grid", asyn
   expect(pageErrors).toEqual([]);
 });
 
+test("offers brightness controls for dimmable lights while keeping lamps binary", async ({ page }) => {
+  const lightingConfig = structuredClone(config);
+  lightingConfig.rooms.find((room) => room.id === "living_room").lights.push("light.living_room_lamp");
+  const pageErrors = await mount(page, lightingConfig, {
+    "light.living_room_lamp": state("light.living_room_lamp", "on", {
+      friendly_name: "Living room lamp",
+      brightness: 150,
+      supported_color_modes: ["brightness"]
+    })
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
+  await card.locator('[data-home-section="lights"]').click();
+
+  const livingDimmer = card.locator('[data-light-brightness="light.living_room"]');
+  await expect(livingDimmer).toHaveCount(1);
+  await expect(card.locator('[data-light-brightness="light.living_room_lamp"]')).toHaveCount(0);
+  await livingDimmer.evaluate((input) => {
+    input.value = "45";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(card.locator('.light-dimmer:has([data-light-brightness="light.living_room"]) output')).toHaveText("45%");
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toContainEqual({
+    domain: "light",
+    service: "turn_on",
+    data: { entity_id: "light.living_room", brightness_pct: 45 }
+  });
+  await expectNoRootOverflow(page);
+  expect(pageErrors).toEqual([]);
+});
+
+test("keeps an expanded heating schedule and its draft open through live state refreshes", async ({ page }) => {
+  const pageErrors = await mount(page);
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
+  await card.locator('[data-home-section="heating"]').click();
+
+  const livingCard = card.locator('[data-climate-card="climate.living_room"]');
+  const schedule = livingCard.locator('details[data-heating-schedule="living_room"]');
+  await schedule.locator("summary").click();
+  await expect(schedule).toHaveAttribute("open", "");
+  await expect(livingCard).toHaveClass(/is-schedule-open/);
+  await expect(schedule.locator(".schedule-period")).toHaveCount(4);
+  await expect(schedule.locator(".schedule-period").first()).toContainText("Starts");
+  await expect(schedule.locator(".schedule-period").first()).toContainText("Temperature");
+
+  const wakeTime = schedule.locator('[data-schedule-time="0"]');
+  await wakeTime.fill("06:30");
+  await updateEntityState(card, state("climate.kitchen", "heat", {
+    current_temperature: 19.3,
+    temperature: 20,
+    hvac_action: "idle"
+  }));
+  await expect(card.locator('[data-climate-card="climate.living_room"] details[data-heating-schedule="living_room"]')).toHaveAttribute("open", "");
+  await expect(card.locator('[data-climate-card="climate.living_room"] [data-schedule-time="0"]')).toHaveValue("06:30");
+
+  const masterBounds = await card.locator(".heating-master").evaluate((master) => {
+    const outer = master.getBoundingClientRect();
+    const controls = [...master.querySelectorAll("button, input, summary")].map((control) => control.getBoundingClientRect());
+    return {
+      left: Math.min(...controls.map((bounds) => bounds.left)) - outer.left,
+      right: Math.max(...controls.map((bounds) => bounds.right)) - outer.right
+    };
+  });
+  expect(masterBounds.left).toBeGreaterThanOrEqual(-1);
+  expect(masterBounds.right).toBeLessThanOrEqual(1);
+  await expectNoRootOverflow(page);
+  expect(pageErrors).toEqual([]);
+});
+
 test("disables unavailable Home toggles and exposes switch state to assistive technology", async ({ page }) => {
   const pageErrors = await mount(page, config, {
     "light.living_room": state("light.living_room", "unavailable", { friendly_name: "Living room light" }),
@@ -1499,7 +1570,7 @@ test("routes a room-mapped garage door through the protected Security action", a
   expect(pageErrors).toEqual([]);
 });
 
-test("v0.13 heating keeps six zones accessible inside the bounded heating grid", async ({ page }, testInfo) => {
+test("v0.14 heating keeps six zones accessible inside the bounded heating grid", async ({ page }, testInfo) => {
   const sixZoneConfig = sixZoneHouseholdConfig();
   const pageErrors = await mount(page, sixZoneConfig, sixZoneStateOverrides());
   const card = page.locator("family-hub-card");

@@ -51,6 +51,7 @@ export function isControlAction(dataset = {}) {
     || dataset.roomLights
     || dataset.allInternalLights !== undefined
     || dataset.climateMaster
+    || dataset.masterTemperatureAdjust
     || dataset.heatingScheduleApply
     || dataset.cleaningCommand
   );
@@ -556,6 +557,16 @@ function entityStateValue(state) {
 export function isEntityAvailable(state) {
   const value = entityStateValue(state);
   return Boolean(state) && !["", "unknown", "unavailable"].includes(value);
+}
+
+export function lightSupportsBrightness(state, name = "") {
+  if (!isEntityAvailable(state) || /\blamps?\b/i.test(String(name))) return false;
+  const modes = Array.isArray(state?.attributes?.supported_color_modes)
+    ? state.attributes.supported_color_modes
+    : [];
+  if (modes.some((mode) => !["onoff", "unknown"].includes(String(mode).toLowerCase()))) return true;
+  return (safeNumber(state?.attributes?.supported_features, 0) & 1) === 1
+    || Number.isFinite(safeNumber(state?.attributes?.brightness, NaN));
 }
 
 export function isCommandEntityAvailable(state) {
@@ -1949,6 +1960,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._footballTab = "fixtures";
     this._fplEntryId = null;
     this._masterTemperature = 20;
+    this._expandedHeatingSchedules = new Set();
+    this._heatingScheduleDrafts = new Map();
     this._gameweek = null;
     this._entityIds = new Set();
     this._controlPolicy = buildControlPolicy();
@@ -1980,6 +1993,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._childMountGeneration = 0;
     this._boundClick = (event) => this._handleClick(event);
     this._boundChange = (event) => this._handleChange(event);
+    this._boundInput = (event) => this._handleInput(event);
+    this._boundToggle = (event) => this._handleToggle(event);
     this._boundKeydown = (event) => this._handleKeydown(event);
     this._boundPointerActivity = () => this._handlePhotoFrameActivity();
     this._boundVisibilityChange = () => {
@@ -2001,6 +2016,8 @@ export class FamilyHubCard extends HTMLElementBase {
   connectedCallback() {
     this.shadowRoot.addEventListener("click", this._boundClick);
     this.shadowRoot.addEventListener("change", this._boundChange);
+    this.shadowRoot.addEventListener("input", this._boundInput);
+    this.shadowRoot.addEventListener("toggle", this._boundToggle, true);
     this.shadowRoot.addEventListener("keydown", this._boundKeydown);
     this.shadowRoot.addEventListener("pointerdown", this._boundPointerActivity, { passive: true });
     globalThis.document?.addEventListener?.("visibilitychange", this._boundVisibilityChange);
@@ -2016,6 +2033,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._invalidateChildHass();
     this.shadowRoot.removeEventListener("click", this._boundClick);
     this.shadowRoot.removeEventListener("change", this._boundChange);
+    this.shadowRoot.removeEventListener("input", this._boundInput);
+    this.shadowRoot.removeEventListener("toggle", this._boundToggle, true);
     this.shadowRoot.removeEventListener("keydown", this._boundKeydown);
     this.shadowRoot.removeEventListener("pointerdown", this._boundPointerActivity);
     globalThis.document?.removeEventListener?.("visibilitychange", this._boundVisibilityChange);
@@ -2044,6 +2063,10 @@ export class FamilyHubCard extends HTMLElementBase {
       ? this._cameraConfigGeneration + 1
       : 1;
     this._config = config;
+    this._expandedHeatingSchedules ||= new Set();
+    this._expandedHeatingSchedules.clear();
+    this._heatingScheduleDrafts ||= new Map();
+    this._heatingScheduleDrafts.clear();
     this._clearPhotoFrameTimers();
     this._photoFrameActive = false;
     this._photoFrameIndex = 0;
@@ -3327,6 +3350,10 @@ export class FamilyHubCard extends HTMLElementBase {
     const exteriorLights = new Set(this._config.home?.exterior_lights || []);
     const internalLights = this._config.rooms.flatMap((room) => room.lights).filter((entityId) => !exteriorLights.has(entityId));
     const internalOn = internalLights.filter((entityId) => states[entityId]?.state === "on").length;
+    const internalDimmable = internalLights.filter((entityId) => {
+      const state = states[entityId];
+      return lightSupportsBrightness(state, entityName(state, titleCase(entityId.split(".")[1])));
+    }).length;
     const rooms = this._config.rooms.filter((room) => room.lights.length).map((room) => {
       const lightStates = room.lights.map((entityId) => states[entityId]);
       const onCount = lightStates.filter((state) => state?.state === "on").length;
@@ -3337,12 +3364,13 @@ export class FamilyHubCard extends HTMLElementBase {
         const isOn = state?.state === "on";
         const name = entityName(state, titleCase(entityId.split(".")[1]));
         const reportedBrightness = safeNumber(state?.attributes?.brightness, NaN);
-        const brightness = isOn
-          ? Number.isFinite(reportedBrightness) ? `${Math.round(reportedBrightness / 2.55)}%` : "On"
-          : titleCase(state?.state || "unavailable");
+        const brightnessPercent = Number.isFinite(reportedBrightness) ? Math.max(1, Math.min(100, Math.round(reportedBrightness / 2.55))) : 100;
+        const dimmable = lightSupportsBrightness(state, name);
+        const brightness = isOn ? dimmable ? `${brightnessPercent}% brightness` : "On" : titleCase(state?.state || "unavailable");
         const unavailable = readOnly || !available ? ' disabled aria-disabled="true"' : "";
         const actionLabel = available ? `Turn ${name} ${isOn ? "off" : "on"}` : `${name} unavailable`;
-        return `<button type="button" class="whole-home-control ${isOn ? "is-on" : ""}" data-toggle="${escapeHtml(entityId)}" aria-label="${escapeHtml(actionLabel)}" aria-pressed="${isOn}"${unavailable}><ha-icon icon="${ICONS.light}" aria-hidden="true"></ha-icon><span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(brightness)}</small></span></button>`;
+        const dimmer = dimmable ? `<label class="light-dimmer ${isOn ? "is-on" : ""}" style="--light-level:${brightnessPercent}%"><span class="sr-only">${escapeHtml(name)} brightness</span><ha-icon icon="mdi:brightness-6" aria-hidden="true"></ha-icon><input type="range" min="1" max="100" step="1" value="${brightnessPercent}" data-light-brightness="${escapeHtml(entityId)}" aria-label="${escapeHtml(name)} brightness, ${brightnessPercent} percent"${unavailable}><output>${brightnessPercent}%</output></label>` : "";
+        return `<div class="light-device ${isOn ? "is-on" : ""} ${dimmable ? "is-dimmable" : "is-binary"}"><button type="button" class="whole-home-control ${isOn ? "is-on" : ""}" data-toggle="${escapeHtml(entityId)}" aria-label="${escapeHtml(actionLabel)}" aria-pressed="${isOn}"${unavailable}><span class="light-control-icon"><ha-icon icon="${ICONS.light}" aria-hidden="true"></ha-icon></span><span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(brightness)}</small></span><span class="light-power-indicator" aria-hidden="true"><ha-icon icon="mdi:power"></ha-icon></span></button>${dimmer}</div>`;
       }).join("");
       const status = availableCount === 0
         ? "Status unavailable"
@@ -3351,9 +3379,9 @@ export class FamilyHubCard extends HTMLElementBase {
           : `${onCount} of ${room.lights.length} on`;
       const roomAction = onCount > 0 ? "turn_off" : "turn_on";
       const roomDisabled = readOnly || availableCount === 0 ? ' disabled aria-disabled="true"' : "";
-      return `<article class="surface whole-home-card"><div class="whole-home-heading"><span><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><h3>${escapeHtml(room.name)}</h3><p>${status}</p></div><button type="button" class="room-light-master ${onCount ? "is-on" : ""}" data-room-lights="${escapeHtml(room.id)}" data-light-service="${roomAction}"${roomDisabled}><ha-icon icon="mdi:power"></ha-icon>${roomAction === "turn_off" ? "All off" : "All on"}</button></div><div class="whole-home-controls">${controls}</div></article>`;
+      return `<article class="surface whole-home-card ${onCount ? "has-lights-on" : ""}"><div class="whole-home-heading"><span><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><h3>${escapeHtml(room.name)}</h3><p>${status}</p></div><button type="button" class="room-light-master ${onCount ? "is-on" : ""}" data-room-lights="${escapeHtml(room.id)}" data-light-service="${roomAction}"${roomDisabled}><ha-icon icon="mdi:power"></ha-icon>${roomAction === "turn_off" ? "All off" : "All on"}</button></div><div class="whole-home-controls">${controls}</div></article>`;
     }).join("");
-    return `<section class="lights-experience"><article class="surface lighting-master"><div><p class="eyebrow">Whole house</p><h2>Internal lights</h2><span>${internalOn ? `${internalOn} currently on` : "Everything inside is off"}</span></div><button type="button" data-all-internal-lights data-light-service="turn_off" ${readOnly || internalOn === 0 ? 'disabled aria-disabled="true"' : ""}><ha-icon icon="mdi:lightbulb-group-off-outline"></ha-icon>Turn all internal lights off</button></article><div class="whole-home-grid">${rooms || '<p class="hub-empty-state">No room lights are available yet.</p>'}</div></section>`;
+    return `<section class="lights-experience"><article class="surface lighting-master"><div class="lighting-master-copy"><p class="eyebrow">Whole house</p><h2>Lighting</h2><span>${internalOn ? `${internalOn} of ${internalLights.length} internal lights on` : "Everything inside is off"}</span></div><div class="lighting-master-stats"><span><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon><strong>${internalOn}</strong><small>On now</small></span><span><ha-icon icon="mdi:tune-vertical"></ha-icon><strong>${internalDimmable}</strong><small>Dimmable</small></span></div><button type="button" class="lighting-all-off" data-all-internal-lights data-light-service="turn_off" ${readOnly || internalOn === 0 ? 'disabled aria-disabled="true"' : ""}><ha-icon icon="mdi:lightbulb-group-off-outline"></ha-icon><span>Turn all off</span></button></article><div class="whole-home-grid">${rooms || '<p class="hub-empty-state">No room lights are available yet.</p>'}</div></section>`;
   }
 
   _renderAllHeating() {
@@ -3389,8 +3417,10 @@ export class FamilyHubCard extends HTMLElementBase {
           ? `Next ${formatTemperature(nextPeriod.temperature)} at ${nextPeriod.time}${nextPeriod.tomorrow ? " tomorrow" : ""}`
           : "Schedule waiting for thermostat"
         : "No schedule entity configured";
+      const scheduleOpen = this._expandedHeatingSchedules.has(room.id);
+      const schedulePeriods = this._heatingScheduleDrafts.get(room.id) || decodedSchedule?.periods || DEFAULT_HEATING_SCHEDULE;
       return `
-        <article class="surface heating-card is-${escapeHtml(presentation.tone)} ${presentation.available ? presentation.isOn ? "is-on" : "is-off" : "is-state-unavailable"}" data-climate-card="${escapeHtml(room.climate)}">
+        <article class="surface heating-card is-${escapeHtml(presentation.tone)} ${presentation.available ? presentation.isOn ? "is-on" : "is-off" : "is-state-unavailable"} ${scheduleOpen ? "is-schedule-open" : ""}" data-climate-card="${escapeHtml(room.climate)}">
           <div class="heating-card-heading">
             <span class="heating-icon"><ha-icon icon="${ICONS.climate}"></ha-icon></span>
             <div><h3>${escapeHtml(room.name)}</h3><p class="heating-status"><span aria-hidden="true"></span>${escapeHtml(presentation.label)}</p></div>
@@ -3407,17 +3437,20 @@ export class FamilyHubCard extends HTMLElementBase {
               </div>
             </div>
           </div>
-          <details class="heating-schedule"><summary><span><ha-icon icon="mdi:calendar-clock"></ha-icon><strong>Schedule</strong><small>${escapeHtml(scheduleSummary)}</small></span><ha-icon icon="mdi:chevron-down"></ha-icon></summary>${room.heating_schedule ? this._renderHeatingScheduleEditor(decodedSchedule?.periods || DEFAULT_HEATING_SCHEDULE, room.id, readOnly) : '<p class="hub-empty-state compact">Add this thermostat’s schedule entities in Admin to edit it here.</p>'}</details>
+          <details class="heating-schedule" data-heating-schedule="${escapeHtml(room.id)}"${scheduleOpen ? " open" : ""}><summary><span><ha-icon icon="mdi:calendar-clock"></ha-icon><strong>Daily schedule</strong><small>${escapeHtml(scheduleSummary)}</small></span><ha-icon class="schedule-chevron" icon="mdi:chevron-down"></ha-icon></summary>${room.heating_schedule ? this._renderHeatingScheduleEditor(schedulePeriods, room.id, readOnly) : '<p class="hub-empty-state compact">Add this thermostat’s schedule entities in Admin to edit it here.</p>'}</details>
         </article>
       `;
     }).join("");
     const availableZones = heatingRooms.filter((room) => isEntityAvailable(states[room.climate])).length;
-    return `<section class="heating-experience"><article class="surface heating-master"><div><p class="eyebrow">Whole house</p><h2>Master heating</h2><span>${availableZones} of ${heatingRooms.length} zones available</span></div><label><span>Target</span><input type="number" min="5" max="35" step="0.5" value="${this._masterTemperature}" data-master-temperature ${readOnly ? "disabled" : ""}></label><div class="heating-master-actions"><button type="button" data-climate-master="set_temperature" ${readOnly || !availableZones ? "disabled" : ""}>Set all rooms</button><button type="button" data-climate-master="turn_on" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:radiator"></ha-icon>All on</button><button type="button" data-climate-master="turn_off" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:power"></ha-icon>All off</button></div><details class="heating-schedule master-schedule"><summary><span><ha-icon icon="mdi:calendar-sync"></ha-icon><strong>Set the same daily schedule</strong><small>Apply four temperature periods to every configured zone</small></span><ha-icon icon="mdi:chevron-down"></ha-icon></summary>${this._renderHeatingScheduleEditor(masterSchedule, "all", readOnly || schedulableRooms.length === 0)}</details></article><div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="hub-empty-state">No heating controls are available yet.</p>'}</div></section>`;
+    const masterOpen = this._expandedHeatingSchedules.has("all");
+    const masterPeriods = this._heatingScheduleDrafts.get("all") || masterSchedule;
+    return `<section class="heating-experience"><article class="surface heating-master ${masterOpen ? "is-schedule-open" : ""}"><div class="heating-master-copy"><p class="eyebrow">Whole house</p><h2>Master heating</h2><span>${availableZones} of ${heatingRooms.length} zones available</span></div><div class="heating-master-target"><span>All-room target</span><div class="master-temperature-stepper"><button type="button" data-master-temperature-adjust="-0.5" aria-label="Lower all-room target" ${readOnly ? "disabled" : ""}>−</button><label><span class="sr-only">All-room target temperature</span><input type="number" min="5" max="35" step="0.5" value="${this._masterTemperature}" data-master-temperature ${readOnly ? "disabled" : ""}><b>°</b></label><button type="button" data-master-temperature-adjust="0.5" aria-label="Raise all-room target" ${readOnly ? "disabled" : ""}>+</button></div></div><div class="heating-master-actions"><button type="button" data-climate-master="set_temperature" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:thermometer-check"></ha-icon><span>Set all rooms</span></button><button type="button" data-climate-master="turn_on" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:radiator"></ha-icon><span>All on</span></button><button type="button" data-climate-master="turn_off" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:power"></ha-icon><span>All off</span></button></div><details class="heating-schedule master-schedule" data-heating-schedule="all"${masterOpen ? " open" : ""}><summary><span><ha-icon icon="mdi:calendar-sync"></ha-icon><strong>Whole-house schedule</strong><small>Use the same four periods in every configured room</small></span><ha-icon class="schedule-chevron" icon="mdi:chevron-down"></ha-icon></summary>${this._renderHeatingScheduleEditor(masterPeriods, "all", readOnly || schedulableRooms.length === 0)}</details></article><div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="hub-empty-state">No heating controls are available yet.</p>'}</div></section>`;
   }
 
   _renderHeatingScheduleEditor(periods, scope, disabled = false) {
     const names = ["Wake", "Away", "Home", "Sleep"];
-    return `<div class="schedule-editor" data-schedule-editor="${escapeHtml(scope)}">${periods.map((period, index) => `<label><span>${names[index]}</span><input type="time" value="${escapeHtml(period.time)}" data-schedule-time="${index}" ${disabled ? "disabled" : ""}><span class="schedule-temp"><input type="number" min="5" max="35" step="0.5" value="${Number(period.temperature)}" data-schedule-temperature="${index}" ${disabled ? "disabled" : ""}>°C</span></label>`).join("")}<button type="button" data-heating-schedule-apply="${escapeHtml(scope)}" ${disabled ? "disabled" : ""}><ha-icon icon="mdi:content-save-outline"></ha-icon>${scope === "all" ? "Apply to all rooms" : "Save this room"}</button></div>`;
+    const descriptions = ["Morning", "Daytime", "Evening", "Overnight"];
+    return `<div class="schedule-editor" data-schedule-editor="${escapeHtml(scope)}"><div class="schedule-periods">${periods.map((period, index) => `<fieldset class="schedule-period"><legend><span>${index + 1}</span><strong>${names[index]}</strong><small>${descriptions[index]}</small></legend><label><span>Starts</span><input type="time" value="${escapeHtml(period.time)}" data-schedule-time="${index}" ${disabled ? "disabled" : ""}></label><label><span>Temperature</span><span class="schedule-temp"><input type="number" min="5" max="35" step="0.5" value="${Number(period.temperature)}" data-schedule-temperature="${index}" ${disabled ? "disabled" : ""}><b>°C</b></span></label></fieldset>`).join("")}</div><button type="button" data-heating-schedule-apply="${escapeHtml(scope)}" ${disabled ? "disabled" : ""}><ha-icon icon="mdi:content-save-outline"></ha-icon>${scope === "all" ? "Apply schedule to all rooms" : "Save schedule"}</button></div>`;
   }
 
   _renderAllCovers() {
@@ -5106,6 +5139,21 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _handleChange(event) {
     this._armPhotoFrameIdleTimer();
+    const lightBrightness = event.target.closest?.("[data-light-brightness]");
+    if (lightBrightness) {
+      const entityId = lightBrightness.dataset.lightBrightness;
+      const state = this._hass?.states?.[entityId];
+      const name = entityName(state, titleCase(entityId?.split(".")[1]));
+      const brightnessPct = Math.max(1, Math.min(100, Math.round(Number(lightBrightness.value))));
+      if (!this._config.display.read_only
+        && this._controlPolicy.lights.has(entityId)
+        && isEntityAvailable(state)
+        && lightSupportsBrightness(state, name)
+        && Number.isFinite(brightnessPct)) {
+        this._hass?.callService?.("light", "turn_on", { entity_id: entityId, brightness_pct: brightnessPct });
+      }
+      return;
+    }
     const cleaningSelect = event.target.closest?.("[data-cleaning-select]");
     if (cleaningSelect) {
       const entityId = cleaningSelect.dataset.cleaningSelect;
@@ -5126,6 +5174,49 @@ export class FamilyHubCard extends HTMLElementBase {
       this._gameweek = Math.max(1, Math.min(38, safeNumber(select.value, 1)));
       this._scheduleRender(true);
     }
+  }
+
+  _handleInput(event) {
+    const lightBrightness = event.target.closest?.("[data-light-brightness]");
+    if (lightBrightness) {
+      const brightnessPct = Math.max(1, Math.min(100, Math.round(Number(lightBrightness.value))));
+      const dimmer = lightBrightness.closest(".light-dimmer");
+      dimmer?.style.setProperty("--light-level", `${brightnessPct}%`);
+      const output = dimmer?.querySelector("output");
+      if (output) output.textContent = `${brightnessPct}%`;
+      return;
+    }
+    const scheduleInput = event.target.closest?.("[data-schedule-time], [data-schedule-temperature]");
+    if (!scheduleInput) return;
+    const editor = scheduleInput.closest("[data-schedule-editor]");
+    const scope = editor?.dataset.scheduleEditor;
+    if (!scope) return;
+    const periods = [0, 1, 2, 3].map((stage) => ({
+      stage,
+      time: editor.querySelector(`[data-schedule-time="${stage}"]`)?.value || "",
+      temperature: Number(editor.querySelector(`[data-schedule-temperature="${stage}"]`)?.value)
+    }));
+    this._heatingScheduleDrafts.set(scope, periods);
+  }
+
+  _handleToggle(event) {
+    const details = event.target?.closest?.("details[data-heating-schedule]");
+    if (!details?.isConnected) return;
+    const scope = details.dataset.heatingSchedule;
+    const wasOpen = this._expandedHeatingSchedules.has(scope);
+    if (details.open) {
+      if (scope !== "all") {
+        for (const current of this._expandedHeatingSchedules) {
+          if (current !== "all" && current !== scope) this._expandedHeatingSchedules.delete(current);
+        }
+      }
+      this._expandedHeatingSchedules.add(scope);
+    } else {
+      this._expandedHeatingSchedules.delete(scope);
+    }
+    const changed = wasOpen !== details.open
+      || (details.open && scope !== "all" && [...this._expandedHeatingSchedules].filter((current) => current !== "all").length > 1);
+    if (changed) this._scheduleRender(true);
   }
 
   async _callPlannerAction(domain, service, entityId, data = {}) {
@@ -5531,6 +5622,13 @@ export class FamilyHubCard extends HTMLElementBase {
       const exterior = new Set(this._config.home?.exterior_lights || []);
       const entityIds = [...this._controlPolicy.lights].filter((entityId) => !exterior.has(entityId) && isEntityAvailable(this._hass?.states?.[entityId]));
       if (entityIds.length) this._hass?.callService?.("light", "turn_off", { entity_id: entityIds });
+      return;
+    }
+    if (target.dataset.masterTemperatureAdjust) {
+      const adjustment = Number(target.dataset.masterTemperatureAdjust);
+      if (![-0.5, 0.5].includes(adjustment)) return;
+      this._masterTemperature = Math.max(5, Math.min(35, Math.round((this._masterTemperature + adjustment) * 2) / 2));
+      this._scheduleRender(true);
       return;
     }
     if (target.dataset.climateMaster) {
@@ -7659,18 +7757,64 @@ export class FamilyHubCard extends HTMLElementBase {
       .league-table tr.is-spotlight { background:#F1F6FF; }
 
       .lights-experience,.heating-experience { height:100%; min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr); gap:14px; }
-      .lighting-master,.heating-master { min-height:86px; padding:16px 20px; display:flex; align-items:center; gap:18px; border-color:#DCE4EE; background:linear-gradient(120deg,#061B3A,#0C315D); color:#fff; }
-      .lighting-master > div,.heating-master > div:first-child { flex:1; min-width:0; }
+      .lighting-master,.heating-master { min-height:94px; padding:16px 20px; border-color:#DCE4EE; background:radial-gradient(circle at 76% 0,rgba(39,118,242,.28),transparent 32%),linear-gradient(120deg,#061B3A,#0C315D); color:#fff; }
+      .lighting-master { display:grid; grid-template-columns:minmax(190px,1fr) auto auto; align-items:center; gap:18px; overflow:hidden; }
+      .lighting-master-copy,.heating-master-copy { min-width:0; }
       .lighting-master h2,.heating-master h2 { margin:2px 0; color:#fff; font-size:22px; }
-      .lighting-master span,.heating-master span { color:#B8C7D9; font-size:12px; }
+      .lighting-master-copy > span,.heating-master-copy > span { color:#B8C7D9; font-size:12px; }
       .lighting-master button,.heating-master-actions button,.schedule-editor > button { min-height:48px; padding:0 15px; border:1px solid rgba(255,255,255,.18); border-radius:14px; background:#1463E8; color:#fff; font-weight:800; }
+      .lighting-master-stats { display:flex; align-items:center; gap:8px; }
+      .lighting-master-stats > span { min-width:92px; padding:8px 10px; display:grid; grid-template-columns:24px auto; grid-template-rows:auto auto; align-items:center; gap:0 7px; border:1px solid rgba(255,255,255,.14); border-radius:14px; background:rgba(255,255,255,.08); }
+      .lighting-master-stats ha-icon { grid-row:1/3; --mdc-icon-size:22px; color:#FFD56A; }
+      .lighting-master-stats strong { color:#fff; font-size:16px; line-height:1; }
+      .lighting-master-stats small { color:#B8C7D9; font-size:12px; }
+      .lighting-all-off { display:flex; align-items:center; justify-content:center; gap:7px; white-space:nowrap; }
+      .lighting-all-off ha-icon { --mdc-icon-size:20px; }
+      .lighting-master button:disabled { opacity:.48; }
       .room-light-master { margin-left:auto; min-height:48px; padding:0 11px; border:1px solid #DCE4EE; border-radius:13px; background:#EAF2FF; color:#1463E8; display:flex; align-items:center; gap:5px; font-weight:800; }
       .room-light-master.is-on { border-color:#E8C67E; background:#FFF4D9; color:#765000; }
-      .heating-master > label { display:grid; gap:4px; color:#fff; font-size:12px; font-weight:800; }
-      .heating-master > label input { width:78px; height:46px; padding:0 10px; border:1px solid rgba(255,255,255,.2); border-radius:13px; background:rgba(255,255,255,.12); color:#fff; font:800 18px inherit; }
-      .heating-master-actions { display:flex; gap:7px; }
-      .heating-master .master-schedule { flex:0 1 310px; border-color:rgba(255,255,255,.18); background:rgba(255,255,255,.07); color:#fff; }
-      .heating-card { height:max-content; }
+      .whole-home-card { position:relative; overflow:hidden; background:#fff; transition:border-color .2s ease,box-shadow .2s ease; }
+      .whole-home-card::before { content:""; position:absolute; inset:0 0 auto; height:4px; background:#DCE4EE; }
+      .whole-home-card.has-lights-on { border-color:#F1D795; box-shadow:0 14px 34px rgba(123,85,17,.1); }
+      .whole-home-card.has-lights-on::before { background:linear-gradient(90deg,#F4B740,#FFD978); }
+      .whole-home-controls { grid-template-columns:1fr; gap:8px; }
+      .light-device { overflow:hidden; border:1px solid #DCE4EE; border-radius:14px; background:#F7F9FC; transition:border-color .18s ease,background .18s ease; }
+      .light-device.is-on { border-color:#EDC76C; background:linear-gradient(100deg,#FFF8E7,#FFF3D4); }
+      .light-device .whole-home-control { width:100%; min-height:58px; padding:9px 10px; display:grid; grid-template-columns:36px minmax(0,1fr) 32px; gap:9px; border:0; border-radius:0; background:transparent; color:#0B1830; }
+      .light-device .whole-home-control.is-on { background:transparent; color:#674600; }
+      .light-control-icon { width:34px; height:34px; display:grid; place-items:center; border-radius:11px; background:#E8EFF9; color:#1463E8; }
+      .light-device.is-on .light-control-icon { background:#FFE7A8; color:#8A5C00; box-shadow:0 0 18px rgba(244,183,64,.28); }
+      .light-device .whole-home-control strong { font-size:12px; }
+      .light-device .whole-home-control small { margin-top:3px; color:#68778E; font-size:12px; }
+      .light-power-indicator { width:30px; height:30px; display:grid; place-items:center; border-radius:10px; background:#EEF3FA; color:#718198; }
+      .light-device.is-on .light-power-indicator { background:#F4B740; color:#fff; }
+      .light-power-indicator ha-icon { --mdc-icon-size:17px; }
+      .light-dimmer { min-height:42px; padding:0 10px 8px; display:grid; grid-template-columns:18px minmax(0,1fr) 38px; align-items:center; gap:7px; color:#718198; }
+      .light-dimmer ha-icon { --mdc-icon-size:16px; }
+      .light-dimmer output { color:#53637A; font-size:12px; font-weight:850; text-align:right; }
+      .light-dimmer input { width:100%; height:28px; margin:0; appearance:none; -webkit-appearance:none; background:transparent; cursor:pointer; }
+      .light-dimmer input::-webkit-slider-runnable-track { height:6px; border-radius:999px; background:linear-gradient(90deg,#F4B740 0 var(--light-level),#DCE4EE var(--light-level) 100%); }
+      .light-dimmer input::-webkit-slider-thumb { width:18px; height:18px; margin-top:-6px; appearance:none; -webkit-appearance:none; border:3px solid #fff; border-radius:50%; background:#E5A51B; box-shadow:0 2px 6px rgba(44,59,82,.3); }
+      .light-dimmer input::-moz-range-track { height:6px; border-radius:999px; background:#DCE4EE; }
+      .light-dimmer input::-moz-range-progress { height:6px; border-radius:999px; background:#F4B740; }
+      .light-dimmer input::-moz-range-thumb { width:14px; height:14px; border:3px solid #fff; border-radius:50%; background:#E5A51B; box-shadow:0 2px 6px rgba(44,59,82,.3); }
+      .light-dimmer input:disabled { cursor:not-allowed; opacity:.48; }
+      .heating-master { display:grid; grid-template-columns:minmax(185px,1fr) auto minmax(330px,auto); align-items:center; gap:14px 18px; overflow:visible; }
+      .heating-master-target { display:grid; gap:5px; color:#C5D1E0; font-size:12px; font-weight:800; }
+      .master-temperature-stepper { display:grid; grid-template-columns:48px 70px 48px; overflow:hidden; border:1px solid rgba(255,255,255,.2); border-radius:14px; background:rgba(255,255,255,.1); }
+      .master-temperature-stepper button { min-height:48px; border:0; background:transparent; color:#BFD6FF; font-size:20px; font-weight:900; }
+      .master-temperature-stepper label { min-width:0; display:flex; align-items:center; justify-content:center; border-inline:1px solid rgba(255,255,255,.14); }
+      .master-temperature-stepper input { width:43px; height:46px; padding:0; border:0; outline:0; background:transparent; color:#fff; font-size:18px; font-weight:900; text-align:right; -moz-appearance:textfield; }
+      .master-temperature-stepper input::-webkit-inner-spin-button,.master-temperature-stepper input::-webkit-outer-spin-button { margin:0; -webkit-appearance:none; }
+      .master-temperature-stepper b { color:#fff; font-size:16px; }
+      .heating-master-actions { display:grid; grid-template-columns:minmax(132px,1.35fr) repeat(2,minmax(92px,1fr)); gap:8px; }
+      .heating-master-actions button { min-width:0; display:flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap; }
+      .heating-master-actions button:disabled { opacity:.48; }
+      .heating-master-actions ha-icon { --mdc-icon-size:19px; }
+      .heating-master .master-schedule { grid-column:1/-1; border-color:rgba(255,255,255,.18); background:rgba(255,255,255,.07); color:#fff; }
+      .heating-master .master-schedule summary small { color:#AFC0D5; }
+      .heating-card { height:max-content; grid-template-rows:auto auto auto; }
+      .heating-card.is-schedule-open { grid-column:span 2; }
       .heating-schedule { border:1px solid #DCE4EE; border-radius:14px; background:#F7F9FC; overflow:visible; }
       .heating-schedule summary { min-height:48px; padding:7px 10px; display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:pointer; list-style:none; }
       .heating-schedule summary::-webkit-details-marker { display:none; }
@@ -7678,11 +7822,22 @@ export class FamilyHubCard extends HTMLElementBase {
       .heating-schedule summary > span ha-icon { grid-row:1/3; --mdc-icon-size:19px; color:#1463E8; }
       .heating-schedule summary strong { color:inherit; font-size:12px; }
       .heating-schedule summary small { color:#5E6B80; font-size:12px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
-      .schedule-editor { padding:9px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; border-top:1px solid #DCE4EE; }
-      .schedule-editor label { min-width:0; display:grid; grid-template-columns:1fr 86px; gap:5px; align-items:center; color:#33445C; font-size:12px; font-weight:800; }
-      .schedule-editor input { min-width:0; width:100%; height:38px; padding:0 6px; border:1px solid #DCE4EE; border-radius:10px; background:#fff; color:#0B1830; }
-      .schedule-temp { display:flex; align-items:center; gap:2px; }
-      .schedule-editor > button { grid-column:1/-1; min-height:48px; }
+      .heating-schedule .schedule-chevron { transition:transform .18s ease; }
+      .heating-schedule[open] .schedule-chevron { transform:rotate(180deg); }
+      .schedule-editor { padding:12px; display:grid; gap:10px; border-top:1px solid #DCE4EE; }
+      .schedule-periods { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+      .master-schedule .schedule-periods { grid-template-columns:repeat(4,minmax(0,1fr)); }
+      .schedule-period { min-width:0; margin:0; padding:9px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; border:1px solid #DCE4EE; border-radius:12px; background:#fff; }
+      .schedule-period legend { width:100%; padding:0 0 7px; display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:6px; color:#0B1830; }
+      .schedule-period legend > span { width:22px; height:22px; display:grid; place-items:center; border-radius:7px; background:#EAF2FF; color:#1463E8; font-size:12px; font-weight:900; }
+      .schedule-period legend strong { font-size:12px; }
+      .schedule-period legend small { color:#7B889B; font-size:12px; }
+      .schedule-period label { min-width:0; display:grid; gap:4px; color:#68778E; font-size:12px; font-weight:850; }
+      .schedule-period input { min-width:0; width:100%; height:38px; padding:0 8px; border:1px solid #DCE4EE; border-radius:10px; background:#F7F9FC; color:#0B1830; box-sizing:border-box; font-weight:750; }
+      .schedule-temp { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) 24px; align-items:center; overflow:hidden; border:1px solid #DCE4EE; border-radius:10px; background:#F7F9FC; }
+      .schedule-temp input { border:0; border-radius:0; background:transparent; }
+      .schedule-temp b { color:#53637A; font-size:12px; }
+      .schedule-editor > button { width:100%; min-height:48px; display:flex; align-items:center; justify-content:center; gap:7px; }
       .cleaning-experience { height:100%; min-height:0; display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr); gap:14px; }
       .cleaning-experience .cleaning-panel { display:flex; flex-direction:column; overflow:auto; }
       .cleaning-selectors { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
@@ -7774,6 +7929,10 @@ export class FamilyHubCard extends HTMLElementBase {
         .hub-nav-button { min-height:55px; }
         .whole-home-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
         .cover-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .lighting-master { grid-template-columns:minmax(160px,1fr) auto auto; gap:12px; }
+        .lighting-master-stats > span { min-width:76px; padding-inline:8px; }
+        .heating-master { grid-template-columns:minmax(150px,1fr) auto minmax(300px,auto); gap:12px; }
+        .heating-master-actions { grid-template-columns:minmax(116px,1.25fr) repeat(2,minmax(82px,1fr)); }
       }
       @media (max-width:1279px) {
         .heating-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -7875,12 +8034,20 @@ export class FamilyHubCard extends HTMLElementBase {
         .football-main { min-height:620px; grid-template-rows:auto minmax(0,1fr); }
         .football-toolbar { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; gap:8px 10px; }
         .football-tabs { grid-column:1/-1; display:grid; grid-template-columns:repeat(3,1fr); }
-        .lighting-master,.heating-master { align-items:stretch; flex-direction:column; }
-        .heating-master-actions { display:grid; grid-template-columns:repeat(3,1fr); }
+        .lighting-master,.heating-master { display:grid; grid-template-columns:1fr; align-items:stretch; }
+        .lighting-master-stats { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .lighting-master-stats > span { min-width:0; }
+        .heating-master-target { justify-self:stretch; }
+        .master-temperature-stepper { grid-template-columns:48px minmax(0,1fr) 48px; }
+        .heating-master-actions { display:grid; grid-template-columns:1fr; }
+        .heating-master .master-schedule { grid-column:auto; }
+        .heating-card.is-schedule-open { grid-column:auto; }
+        .schedule-periods,.master-schedule .schedule-periods { grid-template-columns:1fr; }
         .cleaning-experience,.energy-history-grid,.fpl-detail-grid { grid-template-columns:1fr; height:auto; }
         .fpl-scoreboard { grid-template-columns:repeat(2,minmax(0,1fr)); }
         .fpl-player { width:clamp(60px,20vw,100px); }
       }
+      .light-dimmer input:focus-visible,.schedule-period input:focus-visible,.master-temperature-stepper input:focus-visible { outline:3px solid var(--hub-focus); outline-offset:2px; }
       @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
     `;
   }

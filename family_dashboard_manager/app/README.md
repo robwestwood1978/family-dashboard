@@ -2,7 +2,7 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.13.3 provides:
+Version 0.14.0 provides:
 
 - a secret-rejecting schema-v7 household contract;
 - a private Home Assistant media-source kiosk photo frame with camera-motion return;
@@ -10,6 +10,7 @@ Version 0.13.3 provides:
 - one generated Home Assistant panel containing the bundled `custom:family-hub-card`;
 - eight internal tablet surfaces: Today, Calendar, Home, Tasks, Security, Music, Energy and Football;
 - Home sections for Rooms, Lights, Heating, Blinds & doors and Cleaning, backed only by explicitly configured entities, with an optional preferred starting room;
+- polished tablet-first Lighting and Heating controls with capability-aware dimmers, binary lamp controls, persistent schedule accordions and refresh-safe schedule drafts;
 - optional electricity and gas smart-meter summaries for honest today-so-far usage, cost, tariff and freshness presentation; no live-power value is inferred;
 - a two-floor 3D floorplan engine with private inert SVG assets, percentage-coordinate hotspots, cache-safe revisions and selected-room controls;
 - a first-party colour-coded Family Planner for Day, Week, Month and Agenda with previous/next navigation and cache-bypassing refresh;
