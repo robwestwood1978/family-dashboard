@@ -4410,8 +4410,10 @@ export class FamilyHubCard extends HTMLElementBase {
     </article>`;
   }
 
-  _renderFplSquad(squad) {
-    if (!squad.length) return '<p class="hub-empty-state large">The squad will appear after the next football refresh.</p>';
+  _renderFplSquad(squad, status = "live") {
+    if (!squad.length) return status === "unavailable"
+      ? '<p class="hub-empty-state large">Squad data could not be loaded. The manager will retry automatically.</p>'
+      : '<p class="hub-empty-state large">The squad will appear after the next football refresh.</p>';
     const starters = squad.filter((player) => !player.bench);
     const bench = squad.filter((player) => player.bench);
     const rows = ["GKP", "DEF", "MID", "FWD"].map((position) => {
@@ -4436,6 +4438,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const transferCost = safeNumber(attributes.transfer_cost, 0);
     const leagues = Array.isArray(attributes.leagues) ? attributes.leagues : [];
     const squad = Array.isArray(attributes.squad) ? attributes.squad : [];
+    const squadStatus = attributes.squad_status || (squad.length ? "live" : "unavailable");
     const selectors = entries.map((entry) => {
       const candidate = this._config.people.find((personEntry) => personEntry.id === entry.person_id);
       const selectedEntry = entry.person_id === selected.person_id;
@@ -4456,7 +4459,7 @@ export class FamilyHubCard extends HTMLElementBase {
         <div class="fpl-scoreboard"><span><strong>${available ? escapeHtml(formatPoints(state.state, this._config.product.locale)) : "—"}</strong><small>Total points</small></span><span><strong>${Number.isFinite(eventPoints) ? eventPoints : "—"}</strong><small>GW ${attributes.gameweek || "—"}</small></span><span><strong>${Number.isFinite(rank) ? `#${escapeHtml(formatPoints(rank, this._config.product.locale))}` : "—"}</strong><small>Overall rank</small></span><span><strong>${Number.isFinite(transfers) ? transfers : "—"}</strong><small>Transfers${transferCost ? ` · −${transferCost}` : ""}</small></span></div>
         ${attributes.active_chip ? `<p class="fpl-chip"><ha-icon icon="mdi:star-circle"></ha-icon>${escapeHtml(titleCase(attributes.active_chip))} active</p>` : ""}
       </article>
-      <div class="fpl-detail-grid"><article class="surface fpl-squad-panel"><div class="section-heading"><div><p class="eyebrow">Gameweek ${attributes.gameweek || "—"}</p><h3>Squad points</h3></div>${Number.isFinite(safeNumber(attributes.points_on_bench, NaN)) ? `<span>${safeNumber(attributes.points_on_bench, 0)} on bench</span>` : ""}</div>${this._renderFplSquad(squad)}</article>
+      <div class="fpl-detail-grid"><article class="surface fpl-squad-panel"><div class="section-heading"><div><p class="eyebrow">Gameweek ${attributes.gameweek || "—"}</p><h3>Squad points</h3></div>${Number.isFinite(safeNumber(attributes.points_on_bench, NaN)) ? `<span>${safeNumber(attributes.points_on_bench, 0)} on bench</span>` : squadStatus === "cached" ? "<span>Last update</span>" : ""}</div>${this._renderFplSquad(squad, squadStatus)}</article>
       <article class="surface fpl-league-panel"><div class="section-heading"><div><p class="eyebrow">All competitions</p><h3>Leagues</h3></div><span>${leagues.length}</span></div>${leagues.length ? `<div class="fpl-leagues">${leagueRows}</div>` : '<p class="hub-empty-state compact">League positions will appear after the next manager refresh.</p>'}</article></div>
     </section>`;
   }
