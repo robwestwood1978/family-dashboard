@@ -6,7 +6,10 @@ const approvalViewport = (browserName, width, height) => ({
     browserName,
     viewport: { width, height },
     deviceScaleFactor: 1,
-    hasTouch: true
+    hasTouch: true,
+    ...(browserName === "chromium" && process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+      ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } }
+      : {})
   }
 });
 

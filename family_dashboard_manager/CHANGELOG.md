@@ -1,3 +1,10 @@
+## 0.14.0
+
+- Redesign Heating as a tablet-first control surface with aligned whole-house controls, persistent room accordions and clearly paired time and temperature fields for every schedule period.
+- Preserve an open schedule and its unsaved field values across live Home Assistant refreshes so room cards no longer collapse while being edited.
+- Redesign Lights with room-level status, stronger on-state feedback and native brightness sliders for supported dimmable entities while keeping lamp controls binary.
+- Enforce 48-pixel touch targets, unclipped landscape layouts and 200% zoom quality checks across the updated Heating and Lights views.
+
 ## 0.13.3
 
 - Retry each current-gameweek squad request after the core FPL profile and fixture feeds complete, avoiding a transient optional request failure that could leave the squad panel blank while leagues remained current.
