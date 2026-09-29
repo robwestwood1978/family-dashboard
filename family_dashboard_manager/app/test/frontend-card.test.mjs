@@ -3072,6 +3072,52 @@ test("uses the same one-per-club selection for Today and the full Football view"
   assert.match(football, /data-favourite-code="AVL"[^>]*>.*#8/s);
 });
 
+test("renders the selected FPL squad and every supplied league", () => {
+  const card = Object.create(FamilyHubCard.prototype);
+  card._config = {
+    product: { locale: "en-GB", timezone: "Europe/London" },
+    theme: { accent: "#1463E8" },
+    people: [{ id: "rob", name: "Rob", colour: "#5887A8" }],
+    football: { entries: [{ person_id: "rob", entry_id: 12345 }] }
+  };
+  card._fplEntryId = null;
+  card._hass = { states: {
+    "sensor.family_dashboard_fpl_rob": {
+      state: "379",
+      attributes: {
+        team_name: "Stranger Mings",
+        gameweek: 5,
+        gameweek_points: 51,
+        overall_rank: 85722,
+        transfers: 1,
+        transfer_cost: 4,
+        points_on_bench: 6,
+        leagues: Array.from({ length: 11 }, (_, index) => ({
+          id: index + 1,
+          name: `League ${index + 1}`,
+          rank: index + 1,
+          previous_rank: index + 2
+        })),
+        squad: [
+          { id: 1, name: "Kinsky", position: "GKP", squad_position: 1, bench: false, team_code: "TOT", event_points: 2, contribution_points: 2, captain: false, vice_captain: false, status: "a" },
+          { id: 2, name: "Haaland", position: "FWD", squad_position: 11, bench: false, team_code: "MCI", event_points: 6, contribution_points: 12, captain: true, vice_captain: false, status: "a" },
+          { id: 3, name: "Verbruggen", position: "GKP", squad_position: 12, bench: true, team_code: "BHA", event_points: 6, contribution_points: 6, captain: false, vice_captain: false, status: "d" }
+        ]
+      }
+    }
+  } };
+
+  const html = card._renderFplTeams();
+  assert.match(html, /Stranger Mings/);
+  assert.match(html, /Haaland/);
+  assert.match(html, /aria-label="Captain">C/);
+  assert.match(html, /Haaland.*<em>12<\/em>/s);
+  assert.match(html, /Verbruggen.*<em>6<\/em>/s);
+  assert.match(html, /League 11/);
+  assert.equal((html.match(/class="is-up"/g) || []).length, 11);
+  assert.match(html, /Transfers · −4/);
+});
+
 test("keeps both family clubs visible and never calls unavailable Football data current", () => {
   const card = Object.create(FamilyHubCard.prototype);
   card._config = {

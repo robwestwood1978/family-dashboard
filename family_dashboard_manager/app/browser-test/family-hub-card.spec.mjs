@@ -2384,6 +2384,73 @@ test("keeps the family map private and spotlights both requested clubs", async (
   expect(pageErrors).toEqual([]);
 });
 
+test("shows current FPL squads, captain points and the complete league list", async ({ page }) => {
+  const fplConfig = structuredClone(config);
+  fplConfig.football.entries = [
+    { person_id: "parent", entry_id: 12345 },
+    { person_id: "child_one", entry_id: 67890 }
+  ];
+  const player = (id, name, position, squadPosition, points, options = {}) => ({
+    id,
+    name,
+    position,
+    squad_position: squadPosition,
+    bench: squadPosition > 11,
+    team_code: options.team || "TOT",
+    crest_url: "https://resources.premierleague.com/premierleague/badges/70/t6.png",
+    event_points: points,
+    contribution_points: points * (options.captain ? 2 : 1),
+    multiplier: options.captain ? 2 : squadPosition > 11 ? 0 : 1,
+    captain: options.captain === true,
+    vice_captain: options.vice === true,
+    status: options.status || "a"
+  });
+  const squad = [
+    player(1, "Keeper", "GKP", 1, 2),
+    ...Array.from({ length: 4 }, (_, index) => player(index + 2, `Defender ${index + 1}`, "DEF", index + 2, index + 1)),
+    ...Array.from({ length: 4 }, (_, index) => player(index + 6, `Midfielder ${index + 1}`, "MID", index + 6, 2)),
+    player(10, "Forward one", "FWD", 10, 2),
+    player(11, "Captain Forward", "FWD", 11, 6, { captain: true, team: "MCI" }),
+    player(12, "Bench keeper", "GKP", 12, 6),
+    player(13, "Bench one", "MID", 13, 1, { vice: true }),
+    player(14, "Bench two", "DEF", 14, 4, { status: "d" }),
+    player(15, "Bench three", "FWD", 15, 0)
+  ];
+  const leagues = Array.from({ length: 12 }, (_, index) => ({
+    id: index + 1,
+    name: `Invitational league ${index + 1}`,
+    rank: index + 1,
+    previous_rank: index + 2
+  }));
+  const pageErrors = await mount(page, fplConfig, {
+    "sensor.family_dashboard_fpl_parent": state("sensor.family_dashboard_fpl_parent", "379", {
+      team_name: "Stranger Mings", gameweek: 5, gameweek_points: 51, overall_rank: 85722,
+      transfers: 0, transfer_cost: 0, points_on_bench: 11, leagues, squad
+    }),
+    "sensor.family_dashboard_fpl_child_one": state("sensor.family_dashboard_fpl_child_one", "402", {
+      team_name: "Second XI", gameweek: 5, gameweek_points: 63, overall_rank: 45000,
+      transfers: 1, transfer_cost: 4, points_on_bench: 4, leagues: leagues.slice(0, 2), squad
+    })
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="football"]').click();
+  await card.locator('[data-football-tab="fpl"]').click();
+
+  await expect(card.locator(".fpl-entry-selector button")).toHaveCount(2);
+  await expect(card.locator(".fpl-pitch .fpl-player")).toHaveCount(11);
+  await expect(card.locator(".fpl-bench .fpl-player")).toHaveCount(4);
+  await expect(card.locator('.fpl-player-badge[aria-label="Captain"]')).toHaveText("C");
+  await expect(card.locator(".fpl-player").filter({ hasText: "Captain Forward" })).toContainText("12");
+  await expect(card.locator(".fpl-leagues > span")).toHaveCount(12);
+  await expect(card.locator(".fpl-leagues")).toContainText("Invitational league 12");
+  expect(await card.locator(".fpl-entry-selector button").evaluateAll((buttons) => buttons.every((button) => button.getBoundingClientRect().height >= 48))).toBe(true);
+
+  await card.locator('[data-fpl-entry="child_one"]').click();
+  await expect(card.locator(".fpl-team-card")).toContainText("Second XI");
+  await expect(card.locator(".fpl-leagues > span")).toHaveCount(2);
+  expect(pageErrors).toEqual([]);
+});
+
 test("combines a Spurs and Villa head-to-head into one deliberate family derby card", async ({ page }) => {
   const derby = {
     id: 77,

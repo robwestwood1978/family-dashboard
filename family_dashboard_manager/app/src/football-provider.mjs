@@ -16,6 +16,7 @@ export const FOOTBALL_POLLING_INTERVALS = Object.freeze({
 });
 const NEAR_KICKOFF_BEFORE_MS = 90 * 60 * 1000;
 const NEAR_KICKOFF_AFTER_MS = 3 * 60 * 60 * 1000;
+const FPL_POSITIONS = Object.freeze({ 1: "GKP", 2: "DEF", 3: "MID", 4: "FWD" });
 
 function requireToken(token) {
   if (typeof token !== "string" || token.length < 10) {
@@ -227,11 +228,56 @@ export function normaliseFootballData({ bootstrap, fixtures, spotlightTeamCodes,
   };
 }
 
-export function normaliseFplEntry(config, profile, history) {
+function normaliseFplSquad(picks, bootstrap) {
+  if (!Array.isArray(picks?.picks) || !Array.isArray(bootstrap?.elements)) return [];
+  const players = new Map(bootstrap.elements.map((player) => [asInteger(player.id), player]));
+  const teams = new Map(requireArray(bootstrap?.teams || [], "bootstrap.teams").map((team) => [asInteger(team.id), normaliseTeam(team)]));
+  return picks.picks.map((selection) => {
+    const id = asInteger(selection.element);
+    const player = players.get(id) || {};
+    const team = teams.get(asInteger(player.team));
+    const squadPosition = asInteger(selection.position);
+    const multiplier = Math.max(0, asInteger(selection.multiplier));
+    const eventPoints = asInteger(player.event_points);
+    const bench = squadPosition > 11;
+    return {
+      id,
+      name: String(player.web_name || player.second_name || `Player ${id}`).slice(0, 60),
+      position: FPL_POSITIONS[asInteger(player.element_type)] || null,
+      squad_position: squadPosition,
+      bench,
+      team_code: team?.code || null,
+      team_name: team?.name || null,
+      crest_url: team?.crest_url || null,
+      event_points: eventPoints,
+      contribution_points: bench ? eventPoints : eventPoints * multiplier,
+      multiplier,
+      captain: selection.is_captain === true,
+      vice_captain: selection.is_vice_captain === true,
+      status: String(player.status || "").slice(0, 12) || null,
+      chance_of_playing: player.chance_of_playing_next_round !== null
+        && player.chance_of_playing_next_round !== undefined
+        && Number.isFinite(Number(player.chance_of_playing_next_round))
+        ? Number(player.chance_of_playing_next_round)
+        : null
+    };
+  }).sort((left, right) => left.squad_position - right.squad_position);
+}
+
+function normaliseAutomaticSubs(picks) {
+  if (!Array.isArray(picks?.automatic_subs)) return [];
+  return picks.automatic_subs.map((substitution) => ({
+    in: asInteger(substitution.element_in),
+    out: asInteger(substitution.element_out),
+    event: asInteger(substitution.event)
+  }));
+}
+
+export function normaliseFplEntry(config, profile, history, picks = null, bootstrap = null) {
   const currentEvent = asInteger(profile?.current_event, 0);
   const current = requireArray(history?.current || [], "entry history.current")
     .find((event) => asInteger(event.event) === currentEvent) || null;
-  const leagues = requireArray(profile?.leagues?.classic || [], "entry leagues.classic").slice(0, 8).map((league) => ({
+  const leagues = requireArray(profile?.leagues?.classic || [], "entry leagues.classic").map((league) => ({
     id: asInteger(league.id),
     name: String(league.name || "League").slice(0, 80),
     rank: asInteger(league.entry_rank, 0) || null,
@@ -248,7 +294,11 @@ export function normaliseFplEntry(config, profile, history) {
     last_rank: current ? asInteger(current.overall_rank, 0) || null : null,
     transfers: current ? asInteger(current.event_transfers) : null,
     transfer_cost: current ? asInteger(current.event_transfers_cost) : null,
-    leagues
+    leagues,
+    active_chip: typeof picks?.active_chip === "string" ? picks.active_chip.slice(0, 30) : null,
+    points_on_bench: picks?.entry_history ? asInteger(picks.entry_history.points_on_bench) : null,
+    squad: normaliseFplSquad(picks, bootstrap),
+    automatic_subs: normaliseAutomaticSubs(picks)
   };
 }
 
@@ -340,7 +390,7 @@ export async function publishHomeAssistantState(state, {
 
 async function fetchJson(url, fetchImpl, timeoutMs) {
   const response = await fetchImpl(url, {
-    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.13.1" },
+    headers: { Accept: "application/json", "User-Agent": "family-dashboard-manager/0.13.2" },
     signal: AbortSignal.timeout(timeoutMs)
   });
   if (!response.ok) throw new Error(`football source returned HTTP ${response.status}`);
@@ -390,7 +440,7 @@ export class FootballProvider {
     const checkedAt = this.clock().toISOString();
     try {
       const entryConfigs = Array.isArray(footballConfig.entries) ? footballConfig.entries : [];
-      const [bootstrap, fixtures, entries] = await Promise.all([
+      const [bootstrap, fixtures, entryPayloads] = await Promise.all([
         fetchJson(BOOTSTRAP_URL, this.fetchImpl, this.timeoutMs),
         fetchJson(FIXTURES_URL, this.fetchImpl, this.timeoutMs),
         Promise.all(entryConfigs.map(async (entry) => {
@@ -398,9 +448,21 @@ export class FootballProvider {
             fetchJson(`${ENTRY_URL}/${entry.entry_id}/`, this.fetchImpl, this.timeoutMs),
             fetchJson(`${ENTRY_URL}/${entry.entry_id}/history/`, this.fetchImpl, this.timeoutMs)
           ]);
-          return normaliseFplEntry(entry, profile, history);
+          const currentEvent = asInteger(profile?.current_event, 0);
+          let picks = null;
+          if (currentEvent > 0) {
+            try {
+              picks = await fetchJson(`${ENTRY_URL}/${entry.entry_id}/event/${currentEvent}/picks/`, this.fetchImpl, this.timeoutMs);
+            } catch {
+              // Keep scores, rank and leagues live when the optional picks feed is temporarily unavailable.
+            }
+          }
+          return { entry, profile, history, picks };
         }))
       ]);
+      const entries = entryPayloads.map(({ entry, profile, history, picks }) => (
+        normaliseFplEntry(entry, profile, history, picks, bootstrap)
+      ));
       data = normaliseFootballData({
         bootstrap,
         fixtures,

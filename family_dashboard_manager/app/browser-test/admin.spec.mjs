@@ -32,7 +32,7 @@ let baseUrl;
 test.beforeAll(async () => {
   const app = express();
   app.get("/api/admin/bootstrap", (_request, response) => response.json({
-    version: "0.13.1",
+    version: "0.13.2",
     config,
     schema,
     inventory,
