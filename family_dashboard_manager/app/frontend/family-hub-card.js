@@ -7879,7 +7879,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .schedule-period legend { width:100%; padding:0 0 7px; display:grid; grid-template-columns:22px minmax(0,1fr); grid-template-rows:auto auto; align-items:center; gap:1px 7px; color:#0B1830; }
       .schedule-period legend > span { grid-row:1/3; width:22px; height:22px; display:grid; place-items:center; border-radius:7px; background:#EAF2FF; color:#1463E8; font-size:12px; font-weight:900; }
       .schedule-period legend strong { grid-column:2; font-size:12px; line-height:1.15; }
-      .schedule-period legend small { grid-column:2; color:#7B889B; font-size:11px; line-height:1.15; }
+      .schedule-period legend small { grid-column:2; color:#7B889B; font-size:12px; line-height:1.15; }
       .schedule-period label { min-width:0; display:grid; gap:4px; color:#68778E; font-size:12px; font-weight:850; }
       .schedule-period input { min-width:0; width:100%; height:38px; padding:0 8px; border:1px solid #DCE4EE; border-radius:10px; background:#F7F9FC; color:#0B1830; box-sizing:border-box; font-weight:750; }
       .schedule-temp { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) 24px; align-items:center; overflow:hidden; border:1px solid #DCE4EE; border-radius:10px; background:#F7F9FC; }
