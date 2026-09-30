@@ -7848,7 +7848,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .light-dimmer input::-moz-range-thumb { width:14px; height:14px; border:3px solid #fff; border-radius:50%; background:#E5A51B; box-shadow:0 2px 6px rgba(44,59,82,.3); }
       .light-dimmer input:disabled { cursor:not-allowed; opacity:.48; }
       .heating-master { display:grid; grid-template-columns:minmax(185px,1fr) auto minmax(330px,auto); align-items:center; gap:14px 18px; overflow:visible; }
-      .heating-master-target { display:grid; gap:5px; color:#C5D1E0; font-size:12px; font-weight:800; }
+      .heating-master-target { align-self:end; display:grid; gap:5px; color:#C5D1E0; font-size:12px; font-weight:800; }
       .master-temperature-stepper { display:grid; grid-template-columns:48px 70px 48px; overflow:hidden; border:1px solid rgba(255,255,255,.2); border-radius:14px; background:rgba(255,255,255,.1); }
       .master-temperature-stepper button { min-height:48px; border:0; background:transparent; color:#BFD6FF; font-size:20px; font-weight:900; }
       .master-temperature-stepper label { min-width:0; display:flex; align-items:center; justify-content:center; border-inline:1px solid rgba(255,255,255,.14); }
