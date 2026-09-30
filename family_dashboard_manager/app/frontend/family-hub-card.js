@@ -1723,6 +1723,40 @@ export function selectFavouriteFixture(events = [], teamCode = "") {
   return finished[0] || null;
 }
 
+export function selectHomeFootballFixtures(events = [], spotlightTeamCodes = [], limit = 2) {
+  const codes = new Set((Array.isArray(spotlightTeamCodes) ? spotlightTeamCodes : [])
+    .map((code) => String(code || "").trim().toUpperCase())
+    .filter(Boolean));
+  const unique = new Map();
+  for (const fixture of Array.isArray(events) ? events : []) {
+    if (![footballTeamCode(fixture?.home), footballTeamCode(fixture?.away)].some((code) => codes.has(code))) continue;
+    const identity = fixtureIdentity(fixture);
+    if (identity && !unique.has(identity)) unique.set(identity, fixture);
+  }
+  const relevant = [...unique.values()];
+  const byKickoffAsc = (left, right) => (
+    fixtureKickoffValue(left, Number.POSITIVE_INFINITY) - fixtureKickoffValue(right, Number.POSITIVE_INFINITY)
+    || compareFixtureIds(left, right)
+  );
+  const byKickoffDesc = (left, right) => (
+    fixtureKickoffValue(right, Number.NEGATIVE_INFINITY) - fixtureKickoffValue(left, Number.NEGATIVE_INFINITY)
+    || compareFixtureIds(left, right)
+  );
+  const live = relevant.filter((fixture) => normaliseFixtureStatus(fixture) === "live").sort(byKickoffAsc);
+  const upcoming = relevant.filter((fixture) => normaliseFixtureStatus(fixture) === "upcoming").sort(byKickoffAsc);
+  const finished = relevant.filter((fixture) => normaliseFixtureStatus(fixture) === "finished").sort(byKickoffDesc);
+  const selected = [];
+  const add = (fixture) => {
+    if (!fixture || selected.length >= limit || selected.some((entry) => fixtureIdentity(entry) === fixtureIdentity(fixture))) return;
+    selected.push(fixture);
+  };
+  if (live.length) add(live[0]);
+  else add(finished[0]);
+  add(upcoming[0]);
+  for (const fixture of [...live, ...upcoming, ...finished]) add(fixture);
+  return selected;
+}
+
 export function buildFavouriteClubModels(events = [], spotlightTeamCodes = [], tableRows = []) {
   const fixtures = Array.isArray(events) ? events : [];
   const rows = Array.isArray(tableRows) ? tableRows : [];
@@ -4258,8 +4292,8 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _featuredFixtures() {
-    const { index, gameweekState, table } = this._footballState();
-    if (!isEntityAvailable(index) || !isEntityAvailable(gameweekState)) {
+    const { index } = this._footballState();
+    if (!isEntityAvailable(index)) {
       return {
         title: this._config.football.spotlight_team_codes.join(" & "),
         html: this._config.football.spotlight_team_codes
@@ -4267,16 +4301,30 @@ export class FamilyHubCard extends HTMLElementBase {
           .join("")
       };
     }
-    const fixtures = gameweekState?.attributes?.events || [];
-    const models = buildFavouriteClubModels(
-      fixtures,
-      this._config.football.spotlight_team_codes,
-      isEntityAvailable(table) ? table.attributes?.rows || [] : []
-    );
-    const derby = favouriteDerbyFixture(models);
-    const html = derby
-      ? this._renderCompactFixture(derby, { derby: true })
-      : models.map((model) => this._renderCompactFavourite(model)).join("");
+    const configuredWeeks = Array.isArray(index.attributes?.available_gameweeks)
+      ? index.attributes.available_gameweeks
+      : Array.from({ length: 38 }, (_, offset) => offset + 1);
+    const gameweekStates = configuredWeeks
+      .map((gameweek) => this._hass?.states?.[`${this._config.football.gameweek_entity_prefix}${gameweek}`])
+      .filter(isEntityAvailable);
+    if (!gameweekStates.length) {
+      return {
+        title: this._config.football.spotlight_team_codes.join(" & "),
+        html: this._config.football.spotlight_team_codes
+          .map((code) => this._renderCompactUnavailableFavourite(code))
+          .join("")
+      };
+    }
+    const fixtures = gameweekStates.flatMap((state) => Array.isArray(state.attributes?.events) ? state.attributes.events : []);
+    const selected = selectHomeFootballFixtures(fixtures, this._config.football.spotlight_team_codes, 2);
+    const models = buildFavouriteClubModels(fixtures, this._config.football.spotlight_team_codes);
+    const html = selected.map((fixture) => {
+      const favouriteCodes = this._config.football.spotlight_team_codes.filter((code) => fixtureIncludesTeam(fixture, code));
+      return this._renderCompactFixture(fixture, {
+        derby: favouriteCodes.length > 1,
+        favouriteCode: favouriteCodes.join(" ")
+      });
+    }).join("");
     return {
       title: this._favouriteTitle(models),
       html: html || '<p class="hub-empty-state">No favourite clubs are configured yet.</p>'
@@ -7800,14 +7848,14 @@ export class FamilyHubCard extends HTMLElementBase {
       .light-dimmer input::-moz-range-thumb { width:14px; height:14px; border:3px solid #fff; border-radius:50%; background:#E5A51B; box-shadow:0 2px 6px rgba(44,59,82,.3); }
       .light-dimmer input:disabled { cursor:not-allowed; opacity:.48; }
       .heating-master { display:grid; grid-template-columns:minmax(185px,1fr) auto minmax(330px,auto); align-items:center; gap:14px 18px; overflow:visible; }
-      .heating-master-target { display:grid; gap:5px; color:#C5D1E0; font-size:12px; font-weight:800; }
+      .heating-master-target { align-self:end; display:grid; gap:5px; color:#C5D1E0; font-size:12px; font-weight:800; }
       .master-temperature-stepper { display:grid; grid-template-columns:48px 70px 48px; overflow:hidden; border:1px solid rgba(255,255,255,.2); border-radius:14px; background:rgba(255,255,255,.1); }
       .master-temperature-stepper button { min-height:48px; border:0; background:transparent; color:#BFD6FF; font-size:20px; font-weight:900; }
       .master-temperature-stepper label { min-width:0; display:flex; align-items:center; justify-content:center; border-inline:1px solid rgba(255,255,255,.14); }
       .master-temperature-stepper input { width:43px; height:46px; padding:0; border:0; outline:0; background:transparent; color:#fff; font-size:18px; font-weight:900; text-align:right; -moz-appearance:textfield; }
       .master-temperature-stepper input::-webkit-inner-spin-button,.master-temperature-stepper input::-webkit-outer-spin-button { margin:0; -webkit-appearance:none; }
       .master-temperature-stepper b { color:#fff; font-size:16px; }
-      .heating-master-actions { display:grid; grid-template-columns:minmax(132px,1.35fr) repeat(2,minmax(92px,1fr)); gap:8px; }
+      .heating-master-actions { align-self:end; display:grid; grid-template-columns:minmax(132px,1.35fr) repeat(2,minmax(92px,1fr)); gap:8px; }
       .heating-master-actions button { min-width:0; display:flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap; }
       .heating-master-actions button:disabled { opacity:.48; }
       .heating-master-actions ha-icon { --mdc-icon-size:19px; }
@@ -7828,10 +7876,10 @@ export class FamilyHubCard extends HTMLElementBase {
       .schedule-periods { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
       .master-schedule .schedule-periods { grid-template-columns:repeat(4,minmax(0,1fr)); }
       .schedule-period { min-width:0; margin:0; padding:9px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; border:1px solid #DCE4EE; border-radius:12px; background:#fff; }
-      .schedule-period legend { width:100%; padding:0 0 7px; display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:6px; color:#0B1830; }
-      .schedule-period legend > span { width:22px; height:22px; display:grid; place-items:center; border-radius:7px; background:#EAF2FF; color:#1463E8; font-size:12px; font-weight:900; }
-      .schedule-period legend strong { font-size:12px; }
-      .schedule-period legend small { color:#7B889B; font-size:12px; }
+      .schedule-period legend { width:100%; padding:0 0 7px; display:grid; grid-template-columns:22px minmax(0,1fr); grid-template-rows:auto auto; align-items:center; gap:1px 7px; color:#0B1830; }
+      .schedule-period legend > span { grid-row:1/3; width:22px; height:22px; display:grid; place-items:center; border-radius:7px; background:#EAF2FF; color:#1463E8; font-size:12px; font-weight:900; }
+      .schedule-period legend strong { grid-column:2; font-size:12px; line-height:1.15; }
+      .schedule-period legend small { grid-column:2; color:#7B889B; font-size:12px; line-height:1.15; }
       .schedule-period label { min-width:0; display:grid; gap:4px; color:#68778E; font-size:12px; font-weight:850; }
       .schedule-period input { min-width:0; width:100%; height:38px; padding:0 8px; border:1px solid #DCE4EE; border-radius:10px; background:#F7F9FC; color:#0B1830; box-sizing:border-box; font-weight:750; }
       .schedule-temp { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) 24px; align-items:center; overflow:hidden; border:1px solid #DCE4EE; border-radius:10px; background:#F7F9FC; }
@@ -7939,6 +7987,23 @@ export class FamilyHubCard extends HTMLElementBase {
         .heating-grid[data-zone-count="6"] { grid-template-columns:repeat(3,minmax(0,1fr)); }
         .heating-grid[data-zone-count="6"] .heating-card { min-height:174px; padding:14px; gap:9px; }
         .heating-grid[data-zone-count="6"] .heating-card-heading > .heating-icon { width:42px; flex-basis:42px; }
+        .master-schedule .schedule-periods { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      }
+      @media (min-width:761px) and (max-width:1279px) {
+        :host { height:auto; min-height:calc(100vh - var(--family-ha-header-offset)); }
+        .hub-card,.hub-shell { height:auto; min-height:calc(100vh - var(--family-ha-header-offset)); overflow:visible; }
+        .hub-content { grid-template-rows:70px auto; }
+        .hub-view { min-height:calc(100vh - var(--family-ha-header-offset) - 108px); }
+        .lights-experience,.heating-experience,.football-experience,.music-experience { height:auto; min-height:0; }
+        .whole-home-grid,.heating-grid { height:auto; overflow:visible; }
+        .football-experience { grid-template-rows:auto auto; }
+        .football-main,.football-layout.is-fpl .football-main { min-height:0; grid-template-rows:auto auto; overflow:visible; }
+        .fpl-detail { min-height:0; grid-template-rows:auto auto auto; overflow:visible; padding-right:0; }
+        .fpl-detail-grid { height:auto; align-items:start; }
+        .fpl-squad-panel,.fpl-league-panel,.fpl-leagues { overflow:visible; }
+        .media-player-panel { height:auto; min-height:0; grid-template-rows:auto auto; }
+        .media-player-stage,.media-player-stage .child-card-slot,.media-player-stage .embedded-card { min-height:0; overflow:visible; }
+        .media-player-stage .child-card-slot > * { min-height:0; height:auto; }
       }
       @media (max-width:1180px) {
         .security-layout { grid-template-columns:minmax(0,1fr) 274px; }
@@ -8019,6 +8084,9 @@ export class FamilyHubCard extends HTMLElementBase {
         .security-camera { min-height:174px; }
         .floorplan-canvas { min-height:420px; }
         .music-experience,.media-player-panel { height:auto; min-height:620px; }
+        .media-player-panel { grid-template-rows:auto auto; }
+        .media-player-stage,.media-player-stage .child-card-slot,.media-player-stage .embedded-card { min-height:0; overflow:visible; }
+        .media-player-stage .child-card-slot > * { min-height:0; height:auto; }
         .football-experience { height:auto; grid-template-rows:auto auto; }
         .football-favourites-stage { min-height:410px; padding:18px 16px; overflow:visible; }
         .football-hero-heading { gap:10px; flex-wrap:wrap; }
@@ -8044,6 +8112,9 @@ export class FamilyHubCard extends HTMLElementBase {
         .heating-card.is-schedule-open { grid-column:auto; }
         .schedule-periods,.master-schedule .schedule-periods { grid-template-columns:1fr; }
         .cleaning-experience,.energy-history-grid,.fpl-detail-grid { grid-template-columns:1fr; height:auto; }
+        .football-layout.is-fpl .football-main { min-height:0; grid-template-rows:auto auto; overflow:visible; }
+        .fpl-detail { grid-template-rows:auto auto auto; overflow:visible; padding-right:0; }
+        .fpl-squad-panel,.fpl-league-panel,.fpl-leagues { overflow:visible; }
         .fpl-scoreboard { grid-template-columns:repeat(2,minmax(0,1fr)); }
         .fpl-player { width:clamp(60px,20vw,100px); }
       }

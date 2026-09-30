@@ -72,7 +72,7 @@ export async function buildAdminBootstrap({ store, inventory, user }) {
   ]);
   if (!config) throw new Error("household configuration is not installed");
   return {
-    version: process.env.APP_VERSION || "0.14.0",
+    version: process.env.APP_VERSION || "0.14.1",
     user,
     config,
     schema,
