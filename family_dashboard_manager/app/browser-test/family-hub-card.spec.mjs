@@ -380,7 +380,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       body: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 90"><path d="M45 4 79 16v25c0 22-13 37-34 45C24 78 11 63 11 41V16Z" fill="${badge.background}" stroke="${badge.accent}" stroke-width="5"/><text x="45" y="53" fill="${badge.accent}" font-family="system-ui,sans-serif" font-size="20" font-weight="800" text-anchor="middle">${badge.code}</text></svg>`
     });
   });
-  await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px 0 76px;font:20px system-ui}.ha-sidebar{position:fixed;inset:56px auto 0 0;width:52px;background:#191b20}.ha-main{position:absolute;inset:0 0 0 52px;overflow:hidden}</style><div class="ha-header">Family Hub</div><div class="ha-sidebar"></div><div class="ha-main"></div></body></html>`);
+  await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px 0 76px;font:20px system-ui}.ha-sidebar{position:fixed;inset:56px auto 0 0;width:52px;background:#191b20}.ha-main{position:absolute;inset:0 0 0 52px;overflow-x:hidden;overflow-y:auto}</style><div class="ha-header">Family Hub</div><div class="ha-sidebar"></div><div class="ha-main"></div></body></html>`);
   await page.evaluate(installApprovalClock, { fixedNow: runtimeOptions.fixedNow || APPROVAL_NOW });
   const clockContract = await page.evaluate(async () => {
     const displayBefore = new Date().getTime();
@@ -769,6 +769,7 @@ async function expectNoRootOverflow(page) {
     const topbar = root.querySelector(".hub-topbar").getBoundingClientRect();
     const view = root.querySelector(".hub-view").getBoundingClientRect();
     const header = document.querySelector(".ha-header").getBoundingClientRect();
+    const main = document.querySelector(".ha-main");
     const cardRect = card.getBoundingClientRect();
     return {
       documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
@@ -782,7 +783,8 @@ async function expectNoRootOverflow(page) {
       topbarTop: topbar.top,
       viewBottom: view.bottom,
       viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight
+      viewportHeight: window.innerHeight,
+      mainScrollTop: main.scrollTop
     };
   });
   expect(metrics.documentOverflow).toBeLessThanOrEqual(1);
@@ -790,10 +792,9 @@ async function expectNoRootOverflow(page) {
   expect(metrics.navigationEndsBeforeContent).toBe(true);
   expect(metrics.headerEndsBeforeView).toBe(true);
   expect(metrics.cardRight).toBeLessThanOrEqual(metrics.viewportWidth + 1);
-  expect(metrics.cardTop).toBeGreaterThanOrEqual(metrics.headerBottom - 1);
-  expect(metrics.topbarTop).toBeGreaterThanOrEqual(metrics.headerBottom - 1);
+  expect(metrics.cardTop + metrics.mainScrollTop).toBeGreaterThanOrEqual(metrics.headerBottom - 1);
+  expect(metrics.topbarTop + metrics.mainScrollTop).toBeGreaterThanOrEqual(metrics.headerBottom - 1);
   expect(metrics.viewBottom).toBeLessThanOrEqual(metrics.cardBottom + 1);
-  expect(metrics.cardBottom).toBeLessThanOrEqual(metrics.viewportHeight + 1);
 }
 
 test("fits the supported iPad landscapes and exposes every approved surface", async ({ page }) => {
@@ -1361,7 +1362,7 @@ test("curates lights, heating, blinds and cleaning inside Home", async ({ page }
   expect(pageErrors).toEqual([]);
 });
 
-test("balances six lighting rooms as a contained three-by-two tablet grid", async ({ page }) => {
+test("balances six lighting rooms without clipping cards inside a nested scroller", async ({ page }) => {
   const pageErrors = await mount(page, sixLightRoomConfig(), {
     "light.utility_test": state("light.utility_test", "off", { friendly_name: "Utility" })
   });
@@ -1381,6 +1382,10 @@ test("balances six lighting rooms as a contained three-by-two tablet grid", asyn
       columnCount: new Set(cards.map((bounds) => Math.round(bounds.left))).size,
       rowCounts: [...rows.values()],
       horizontalOverflow: grid.scrollWidth - grid.clientWidth,
+      verticalOverflow: grid.scrollHeight - grid.clientHeight,
+      overflowY: getComputedStyle(grid).overflowY,
+      lastCardBottom: cards.at(-1).bottom,
+      gridBottom: gridBounds.bottom,
       cardsInsideHorizontalBounds: cards.every((bounds) => bounds.left >= gridBounds.left - 1 && bounds.right <= gridBounds.right + 1),
       widthSpread: Math.max(...cards.map((bounds) => bounds.width)) - Math.min(...cards.map((bounds) => bounds.width))
     };
@@ -1388,6 +1393,9 @@ test("balances six lighting rooms as a contained three-by-two tablet grid", asyn
   expect(layout.columnCount).toBe(3);
   expect(layout.rowCounts).toEqual([3, 3]);
   expect(layout.horizontalOverflow).toBeLessThanOrEqual(1);
+  expect(layout.verticalOverflow).toBeLessThanOrEqual(1);
+  expect(layout.overflowY).toBe("visible");
+  expect(layout.lastCardBottom).toBeLessThanOrEqual(layout.gridBottom + 1);
   expect(layout.cardsInsideHorizontalBounds).toBe(true);
   expect(layout.widthSpread).toBeLessThanOrEqual(1);
   await expectNoRootOverflow(page);
@@ -1440,6 +1448,12 @@ test("keeps an expanded heating schedule and its draft open through live state r
   await expect(schedule.locator(".schedule-period")).toHaveCount(4);
   await expect(schedule.locator(".schedule-period").first()).toContainText("Starts");
   await expect(schedule.locator(".schedule-period").first()).toContainText("Temperature");
+  const legendLabels = await schedule.locator(".schedule-period legend").evaluateAll((legends) => legends.map((legend) => {
+    const name = legend.querySelector("strong").getBoundingClientRect();
+    const description = legend.querySelector("small").getBoundingClientRect();
+    return { nameBottom: name.bottom, descriptionTop: description.top, width: legend.getBoundingClientRect().width };
+  }));
+  expect(legendLabels.every(({ nameBottom, descriptionTop, width }) => descriptionTop >= nameBottom - 1 && width >= 120)).toBe(true);
 
   const wakeTime = schedule.locator('[data-schedule-time="0"]');
   await wakeTime.fill("06:30");
@@ -1450,6 +1464,22 @@ test("keeps an expanded heating schedule and its draft open through live state r
   }));
   await expect(card.locator('[data-climate-card="climate.living_room"] details[data-heating-schedule="living_room"]')).toHaveAttribute("open", "");
   await expect(card.locator('[data-climate-card="climate.living_room"] [data-schedule-time="0"]')).toHaveValue("06:30");
+
+  const masterSchedule = card.locator('details[data-heating-schedule="all"]');
+  await masterSchedule.locator("summary").click();
+  await expect(masterSchedule.locator(".schedule-period")).toHaveCount(4);
+  const masterLabels = await masterSchedule.locator(".schedule-period legend").evaluateAll((legends) => legends.map((legend) => {
+    const name = legend.querySelector("strong").getBoundingClientRect();
+    const description = legend.querySelector("small").getBoundingClientRect();
+    return { nameBottom: name.bottom, descriptionTop: description.top };
+  }));
+  expect(masterLabels.every(({ nameBottom, descriptionTop }) => descriptionTop >= nameBottom - 1)).toBe(true);
+  const masterControlAlignment = await card.locator(".heating-master").evaluate((master) => {
+    const target = master.querySelector(".master-temperature-stepper").getBoundingClientRect();
+    const setAll = master.querySelector('[data-climate-master="set_temperature"]').getBoundingClientRect();
+    return Math.abs(target.bottom - setAll.bottom);
+  });
+  expect(masterControlAlignment).toBeLessThanOrEqual(1);
 
   const masterBounds = await card.locator(".heating-master").evaluate((master) => {
     const outer = master.getBoundingClientRect();
@@ -1570,7 +1600,7 @@ test("routes a room-mapped garage door through the protected Security action", a
   expect(pageErrors).toEqual([]);
 });
 
-test("v0.14 heating keeps six zones accessible inside the bounded heating grid", async ({ page }, testInfo) => {
+test("v0.14 heating keeps six zones accessible without a nested heating scroller", async ({ page }, testInfo) => {
   const sixZoneConfig = sixZoneHouseholdConfig();
   const pageErrors = await mount(page, sixZoneConfig, sixZoneStateOverrides());
   const card = page.locator("family-hub-card");
@@ -1610,8 +1640,8 @@ test("v0.14 heating keeps six zones accessible inside the bounded heating grid",
   expect(layout.columnCount).toBe(expectedColumns);
   expect(layout.rowCounts).toEqual(expectedColumns === 2 ? [2, 2, 2] : [3, 3]);
   expect(layout.horizontalOverflow).toBeLessThanOrEqual(1);
-  expect(["auto", "scroll"]).toContain(layout.overflowY);
-  expect(layout.verticalOverflow).toBeGreaterThanOrEqual(0);
+  expect(layout.overflowY).toBe("visible");
+  expect(layout.verticalOverflow).toBeLessThanOrEqual(1);
   expect(layout.cardsInsideHorizontalBounds).toBe(true);
   expect(layout.widthSpread).toBeLessThanOrEqual(1);
   if (testInfo.project.name.startsWith("approval-")) {
@@ -1622,6 +1652,7 @@ test("v0.14 heating keeps six zones accessible inside the bounded heating grid",
   await expectNoRootOverflow(page);
 
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator(".ha-main").evaluate((main) => { main.scrollTop = 0; });
   await page.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(resolveFrame))));
   const wideLayout = await card.locator(".heating-grid").evaluate((grid) => {
     const cards = [...grid.querySelectorAll(".heating-card")].map((item) => item.getBoundingClientRect());
@@ -2515,6 +2546,27 @@ test("shows current FPL squads, captain points and the complete league list", as
   await expect(card.locator(".fpl-leagues > span")).toHaveCount(12);
   await expect(card.locator(".fpl-leagues")).toContainText("Invitational league 12");
   expect(await card.locator(".fpl-entry-selector button").evaluateAll((buttons) => buttons.every((button) => button.getBoundingClientRect().height >= 48))).toBe(true);
+  const fplOverflow = await card.locator(".fpl-detail").evaluate((detail) => {
+    const footballMain = detail.closest(".football-main");
+    const squad = detail.querySelector(".fpl-squad-panel");
+    const leaguesPanel = detail.querySelector(".fpl-league-panel");
+    return {
+      detailOverflow: getComputedStyle(detail).overflowY,
+      mainOverflow: getComputedStyle(footballMain).overflowY,
+      squadOverflow: getComputedStyle(squad).overflowY,
+      leaguesOverflow: getComputedStyle(leaguesPanel).overflowY,
+      detailScrollOverflow: detail.scrollHeight - detail.clientHeight,
+      mainScrollOverflow: footballMain.scrollHeight - footballMain.clientHeight
+    };
+  });
+  expect(fplOverflow).toEqual({
+    detailOverflow: "visible",
+    mainOverflow: "visible",
+    squadOverflow: "visible",
+    leaguesOverflow: "visible",
+    detailScrollOverflow: 0,
+    mainScrollOverflow: 0
+  });
 
   await card.locator('[data-fpl-entry="child_one"]').click();
   await expect(card.locator(".fpl-team-card")).toContainText("Second XI");
@@ -2813,14 +2865,14 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
     };
   });
   expect(mediaMetrics.childTop).toBeGreaterThanOrEqual(mediaMetrics.stageTop - 1);
-  expect(mediaMetrics.childBottom).toBeGreaterThan(mediaMetrics.stageBottom);
+  expect(mediaMetrics.childBottom).toBeLessThanOrEqual(mediaMetrics.stageBottom + 1);
   expect(mediaMetrics.chipColour).toBe("rgb(247, 248, 252)");
   expect(mediaMetrics.chipBackground).toBe("rgb(38, 50, 81)");
   expect(mediaMetrics.stageBackground).toBe("rgb(7, 24, 47)");
-  expect(mediaMetrics.stageOverflowX).toBe("auto");
-  expect(mediaMetrics.stageOverflowY).toBe("auto");
-  expect(mediaMetrics.stageScrollHeight).toBeGreaterThan(mediaMetrics.stageClientHeight);
-  expect(mediaMetrics.stageScrollTop).toBeGreaterThan(0);
+  expect(mediaMetrics.stageOverflowX).toBe("visible");
+  expect(mediaMetrics.stageOverflowY).toBe("visible");
+  expect(mediaMetrics.stageScrollHeight).toBeLessThanOrEqual(mediaMetrics.stageClientHeight + 1);
+  expect(mediaMetrics.stageScrollTop).toBe(0);
   expect(mediaMetrics.slotOverflowX).toBe("visible");
   expect(mediaMetrics.slotOverflowY).toBe("visible");
   expect(mediaMetrics.childInlineHeight).toBe("");
@@ -2841,7 +2893,6 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await card.evaluate((element) => {
     const stage = element.shadowRoot.querySelector(".media-player-stage");
     stage.dataset.persistenceMarker = "keep-music-stage";
-    stage.scrollTop = 48;
     element.shadowRoot.querySelector("[data-mock-service]").focus();
   });
   await updateEntityState(card, state("media_player.living_room", "playing", {
@@ -2849,7 +2900,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
     media_title: "Updated without a jump"
   }));
   await expect(card.locator('.media-player-stage[data-persistence-marker="keep-music-stage"]')).toHaveCount(1);
-  await expect.poll(() => card.locator(".media-player-stage").evaluate((stage) => stage.scrollTop)).toBeGreaterThan(0);
+  await expect.poll(() => card.locator(".media-player-stage").evaluate((stage) => stage.scrollTop)).toBe(0);
   await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.dataset?.mockService !== undefined)).toBe(true);
 
   await card.locator("[data-mock-service]").evaluate((button) => button.click());

@@ -63,6 +63,7 @@ import {
   safeClassroomLink,
   schoolDataSource,
   selectFavouriteFixture,
+  selectHomeFootballFixtures,
   teamCrest,
   todaySecurityPresentation,
   weatherStateLabel
@@ -3007,6 +3008,60 @@ test("selects one deterministic live, nearest upcoming, or latest finished fixtu
   ];
   assert.equal(selectFavouriteFixture(tied, "TOT")?.id, 3);
   assert.equal(selectFavouriteFixture(events, "MCI"), null);
+});
+
+test("selects a recent result and the next family fixture for Today across matchweeks", () => {
+  const fixture = (id, kickoff_time, home, away, status = "upcoming") => ({
+    id,
+    kickoff_time,
+    home: { short_name: home, name: home },
+    away: { short_name: away, name: away },
+    started: status !== "upcoming",
+    finished: status === "finished",
+    minutes: status === "finished" ? 90 : 0
+  });
+  const recentDerby = fixture(40, "2026-09-27T14:00:00Z", "TOT", "AVL", "finished");
+  const nextSpurs = fixture(41, "2026-10-03T14:00:00Z", "LEE", "TOT");
+  const laterVilla = fixture(42, "2026-10-04T16:30:00Z", "AVL", "FUL");
+  const unrelated = fixture(43, "2026-10-03T12:30:00Z", "ARS", "CHE");
+
+  assert.deepEqual(
+    selectHomeFootballFixtures([laterVilla, unrelated, recentDerby, nextSpurs], ["TOT", "AVL"]).map(({ id }) => id),
+    [40, 41]
+  );
+  assert.deepEqual(
+    selectHomeFootballFixtures([nextSpurs, laterVilla], ["TOT", "AVL"]).map(({ id }) => id),
+    [41, 42]
+  );
+});
+
+test("Today reads the next available gameweek as well as the latest result", () => {
+  const card = Object.create(FamilyHubCard.prototype);
+  card._config = {
+    product: { locale: "en-GB", timezone: "Europe/London" },
+    football: {
+      index_entity: "sensor.football",
+      gameweek_entity_prefix: "sensor.football_gw_",
+      table_entity: "sensor.football_table",
+      spotlight_team_codes: ["TOT", "AVL"]
+    }
+  };
+  card._gameweek = null;
+  card._hass = { states: {
+    "sensor.football": { state: "5", attributes: { current_gameweek: 5, available_gameweeks: [5, 6] } },
+    "sensor.football_gw_5": { state: "1", attributes: { events: [
+      { id: 50, kickoff_time: "2026-09-27T14:00:00Z", started: true, finished: true, minutes: 90, home: { short_name: "TOT", name: "Tottenham Hotspur" }, away: { short_name: "AVL", name: "Aston Villa" }, home_score: 2, away_score: 3 }
+    ] } },
+    "sensor.football_gw_6": { state: "1", attributes: { events: [
+      { id: 51, kickoff_time: "2026-10-03T14:00:00Z", started: false, finished: false, minutes: 0, home: { short_name: "LEE", name: "Leeds" }, away: { short_name: "TOT", name: "Tottenham Hotspur" } }
+    ] } }
+  } };
+
+  const today = card._featuredFixtures();
+  assert.match(today.html, /data-fixture-id="50"/);
+  assert.match(today.html, /data-fixture-id="51"/);
+  assert.match(today.html, /Full time/);
+  assert.match(today.html, /3 Oct/);
 });
 
 test("combines a genuine two-favourite head-to-head into one derby fixture", () => {

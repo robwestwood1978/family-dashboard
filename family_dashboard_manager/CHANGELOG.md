@@ -1,3 +1,9 @@
+## 0.14.1
+
+- Let the iPad use one predictable page scroll for Lights, Heating, FPL and Music instead of clipping room content inside nested fixed-height panels.
+- Keep all room lights visible, align the whole-house target with its action buttons and prevent schedule names from overlapping their period descriptions.
+- Make the FPL squad and league panels flow to their full height, and show both the latest family result and the next available fixture on Today.
+
 ## 0.14.0
 
 - Redesign Heating as a tablet-first control surface with aligned whole-house controls, persistent room accordions and clearly paired time and temperature fields for every schedule period.
