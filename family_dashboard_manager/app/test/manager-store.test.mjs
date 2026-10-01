@@ -160,6 +160,8 @@ test("deploys the card atomically, preserves private assets, snapshots and rolls
   assert.equal((await store.getStatus()).active_config_hash, secondPrepared.config_hash);
 
   await writeFile(join(root, "www", "family-dashboard", "family-hub-card.js"), "test corruption", "utf8");
+  await writeFile(join(root, "www", "family-dashboard", "daily-brief-styles.js"), "test corruption", "utf8");
+  await writeFile(join(root, "www", "family-dashboard", "assets", "home-illustration.js"), "test corruption", "utf8");
   const rollback = await store.rollback({
     snapshotId: secondDeployment.rollback_snapshot,
     expectedActiveHash: secondPrepared.config_hash,
@@ -169,6 +171,8 @@ test("deploys the card atomically, preserves private assets, snapshots and rolls
   const active = JSON.parse(await readFile(join(root, "config", "household.json"), "utf8"));
   assert.equal(active.product.title, "Family Dashboard");
   assert.match(await readFile(join(root, "www", "family-dashboard", "family-hub-card.js"), "utf8"), /class FamilyHubCard/);
+  assert.match(await readFile(join(root, "www", "family-dashboard", "daily-brief-styles.js"), "utf8"), /DAILY_BRIEF_STYLES/);
+  assert.match(await readFile(join(root, "www", "family-dashboard", "assets", "home-illustration.js"), "utf8"), /data:image\/jpeg;base64,/);
   assert.equal(await readFile(privateAsset, "utf8"), "private floorplan");
 });
 

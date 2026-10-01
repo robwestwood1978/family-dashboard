@@ -14,7 +14,11 @@ import {
 import { preparationDescription } from "../frontend/family-hub-card.js";
 
 const config = JSON.parse(await readFile(new URL("../config/example.json", import.meta.url), "utf8"));
-const cardSource = await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8");
+const illustrationSource = await readFile(new URL("../frontend/assets/home-illustration.js", import.meta.url), "utf8");
+const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
+const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
+  .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js";', dailyBriefSource);
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
 const APPROVAL_FOOTBALL_CHECKED_AT = Object.freeze({
   live: "2026-08-24T15:07:00.000Z",
@@ -804,7 +808,7 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   await expect(card).not.toContainText(/Controlled live|mapped rooms|fixtures loaded/i);
   await expect(card.locator(".hub-brand[data-view=\"today\"]")).toContainText("Today");
   await expect(card.locator(".hub-nav-button")).toHaveCount(7);
-  await expect(card.locator(".hub-nav-button")).toContainText(["Calendar", "Home", "Tasks", "Security", "Music", "Energy", "Football"]);
+  await expect(card.locator(".hub-nav-button")).toContainText(["Calendar", "Tasks", "Home", "Security", "Energy", "Football", "Music"]);
   await expectNoRootOverflow(page);
 
   for (const view of ["calendar", "rooms", "family", "entry", "music", "energy", "football", "today"]) {
@@ -842,6 +846,64 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   await expect(card.locator(".next-panel")).toContainText("Family dinner");
   await expect(card.locator(".next-panel")).not.toContainText("Finished early appointment");
 
+  expect(pageErrors).toEqual([]);
+});
+
+test("Daily brief keeps every screen readable in both appearances and preserves the Music player when appearance changes", async ({ page }, testInfo) => {
+  const familyConfig = structuredClone(config);
+  familyConfig.features.location_map = false;
+  const pageErrors = await mount(page, familyConfig);
+  const card = page.locator("family-hub-card");
+  const contrastChecks = {
+    today: [{ foreground: ".today-hero h2,.today-hero-copy > p:last-child,.hero-metrics small", background: ".today-hero", minimum: 4.5 }],
+    calendar: [{ foreground: ".calendar-person-filter,.family-planner-day > header strong,.calendar-navigation strong,.family-planner-event strong", background: ".calendar-view", minimum: 4.5 }],
+    rooms: [{ foreground: ".home-toolbar h2,.room-title h2", background: ".home-surface", minimum: 4.5 }],
+    family: [{ foreground: ".family-person-heading h2,.chore-row strong,.chore-row b,.chore-claim-action:not([disabled]),.family-summary-item strong", background: ".family-dashboard", minimum: 4.5 }],
+    entry: [{ foreground: ".garage-heading h2,.garage-motion", background: ".garage-panel", minimum: 4.5 }],
+    energy: [{ foreground: ".energy-meter-heading h2,.energy-freshness", background: ".energy-meter", minimum: 4.5 }],
+    football: [{ foreground: ".football-toolbar h2,.team,.fixture-score", background: ".football-main", minimum: 4.5 }],
+    music: [{ foreground: ".music-heading h2,.music-meta", background: ".media-player-panel", minimum: 4.5 }]
+  };
+  for (const darkMode of [false, true]) {
+    await card.evaluate((element, dark) => { element.hass = { ...element._hass, themes: { darkMode: dark } }; }, darkMode);
+    await expect(card.locator(".hub-card")).toHaveAttribute("data-appearance", darkMode ? "dark" : "light");
+    for (const view of ["today", "calendar", "rooms", "family", "entry", "energy", "football", "music"]) {
+      await card.locator(`.hub-navigation [data-view="${view}"]`).click();
+      await expect(card.locator(`[data-current-view="${view}"]`)).toBeVisible();
+      await expectApprovalQuality(page, { securityLabels: view === "entry" });
+      await expectContrast(card, contrastChecks[view]);
+      if (view === "today") {
+        await expect.poll(() => card.locator(".daily-home-art img").evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
+      }
+      if (process.env.DAILY_BRIEF_REVIEW_DIR) {
+        const directory = resolve(process.env.DAILY_BRIEF_REVIEW_DIR, testInfo.project.name);
+        await mkdir(directory, { recursive: true });
+        await page.screenshot({ path: resolve(directory, `${darkMode ? "dark" : "light"}-${view}.png`), fullPage: true, animations: "disabled" });
+      }
+      if (view === "rooms") {
+        for (const section of ["lights", "heating", "covers", "cleaning"]) {
+          await card.locator(`[data-home-section="${section}"]`).click();
+          await expectApprovalQuality(page);
+          if (section === "lights" || section === "heating") {
+            await expectContrast(card, [{ foreground: `.${section === "lights" ? "lighting" : "heating"}-master .eyebrow`, background: `.${section === "lights" ? "lighting" : "heating"}-master`, minimum: 4.5 }]);
+          }
+          if (section === "heating") {
+            await expectContrast(card, [{ foreground: ".heating-master-target,.master-temperature-stepper button", background: ".heating-master", minimum: 4.5 }]);
+          }
+          if (process.env.DAILY_BRIEF_REVIEW_DIR) {
+            const directory = resolve(process.env.DAILY_BRIEF_REVIEW_DIR, testInfo.project.name);
+            await page.screenshot({ path: resolve(directory, `${darkMode ? "dark" : "light"}-home-${section}.png`), fullPage: true, animations: "disabled" });
+          }
+        }
+        await card.locator('[data-home-section="rooms"]').click();
+      }
+    }
+  }
+  const player = card.locator(`[data-card-type="${familyConfig.media.card_type}"]`);
+  const instance = await player.getAttribute("data-instance-id");
+  await card.evaluate((element) => { element.hass = { ...element._hass, themes: { darkMode: false } }; });
+  await expect(card.locator(".hub-card")).toHaveAttribute("data-appearance", "light");
+  await expect(player).toHaveAttribute("data-instance-id", instance);
   expect(pageErrors).toEqual([]);
 });
 
@@ -2571,6 +2633,12 @@ test("shows current FPL squads, captain points and the complete league list", as
   await card.locator('[data-fpl-entry="child_one"]').click();
   await expect(card.locator(".fpl-team-card")).toContainText("Second XI");
   await expect(card.locator(".fpl-leagues > span")).toHaveCount(2);
+  await card.evaluate((element) => { element.hass = { ...element._hass, themes: { darkMode: true } }; });
+  await expect(card.locator(".hub-card")).toHaveAttribute("data-appearance", "dark");
+  await expectApprovalQuality(page);
+  await expectContrast(card, [
+    { foreground: ".fpl-scoreboard strong,.fpl-scoreboard small,.fpl-leagues strong,.fpl-player strong,.fpl-player small", background: ".football-main", minimum: 4.5 }
+  ]);
   expect(pageErrors).toEqual([]);
 });
 
@@ -2924,7 +2992,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   expect(mediaMetrics.childBottom).toBeLessThanOrEqual(mediaMetrics.stageBottom + 1);
   expect(mediaMetrics.chipColour).toBe("rgb(247, 248, 252)");
   expect(mediaMetrics.chipBackground).toBe("rgb(38, 50, 81)");
-  expect(mediaMetrics.stageBackground).toBe("rgb(7, 24, 47)");
+  expect(mediaMetrics.stageBackground).toBe("rgb(255, 255, 255)");
   expect(mediaMetrics.stageOverflowX).toBe("visible");
   expect(mediaMetrics.stageOverflowY).toBe("visible");
   expect(mediaMetrics.stageScrollHeight).toBeLessThanOrEqual(mediaMetrics.stageClientHeight + 1);
@@ -3332,12 +3400,12 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     expect(navigationTargetGeometry.map(({ label }) => label), `${name} compact navigation must retain its semantic order`).toEqual([
       "Open Today",
       "Calendar",
-      "Home",
       "Tasks",
+      "Home",
       "Security",
-      "Music",
       "Energy",
-      "Football"
+      "Football",
+      "Music"
     ]);
     expect(navigationTargetGeometry.every((target, index, targets) => index === 0 || target.left >= targets[index - 1].right + 1), `${name} compact navigation targets must stay in visual order without overlap`).toBe(true);
     expect(Math.max(...navigationTargetGeometry.map(({ top }) => top)) - Math.min(...navigationTargetGeometry.map(({ top }) => top)), `${name} compact navigation targets must stay on one aligned row`).toBeLessThanOrEqual(1);
@@ -3557,8 +3625,8 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
 
   await expect(card.locator(".today-hero")).toContainText("Good afternoon");
   await expect(card.locator(".hub-weather-pill")).toContainText("Partly cloudy");
-  await expect(card.locator(".today-weather")).toContainText("Partly cloudy");
-  expect((await card.locator(".hub-weather-pill,.today-weather").allTextContents()).join(" ")).not.toContain("Partlycloudy");
+  await expect(card.locator(".today-weather")).toHaveCount(0);
+  expect(await card.locator(".hub-weather-pill").textContent()).not.toContain("Partlycloudy");
   await expect(card.locator(".hero-metrics button[data-view='entry']")).toContainText("Quiet at home");
   await expect(card.locator(".hero-metrics button[data-view='entry']")).not.toContainText("All secure");
   await expectContrast(card, [

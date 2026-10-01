@@ -21,6 +21,8 @@ const PRIVATE_FLOORPLAN_SET = new Set(PRIVATE_FLOORPLAN_FILES);
 const MAX_FLOORPLAN_BYTES = 512 * 1024;
 const MANAGED_FRONTEND_FILES = Object.freeze([
   "family-hub-card.js",
+  "daily-brief-styles.js",
+  "assets/home-illustration.js",
   "assets/example-ground.svg",
   "assets/example-first.svg",
   "assets/example-living-room-light.svg",
