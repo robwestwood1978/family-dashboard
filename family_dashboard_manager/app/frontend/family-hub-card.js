@@ -6734,7 +6734,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _styles() {
-    return `
+    const styles = `
       /* Responsive layout: ${this._responsiveViewportKey()} */
       :host { --family-ha-header-offset:var(--header-height,56px); --hub-focus:#0B57C7; display:block; width:100%; min-width:0; min-height:664px; height:calc(100vh - var(--family-ha-header-offset)); margin-top:var(--family-ha-header-offset); color:var(--primary-text-color); font-family:var(--family-font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif); }
       *, *::before, *::after { box-sizing:border-box; }
@@ -8236,6 +8236,13 @@ export class FamilyHubCard extends HTMLElementBase {
       .light-dimmer input:focus-visible,.schedule-period input:focus-visible,.master-temperature-stepper input:focus-visible { outline:3px solid var(--hub-focus); outline-offset:2px; }
       @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
     `;
+    // Resolve viewport rules at each breakpoint refresh. WebKit can reuse stale
+    // media-query results from a previously mounted shadow stylesheet after zoom.
+    // Preference queries remain native so reduced-motion changes apply immediately.
+    return styles.replace(/@media\s*([^{}]+)\{/g, (rule, query) => {
+      if (!globalThis.matchMedia || !/(?:min|max)-width|orientation/.test(query)) return rule;
+      return `@media ${globalThis.matchMedia(query.trim()).matches ? "all" : "not all"} {`;
+    });
   }
 }
 
