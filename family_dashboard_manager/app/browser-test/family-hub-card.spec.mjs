@@ -4096,7 +4096,7 @@ test("Home in focus adapts every screen to portrait and narrow layouts while pre
         const dock = element.shadowRoot.querySelector(".focus-music-dock");
         return { cardWidth: card.clientWidth, cardScroll: card.scrollWidth, viewWidth: view.clientWidth, viewScroll: view.scrollWidth, overflowing: [...view.querySelectorAll("*")].filter((node) => node.getBoundingClientRect().right > view.getBoundingClientRect().right + 2).map((node) => ({class:String(node.className),width:node.getBoundingClientRect().width,minWidth:getComputedStyle(node).minWidth,grid:getComputedStyle(node).gridTemplateColumns})).slice(0,25), dockBottom: dock.getBoundingClientRect().bottom };
       });
-      expect(geometry.cardScroll).toBeLessThanOrEqual(geometry.cardWidth + 1);
+      expect(geometry.cardScroll, `${width}px ${view}: ${JSON.stringify(geometry)}`).toBeLessThanOrEqual(geometry.cardWidth + 1);
       expect(geometry.viewScroll, `${width}px ${view}: ${JSON.stringify(geometry.overflowing)}`).toBeLessThanOrEqual(geometry.viewWidth + 1);
       expect(geometry.dockBottom).toBeLessThanOrEqual(1024);
       if (process.env.DAILY_BRIEF_REVIEW_DIR && width === 768) {

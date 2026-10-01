@@ -234,7 +234,7 @@ export const DAILY_BRIEF_STYLES = `
   }
   /* Home in focus: one workspace, persistent navigation and playback. */
   :host { min-height:0; height:calc(100vh - var(--family-ha-header-offset)); }
-  .hub-card { display:grid; height:100%; min-height:0; overflow:hidden; grid-template-rows:48px minmax(0,1fr) auto; }
+  .hub-card { display:grid; height:100%; min-height:0; overflow:hidden; grid-template-columns:minmax(0,1fr); grid-template-rows:48px minmax(0,1fr) auto; }
   .focus-app-brand { display:flex; gap:10px; align-items:center; padding:0 24px; border-bottom:1px solid var(--daily-line); background:var(--daily-surface); }
   .focus-app-brand > ha-icon { --mdc-icon-size:23px; }
   .focus-app-brand strong { font-size:16px; font-weight:650; letter-spacing:-.03em; }
@@ -250,6 +250,7 @@ export const DAILY_BRIEF_STYLES = `
   .hub-view { min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin; }
   .hub-topbar h1 { font-size:30px; }
   .hub-weather-pill { border:1px solid var(--daily-line); min-height:42px; }
+  .focus-dock-shell { min-width:0; }
   .focus-dock-shell:empty { display:none; }
   .focus-music-dock.today-music { display:grid; grid-template-columns:44px minmax(120px,1fr) auto auto 100px; gap:12px; margin:0; padding:10px 24px !important; border-top:1px solid var(--daily-line); background:var(--daily-surface); min-height:66px; }
   .focus-music-dock .artwork { width:48px; height:48px; border-radius:9px; background:var(--daily-soft); }
