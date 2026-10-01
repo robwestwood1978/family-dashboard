@@ -966,7 +966,7 @@ test("creates one Apple calendar event and a point-free Ready checklist inside t
   expect(pageErrors).toEqual([]);
 });
 
-test("previews urgent Ready items on Today and toggles them through the bounded to-do service", async ({ page }) => {
+test("shows the next event checklist once on Today and toggles it through the bounded to-do service", async ({ page }) => {
   const start = new Date(Date.parse(APPROVAL_NOW) + 3_600_000).toISOString();
   const end = new Date(Date.parse(APPROVAL_NOW) + 7_200_000).toISOString();
   const event = {
@@ -983,9 +983,10 @@ test("previews urgent Ready items on Today and toggles them through the bounded 
     ]
   });
   const card = page.locator("family-hub-card");
-  await expect(card.locator(".today-ready-item")).toHaveCount(2);
-  await expect(card.locator(".today-ready-preview")).toContainText(/Ready next.*1 still to do.*Football boots.*Child one.*Football training/s);
-  await card.locator('.today-ready-item[data-prep-item="boots"]').click();
+  await expect(card.locator(".today-next .focus-ready-item")).toHaveCount(2);
+  await expect(card.locator(".today-ready-item")).toHaveCount(0);
+  await expect(card.locator(".today-next")).toContainText(/Football training.*Football boots.*Child one.*Water bottle.*1 of 2 ready/s);
+  await card.locator('.today-next [data-prep-item="boots"]').click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.find((entry) => entry.domain === "todo" && entry.service === "update_item"))).toMatchObject({
     domain: "todo",
     service: "update_item",
@@ -4007,8 +4008,11 @@ test("Home in focus shares complete event checklists between Calendar, Tasks and
   responses["calendar.child_two"] = events.slice(2);
   const errors = await mount(page, familyConfig, {}, { calendarEventsByEntity: responses, preparationItems });
   const card = page.locator("family-hub-card");
-  await card.locator('.today-next [data-prep-item="boots"]').click();
+  await card.locator('.today-next [data-prep-item="boots"]').focus();
+  await card.locator('.today-next [data-prep-item="boots"]').press("Enter");
   await expect(card.locator('.today-next [data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.dataset?.prepItem)).toBe("boots");
+  await expect(card.locator('.today-ready-item[data-prep-item="boots"]')).toHaveCount(0);
   await card.locator('.hub-navigation [data-view="family"]').click();
   await expect(card.locator(".family-prep-item")).toHaveCount(9);
   await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "true");
