@@ -394,7 +394,7 @@ async function fetchJson(url, fetchImpl, timeoutMs) {
     headers: {
       Accept: "application/json",
       Referer: "https://fantasy.premierleague.com/",
-      "User-Agent": "family-dashboard-manager/0.15.0"
+      "User-Agent": "family-dashboard-manager/0.16.0"
     },
     signal: AbortSignal.timeout(timeoutMs)
   });
