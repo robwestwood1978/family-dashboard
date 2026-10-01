@@ -108,6 +108,7 @@ export const DAILY_BRIEF_STYLES = `
   .team-mark,.team-mark img { background:#FFFFFF; color:#22332B; }
   .team-mark { box-shadow:none; }
   .team-mark strong { color:#22332B; }
+  .matchweek-controls button { flex:0 0 48px; min-width:48px; }
   .home-toolbar h2 { font-size:22px; letter-spacing:-.035em; }
   .home-segments { max-width:100%; }
   .home-toolbar { flex-wrap:wrap; gap:14px; }
@@ -149,6 +150,8 @@ export const DAILY_BRIEF_STYLES = `
   .family-summary-item > span { background:var(--daily-warning-soft); color:var(--daily-warning); }
   .family-kid-tab > span,.calendar-person-filter > span,.day-people i,.fpl-entry-selector button > span,.fpl-team-card header > span { background:color-mix(in srgb,var(--person-colour) 25%,#263A2E); color:#FFFFFF; }
   .chore-row.is-kid-card > b { background:color-mix(in srgb,var(--person-colour) 10%,var(--daily-soft)); color:var(--daily-text); }
+  .kid-mission,.kid-mission.is-complete { background:var(--daily-strong); }
+  .kid-mission strong,.kid-mission p,.kid-mission em { color:var(--daily-on-strong); }
   .kid-mission i b { background:#FFFFFF; }
   .chore-claim-action { background:var(--daily-accent); color:var(--daily-on-accent); }
   .chore-claim-action:disabled { background:var(--daily-soft); color:var(--daily-muted); }

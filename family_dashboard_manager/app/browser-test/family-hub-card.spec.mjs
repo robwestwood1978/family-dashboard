@@ -858,7 +858,10 @@ test("Daily brief keeps every screen readable in both appearances and preserves 
     today: [{ foreground: ".today-hero h2,.today-hero-copy > p:last-child,.hero-metrics small", background: ".today-hero", minimum: 4.5 }],
     calendar: [{ foreground: ".calendar-person-filter,.family-planner-day > header strong,.calendar-navigation strong,.family-planner-event strong", background: ".calendar-view", minimum: 4.5 }],
     rooms: [{ foreground: ".home-toolbar h2,.room-title h2", background: ".home-surface", minimum: 4.5 }],
-    family: [{ foreground: ".family-person-heading h2,.chore-row strong,.chore-row b,.chore-claim-action:not([disabled]),.family-summary-item strong", background: ".family-dashboard", minimum: 4.5 }],
+    family: [
+      { foreground: ".family-person-heading h2,.chore-row strong,.chore-row b,.chore-claim-action:not([disabled]),.family-summary-item strong", background: ".family-dashboard", minimum: 4.5 },
+      { foreground: ".kid-mission strong,.kid-mission p,.kid-mission em", background: ".kid-mission", minimum: 4.5 }
+    ],
     entry: [{ foreground: ".garage-heading h2,.garage-motion", background: ".garage-panel", minimum: 4.5 }],
     energy: [{ foreground: ".energy-meter-heading h2,.energy-freshness", background: ".energy-meter", minimum: 4.5 }],
     football: [{ foreground: ".football-toolbar h2,.team,.fixture-score", background: ".football-main", minimum: 4.5 }],
@@ -1074,6 +1077,7 @@ test("retains keyboard focus across equivalent full-card rerenders", async ({ pa
   const firstFloor = card.locator('[data-floor="first"]');
   await firstFloor.focus();
   await firstFloor.press("Enter");
+  await expect(firstFloor).toHaveAttribute("aria-pressed", "true");
   await expect.poll(focusedControl).toMatchObject({ floor: "first" });
 
   const room = card.locator('[data-room]').first();
