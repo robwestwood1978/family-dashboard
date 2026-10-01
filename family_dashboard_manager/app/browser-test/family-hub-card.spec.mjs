@@ -874,6 +874,10 @@ test("Daily brief keeps every screen readable in both appearances and preserves 
       await expectContrast(card, contrastChecks[view]);
       if (view === "today") {
         await expect.poll(() => card.locator(".daily-home-art img").evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
+        if (!testInfo.project.name.startsWith("approval-") && (await page.viewportSize()).width >= 1024) {
+          const musicBottom = await card.locator(".today-music").evaluate((node) => node.getBoundingClientRect().bottom);
+          expect(musicBottom, "The baseline Daily brief must show its Music strip within the tablet screen").toBeLessThanOrEqual(page.viewportSize().height);
+        }
       }
       if (process.env.DAILY_BRIEF_REVIEW_DIR) {
         const directory = resolve(process.env.DAILY_BRIEF_REVIEW_DIR, testInfo.project.name);

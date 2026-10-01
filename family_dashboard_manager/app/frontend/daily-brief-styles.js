@@ -79,10 +79,11 @@ export const DAILY_BRIEF_STYLES = `
   .hero-metrics button > ha-icon { --mdc-icon-size:20px; color:var(--daily-accent); }
   .hero-metrics strong { color:var(--daily-text); font-size:14px; font-weight:650; }
   .hero-metrics small { color:var(--daily-muted); font-size:12px; line-height:1.3; }
-  .today-next { grid-column:5/7; grid-row:1; min-height:236px; padding:22px !important; border:0; background:var(--daily-accent-soft); box-shadow:none; }
+  .today-next { grid-column:5/7; grid-row:1; min-height:236px; padding:20px !important; border:0; background:var(--daily-accent-soft); box-shadow:none; }
   .today-card-icon { margin-bottom:14px; background:var(--daily-surface); color:var(--daily-accent); }
   .today-next h2 { font-size:27px; letter-spacing:-.04em; font-weight:650; overflow-wrap:anywhere; }
-  .today-next .text-action { margin-top:20px; }
+  .today-next .today-card-icon { width:40px; height:40px; margin-bottom:10px; }
+  .today-next .text-action { margin-top:12px; }
   .today-family { grid-row:2; grid-column:1/4; }
   .today-football { grid-row:2; grid-column:4/7; }
   .today-music { grid-row:3; grid-column:1/-1; }
@@ -93,11 +94,15 @@ export const DAILY_BRIEF_STYLES = `
   .today-family,.today-football,.today-music { justify-content:flex-start; background:var(--daily-surface); }
   .today-music { display:grid; grid-template-columns:minmax(160px,.7fr) minmax(0,1fr); align-items:center; gap:20px; }
   .today-music .section-heading { align-items:center; }
-  .today-music .now-playing,.today-music .quiet-music { margin:0; min-height:64px; }
+  .today-music { padding:12px 18px !important; }
+  .today-music .now-playing { grid-template-columns:52px minmax(0,1fr) 48px; }
+  .today-music .artwork { width:52px; height:52px; }
+  .today-music .now-playing,.today-music .quiet-music { margin:0; min-height:52px; }
   .person-summary { border:0; min-height:68px; background:color-mix(in srgb,var(--person-colour) 5%,var(--daily-soft)); border-radius:14px; }
   .person-summary strong { font-size:15px; }
   .person-initial { border:0; background:color-mix(in srgb,var(--person-colour) 25%,#263A2E); color:#FFFFFF; }
   .compact-fixture { border:0; border-left:3px solid var(--daily-line); min-height:74px; background:var(--daily-soft); border-radius:12px; box-shadow:none; }
+  .compact-fixture:not(.is-empty) { padding:6px 10px; gap:2px 8px; }
   .compact-fixture.is-derby { background:var(--daily-soft); border-right:3px solid #670E36; border-left:3px solid #132257; }
   .compact-team { font-size:13px; }
   .team-mark,.team-mark img { background:#FFFFFF; color:#22332B; }
