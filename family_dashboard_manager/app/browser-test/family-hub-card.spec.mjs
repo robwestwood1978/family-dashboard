@@ -18,7 +18,7 @@ const illustrationSource = await readFile(new URL("../frontend/assets/home-illus
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.16.0";', dailyBriefSource);
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
 const APPROVAL_FOOTBALL_CHECKED_AT = Object.freeze({
   live: "2026-08-24T15:07:00.000Z",
@@ -698,6 +698,10 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
             window.__pendingServiceCalls.push({ key, resolve, reject });
           });
         }
+        if (domain === "todo" && service === "update_item") {
+          const item = (runtimeOptions.preparationItems || []).find((item) => item.uid === boundedData.item);
+          if (item) item.status = boundedData.status;
+        }
         return Promise.resolve();
       },
       async callApi(method, path) {
@@ -849,13 +853,13 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   expect(pageErrors).toEqual([]);
 });
 
-test("Daily brief keeps every screen readable in both appearances and preserves the Music player when appearance changes", async ({ page }, testInfo) => {
+test("Home in focus keeps every screen readable in both appearances and preserves the Music player when appearance changes", async ({ page }, testInfo) => {
   const familyConfig = structuredClone(config);
   familyConfig.features.location_map = false;
   const pageErrors = await mount(page, familyConfig);
   const card = page.locator("family-hub-card");
   const contrastChecks = {
-    today: [{ foreground: ".today-hero h2,.today-hero-copy > p:last-child,.hero-metrics small", background: ".today-hero", minimum: 4.5 }],
+    today: [{ foreground: ".today-hero h2,.today-hero-copy > p:last-child", background: ".today-hero", minimum: 4.5 }],
     calendar: [{ foreground: ".calendar-person-filter,.family-planner-day > header strong,.calendar-navigation strong,.family-planner-event strong", background: ".calendar-view", minimum: 4.5 }],
     rooms: [{ foreground: ".home-toolbar h2,.room-title h2", background: ".home-surface", minimum: 4.5 }],
     family: [
@@ -879,7 +883,7 @@ test("Daily brief keeps every screen readable in both appearances and preserves 
         await expect.poll(() => card.locator(".daily-home-art img").evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
         if (!testInfo.project.name.startsWith("approval-") && (await page.viewportSize()).width >= 1024) {
           const musicBottom = await card.locator(".today-music").evaluate((node) => node.getBoundingClientRect().bottom);
-          expect(musicBottom, "The baseline Daily brief must show its Music strip within the tablet screen").toBeLessThanOrEqual(page.viewportSize().height);
+          expect(musicBottom, "Home in focus must show its Music dock within the tablet screen").toBeLessThanOrEqual(page.viewportSize().height);
         }
       }
       if (process.env.DAILY_BRIEF_REVIEW_DIR) {
@@ -1022,7 +1026,7 @@ test("keeps the first-party month planner isolated from dashboard navigation", a
   expect(inactiveColourAfter).toBe(inactiveColourBefore);
 
   await expect(card.locator(".calendar-context")).toContainText("Family planner");
-  await expect(card.locator(".calendar-context")).toContainText("Who is doing what");
+  await expect(card.locator(".focus-calendar-title")).toContainText("2026");
   const modeStyles = await card.locator(".calendar-modes .segment").evaluateAll((buttons) => buttons.map((button) => {
     const style = getComputedStyle(button);
     return { minHeight: style.minHeight, marginTop: style.marginTop, paddingLeft: style.paddingLeft };
@@ -1582,7 +1586,7 @@ test("disables unavailable Home toggles and exposes switch state to assistive te
   await expect(roomLight).toHaveAttribute("aria-disabled", "true");
   await expect(roomLight).toHaveAttribute("aria-pressed", "false");
   await expect(roomLight).toHaveAttribute("aria-label", "Living room light unavailable");
-  const roomMedia = card.locator('[data-media-toggle="media_player.living_room"]');
+  const roomMedia = card.locator('.media-room-control[data-media-toggle="media_player.living_room"]');
   await expect(roomMedia).toBeDisabled();
   await expect(roomMedia).toHaveAttribute("aria-label", "Living room speaker unavailable");
   await expect(card.locator('[data-climate-adjust][data-entity="climate.living_room"]')).toHaveCount(2);
@@ -2513,7 +2517,7 @@ test("fails Security unavailable states safely without presenting them as clear 
 test("keeps the family map private and spotlights both requested clubs", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
-  await expect(card.locator(".today-family")).toContainText("Tasks, jobs & rewards");
+  await expect(card.locator(".today-family")).toContainText("A little left to do");
   const todayFavourites = card.locator(".today-football .compact-fixture[data-favourite-code]");
   await expect(todayFavourites).toHaveCount(2);
   expect(await todayFavourites.evaluateAll((items) => items.map((item) => [item.dataset.favouriteCode, item.dataset.fixtureId]))).toEqual([
@@ -3631,7 +3635,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
   });
   const card = page.locator("family-hub-card");
 
-  await expect(card.locator(".today-hero")).toContainText("Good afternoon");
+  await expect(card.locator(".today-hero")).toContainText("Living room");
   await expect(card.locator(".hub-weather-pill")).toContainText("Partly cloudy");
   await expect(card.locator(".today-weather")).toHaveCount(0);
   expect(await card.locator(".hub-weather-pill").textContent()).not.toContain("Partlycloudy");
@@ -3983,4 +3987,148 @@ test("v0.9 design approval captures live, cached, and stale football health", as
   await expect(card.locator(".football-health-note.is-stale")).toHaveText("The last football check is older than expected.");
   await captureApproval(page, testInfo, "football-stale");
   expect(pageErrors).toEqual([]);
+});
+
+test("Home in focus shares complete event checklists between Calendar, Tasks and Today without changing rewards", async ({ page }) => {
+  const familyConfig = structuredClone(config);
+  familyConfig.features.location_map = false;
+  const events = [
+    { summary: "Football training", start: { dateTime: "2026-08-24T15:38:00Z" }, end: { dateTime: "2026-08-24T17:00:00Z" }, _calendar: config.calendar.entities.find((entry) => entry.entity_id === "calendar.child_one") },
+    { summary: "Friday swimming", start: { dateTime: "2026-08-28T17:00:00Z" }, end: { dateTime: "2026-08-28T18:00:00Z" }, _calendar: config.calendar.entities.find((entry) => entry.entity_id === "calendar.child_one") },
+    { summary: "Other child swimming", start: { dateTime: "2026-08-28T16:00:00Z" }, end: { dateTime: "2026-08-28T17:00:00Z" }, _calendar: config.calendar.entities.find((entry) => entry.entity_id === "calendar.child_two") }
+  ];
+  const preparationItems = [
+    { uid: "boots", summary: "Football boots", status: "needs_action", due: "2026-08-24", description: preparationDescription(events[0], "child_one", "football") },
+    ...Array.from({ length: 8 }, (_, index) => ({ uid: `swim-${index}`, summary: `Swimming item ${index + 1}`, status: "needs_action", due: "2026-08-28", description: preparationDescription(events[1], "child_one", "custom") })),
+    { uid: "other-bag", summary: "Other child bag", status: "needs_action", due: "2026-08-28", description: preparationDescription(events[2], "child_two", "custom") }
+  ];
+  const responses = Object.fromEntries(config.calendar.entities.map((entry) => [entry.entity_id, []]));
+  responses["calendar.child_one"] = events.slice(0, 2);
+  responses["calendar.child_two"] = events.slice(2);
+  const errors = await mount(page, familyConfig, {}, { calendarEventsByEntity: responses, preparationItems });
+  const card = page.locator("family-hub-card");
+  await card.locator('.today-next [data-prep-item="boots"]').click();
+  await expect(card.locator('.today-next [data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "true");
+  await card.locator('.hub-navigation [data-view="family"]').click();
+  await expect(card.locator(".family-prep-item")).toHaveCount(9);
+  await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(card.locator(".family-preparation")).not.toContainText("Other child bag");
+  await expect(card.locator(".focus-task-rewards")).toContainText("Weekend movie");
+  await card.locator('.family-prep-item[data-prep-item="swim-7"]').click();
+  await card.locator('.focus-task-event').filter({ hasText: "Friday swimming" }).locator("[data-focus-open-plan]").click();
+  await expect(card.locator('.focus-event-ready [data-prep-item="swim-7"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(card.locator(".focus-event-ready .focus-ready-item")).toHaveCount(8);
+  await card.locator('.focus-event-ready [data-prep-item="swim-7"]').click();
+  await card.locator('[data-focus-tasks="child_one"]').click();
+  await expect(card.locator('.family-prep-item[data-prep-item="swim-7"]')).toHaveAttribute("aria-pressed", "false");
+  await card.locator('[data-family-person="child_two"]').click();
+  await expect(card.locator(".family-prep-item")).toHaveCount(1);
+  await expect(card.locator(".family-preparation")).toContainText("Other child bag");
+  const calls = await page.evaluate(() => window.__serviceCalls);
+  expect(calls.filter((call) => call.domain === "todo" && call.service === "update_item").map((call) => [call.data.item, call.data.status])).toEqual([["boots", "completed"], ["swim-7", "completed"], ["swim-7", "needs_action"]]);
+  expect(calls.some((call) => call.domain === "choreops" || call.domain === "button")).toBe(false);
+  expect(await card.evaluate((element) => element._hass.states["sensor.child_one_choreops_points"].state)).toBe("42");
+  expect(errors).toEqual([]);
+});
+
+test("Home in focus keeps the music dock live across views and bounds playback, volume and room selection", async ({ page }) => {
+  const errors = await mount(page, config, {
+    "media_player.living_room": state("media_player.living_room", "playing", { media_title: "First track", supported_features: 16437, volume_level: .4 }),
+    "media_player.kitchen": state("media_player.kitchen", "paused", { media_title: "Kitchen track", supported_features: 16437, volume_level: .2 })
+  });
+  const card = page.locator("family-hub-card");
+  const dock = card.locator(".focus-music-dock");
+  for (const view of ["today", "calendar", "rooms", "family", "entry", "energy", "football", "music"]) {
+    await card.locator(`.hub-navigation [data-view="${view}"]`).click();
+    await expect(dock).toBeVisible();
+    const bottom = await dock.evaluate((node) => node.getBoundingClientRect().bottom);
+    expect(bottom).toBeLessThanOrEqual(page.viewportSize().height);
+  }
+  const player = card.locator(`[data-card-type="${config.media.card_type}"]`);
+  const instance = await player.getAttribute("data-instance-id");
+  await updateEntityState(card, state("media_player.living_room", "playing", { media_title: "Updated track", supported_features: 16437, volume_level: .4 }));
+  await expect(dock).toContainText("Updated track");
+  await expect(player).toHaveAttribute("data-instance-id", instance);
+  await dock.locator('[data-media-service="media_next_track"]').click();
+  await dock.locator('[data-media-toggle="media_player.living_room"]').click();
+  await dock.locator("[data-dock-player]").selectOption("media_player.kitchen");
+  await expect(dock).toContainText("Kitchen track");
+  await dock.locator("[data-dock-volume]").evaluate((input) => { input.value = "55"; input.dispatchEvent(new Event("change", { bubbles: true, composed: true })); });
+  expect(await page.evaluate(() => window.__serviceCalls)).toEqual([
+    { domain: "media_player", service: "media_next_track", data: { entity_id: "media_player.living_room" } },
+    { domain: "media_player", service: "media_play_pause", data: { entity_id: "media_player.living_room" } },
+    { domain: "media_player", service: "volume_set", data: { entity_id: "media_player.kitchen", volume_level: .55 } }
+  ]);
+  await card.evaluate((element) => {
+    element._config.display.read_only = true;
+    const button = document.createElement("button");
+    button.dataset.mediaService = "media_next_track";
+    button.dataset.entity = "media_player.kitchen";
+    element.shadowRoot.append(button);
+    button.click();
+    const slider = element.shadowRoot.querySelector("[data-dock-volume]");
+    slider.value = "75";
+    slider.dispatchEvent(new Event("change", { bubbles: true }));
+    element._config.display.read_only = false;
+    button.dataset.entity = "media_player.private";
+    button.click();
+  });
+  expect(await page.evaluate(() => window.__serviceCalls.length)).toBe(3);
+  expect(errors).toEqual([]);
+});
+
+test("Home in focus adapts every screen to portrait and narrow layouts while preserving navigation and playback", async ({ page }, testInfo) => {
+  const errors = await mount(page);
+  const card = page.locator("family-hub-card");
+  for (const width of [768, 320]) {
+    await page.setViewportSize({ width, height: 1024 });
+    for (const view of ["today", "calendar", "rooms", "family", "entry", "energy", "football", "music"]) {
+      await card.locator(`.hub-navigation [data-view="${view}"]`).click();
+      await expect(card.locator(`[data-current-view="${view}"]`)).toBeVisible();
+      await expect(card.locator(".focus-music-dock")).toBeVisible();
+      const geometry = await card.evaluate((element) => {
+        const card = element.shadowRoot.querySelector(".hub-card");
+        const view = element.shadowRoot.querySelector(".hub-view");
+        const dock = element.shadowRoot.querySelector(".focus-music-dock");
+        return { cardWidth: card.clientWidth, cardScroll: card.scrollWidth, viewWidth: view.clientWidth, viewScroll: view.scrollWidth, overflowing: [...view.querySelectorAll("*")].filter((node) => node.getBoundingClientRect().right > view.getBoundingClientRect().right + 2).map((node) => ({class:String(node.className),width:node.getBoundingClientRect().width,minWidth:getComputedStyle(node).minWidth,grid:getComputedStyle(node).gridTemplateColumns})).slice(0,25), dockBottom: dock.getBoundingClientRect().bottom };
+      });
+      expect(geometry.cardScroll).toBeLessThanOrEqual(geometry.cardWidth + 1);
+      expect(geometry.viewScroll, `${width}px ${view}: ${JSON.stringify(geometry.overflowing)}`).toBeLessThanOrEqual(geometry.viewWidth + 1);
+      expect(geometry.dockBottom).toBeLessThanOrEqual(1024);
+      if (process.env.DAILY_BRIEF_REVIEW_DIR && width === 768) {
+        const directory = resolve(process.env.DAILY_BRIEF_REVIEW_DIR, testInfo.project.name);
+        await mkdir(directory, { recursive: true });
+        await page.screenshot({ path: resolve(directory, `portrait-${view}.png`), animations: "disabled" });
+      }
+    }
+  }
+  expect(errors).toEqual([]);
+});
+
+test("Home in focus restores failed checklist updates and blocks read-only checklist writes", async ({ page }) => {
+  const familyConfig = structuredClone(config);
+  familyConfig.features.location_map = false;
+  const event = { summary: "Football training", start: { dateTime: "2026-08-24T15:38:00Z" }, end: { dateTime: "2026-08-24T17:00:00Z" }, _calendar: config.calendar.entities.find((entry) => entry.entity_id === "calendar.child_one") };
+  const responses = Object.fromEntries(config.calendar.entities.map((entry) => [entry.entity_id, []]));
+  responses["calendar.child_one"] = [event];
+  const errors = await mount(page, familyConfig, {}, {
+    calendarEventsByEntity: responses,
+    preparationItems: [{ uid: "boots", summary: "Football boots", status: "needs_action", due: "2026-08-24", description: preparationDescription(event, "child_one", "football") }],
+    serviceBehaviors: { "todo.update_item:todo.family_prep": "reject" }
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.today-next [data-prep-item="boots"]').click();
+  await expect(card.locator('.today-next [data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "false");
+  await expect(card.locator('.focus-today-plan [role="alert"]')).toBeVisible();
+  await card.locator('.hub-navigation [data-view="family"]').click();
+  await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "false");
+  await card.evaluate((element) => {
+    element._config.display.read_only = true;
+    element._scheduleRender(true);
+  });
+  await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toBeDisabled();
+  await card.locator('.family-prep-item[data-prep-item="boots"]').evaluate((button) => { button.disabled = false; button.click(); });
+  expect(await page.evaluate(() => window.__serviceCalls.length)).toBe(1);
+  await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "false");
+  expect(errors).toEqual([]);
 });

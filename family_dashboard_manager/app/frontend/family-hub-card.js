@@ -1,5 +1,5 @@
 import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.16.0";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -43,6 +43,7 @@ export function isControlAction(dataset = {}) {
     dataset.toggle
     || dataset.scene
     || dataset.mediaToggle
+    || dataset.mediaService
     || dataset.coverAction
     || dataset.climateAdjust
     || dataset.climatePower
@@ -1962,6 +1963,9 @@ export class FamilyHubCard extends HTMLElementBase {
     this._view = "today";
     this._homeSection = "rooms";
     this._calendarMode = "week";
+    this._calendarSelectedKey = null;
+    this._calendarFocusEvent = null;
+    this._dockPlayerId = null;
     this._floor = null;
     this._room = null;
     this._securityCameraId = null;
@@ -2192,6 +2196,7 @@ export class FamilyHubCard extends HTMLElementBase {
       // The embedded player receives the new hass object above. Rebuilding the
       // outer shell for every playback tick would reset its browsing position.
       if (this._view !== "music") this._scheduleRender();
+      else this._refreshMusicDock();
     }
     this._loadCalendarEvents();
     void this._loadPreparationItems();
@@ -2537,6 +2542,8 @@ export class FamilyHubCard extends HTMLElementBase {
       const step = this._calendarMode === "day" ? 1 : 7;
       this._calendarAnchorKey = shiftDateKey(this._calendarAnchorKey || today, direction === "next" ? step : -step);
     }
+    this._calendarSelectedKey = this._calendarAnchorKey;
+    this._calendarFocusEvent = null;
     this._calendarRequestKey = "";
     this._scheduleRender(true);
     void this._loadCalendarEvents(true);
@@ -2663,15 +2670,17 @@ export class FamilyHubCard extends HTMLElementBase {
         --hub-backdrop-end:${escapeHtml(theme.backdrop_end)};
         --hub-radius:${Number(theme.radius_px)}px;
       ">
+        <header class="focus-app-brand"${shellGuard}><ha-icon icon="mdi:home-outline"></ha-icon><strong>Family Hub</strong><span>${escapeHtml(this._config.product.name || "")}</span></header>
         <div class="hub-shell"${shellGuard}>
           ${this._renderNavigation()}
           <main class="hub-content">
             ${this._renderHeader()}
-            <div class="hub-view" data-current-view="${escapeHtml(this._view)}">
+            <div class="hub-view" data-current-view="${escapeHtml(this._view)}" tabindex="0" aria-label="${escapeHtml(this._enabledViews().find((entry)=>entry.id===this._view)?.label || "Dashboard")} content">
               ${this._renderView()}
             </div>
           </main>
         </div>
+        <div class="focus-dock-shell"${this._pendingConfirmation ? ' inert aria-hidden="true"' : shellGuard}>${this._renderMusicDock()}</div>
         ${this._renderPhotoFrame()}
         ${this._renderPlannerModal()}
       </ha-card>
@@ -2852,7 +2861,6 @@ export class FamilyHubCard extends HTMLElementBase {
     };
     return `
       <nav class="hub-navigation" aria-label="Family Dashboard views"${confirmationGuard}>
-        <div class="hub-wordmark"><ha-icon icon="mdi:home-heart" aria-hidden="true"></ha-icon><span>Family<br>Hub.</span></div>
         <button class="hub-brand ${this._view === "today" ? "is-active" : ""}" type="button" data-view="today" aria-label="Open Today" aria-current="${this._view === "today" ? "page" : "false"}"><ha-icon icon="mdi:home-heart" aria-hidden="true"></ha-icon><span>Today</span></button>
         ${group("Family", ["calendar", "family"], "hub-nav-core")}
         ${group("House", ["rooms", "entry", "energy"])}
@@ -2904,106 +2912,105 @@ export class FamilyHubCard extends HTMLElementBase {
     }
   }
 
+  _renderFocusChecklist(event, { compact = false, personId = "" } = {}) {
+    const eventKey = familyPlannerEventKey(event);
+    const items = this._preparationItems.filter((item) => item?._preparation?.eventKey === eventKey && (!personId || item._preparation.personId === personId));
+    if (!items.length) return "";
+    const progress = preparationProgress(items,eventKey);
+    return `<div class="focus-checklist ${compact ? "is-compact":""}">${items.map((item) => {const done=String(item.status).toLowerCase()==="completed";const id=item.uid || item.id || item.summary;const person=this._config.people.find((person)=>person.id===item._preparation.personId);return `<button type="button" class="focus-ready-item ${done ? "is-complete":""}" data-prep-item="${escapeHtml(id)}" data-prep-status="${done ? "needs_action":"completed"}" aria-pressed="${done}" ${this._config.display.read_only ? "disabled":""}><ha-icon icon="${done ? "mdi:checkbox-marked":"mdi:checkbox-blank-outline"}"></ha-icon><span>${escapeHtml(item.summary || item.item || "Ready item")}</span>${person && !personId ? `<small class="focus-ready-person">${escapeHtml(person.name)}</small>` : ""}</button>`}).join("")}</div><p class="focus-ready-count">${progress.complete} of ${progress.total} ready</p>`;
+  }
+
+  _refreshMusicDock() {
+    const shell = this.shadowRoot?.querySelector(".focus-dock-shell");
+    if (!shell) return;
+    const active = this.shadowRoot.activeElement;
+    const focus = this._captureRenderFocus();
+    const volume = active?.matches?.("[data-dock-volume]")
+      ? { entity: active.dataset.dockVolume, value: active.value } : null;
+    shell.innerHTML = this._renderMusicDock();
+    if (volume) {
+      const input = [...shell.querySelectorAll("[data-dock-volume]")].find((node) => node.dataset.dockVolume === volume.entity);
+      if (input) { input.value = volume.value; input.focus({ preventScroll: true }); }
+    } else this._restoreRenderFocus(focus);
+  }
+
+  _renderMusicDock() {
+    if (!this._config.features.music) return "";
+    const players=this._config.media.players;
+    const playing=firstPlayingPlayer(this._config,this._hass?.states || {});
+    const player=players.find((entry)=>entry.entity_id===this._dockPlayerId) || playing?.player || players[0];
+    if (!player) return "";
+    const state=this._hass?.states?.[player.entity_id];
+    const available=isEntityAvailable(state);
+    const features=Number(state?.attributes?.supported_features || 0);
+    const locked=this._config.display.read_only || !available;
+    const mediaButton=(service,icon,label,capability=0)=>`<button type="button" class="focus-dock-action" data-media-service="${service}" data-entity="${escapeHtml(player.entity_id)}" aria-label="${label}" ${locked || (capability && !(features & capability)) ? "disabled":""}><ha-icon icon="${icon}"></ha-icon></button>`;
+    return `<footer class="focus-music-dock today-music" aria-label="Music playback"><div class="artwork">${state?.attributes?.entity_picture ? `<img src="${escapeHtml(state.attributes.entity_picture)}" alt="Album artwork">`:'<ha-icon icon="mdi:music-note"></ha-icon>'}</div><button type="button" class="focus-dock-track" data-view="music"><strong>${escapeHtml(available ? state.attributes?.media_title || "Choose something to play":"Player unavailable")}</strong><small>${escapeHtml(available ? state.attributes?.media_artist || player.name:player.name)}</small></button><div class="focus-dock-playback">${mediaButton("media_previous_track","mdi:skip-previous","Previous track",16)}<button type="button" class="focus-dock-action is-play" data-media-toggle="${escapeHtml(player.entity_id)}" aria-label="${state?.state === "playing" ? "Pause music":"Play music"}" ${locked || (state?.state === "playing" ? !(features & 1):!(features & 16384)) ? "disabled":""}><ha-icon icon="${state?.state === "playing" ? "mdi:pause":"mdi:play"}"></ha-icon></button>${mediaButton("media_next_track","mdi:skip-next","Next track",32)}</div><label class="focus-dock-output"><ha-icon icon="mdi:speaker"></ha-icon><select data-dock-player aria-label="Music output room">${players.map((entry)=>`<option value="${escapeHtml(entry.entity_id)}" ${entry.entity_id===player.entity_id ? "selected":""}>${escapeHtml(entry.name)}</option>`).join("")}</select></label><input class="focus-dock-volume" type="range" min="0" max="100" value="${Math.round(safeNumber(state?.attributes?.volume_level,0)*100)}" data-dock-volume="${escapeHtml(player.entity_id)}" aria-label="${escapeHtml(player.name)} volume" ${locked || !(features & 4) ? "disabled":""}></footer>`;
+  }
+
+  _focusCalendarDay() {
+    const days=this._calendarWindow();
+    const selected=this._calendarSelectedKey || this._calendarAnchorKey || dateKey(new Date(),this._config.product.timezone);
+    return days.find((day)=>day.key===selected) || days[0];
+  }
+
+  _renderFocusCalendarPlan() {
+    const day=this._focusCalendarDay();
+    if (!day) return "";
+    const events=this._filteredCalendarEvents().filter((event)=>dateKey(calendarEventStart(event),this._config.product.timezone)===day.key);
+    const selected=events.find((event)=>familyPlannerEventKey(event)===this._calendarFocusEvent) || events.find((event)=>isCurrentOrFutureCalendarEvent(event,new Date(),this._config.product.timezone)) || events[0];
+    return `<div class="focus-calendar-layout"><section class="focus-calendar-agenda"><header><h2>${escapeHtml(formatDay(`${day.key}T12:00:00`,this._config.product.locale,this._config.product.timezone))}</h2><small>${events.length} plan${events.length===1 ? "":"s"}</small></header>${events.map((event)=>`<div class="focus-agenda-row">${this._renderPlannerEventButton(event)}<button type="button" class="focus-plan-select" data-calendar-focus="${escapeHtml(familyPlannerEventKey(event))}" aria-label="Show ${escapeHtml(event.summary || "event")} checklist" aria-pressed="${selected===event}"><ha-icon icon="mdi:bag-personal-outline"></ha-icon>Get ready</button></div>`).join("") || '<p class="family-planner-empty">A little breathing room. Add a plan when you need one.</p>'}</section>${selected ? this._renderFocusPreparation(selected):""}</div>`;
+  }
+
+  _renderFocusPreparation(event) {
+    const key = familyPlannerEventKey(event);
+    const children = familyPlannerPeople(event, this._config.people).filter((person) => person.role === "child");
+    const suggestion = matchPreparationTemplate(event, this._config.calendar.preparation?.templates || []);
+    let checklist = this._renderFocusChecklist(event);
+    if (!checklist && suggestion && children.length && !this._config.display.read_only) {
+      checklist = `<p class="supporting">${escapeHtml(suggestion.label)}</p>${children.map((person) => `
+        <button type="button" class="focus-add-template" data-add-preparation="${escapeHtml(key)}"
+          data-preparation-template="${escapeHtml(suggestion.id)}" data-preparation-person="${escapeHtml(person.id)}">
+          Add for ${escapeHtml(person.name)}
+        </button>`).join("")}`;
+    }
+    const day = formatDay(calendarEventStart(event), this._config.product.locale, this._config.product.timezone);
+    const time = isAllDayCalendarEvent(event) ? "All day" : formatTime(calendarEventStart(event), this._config.product.locale, this._config.product.timezone);
+    return `<aside class="focus-event-ready">
+      <ha-icon class="focus-prep-icon" icon="mdi:bag-personal-outline"></ha-icon>
+      <p class="eyebrow">Get ready</p>
+      <h2>${escapeHtml(event.summary || "Your next plan")}</h2>
+      <p class="supporting">${escapeHtml(day)} · ${escapeHtml(time)}</p>
+      ${event.location ? `<p class="supporting"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(event.location)}</p>` : ""}
+      ${checklist || '<p class="planner-no-prep">No checklist linked yet.</p>'}
+      <div class="focus-prep-links">
+        <button type="button" data-planner-event="${escapeHtml(key)}">Event details <ha-icon icon="mdi:arrow-top-right"></ha-icon></button>
+        ${this._config.features.family && children.length ? `<button type="button" data-focus-tasks="${escapeHtml(children[0].id)}">Tasks <ha-icon icon="mdi:arrow-right"></ha-icon></button>` : ""}
+      </div>
+    </aside>`;
+  }
+
   _renderToday() {
     const states = this._hass?.states || {};
     const features = this._config.features;
-    const homeSummary = features.rooms ? homeSummaryPresentation(this._config, states) : null;
-    const nextCalendar = features.calendar
-      ? (this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents())
-        .filter((event) => isCurrentOrFutureCalendarEvent(event, new Date(), this._config.product.timezone))
-        .sort((a, b) => new Date(calendarEventStart(a)) - new Date(calendarEventStart(b)))[0]
-      : null;
-    const playing = features.music ? firstPlayingPlayer(this._config, states) : null;
-    const footballSummary = features.football ? this._featuredFixtures() : null;
-    const alarm = features.entry ? states[this._config.entry?.alarm_entity] : null;
-    const garage = features.entry ? states[this._config.entry?.garage?.cover_entity] : null;
-    const entrySignals = features.entry
-      ? (this._config.entry?.cameras || []).flatMap((camera) => [
-        camera.ringing_entity,
-        camera.person_entity,
-        camera.motion_entity
-      ]).filter(Boolean).map((entityId) => states[entityId])
-      : [];
-    const securitySummary = features.entry ? todaySecurityPresentation(alarm, garage, entrySignals) : null;
-    const energySummary = this._energyPresentation();
-    const energyCompact = energyCompactPresentation(energySummary);
-    const lightingCompact = homeLightingCompactPresentation(homeSummary || {});
-    const heatingCompact = homeHeatingCompactPresentation(homeSummary || {});
-    const heroMetrics = [
-      ...(features.rooms ? [
-        `<button type="button" data-home-target="heating"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${escapeHtml(heatingCompact.value)}</strong><small>${escapeHtml(heatingCompact.detail)}</small></span></button>`,
-        `<button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${escapeHtml(lightingCompact.value)}</strong><small>${escapeHtml(lightingCompact.detail)}</small></span></button>`
-      ] : []),
-      ...(securitySummary ? [`<button type="button" data-view="entry"><ha-icon icon="${securitySummary.icon}"></ha-icon><span><strong>${escapeHtml(securitySummary.title)}</strong><small>${escapeHtml(securitySummary.detail)}</small></span></button>`] : []),
-      ...(energyCompact ? [`<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energyCompact.value)}</strong><small>${escapeHtml(energyCompact.detail)}</small></span></button>`] : [])
-    ];
-    const familyHeading = features.chores ? "Tasks, jobs & rewards" : features.school ? "School & tasks" : "Tasks";
-    const preparationPreview = features.family && features.calendar
-      ? todayPreparationPreview(
-        this._preparationItems,
-        this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents(),
-        this._config.people,
-        new Date(),
-        this._config.product.timezone,
-        2
-      )
-      : { total: 0, complete: 0, rows: [] };
-    const secondaryCards = [
-      ...(features.family ? [`
-        <article class="surface children-panel today-family today-secondary">
-          <div class="section-heading"><div><p class="eyebrow">To-do</p><h2>${familyHeading}</h2></div><button type="button" data-view="family">Open</button></div>
-          ${this._renderTodayTaskPreview(preparationPreview)}
-          <div class="person-summary-list ${preparationPreview.total ? "has-ready-preview" : ""}">${this._renderChildSummaries()}</div>
-        </article>
-      `] : []),
-      ...(footballSummary ? [`
-        <article class="surface football-panel today-football today-secondary" data-fixture-count="${footballSummary.fixtureCount || 0}">
-          <div class="section-heading"><div><p class="eyebrow">Football</p><h2>${escapeHtml(footballSummary.title)}</h2></div><button type="button" data-view="football">Open</button></div>
-          <div class="featured-fixtures">${footballSummary.html}</div>
-        </article>
-      `] : []),
-      ...(features.music ? [`
-        <article class="surface now-playing-panel today-music today-secondary">
-          <div class="section-heading"><div><p class="eyebrow">Music</p><h2>${playing ? "Now playing" : "House sound"}</h2></div><button type="button" data-view="music">Open</button></div>
-          ${playing ? `
-            <div class="now-playing">
-              <div class="artwork">${playing.state.attributes.entity_picture ? `<img src="${escapeHtml(playing.state.attributes.entity_picture)}" alt="">` : '<ha-icon icon="mdi:music-note" aria-hidden="true"></ha-icon>'}</div>
-              <div class="now-playing-copy" title="${escapeHtml(`${playing.state.attributes.media_title || "Music"} · ${playing.state.attributes.media_artist || playing.player.name}`)}"><h2>${escapeHtml(playing.state.attributes.media_title || "Music")}</h2><p>${escapeHtml(playing.state.attributes.media_artist || playing.player.name)}</p></div>
-              <button type="button" class="icon-action" data-media-toggle="${escapeHtml(playing.player.entity_id)}" aria-label="Play or pause" ${this._config.display.read_only ? 'disabled aria-disabled="true"' : ""}><ha-icon icon="${playing.state.state === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon></button>
-            </div>
-          ` : `
-            <div class="quiet-music"><div class="today-card-icon is-coral"><ha-icon icon="mdi:music-note"></ha-icon></div><div><strong>The house is quiet</strong><span>Choose a room in Music</span></div></div>
-          `}
-        </article>
-      `] : [])
-    ];
-    return `
-      <section class="today-grid" data-calendar="${features.calendar}" data-secondary-count="${secondaryCards.length}" aria-label="Today at a glance">
-        <article class="surface hero-panel today-hero ${features.weather ? "" : "is-weatherless"}">
-          <div class="today-hero-copy">
-            <p class="eyebrow">Your daily brief</p>
-            <h2>${escapeHtml(greetingForTime(new Date(), this._config.product.timezone))}</h2>
-            <p>${features.calendar ? nextCalendar ? `${escapeHtml(nextCalendar.summary || nextCalendar._calendar?.label || "Family event")} is next at ${escapeHtml(formatTime(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}.` : "The day is clear and the house is ready." : "Home is ready when you are."}</p>
-          </div>
-          ${features.rooms ? `<div class="daily-home-art" aria-hidden="true"><img src="${HOME_ILLUSTRATION}" alt="" width="360" height="240" decoding="async"></div>` : ""}
-          ${heroMetrics.length ? `<div class="hero-metrics ${energySummary ? "has-energy" : ""}" data-metric-count="${heroMetrics.length}">${heroMetrics.join("")}</div>` : ""}
-        </article>
-        ${features.calendar ? `<article class="surface next-panel today-next">
-          <div class="today-card-icon is-amber"><ha-icon icon="mdi:calendar-clock"></ha-icon></div>
-          <p class="eyebrow">Coming up</p>
-          ${nextCalendar ? `
-            <h2>${escapeHtml(nextCalendar.summary || nextCalendar._calendar?.label || "Family event")}</h2>
-            <p class="supporting">${escapeHtml(formatDay(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}${isAllDayCalendarEvent(nextCalendar) ? " · All day" : ` at ${escapeHtml(formatTime(calendarEventStart(nextCalendar), this._config.product.locale, this._config.product.timezone))}`}</p>
-            <button class="text-action" type="button" data-view="calendar">See the day <ha-icon icon="mdi:arrow-right"></ha-icon></button>
-          ` : `
-            <h2>No plans yet</h2>
-            <p class="supporting">The next family event will appear here.</p>
-            <button class="text-action" type="button" data-view="calendar">Open calendar <ha-icon icon="mdi:arrow-right"></ha-icon></button>
-          `}
-        </article>` : ""}
-        ${secondaryCards.join("")}
-      </section>
-    `;
+    const home = features.rooms ? homeSummaryPresentation(this._config, states) : null;
+    const room = features.rooms ? this._config.rooms.find((entry) => entry.id === this._config.home?.default_room) || this._config.rooms[0] : null;
+    const summary = room ? deriveRoomState(room, states, this._config.theme.accent) : null;
+    const next = features.calendar ? (this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents()).filter((event) => isCurrentOrFutureCalendarEvent(event, new Date(), this._config.product.timezone)).sort((a,b) => new Date(calendarEventStart(a))-new Date(calendarEventStart(b)))[0] : null;
+    const football = features.football ? this._featuredFixtures() : null;
+    const readOnly = this._config.display.read_only;
+    const availableLights = (room?.lights || []).filter((id) => isEntityAvailable(states[id]));
+    const lighting = homeLightingCompactPresentation(home || {});
+    const heating = homeHeatingCompactPresentation(home || {});
+    const energy = features.energy ? energyCompactPresentation(this._energyPresentation()) : null;
+    const security = features.entry ? todaySecurityPresentation(states[this._config.entry?.alarm_entity], states[this._config.entry?.garage?.cover_entity], (this._config.entry?.cameras || []).flatMap((camera) => [camera.ringing_entity,camera.person_entity,camera.motion_entity]).filter(Boolean).map((id) => states[id])) : null;
+    const preview = features.family && features.calendar ? todayPreparationPreview(this._preparationItems,this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents(),this._config.people,new Date(),this._config.product.timezone,2) : {total:0,complete:0,rows:[]};
+    return `<section class="today-grid focus-today" data-calendar="${features.calendar}" data-secondary-count="${[features.family, features.football, features.music].filter(Boolean).length}" aria-label="Today at a glance">
+      ${room ? `<article class="surface hero-panel today-hero focus-home-card"><div class="daily-home-art" aria-hidden="true"><img src="${HOME_ILLUSTRATION}" alt="" decoding="async"></div><div class="today-hero-copy"><h2>${escapeHtml(room.name)}</h2><p>${Number.isFinite(summary.temperature) ? `${formatTemperature(summary.temperature)} inside` : "Your home controls"}</p></div><button type="button" class="focus-home-open" data-focus-home-room="${escapeHtml(room.id)}" aria-label="Open ${escapeHtml(room.name)} controls"><ha-icon icon="mdi:arrow-top-right"></ha-icon></button><div class="focus-home-controls"><button type="button" data-room-lights="${escapeHtml(room.id)}" data-light-service="${summary.lightsOn ? "turn_off":"turn_on"}" aria-label="Turn ${escapeHtml(room.name)} lights ${summary.lightsOn ? "off":"on"}" aria-pressed="${Boolean(summary.lightsOn)}" ${readOnly || !availableLights.length ? "disabled" : ""}><ha-icon icon="mdi:lamp-outline"></ha-icon><span><strong>${availableLights.length ? summary.lightsOn ? "Lights on":"Lights off" : "Lighting unavailable"}</strong><small>${escapeHtml(room.name)}</small></span></button><button type="button" data-focus-home-room="${escapeHtml(room.id)}"><ha-icon icon="mdi:thermometer"></ha-icon><span><strong>${Number.isFinite(summary.targetTemperature) ? formatTemperature(summary.targetTemperature):"Heating"}</strong><small>Heating target <ha-icon icon="mdi:chevron-right"></ha-icon></small></span></button></div></article>` : `<article class="focus-hello"><h2>${escapeHtml(greetingForTime(new Date(),this._config.product.timezone))}</h2><p>Your family’s day, together.</p></article>`}
+      <div class="focus-today-plan">${this._preparationError ? `<p class="calendar-warning" role="alert">${escapeHtml(this._preparationError)}</p>` : ""}${features.calendar ? `<article class="next-panel today-next"><p class="eyebrow">Coming up</p><h2>${escapeHtml(next?.summary || "No plans yet")}</h2><p class="supporting">${next ? `${escapeHtml(formatDay(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}${isAllDayCalendarEvent(next) ? " · All day":` at ${escapeHtml(formatTime(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}`}`:"The next family event will appear here."}</p>${next?.location ? `<p class="supporting"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(next.location)}</p>`:""}${next ? this._renderFocusChecklist(next, { compact:true }) : ""}<button type="button" class="text-action" ${next ? `data-focus-open-plan="${escapeHtml(familyPlannerEventKey(next))}"`:'data-view="calendar"'}>See the plan <ha-icon icon="mdi:arrow-right"></ha-icon></button></article>`:""}${features.family ? `<article class="children-panel today-family"><div class="section-heading"><h2>A little left to do</h2><button type="button" data-view="family">Tasks <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div>${this._renderTodayTaskPreview(preview)}<div class="person-summary-list">${this._renderChildSummaries()}</div></article>`:""}</div>
+      ${football ? `<article class="football-panel today-football" data-fixture-count="${football.fixtureCount || 0}"><div class="section-heading"><h2>${escapeHtml(football.title)}</h2><button type="button" data-view="football">All football <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="featured-fixtures">${football.html}</div></article>`:""}
+      ${home || security || energy ? `<footer class="hero-metrics focus-home-summary">${home ? `<button type="button" data-home-target="heating"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${escapeHtml(heating.value)}</strong><small>${escapeHtml(heating.detail)}</small></span></button><button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${escapeHtml(lighting.value)}</strong><small>${escapeHtml(lighting.detail)}</small></span></button>`:""}${security ? `<button type="button" data-view="entry"><ha-icon icon="${security.icon}"></ha-icon><span><strong>${escapeHtml(security.title)}</strong><small>${escapeHtml(security.detail)}</small></span></button>`:""}${energy ? `<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energy.value)}</strong><small>${escapeHtml(energy.detail)}</small></span></button>`:""}</footer>` : ""}
+    </section>`;
   }
 
   _renderTodayTaskPreview(preview) {
@@ -3163,7 +3170,7 @@ export class FamilyHubCard extends HTMLElementBase {
     return `
       <section class="single-surface surface calendar-view">
         <div class="calendar-toolbar">
-          <div class="calendar-context"><ha-icon icon="mdi:calendar-heart" aria-hidden="true"></ha-icon><span><strong>Family planner</strong><small>Who is doing what, and what needs to be ready</small></span></div>
+          <div class="calendar-context"><span><h2 class="focus-calendar-title">${escapeHtml(new Intl.DateTimeFormat(this._config.product.locale,{month:"long",year:"numeric",timeZone:"UTC"}).format(new Date(`${this._calendarAnchorKey || dateKey(new Date(),this._config.product.timezone)}T12:00:00Z`)))}</h2><strong>Family planner</strong></span></div>
           <div class="calendar-toolbar-actions">${canCreate ? '<button type="button" class="calendar-add-event" data-planner-add-event><ha-icon icon="mdi:plus"></ha-icon>Add event</button>' : ""}<div class="segments calendar-modes" role="group" aria-label="Choose calendar view">${modeButtons}</div></div>
         </div>
         <div class="calendar-person-filters" role="group" aria-label="Filter by family member">${personFilters}</div>
@@ -3174,6 +3181,7 @@ export class FamilyHubCard extends HTMLElementBase {
           <button type="button" data-calendar-refresh aria-label="Refresh calendars"><ha-icon icon="mdi:refresh"></ha-icon></button>
           <button type="button" data-calendar-nav="next" aria-label="Next period"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
         </div>
+        ${this._preparationError ? `<p class="calendar-warning" role="alert">${escapeHtml(this._preparationError)}</p>` : ""}
         <div class="family-planner-slot">${this._calendarMode === "month"
           ? this._renderPlannerMonth()
           : this._calendarMode === "agenda"
@@ -3209,32 +3217,10 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderFamilyPlanner() {
-    const allDays = this._calendarWindow();
-    const days = this._calendarMode === "day" ? allDays.slice(0, 1) : allDays.slice(0, 7);
-    const timeZone = this._config.product.timezone;
-    const locale = this._config.product.locale;
-    const events = this._filteredCalendarEvents();
-    const columns = days.map((day) => {
-      const dayEvents = events.filter((event) => dateKey(calendarEventStart(event), timeZone) === day.key);
-      const activePeople = this._config.people.filter((person) => person.role !== "household"
-        && dayEvents.some((event) => event?._calendar?.person_ids?.includes(person.id)));
-      const prepItems = this._preparationItems.filter((item) => {
-        const event = this._plannerEventByKey(item?._preparation?.eventKey);
-        return event && dateKey(calendarEventStart(event), timeZone) === day.key;
-      });
-      const prepComplete = prepItems.filter((item) => String(item.status).toLocaleLowerCase() === "completed").length;
-      return `
-        <section class="family-planner-day ${day.isToday ? "is-today" : ""}">
-          <header><div><span>${escapeHtml(day.weekday)}</span><strong>${escapeHtml(day.day)}</strong><small>${escapeHtml(day.month)}</small></div><div class="day-people" aria-label="Family members with events">${activePeople.map((person) => `<i style="--person-colour:${escapeHtml(person.colour)}" title="${escapeHtml(person.name)}">${escapeHtml(person.name.slice(0, 1))}</i>`).join("")}</div></header>
-          <div class="family-planner-events">
-            ${dayEvents.map((event) => {
-              return this._renderPlannerEventButton(event);
-            }).join("") || '<p class="family-planner-empty">Clear day</p>'}
-          </div>
-          ${prepItems.length ? `<footer class="day-ready ${prepComplete === prepItems.length ? "is-ready" : ""}"><ha-icon icon="${prepComplete === prepItems.length ? "mdi:check-circle" : "mdi:bag-personal-outline"}"></ha-icon>${prepComplete === prepItems.length ? "Ready" : `${prepComplete} of ${prepItems.length} packed`}</footer>` : ""}
-        </section>`;
-    }).join("");
-    return `${this._calendarLoading || this._preparationLoading ? `<div class="calendar-loading"><span></span>${this._calendarLoading ? "Refreshing the family week…" : "Refreshing Ready lists…"}</div>` : ""}${this._calendarError ? `<p class="calendar-warning">${escapeHtml(this._calendarError)}</p>` : ""}${this._preparationError ? `<p class="calendar-warning preparation-warning">${escapeHtml(this._preparationError)}</p>` : ""}<div class="family-planner-grid ${this._calendarMode === "day" ? "is-day" : ""}">${columns}</div>`;
+    const days=this._calendarWindow().slice(0,this._calendarMode==="day" ? 1:7);
+    const selected=this._focusCalendarDay();
+    const events=this._filteredCalendarEvents();
+    return `${this._calendarLoading || this._preparationLoading ? '<div class="calendar-loading"><span></span>Refreshing the family planner…</div>':""}${this._calendarError ? `<p class="calendar-warning">${escapeHtml(this._calendarError)}</p>`:""}${this._preparationError ? `<p class="calendar-warning preparation-warning">${escapeHtml(this._preparationError)}</p>`:""}<div class="family-planner-grid focus-week-picker ${this._calendarMode==="day" ? "is-day":""}">${days.map((day)=>{const list=events.filter((event)=>dateKey(calendarEventStart(event),this._config.product.timezone)===day.key);return `<button type="button" class="family-planner-day ${day.isToday ? "is-today":""} ${day.key===selected?.key ? "is-selected":""}" data-calendar-day="${day.key}" aria-label="${escapeHtml(`${day.weekday} ${day.day} ${day.month}, ${list.length} events`)}" aria-pressed="${day.key===selected?.key}"><header><span>${escapeHtml(day.weekday)}</span><strong>${escapeHtml(day.day)}</strong><small>${escapeHtml(day.month)}</small></header><span class="focus-calendar-dots">${list.slice(0,4).map((event)=>`<i style="--calendar-colour:${escapeHtml(event._calendar?.colour || this._config.theme.accent)}"></i>`).join("")}</span><span class="focus-week-hint">${escapeHtml(list[0]?.summary || "—")}${list[0] ? `<small>${isAllDayCalendarEvent(list[0]) ? "All day":escapeHtml(formatTime(calendarEventStart(list[0]),this._config.product.locale,this._config.product.timezone))}${list.length>1 ? ` · +${list.length-1}`:""}</small>`:""}</span></button>`}).join("")}</div>${this._renderFocusCalendarPlan()}`;
   }
 
   _renderPlannerMonth() {
@@ -3246,11 +3232,11 @@ export class FamilyHubCard extends HTMLElementBase {
     const cells = days.map((day) => {
       const dayEvents = events.filter((event) => dateKey(calendarEventStart(event), this._config.product.timezone) === day.key);
       return `<section class="planner-month-day ${day.isToday ? "is-today" : ""} ${day.key.slice(0, 7) !== anchorMonth ? "is-outside" : ""}">
-        <header><strong>${escapeHtml(day.day)}</strong></header>
+        <header><button type="button" class="planner-date-select" data-calendar-day="${day.key}" aria-label="Select ${escapeHtml(`${day.day} ${day.month}`)}" aria-pressed="${this._focusCalendarDay()?.key===day.key}"><strong>${escapeHtml(day.day)}</strong></button></header>
         <div>${dayEvents.slice(0, 2).map((event) => this._renderPlannerEventButton(event, true)).join("")}${dayEvents.length > 2 ? `<span class="planner-month-more">+${dayEvents.length - 2} more</span>` : ""}</div>
       </section>`;
     }).join("");
-    return `${this._calendarLoading ? '<div class="calendar-loading"><span></span>Refreshing month…</div>' : ""}<div class="planner-month-headings">${headings}</div><div class="planner-month-grid">${cells}</div>`;
+    return `${this._calendarLoading ? '<div class="calendar-loading"><span></span>Refreshing month…</div>' : ""}<div class="planner-month-headings">${headings}</div><div class="planner-month-grid">${cells}</div>${this._renderFocusCalendarPlan()}`;
   }
 
   _renderPlannerAgenda() {
@@ -4147,25 +4133,23 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _renderPersonPreparation(person) {
     if (!this._config.calendar?.preparation?.enabled) return "";
-    const lookaheadDays = Math.min(1, this._config.calendar.preparation.lookahead_days || 1);
-    const events = (this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents())
-      .filter((event) => event?._calendar?.person_ids?.includes(person.id))
-      .filter((event) => isPreparationWindowEvent(event, lookaheadDays, new Date(), this._config.product.timezone));
-    const eventMap = new Map(events.map((event) => [familyPlannerEventKey(event), event]));
-    const items = this._preparationItems.filter((item) => item?._preparation?.personId === person.id
-      && eventMap.has(item._preparation.eventKey));
-    if (!items.length) return "";
-    const complete = items.filter((item) => String(item.status).toLocaleLowerCase() === "completed").length;
-    const ready = complete === items.length;
-    const rows = items.slice(0, 6).map((item) => {
-      const completed = String(item.status).toLocaleLowerCase() === "completed";
-      const event = eventMap.get(item._preparation.eventKey);
-      const itemId = item.uid || item.id || item.summary;
-      return `<button type="button" class="family-prep-item ${completed ? "is-complete" : ""}" data-prep-item="${escapeHtml(itemId)}" data-prep-status="${completed ? "needs_action" : "completed"}"><span><ha-icon icon="${completed ? "mdi:check" : "mdi:circle-outline"}"></ha-icon></span><div><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong><small>${escapeHtml(event?.summary || "Upcoming event")}</small></div></button>`;
-    }).join("");
-    return `<section class="family-preparation ${ready ? "is-ready" : ""}" aria-label="Get ready for upcoming events"><div class="chore-heading"><p class="eyebrow">Get ready</p><span>${ready ? "Ready" : `${complete} of ${items.length}`}</span></div><div class="family-prep-list">${rows}</div>${items.length > 6 ? `<button type="button" class="family-prep-more" data-view="calendar">Open planner for ${items.length - 6} more</button>` : ""}</section>`;
+    const source=this._calendarEvents.length ? this._calendarEvents:this._calendarFallbackEvents();
+    const byKey=new Map(source.map((event)=>[familyPlannerEventKey(event),event]));
+    const today=dateKey(new Date(),this._config.product.timezone);
+    const groups=new Map();
+    for (const item of this._preparationItems) {
+      if (item?._preparation?.personId!==person.id) continue;
+      const event=byKey.get(item._preparation.eventKey);
+      const due=event ? calendarEventStart(event):item.due || item.due_datetime || item.due_date;
+      if (due && dateKey(due,this._config.product.timezone)<today) continue;
+      if (!due && String(item.status).toLowerCase()==="completed") continue;
+      const key=item._preparation.eventKey;
+      if (!groups.has(key)) groups.set(key,{event,due,items:[]});
+      groups.get(key).items.push(item);
+    }
+    if (!groups.size) return "";
+    return `<section class="family-preparation" aria-label="Get ready for upcoming events"><div class="chore-heading"><p class="eyebrow">Get ready</p><span>From your calendar</span></div>${[...groups.values()].sort((a,b)=>String(a.due || "").localeCompare(String(b.due || ""))).map(({event,due,items})=>`<section class="focus-task-event"><header><ha-icon icon="mdi:bag-personal-outline"></ha-icon><div><h3>${escapeHtml(event?.summary || "Event checklist")}</h3>${due ? `<small>${escapeHtml(formatDay(due,this._config.product.locale,this._config.product.timezone))}</small>`:""}</div>${event ? `<button type="button" data-focus-open-plan="${escapeHtml(familyPlannerEventKey(event))}" aria-label="Open ${escapeHtml(event.summary || "event")} in Calendar"><ha-icon icon="mdi:arrow-top-right"></ha-icon></button>`:""}</header><div class="family-prep-list">${items.map((item)=>{const done=String(item.status).toLowerCase()==="completed";return `<button type="button" class="family-prep-item ${done ? "is-complete":""}" data-prep-item="${escapeHtml(item.uid || item.id || item.summary)}" data-prep-status="${done ? "needs_action":"completed"}" aria-pressed="${done}" ${this._config.display.read_only ? "disabled":""}><span><ha-icon icon="${done ? "mdi:checkbox-marked":"mdi:checkbox-blank-outline"}"></ha-icon></span><div><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong></div></button>`}).join("")}</div><small>${items.filter((item)=>String(item.status).toLowerCase()==="completed").length} of ${items.length} ready</small></section>`).join("")}</section>`;
   }
-
   _renderFamilyPerson(person, { kidMode = false } = {}) {
     const states = this._hass?.states || {};
     const choresEnabled = this._config.features.chores === true;
@@ -4270,11 +4254,11 @@ export class FamilyHubCard extends HTMLElementBase {
         ${kidMode && choresEnabled && chore ? `<section class="kid-mission ${completedJobs === totalJobs && totalJobs ? "is-complete" : ""}"><span class="kid-mission-orbit"><ha-icon icon="${completedJobs === totalJobs && totalJobs ? "mdi:trophy" : "mdi:rocket-launch"}"></ha-icon></span><div><p>${completedJobs === totalJobs && totalJobs ? "Mission complete!" : "Today’s mission"}</p><strong>${completedJobs} of ${totalJobs} jobs finished</strong><i><b style="width:${missionProgress}%"></b></i></div><em>${missionProgress}%</em></section>` : ""}
         ${factItems ? `<div class="family-facts">${factItems}</div>` : ""}
         ${choresEnabled && !chore ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps is not connected for this child.</p>' : choresEnabled && (!pointsAvailable || !choresSummaryAvailable) ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps data is currently unavailable.</p>' : ""}
-        ${this._renderPersonPreparation(person)}
+        <div class="focus-task-workspace"><section class="focus-task-jobs">
         ${choreHeading}
         ${choresEnabled && chore ? choreRows ? `<ul class="chore-list" aria-label="Today’s jobs">${choreRows}</ul>` : '<p class="hub-empty-state compact">No jobs are due yet.</p>' : ""}
-        ${choreOpsSummary}
-        ${classroomStatus}
+        ${this._renderPersonPreparation(person)}
+        ${classroomStatus}</section><aside class="focus-task-rewards" aria-label="Rewards and awards">${choreOpsSummary}</aside></div>
       </article>
     `;
   }
@@ -5201,6 +5185,27 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _handleChange(event) {
     this._armPhotoFrameIdleTimer();
+    if (this._pendingConfirmation || this._photoFrameActive) return;
+    const dockPlayer = event.target.closest?.("[data-dock-player]");
+    if (dockPlayer) {
+      if (this._config.media.players.some((player) => player.entity_id === dockPlayer.value)) {
+        this._dockPlayerId = dockPlayer.value;
+        this._refreshMusicDock();
+      }
+      return;
+    }
+    const dockVolume = event.target.closest?.("[data-dock-volume]");
+    if (dockVolume) {
+      const entityId = dockVolume.dataset.dockVolume;
+      const state = this._hass?.states?.[entityId];
+      const volume = Number(dockVolume.value);
+      if (!this._config.display.read_only && this._controlPolicy.mediaPlayers.has(entityId)
+        && isEntityAvailable(state) && (Number(state.attributes?.supported_features) & 4)
+        && Number.isFinite(volume) && volume >= 0 && volume <= 100) {
+        this._hass?.callService?.("media_player", "volume_set", { entity_id: entityId, volume_level: volume / 100 });
+      }
+      return;
+    }
     const lightBrightness = event.target.closest?.("[data-light-brightness]");
     if (lightBrightness) {
       const entityId = lightBrightness.dataset.lightBrightness;
@@ -5349,7 +5354,7 @@ export class FamilyHubCard extends HTMLElementBase {
   async _togglePreparationItem(itemId, status) {
     const entityId = this._config.calendar.preparation?.todo_entity;
     const item = this._preparationItems.find((entry) => String(entry.uid || entry.id || entry.summary) === itemId);
-    if (!entityId || !item || !["completed", "needs_action"].includes(status)) return;
+    if (this._config.display.read_only || !entityId || !item || !["completed", "needs_action"].includes(status)) return;
     const previousStatus = item.status;
     item.status = status;
     this._scheduleRender(true);
@@ -5466,6 +5471,56 @@ export class FamilyHubCard extends HTMLElementBase {
           input.value = "";
         }
       }
+      return;
+    }
+    // Navigation remains local; checklist writes use the existing bounded
+    // to-do action path shared with the event editor.
+    if (this._pendingConfirmation && !target.dataset.confirmAction) return;
+    if (target.dataset.focusHomeRoom) {
+      if (!this._config.features.rooms || !this._config.rooms.some((room) => room.id === target.dataset.focusHomeRoom)) return;
+      if (this._view === "entry") this._closeActiveCamera({ render: false, invalidate: true });
+      this._view = "rooms";
+      this._homeSection = "rooms";
+      this._selectRoom(target.dataset.focusHomeRoom);
+      return;
+    }
+    if (target.dataset.focusTasks) {
+      if (!this._config.features.family || !this._config.people.some((person) => person.role === "child" && person.id === target.dataset.focusTasks)) return;
+      this._view = "family";
+      this._familyPersonId = target.dataset.focusTasks;
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.focusOpenPlan) {
+      const plan = this._plannerEventByKey(target.dataset.focusOpenPlan);
+      if (!this._config.features.calendar || !plan) return;
+      this._view = "calendar";
+      this._calendarAnchorKey = dateKey(calendarEventStart(plan), this._config.product.timezone);
+      this._calendarSelectedKey = this._calendarAnchorKey;
+      this._calendarFocusEvent = target.dataset.focusOpenPlan;
+      this._scheduleRender(true);
+      void this._loadCalendarEvents(true);
+      return;
+    }
+    if (target.dataset.calendarDay) {
+      if (this._calendarWindow().some((day) => day.key === target.dataset.calendarDay)) {
+        this._calendarSelectedKey = target.dataset.calendarDay;
+        this._calendarFocusEvent = null;
+        this._scheduleRender(true);
+      }
+      return;
+    }
+    if (target.dataset.calendarFocus) {
+      const plan = this._plannerEventByKey(target.dataset.calendarFocus);
+      if (plan) {
+        this._calendarSelectedKey = dateKey(calendarEventStart(plan), this._config.product.timezone);
+        this._calendarFocusEvent = target.dataset.calendarFocus;
+        this._scheduleRender(true);
+      }
+      return;
+    }
+    if (target.dataset.addPreparation) {
+      void this._addPreparationForEvent(target.dataset.addPreparation, target.dataset.preparationTemplate, target.dataset.preparationPerson);
       return;
     }
     if (target.dataset.plannerAddEvent !== undefined) {
@@ -5742,6 +5797,16 @@ export class FamilyHubCard extends HTMLElementBase {
       if (this._controlPolicy.scenes.has(target.dataset.scene)
         && isEntityAvailable(this._hass?.states?.[target.dataset.scene])) {
         this._hass?.callService?.("scene", "turn_on", { entity_id: target.dataset.scene });
+      }
+      return;
+    }
+    if (target.dataset.mediaService) {
+      const capabilities = { media_previous_track: 16, media_next_track: 32 };
+      const state = this._hass?.states?.[target.dataset.entity];
+      const capability = capabilities[target.dataset.mediaService];
+      if (capability && this._controlPolicy.mediaPlayers.has(target.dataset.entity)
+        && isEntityAvailable(state) && (Number(state.attributes?.supported_features) & capability)) {
+        this._hass?.callService?.("media_player", target.dataset.mediaService, { entity_id: target.dataset.entity });
       }
       return;
     }

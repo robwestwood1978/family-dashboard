@@ -1,3 +1,12 @@
+## 0.16.0
+
+- Replace Today’s brief with Home in focus: a large room illustration, direct lighting, a heating shortcut, the next family plan, jobs, and both favourite clubs’ match summaries.
+- Rebuild Calendar around a selectable week or month, a focused agenda and an inline Get ready panel. Keep Day, Week, Month and Agenda, family filters, event creation, templates and custom checklist items.
+- Show each child’s complete upcoming event checklists alongside their actual jobs in Tasks, including events beyond tomorrow. Share the existing to-do item IDs across Today, Calendar and Tasks; completion does not change ChoreOps points.
+- Add persistent, capability-aware Music playback, room selection and volume without resetting the full player on state updates.
+- Use neutral light/dark surfaces throughout, separate jobs from rewards and awards, and adapt all eight screens to portrait. Preserve heating schedules, lighting, blinds, cleaning, private floorplans, Security, Energy, football tables and FPL.
+- Version the shared stylesheet import so the tablet loads the new layout after updating the existing resource.
+
 ## 0.15.0
 
 - Apply the Daily brief design across Today, Calendar, Home, Tasks, Security, Energy, Football and Music, with calmer typography, grouped navigation, a warm room illustration, and shared light/dark palettes that follow Home Assistant's appearance setting.
