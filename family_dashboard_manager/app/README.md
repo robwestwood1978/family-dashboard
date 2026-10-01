@@ -2,8 +2,9 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.14.1 provides:
+Version 0.15.0 provides:
 
+- the approved Daily brief design, grouped navigation, a warm room illustration, shared light/dark palettes and equal latest/next match summaries for both favourite clubs;
 - a secret-rejecting schema-v7 household contract;
 - a private Home Assistant media-source kiosk photo frame with camera-motion return;
 - an explicit calendar-only School fallback that does not claim Classroom assignment access;

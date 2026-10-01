@@ -54,5 +54,9 @@ approval suite renders the actual component with synthetic Home Assistant data
 at both iPad sizes and exercises 200% zoom. Physical household integration checks
 still require the real iPad and devices after an approved deployment.
 
-This work does not merge a release, upgrade Manager, or deploy household
-configuration. It builds on the separate Today football correction.
+Manager 0.15.0 packages this design and the Today football correction through the
+existing multi-architecture release workflow. Upgrade the existing app, verify
+its reported version, validate and redeploy the current household configuration
+without changing its mappings, and refresh the existing resource query to
+`/local/family-dashboard/family-hub-card.js?v=0.15.0`. Deployment creates a rollback
+snapshot and preserves private floorplans. No second app or tunnel is needed.

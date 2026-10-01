@@ -1,4 +1,4 @@
-## Unreleased
+## 0.15.0
 
 - Apply the Daily brief design across Today, Calendar, Home, Tasks, Security, Energy, Football and Music, with calmer typography, grouped navigation, a warm room illustration, and shared light/dark palettes that follow Home Assistant's appearance setting.
 - Preserve the existing control surfaces, ChoreOps rewards and awards, calendar preparation, football tables and FPL, and the full room-based Music player. Keep appearance changes from resetting Music browsing.
