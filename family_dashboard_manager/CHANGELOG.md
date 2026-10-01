@@ -1,3 +1,8 @@
+## Unreleased
+
+- Give both favourite clubs their latest result or live match and next fixture on Today, rather than limiting the whole family to one result and one upcoming match. Keep shared derbies deduplicated.
+- Stack compact match team names beside the score and kickoff details so names and crests remain readable. Let Today grow for a full four-match summary instead of clipping the extra rows.
+
 ## 0.14.1
 
 - Let the iPad use one predictable page scroll for Lights, Heating, FPL and Music instead of clipping room content inside nested fixed-height panels.

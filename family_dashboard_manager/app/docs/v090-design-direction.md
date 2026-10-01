@@ -76,7 +76,9 @@ states that the real integrations cannot reliably support.
 - Tottenham and Aston Villa receive equal favourite cards. Fixture ordering may
   never decide which club gets the hero treatment.
 - A Spurs-Villa fixture becomes one shared Family derby card.
-- Today follows the same one-card-per-club selection rule.
+- Today selects each club's latest result or live match and its next fixture
+  across available matchweeks. Shared fixtures appear once; one club's schedule
+  must never crowd out the other club. Team labels wrap within stacked rows.
 
 ## Compatibility boundary
 

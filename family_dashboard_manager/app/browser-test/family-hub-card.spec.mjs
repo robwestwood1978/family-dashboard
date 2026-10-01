@@ -2574,6 +2574,62 @@ test("shows current FPL squads, captain points and the complete league list", as
   expect(pageErrors).toEqual([]);
 });
 
+test("Today shows both clubs' results and next fixtures without clipping names", async ({ page }, testInfo) => {
+  const fixture = (id, kickoff_time, home, away, finished) => ({
+    id, kickoff_time, started: finished, finished, minutes: finished ? 90 : 0,
+    home, away, home_score: finished ? 2 : null, away_score: finished ? 1 : null, spotlight: true
+  });
+  const spurs = { short_name: "TOT", name: "Tottenham Hotspur" };
+  const villa = { short_name: "AVL", name: "Aston Villa" };
+  const forest = { short_name: "NFO", name: "Nottingham Forest" };
+  const city = { short_name: "MCI", name: "Manchester City" };
+  const pageErrors = await mount(page, config, {
+    [config.football.index_entity]: state(config.football.index_entity, "5", { current_gameweek: 5, available_gameweeks: [5, 6] }),
+    "sensor.family_dashboard_premier_league_gw_1": state("sensor.family_dashboard_premier_league_gw_1", "0", { events: [] }),
+    "sensor.family_dashboard_premier_league_gw_5": state("sensor.family_dashboard_premier_league_gw_5", "2", { events: [
+      fixture(501, "2026-09-26T14:00:00Z", spurs, forest, true),
+      fixture(502, "2026-09-27T14:00:00Z", city, villa, true)
+    ] }),
+    "sensor.family_dashboard_premier_league_gw_6": state("sensor.family_dashboard_premier_league_gw_6", "2", { events: [
+      fixture(601, "2026-10-03T14:00:00Z", forest, spurs, false),
+      fixture(602, "2026-10-10T14:00:00Z", villa, city, false)
+    ] })
+  });
+  const card = page.locator("family-hub-card");
+  const panel = card.locator(".today-football");
+  await expect(panel.locator('[data-fixture-status="finished"]')).toHaveCount(2);
+  await expect(panel.locator('[data-fixture-status="upcoming"]')).toHaveCount(2);
+  expect(await panel.locator(".compact-fixture").evaluateAll((items) => items.map((item) => item.dataset.fixtureId))).toEqual(["502", "501", "601", "602"]);
+  const checkNames = async () => {
+    const metrics = await panel.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return [...element.querySelectorAll('.compact-team-name,.team-mark,.compact-score,.compact-fixture-detail')].map((item) => {
+        const rect = item.getBoundingClientRect();
+        const fixture = item.closest('.compact-fixture').getBoundingClientRect();
+        return { text: item.textContent, horizontalOverflow: item.scrollWidth - item.clientWidth,
+          insideFixture: rect.left >= fixture.left && rect.right <= fixture.right + 1 && rect.top >= fixture.top && rect.bottom <= fixture.bottom + 1,
+          insidePanel: rect.left >= bounds.left && rect.right <= bounds.right + 1 && rect.top >= bounds.top && rect.bottom <= bounds.bottom + 1 };
+      });
+    });
+    for (const metric of metrics) {
+      expect(metric.horizontalOverflow, metric.text).toBeLessThanOrEqual(1);
+      expect(metric.insideFixture, metric.text).toBe(true);
+      expect(metric.insidePanel, metric.text).toBe(true);
+    }
+    const overflow = await card.evaluate((element) => ({
+      document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      hub: element.shadowRoot.querySelector('.hub-card').scrollWidth - element.shadowRoot.querySelector('.hub-card').clientWidth
+    }));
+    expect(overflow.document).toBeLessThanOrEqual(1);
+    expect(overflow.hub).toBeLessThanOrEqual(1);
+  };
+  await checkNames();
+  await page.screenshot({ path: testInfo.outputPath("today-both-clubs.png"), fullPage: true });
+  await setApprovalBrowserZoom(page, true);
+  await checkNames();
+  expect(pageErrors).toEqual([]);
+});
+
 test("combines a Spurs and Villa head-to-head into one deliberate family derby card", async ({ page }) => {
   const derby = {
     id: 77,
