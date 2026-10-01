@@ -4085,7 +4085,11 @@ test("Home in focus adapts every screen to portrait and narrow layouts while pre
   const errors = await mount(page);
   const card = page.locator("family-hub-card");
   for (const width of [768, 320]) {
+    const player = card.locator(`[data-card-type="${config.media.card_type}"]`);
+    const previousInstance = await player.count() ? await player.getAttribute("data-instance-id") : null;
     await page.setViewportSize({ width, height: 1024 });
+    await expect.poll(() => card.evaluate((element) => element.shadowRoot.querySelector("style[data-layout]")?.dataset.layout === element._responsiveViewportKey())).toBe(true);
+    if (previousInstance) await expect(player).toHaveAttribute("data-instance-id", previousInstance);
     for (const view of ["today", "calendar", "rooms", "family", "entry", "energy", "football", "music"]) {
       await card.locator(`.hub-navigation [data-view="${view}"]`).click();
       await expect(card.locator(`[data-current-view="${view}"]`)).toBeVisible();

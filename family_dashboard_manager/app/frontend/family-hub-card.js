@@ -1966,6 +1966,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarSelectedKey = null;
     this._calendarFocusEvent = null;
     this._dockPlayerId = null;
+    this._responsiveStyleFrame = null;
     this._floor = null;
     this._room = null;
     this._securityCameraId = null;
@@ -2058,6 +2059,19 @@ export class FamilyHubCard extends HTMLElementBase {
       }
     };
     this._boundPageHide = () => this._closeActiveCamera({ render: false, invalidate: true });
+    this._boundResize = () => {
+      if (this._responsiveStyleFrame !== null) return;
+      this._responsiveStyleFrame = requestAnimationFrame(() => {
+        this._responsiveStyleFrame = null;
+        const style = this.shadowRoot.querySelector("style[data-layout]");
+        const key = this._responsiveViewportKey();
+        if (!this.isConnected || !style || style.dataset.layout === key) return;
+        // Refresh only the stylesheet when Safari retains a previous breakpoint.
+        // Child players, control state and keyboard focus keep their identity.
+        style.dataset.layout = key;
+        style.textContent = this._styles();
+      });
+    };
   }
 
   connectedCallback() {
@@ -2069,6 +2083,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.addEventListener("pointerdown", this._boundPointerActivity, { passive: true });
     globalThis.document?.addEventListener?.("visibilitychange", this._boundVisibilityChange);
     globalThis.addEventListener?.("pagehide", this._boundPageHide);
+    globalThis.addEventListener?.("resize", this._boundResize, { passive: true });
     this._armFreshnessTimer();
     this._armPhotoFrameIdleTimer();
     void this._loadPhotoFrameMedia();
@@ -2086,6 +2101,9 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.removeEventListener("pointerdown", this._boundPointerActivity);
     globalThis.document?.removeEventListener?.("visibilitychange", this._boundVisibilityChange);
     globalThis.removeEventListener?.("pagehide", this._boundPageHide);
+    globalThis.removeEventListener?.("resize", this._boundResize);
+    if (this._responsiveStyleFrame != null) globalThis.cancelAnimationFrame?.(this._responsiveStyleFrame);
+    this._responsiveStyleFrame = null;
     this._clearFreshnessTimer();
     this._clearPhotoFrameTimers();
     this._photoFrameBrowseRequest += 1;
@@ -2657,7 +2675,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const theme = this._config.theme;
     const shellGuard = this._photoFrameActive || this._plannerModal ? ' inert aria-hidden="true"' : "";
     this.shadowRoot.innerHTML = `
-      <style>${this._styles()}</style>
+      <style data-layout="${this._responsiveViewportKey()}">${this._styles()}</style>
       <ha-card class="hub-card" data-appearance="${this._hass?.themes?.darkMode ? "dark" : "light"}" style="
         --hub-accent:${escapeHtml(theme.accent)};
         --hub-background:${escapeHtml(theme.background)};
@@ -6708,8 +6726,16 @@ export class FamilyHubCard extends HTMLElementBase {
     this.dispatchEvent(event);
   }
 
+  _responsiveViewportKey() {
+    const width = globalThis.innerWidth || 0;
+    const height = globalThis.innerHeight || 0;
+    // Bound stylesheet variants to the existing breakpoints, rather than each pixel.
+    return [480, 760, 850, 900, 1030, 1120, 1180, 1279].map((limit) => Number(width <= limit)).join("") + (width <= height ? "p" : "l");
+  }
+
   _styles() {
     return `
+      /* Responsive layout: ${this._responsiveViewportKey()} */
       :host { --family-ha-header-offset:var(--header-height,56px); --hub-focus:#0B57C7; display:block; width:100%; min-width:0; min-height:664px; height:calc(100vh - var(--family-ha-header-offset)); margin-top:var(--family-ha-header-offset); color:var(--primary-text-color); font-family:var(--family-font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif); }
       *, *::before, *::after { box-sizing:border-box; }
       button, select { font:inherit; }

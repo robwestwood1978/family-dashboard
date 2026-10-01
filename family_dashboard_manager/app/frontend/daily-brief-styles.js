@@ -376,7 +376,8 @@ export const DAILY_BRIEF_STYLES = `
     .hub-brand,.hub-nav-button { width:64px; min-height:50px; flex:1 0 64px; padding:6px; }
     .hub-brand span,.hub-nav-button span { display:block; font-size:11px; }
     .hub-content { padding:14px 18px; }
-    .focus-music-dock.today-music { grid-template-columns:40px minmax(60px,1fr) auto; padding:8px 14px !important; gap:8px; }
+    .focus-music-dock.today-music { grid-template-columns:40px minmax(0,1fr) auto; padding:8px 14px !important; gap:8px; }
+    .focus-music-dock .artwork { width:40px; height:40px; }
     .focus-dock-output,.focus-dock-volume { display:none; }
     .today-grid.focus-today,.today-grid.focus-today:has(.today-football) { display:flex; flex-direction:column; }
     .focus-home-card,.focus-today-plan,.focus-today .today-football,.focus-home-summary { width:100%; }
