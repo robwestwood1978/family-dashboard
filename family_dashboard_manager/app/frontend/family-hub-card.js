@@ -1723,7 +1723,7 @@ export function selectFavouriteFixture(events = [], teamCode = "") {
   return finished[0] || null;
 }
 
-export function selectHomeFootballFixtures(events = [], spotlightTeamCodes = [], limit = 2) {
+export function selectHomeFootballFixtures(events = [], spotlightTeamCodes = [], limit = 4) {
   const codes = new Set((Array.isArray(spotlightTeamCodes) ? spotlightTeamCodes : [])
     .map((code) => String(code || "").trim().toUpperCase())
     .filter(Boolean));
@@ -1750,10 +1750,16 @@ export function selectHomeFootballFixtures(events = [], spotlightTeamCodes = [],
     if (!fixture || selected.length >= limit || selected.some((entry) => fixtureIdentity(entry) === fixtureIdentity(fixture))) return;
     selected.push(fixture);
   };
-  if (live.length) add(live[0]);
-  else add(finished[0]);
-  add(upcoming[0]);
-  for (const fixture of [...live, ...upcoming, ...finished]) add(fixture);
+  // Select within each club before combining: a busy club must not crowd out
+  // the other club's result or next match. A shared derby remains one fixture.
+  const current = [...codes].map((code) => (
+    live.find((fixture) => fixtureIncludesTeam(fixture, code))
+    || finished.find((fixture) => fixtureIncludesTeam(fixture, code))
+  )).filter(Boolean);
+  for (const fixture of current.filter((entry) => normaliseFixtureStatus(entry) === "live").sort(byKickoffAsc)) add(fixture);
+  for (const fixture of current.filter((entry) => normaliseFixtureStatus(entry) === "finished").sort(byKickoffDesc)) add(fixture);
+  const next = [...codes].map((code) => upcoming.find((fixture) => fixtureIncludesTeam(fixture, code))).filter(Boolean);
+  for (const fixture of next.sort(byKickoffAsc)) add(fixture);
   return selected;
 }
 
@@ -2941,7 +2947,7 @@ export class FamilyHubCard extends HTMLElementBase {
         </article>
       `] : []),
       ...(footballSummary ? [`
-        <article class="surface football-panel today-football today-secondary">
+        <article class="surface football-panel today-football today-secondary" data-fixture-count="${footballSummary.fixtureCount || 0}">
           <div class="section-heading"><div><p class="eyebrow">Football</p><h2>${escapeHtml(footballSummary.title)}</h2></div><button type="button" data-view="football">Open</button></div>
           <div class="featured-fixtures">${footballSummary.html}</div>
         </article>
@@ -4316,7 +4322,7 @@ export class FamilyHubCard extends HTMLElementBase {
       };
     }
     const fixtures = gameweekStates.flatMap((state) => Array.isArray(state.attributes?.events) ? state.attributes.events : []);
-    const selected = selectHomeFootballFixtures(fixtures, this._config.football.spotlight_team_codes, 2);
+    const selected = selectHomeFootballFixtures(fixtures, this._config.football.spotlight_team_codes);
     const models = buildFavouriteClubModels(fixtures, this._config.football.spotlight_team_codes);
     const html = selected.map((fixture) => {
       const favouriteCodes = this._config.football.spotlight_team_codes.filter((code) => fixtureIncludesTeam(fixture, code));
@@ -4324,9 +4330,11 @@ export class FamilyHubCard extends HTMLElementBase {
         derby: favouriteCodes.length > 1,
         favouriteCode: favouriteCodes.join(" ")
       });
-    }).join("");
+    }).join("") + models.filter((model) => !selected.some((fixture) => fixtureIncludesTeam(fixture, model.code)))
+      .map((model) => this._renderCompactFavourite(model)).join("");
     return {
       title: this._favouriteTitle(models),
+      fixtureCount: selected.length,
       html: html || '<p class="hub-empty-state">No favourite clubs are configured yet.</p>'
     };
   }
@@ -4340,10 +4348,10 @@ export class FamilyHubCard extends HTMLElementBase {
       ? this._config.football.spotlight_team_codes.join(" ")
       : favouriteCode;
     return `
-      <button type="button" class="compact-fixture ${derby ? "is-derby" : ""}" data-view="football" data-fixture-id="${escapeHtml(fixture.id ?? "")}"${favouriteAttribute ? ` data-favourite-code="${escapeHtml(favouriteAttribute)}"` : ""}>
-        <span class="compact-team" title="${escapeHtml(fixture.home?.name || "Home")}">${this._renderTeamMark(fixture.home, "small")}<span>${escapeHtml(compactClubName(fixture.home))}</span></span>
+      <button type="button" class="compact-fixture ${derby ? "is-derby" : ""}" data-view="football" data-fixture-status="${status}" data-fixture-id="${escapeHtml(fixture.id ?? "")}"${favouriteAttribute ? ` data-favourite-code="${escapeHtml(favouriteAttribute)}"` : ""}>
+        <span class="compact-team" title="${escapeHtml(fixture.home?.name || "Home")}">${this._renderTeamMark(fixture.home, "small")}<span class="compact-team-name">${escapeHtml(compactClubName(fixture.home))}</span></span>
         <strong class="compact-score">${escapeHtml(score)}</strong>
-        <span class="compact-team is-away" title="${escapeHtml(fixture.away?.name || "Away")}"><span>${escapeHtml(compactClubName(fixture.away))}</span>${this._renderTeamMark(fixture.away, "small")}</span>
+        <span class="compact-team is-away" title="${escapeHtml(fixture.away?.name || "Away")}">${this._renderTeamMark(fixture.away, "small")}<span class="compact-team-name">${escapeHtml(compactClubName(fixture.away))}</span></span>
         <small class="compact-fixture-detail">${escapeHtml(derby ? `Family derby · ${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone)}` : status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "Full time" : formatDay(fixture.kickoff_time, this._config.product.locale, this._config.product.timezone))}</small>
       </button>
     `;
@@ -6725,7 +6733,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .featured-fixtures { display:grid; gap:8px; margin-top:12px; }
       .compact-fixture { position:relative; overflow:hidden; border:1px solid color-mix(in srgb,var(--hub-accent) 18%,transparent); border-radius:15px; background:var(--hub-surface); min-height:70px; padding:8px 12px; color:var(--hub-text); display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:7px; align-items:center; cursor:pointer; }
       .compact-team { min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; font-size:10px; font-weight:750; }
-      .compact-team > span:last-child { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+      .compact-team-name { min-width:0; white-space:normal; overflow-wrap:anywhere; }
       .compact-team.is-away { justify-content:flex-end; text-align:right; }
       .compact-score { min-width:52px; font-size:14px; text-align:center; }
       .compact-fixture-detail { grid-column:1/-1; color:var(--hub-muted); font-size:9px; text-align:center; }
@@ -8118,6 +8126,16 @@ export class FamilyHubCard extends HTMLElementBase {
         .fpl-scoreboard { grid-template-columns:repeat(2,minmax(0,1fr)); }
         .fpl-player { width:clamp(60px,20vw,100px); }
       }
+      /* Today needs both clubs' latest/live match and next fixture. Stack the
+         teams within a row rather than squeezing two names around a score. */
+      .compact-fixture:not(.is-empty) { grid-template-columns:minmax(0,1fr) 76px; grid-template-rows:auto auto; gap:3px 10px; padding:10px 12px; }
+      .compact-fixture:not(.is-empty) .compact-team { grid-column:1; grid-row:1; overflow:visible; text-align:left; justify-content:flex-start; }
+      .compact-fixture:not(.is-empty) .compact-team.is-away { grid-row:2; }
+      .compact-fixture:not(.is-empty) .compact-score { grid-column:2; grid-row:1; min-width:0; }
+      .compact-fixture:not(.is-empty) .compact-fixture-detail { grid-column:2; grid-row:2; overflow-wrap:anywhere; }
+      .compact-fixture .compact-team-name { overflow:visible; white-space:normal; text-overflow:clip; line-height:1.3; }
+      .today-grid:has(.today-football[data-fixture-count="3"]),.today-grid:has(.today-football[data-fixture-count="4"]) { height:auto; min-height:100%; grid-template-rows:minmax(282px,auto) minmax(226px,auto); }
+      .hub-view:has(.today-football[data-fixture-count="3"]),.hub-view:has(.today-football[data-fixture-count="4"]) { overflow:auto; }
       .light-dimmer input:focus-visible,.schedule-period input:focus-visible,.master-temperature-stepper input:focus-visible { outline:3px solid var(--hub-focus); outline-offset:2px; }
       @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
     `;

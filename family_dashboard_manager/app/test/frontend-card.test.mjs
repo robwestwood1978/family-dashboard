@@ -3010,7 +3010,7 @@ test("selects one deterministic live, nearest upcoming, or latest finished fixtu
   assert.equal(selectFavouriteFixture(events, "MCI"), null);
 });
 
-test("selects a recent result and the next family fixture for Today across matchweeks", () => {
+test("selects each club's recent result and next fixture across matchweeks without repeating a derby", () => {
   const fixture = (id, kickoff_time, home, away, status = "upcoming") => ({
     id,
     kickoff_time,
@@ -3027,12 +3027,34 @@ test("selects a recent result and the next family fixture for Today across match
 
   assert.deepEqual(
     selectHomeFootballFixtures([laterVilla, unrelated, recentDerby, nextSpurs], ["TOT", "AVL"]).map(({ id }) => id),
-    [40, 41]
+    [40, 41, 42]
   );
   assert.deepEqual(
     selectHomeFootballFixtures([nextSpurs, laterVilla], ["TOT", "AVL"]).map(({ id }) => id),
     [41, 42]
   );
+});
+
+test("keeps both clubs' latest/live and next matches even when one club has more fixtures", () => {
+  const fixture = (id, kickoff_time, home, away, status = "upcoming") => ({
+    id, kickoff_time,
+    home: { short_name: home }, away: { short_name: away },
+    started: status !== "upcoming", finished: status === "finished", minutes: status === "live" ? 30 : 0
+  });
+  const events = [
+    fixture(1, "2026-09-26T14:00:00Z", "TOT", "ARS", "finished"),
+    fixture(2, "2026-09-27T14:00:00Z", "AVL", "FUL", "finished"),
+    fixture(3, "2026-10-03T14:00:00Z", "TOT", "LEE"),
+    fixture(4, "2026-10-04T14:00:00Z", "TOT", "MCI"),
+    fixture(5, "2026-10-10T14:00:00Z", "AVL", "BRE"),
+    fixture(6, "2026-09-20T14:00:00Z", "TOT", "BUR", "finished")
+  ];
+  for (const input of [events, [...events].reverse(), [...events, ...events]]) {
+    assert.deepEqual(selectHomeFootballFixtures(input, ["tot", "avl"]).map(({ id }) => id), [2, 1, 3, 5]);
+  }
+  const bothLive = events.map((event) => [1, 2].includes(event.id) ? { ...event, finished: false, minutes: 30 } : event);
+  assert.deepEqual(selectHomeFootballFixtures(bothLive, ["TOT", "AVL"]).map(({ id }) => id), [1, 2, 3, 5]);
+  assert.deepEqual(selectHomeFootballFixtures(events, []).map(({ id }) => id), []);
 });
 
 test("Today reads the next available gameweek as well as the latest result", () => {
@@ -3053,13 +3075,16 @@ test("Today reads the next available gameweek as well as the latest result", () 
       { id: 50, kickoff_time: "2026-09-27T14:00:00Z", started: true, finished: true, minutes: 90, home: { short_name: "TOT", name: "Tottenham Hotspur" }, away: { short_name: "AVL", name: "Aston Villa" }, home_score: 2, away_score: 3 }
     ] } },
     "sensor.football_gw_6": { state: "1", attributes: { events: [
-      { id: 51, kickoff_time: "2026-10-03T14:00:00Z", started: false, finished: false, minutes: 0, home: { short_name: "LEE", name: "Leeds" }, away: { short_name: "TOT", name: "Tottenham Hotspur" } }
+      { id: 51, kickoff_time: "2026-10-03T14:00:00Z", started: false, finished: false, minutes: 0, home: { short_name: "LEE", name: "Leeds" }, away: { short_name: "TOT", name: "Tottenham Hotspur" } },
+      { id: 52, kickoff_time: "2026-10-10T14:00:00Z", started: false, finished: false, minutes: 0, home: { short_name: "AVL", name: "Aston Villa" }, away: { short_name: "BRE", name: "Brentford" } }
     ] } }
   } };
 
   const today = card._featuredFixtures();
   assert.match(today.html, /data-fixture-id="50"/);
   assert.match(today.html, /data-fixture-id="51"/);
+  assert.match(today.html, /data-fixture-id="52"/);
+  assert.equal(today.fixtureCount, 3);
   assert.match(today.html, /Full time/);
   assert.match(today.html, /3 Oct/);
 });
@@ -3085,7 +3110,7 @@ test("combines a genuine two-favourite head-to-head into one derby fixture", () 
   assert.equal(favouriteDerbyFixture(separate), null);
 });
 
-test("uses the same one-per-club selection for Today and the full Football view", () => {
+test("keeps the Football heroes club-specific while Today includes each club's next match too", () => {
   const card = Object.create(FamilyHubCard.prototype);
   card._config = {
     product: { locale: "en-GB", timezone: "Europe/London" },
@@ -3117,7 +3142,7 @@ test("uses the same one-per-club selection for Today and the full Football view"
   assert.equal(today.title, "Spurs & Villa");
   assert.match(today.html, /data-fixture-id="32" data-favourite-code="TOT"/);
   assert.match(today.html, /data-fixture-id="33" data-favourite-code="AVL"/);
-  assert.doesNotMatch(today.html, /data-fixture-id="31"/);
+  assert.match(today.html, /data-fixture-id="31" data-favourite-code="TOT"/);
 
   const football = card._renderFootball();
   assert.match(football, /data-favourite-code="TOT" data-fixture-id="32"/);
