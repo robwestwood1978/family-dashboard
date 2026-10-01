@@ -1,5 +1,8 @@
-## Unreleased
+## 0.15.0
 
+- Apply the Daily brief design across Today, Calendar, Home, Tasks, Security, Energy, Football and Music, with calmer typography, grouped navigation, a warm room illustration, and shared light/dark palettes that follow Home Assistant's appearance setting.
+- Preserve the existing control surfaces, ChoreOps rewards and awards, calendar preparation, football tables and FPL, and the full room-based Music player. Keep appearance changes from resetting Music browsing.
+- Improve FPL label readability and bundle the illustration and shared stylesheet in Manager deployment snapshots and rollback.
 - Give both favourite clubs their latest result or live match and next fixture on Today, rather than limiting the whole family to one result and one upcoming match. Keep shared derbies deduplicated.
 - Stack compact match team names beside the score and kickoff details so names and crests remain readable. Let Today grow for a full four-match summary instead of clipping the extra rows.
 

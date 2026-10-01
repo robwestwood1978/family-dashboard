@@ -21,6 +21,8 @@ const PRIVATE_FLOORPLAN_SET = new Set(PRIVATE_FLOORPLAN_FILES);
 const MAX_FLOORPLAN_BYTES = 512 * 1024;
 const MANAGED_FRONTEND_FILES = Object.freeze([
   "family-hub-card.js",
+  "daily-brief-styles.js",
+  "assets/home-illustration.js",
   "assets/example-ground.svg",
   "assets/example-first.svg",
   "assets/example-living-room-light.svg",
@@ -195,7 +197,7 @@ export class DashboardStore {
   }
 
   getResourceUrl() {
-    return `${this.publicResourceBase}/family-hub-card.js?v=${process.env.APP_VERSION || "0.14.1"}`;
+    return `${this.publicResourceBase}/family-hub-card.js?v=${process.env.APP_VERSION || "0.15.0"}`;
   }
 
   getPrivateAssetUrl(filename) {
@@ -219,7 +221,7 @@ export class DashboardStore {
       this.readPrivateAssetStatus()
     ]);
     return {
-      app_version: process.env.APP_VERSION || "0.14.1",
+      app_version: process.env.APP_VERSION || "0.15.0",
       read_only_required: this.requireReadOnly,
       installed: configText !== null && dashboard !== null,
       resource_installed: resource !== null,
