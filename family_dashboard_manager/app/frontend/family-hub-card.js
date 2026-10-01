@@ -8133,8 +8133,6 @@ export class FamilyHubCard extends HTMLElementBase {
       .compact-fixture:not(.is-empty) .compact-team.is-away { grid-row:2; }
       .compact-fixture:not(.is-empty) .compact-score { grid-column:2; grid-row:1; min-width:0; }
       .compact-fixture:not(.is-empty) .compact-fixture-detail { grid-column:2; grid-row:2; overflow-wrap:anywhere; }
-      .compact-fixture .team-mark.is-small { width:22px; height:22px; flex:0 0 22px; }
-      .compact-fixture .team-mark.is-small strong { font-size:9px; }
       .compact-fixture .compact-team-name { overflow:visible; white-space:normal; text-overflow:clip; line-height:1.3; }
       .today-grid:has(.today-football[data-fixture-count="3"]),.today-grid:has(.today-football[data-fixture-count="4"]) { height:auto; min-height:100%; grid-template-rows:minmax(282px,auto) minmax(226px,auto); }
       .hub-view:has(.today-football[data-fixture-count="3"]),.hub-view:has(.today-football[data-fixture-count="4"]) { overflow:auto; }
