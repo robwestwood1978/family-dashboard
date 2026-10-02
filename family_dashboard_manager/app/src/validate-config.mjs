@@ -160,6 +160,9 @@ export function validateConfig(config) {
   if (!["landscape", "portrait"].includes(display.orientation)) {
     fail("config.display.orientation", "must be landscape or portrait");
   }
+  if (display.appearance !== undefined && !["light", "dark", "auto"].includes(display.appearance)) {
+    fail("config.display.appearance", "must be light, dark or auto");
+  }
   requireBoolean(display.kiosk, "config.display.kiosk");
   requireBoolean(display.legacy_ios, "config.display.legacy_ios");
   requireBoolean(display.read_only, "config.display.read_only");

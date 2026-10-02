@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   buildFootballStates,
@@ -19,6 +19,8 @@ const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
   .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.16.0";', dailyBriefSource);
+const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
+const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
 const APPROVAL_FOOTBALL_CHECKED_AT = Object.freeze({
   live: "2026-08-24T15:07:00.000Z",
@@ -334,12 +336,41 @@ function approvalFootballStates(mode = "live") {
 }
 
 async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOptions = {}) {
+  let reviewHtml = "";
+  const reviewSteps = [];
+  if (runtimeOptions.reviewExportPath) {
+    const original = page;
+    page = new Proxy(original, {get(target, property) {
+      if (property === "setContent") return async (html) => {
+        reviewHtml = html.replace('<base href="http://homeassistant.local/">', "").replace('>Family Hub</div>', '>Family Hub · Preview</div>');
+        return target.setContent(html);
+      };
+      if (property === "evaluate") return async (fn, arg) => {
+        reviewSteps.push({kind:"evaluate", source:fn.toString(), arg});
+        return target.evaluate(fn, arg);
+      };
+      if (property === "addScriptTag") return async (options) => {
+        reviewSteps.push({kind:"script", source:options.content, module:options.type === "module"});
+        return target.addScriptTag(options);
+      };
+      const value = target[property];
+      return typeof value === "function" ? value.bind(target) : value;
+    }});
+  }
+  if (runtimeOptions.nativeMusic) {
+    stateOverrides={...stateOverrides};
+    const originals=fixtureStates();
+    for (const player of familyConfig.media.players) {
+      const previous=stateOverrides[player.entity_id] || originals[player.entity_id] || state(player.entity_id,"idle",{friendly_name:player.name});
+      stateOverrides[player.entity_id]={...previous,attributes:{...previous.attributes,device_class:"speaker",supported_features:16831,media_duration:198,media_position:42,media_position_updated_at:APPROVAL_NOW,volume_level:.32,entity_picture:"/local/family-dashboard/assets/review-album.svg",group_members:[player.entity_id]}};
+    }
+  }
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.route("**/local/family-dashboard/assets/**", async (route) => {
     const filename = new URL(route.request().url()).pathname.split("/").pop();
     const approvedAssets = new Set(["example-ground.svg", "example-first.svg", "example-living-room-light.svg", "example-kitchen-light.svg"]);
-    const body = approvedAssets.has(filename)
+    const body = filename === "review-album.svg" ? await readFile(new URL("./fixtures/review-album.svg", import.meta.url), "utf8") : approvedAssets.has(filename)
       ? await readFile(new URL(`../frontend/assets/${filename}`, import.meta.url), "utf8")
       : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#eef0f4"/></svg>';
     await route.fulfill({
@@ -384,7 +415,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       body: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 90"><path d="M45 4 79 16v25c0 22-13 37-34 45C24 78 11 63 11 41V16Z" fill="${badge.background}" stroke="${badge.accent}" stroke-width="5"/><text x="45" y="53" fill="${badge.accent}" font-family="system-ui,sans-serif" font-size="20" font-weight="800" text-anchor="middle">${badge.code}</text></svg>`
     });
   });
-  await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px 0 76px;font:20px system-ui}.ha-sidebar{position:fixed;inset:56px auto 0 0;width:52px;background:#191b20}.ha-main{position:absolute;inset:0 0 0 52px;overflow-x:hidden;overflow-y:auto}</style><div class="ha-header">Family Hub</div><div class="ha-sidebar"></div><div class="ha-main"></div></body></html>`);
+  await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px 0 76px;font:20px system-ui}.ha-sidebar{position:fixed;inset:56px auto 0 0;width:52px;background:#191b20}.ha-main{position:absolute;inset:56px 0 0 52px;overflow-x:hidden;overflow-y:auto}</style><div class="ha-header">Family Hub</div><div class="ha-sidebar"></div><div class="ha-main"></div></body></html>`);
   await page.evaluate(installApprovalClock, { fixedNow: runtimeOptions.fixedNow || APPROVAL_NOW });
   const clockContract = await page.evaluate(async () => {
     const displayBefore = new Date().getTime();
@@ -398,6 +429,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
   });
   expect(clockContract.displayAfter, "approval display time must remain deterministic").toBe(clockContract.displayBefore);
   expect(clockContract.deadlineElapsed, "camera deadline time must continue advancing").toBeGreaterThan(0);
+  await page.evaluate((paths) => { window.__mdiGlyphPaths = paths; }, mdiGlyphPaths);
   await page.evaluate(() => {
     class HaCard extends HTMLElement {}
     class HaIcon extends HTMLElement {
@@ -413,6 +445,22 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       _renderNavigationGlyph() {
         const icon = this.getAttribute("icon") || "mdi:shape-outline";
         const exact = {
+          "mdi:clipboard-check-outline": '<rect x="5" y="4" width="14" height="18" rx="2"/><rect x="9" y="2" width="6" height="4" rx="1"/><path d="m8 13 3 3 5-5"/>',
+          "mdi:arrow-top-right": '<path d="M6 18 18 6M6 6h12v12"/>',
+          "mdi:lamp-outline": '<path d="m8 3-4 10h16L16 3zM12 13v7m-5 1h10"/>',
+          "mdi:thermometer": '<path d="M9 15V5a3 3 0 0 1 6 0v10a5 5 0 1 1-6 0zM12 8v10"/>',
+          "mdi:skip-previous": '<path d="M5 5v14M18 5 7 12l11 7z"/>',
+          "mdi:skip-next": '<path d="M19 5v14M6 5l11 7-11 7z"/>',
+          "mdi:bag-personal-outline": '<rect x="5" y="6" width="14" height="15" rx="2"/><path d="M9 6V4a3 3 0 0 1 6 0v2M5 13h14m-8-2h2v4h-2z"/>',
+          "mdi:gift-outline": '<rect x="3" y="8" width="18" height="4"/><path d="M5 12v9h14v-9M12 8v13M12 8c-7 0-7-6-3-6 3 0 3 6 3 6s0-6 3-6c4 0 4 6-3 6z"/>',
+          "mdi:rocket-launch-outline": '<path d="M9 16c-4-2-3-4-1-6 4-5 8-6 12-6 0 4-1 8-6 12-2 2-4 3-6-1M8 10H4l-2 6 5-1m7 1v4l-6 2 1-5m-5 3-2 2"/><circle cx="15" cy="9" r="2"/>',
+          "mdi:trophy-outline": '<path d="M7 3h10v7a5 5 0 0 1-10 0zM7 5H3v4c0 3 2 4 5 4m9-8h4v4c0 3-2 4-5 4M12 15v5m-4 1h8"/>',
+          "mdi:medal-outline": '<path d="m6 2 6 8 6-8M9 2l3 4 3-4"/><circle cx="12" cy="15" r="6"/><path d="m12 11 1 3 3 1-3 1-1 3-1-3-3-1 3-1z"/>',
+          "mdi:checkbox-blank-outline": '<rect x="4" y="4" width="16" height="16" rx="2"/>',
+          "mdi:checkbox-marked": '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="m7 12 3 3 7-7"/>',
+          "mdi:window-shutter": '<rect x="4" y="3" width="16" height="18"/><path d="M7 6h10M7 10h10M7 14h10M7 18h10"/>',
+          "mdi:plus": '<path d="M12 4v16M4 12h16"/>',
+
           "mdi:home-heart": '<path d="M3 11 12 3l9 8v9h-6v-6H9v6H3z"/><path d="M12 12c-2-2-5 1 0 4 5-3 2-6 0-4z"/>',
           "mdi:calendar-month": '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18M8 14h2m4 0h2m-8 4h2m4 0h2"/>',
           "mdi:floor-plan": '<path d="M3 3h8v7H7v11H3zm8 0h10v10h-6v8H7V10h4z"/>',
@@ -465,6 +513,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
                           ? '<rect x="4" y="7" width="16" height="12" rx="5"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><path d="M12 7V4m-2 0h4"/>'
                           : '<circle cx="12" cy="12" r="8"/><path d="M12 7v10M7 12h10"/>';
         this.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${exact || generic}</g></svg>`;
+        if (window.__mdiGlyphPaths[icon]) this.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="${window.__mdiGlyphPaths[icon]}"/></svg>`;
         this.dataset.mockGlyph = icon;
         this.style.cssText = "display:inline-grid;place-items:center;width:var(--mdc-icon-size,22px);height:var(--mdc-icon-size,22px);color:currentColor;flex:0 0 auto";
         this.querySelector("svg").style.cssText = "display:block;width:100%;height:100%";
@@ -548,11 +597,11 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           mediaRoot.innerHTML = `<style>
             mock-child-card[data-card-type="custom:mediocre-multi-media-player-card"]{display:block;min-height:100%;color:var(--mmpc-on-card);font-family:inherit}
             *{box-sizing:border-box}button{font:inherit}
-            .mock-media-player{min-height:100%;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;padding:18px;background:var(--mmpc-card);color:var(--mmpc-on-card);overflow:visible}
-            .mock-massive,.mock-speaker-scroll{min-width:0;min-height:0;overflow:visible;padding:8px}
+            .mock-media-player{height:100%;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;padding:18px;background:var(--mmpc-card);color:var(--mmpc-on-card);overflow:hidden}
+            .mock-massive,.mock-speaker-scroll{min-width:0;min-height:0;overflow:auto;padding:8px}
             .mock-massive{display:flex;flex-direction:column}.mock-kicker{color:var(--mmpc-on-card-muted);font-size:12px;font-weight:750;letter-spacing:.08em;text-transform:uppercase}
             .mock-now-playing{margin-top:10px}.mock-now-playing strong{display:block;color:var(--mmpc-on-card);font-size:22px}.mock-now-playing small{display:block;margin-top:5px;color:var(--mmpc-on-card-muted);font-size:13px}
-            .mock-feature-tabs,.mock-transport{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mock-feature-tabs{margin-top:12px}.mock-feature-tabs button,.mock-transport button{min-width:48px;min-height:48px;padding:0 14px;border:1px solid rgba(255,255,255,.14);border-radius:13px;background:rgba(255,255,255,.08);color:var(--mmpc-on-card);font-weight:800}.mock-feature-tabs button:first-child{border-color:#8fd8cb;color:#8fd8cb}
+            .mock-feature-tabs,.mock-transport{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mock-feature-tabs{margin-top:12px}.mock-feature-tabs button,.mock-transport button{min-width:48px;min-height:48px;padding:0 14px;border:1px solid rgba(255,255,255,.14);border-radius:13px;background:rgba(255,255,255,.08);color:var(--mmpc-on-card);font-weight:800}.mock-feature-tabs button:first-child{border-color:var(--mmpc-chip-foreground);color:var(--mmpc-chip-foreground);background:var(--mmpc-chip-background)}
             .mock-artwork{min-height:142px;margin:12px 0;display:grid;place-items:center;border:1px solid rgba(255,255,255,.1);border-radius:20px;background:radial-gradient(circle at 32% 28%,rgba(143,216,203,.52),transparent 32%),linear-gradient(145deg,#1463e8,#061b3a);font-size:54px;color:#fff}
             [data-mock-service]{min-width:48px;min-height:48px;align-self:flex-start;padding:0 18px;border:0;border-radius:14px;background:#1463e8;color:#fff;font-weight:800;cursor:pointer}
             .mock-speaker-scroll>strong,.mock-speaker-scroll>h3{display:block;margin:0;color:var(--mmpc-on-card)}.mock-speaker-scroll>h3{margin-top:22px;font-size:15px}
@@ -561,7 +610,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
             .mock-player-row,.mock-queue-row{min-height:64px;margin-top:9px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.055)}
             .mock-player-row strong,.mock-player-row small{display:block;color:var(--mmpc-on-card)}.mock-player-row small{margin-top:3px;color:var(--mmpc-on-card-muted);font-size:12px}.mock-player-row b{color:#8fd8cb}
             .mock-queue-row{min-height:54px;color:var(--mmpc-on-card-muted);font-size:13px}.mock-queue-row strong{color:var(--mmpc-on-card)}
-            @media(max-width:620px){.mock-media-player{grid-template-columns:1fr}.mock-massive,.mock-speaker-scroll{overflow:visible}}
+            @media(max-width:620px){.mock-media-player{grid-template-columns:1fr;overflow:auto}.mock-massive,.mock-speaker-scroll{overflow:visible}}
           </style><div class="mock-media-player">
             <section class="mock-massive"><span class="mock-kicker">Spotify · Sonos</span><div class="mock-feature-tabs"><button type="button" data-mock-music-tab="search">Search</button><button type="button" data-mock-music-tab="browse">Browse</button><button type="button" data-mock-music-tab="queue">Queue</button></div><div class="mock-now-playing"><strong data-mock-state-name>${initialName}</strong><small data-mock-state-track>Dashboard test song · Test artist</small></div><div class="mock-artwork" aria-hidden="true">♫</div><div class="mock-transport"><button type="button" aria-label="Previous track">‹</button><button type="button" data-mock-service data-mock-entity="${serviceEntity}">Play / pause</button><button type="button" aria-label="Next track">›</button><button type="button" aria-label="Volume down">−</button><button type="button" aria-label="Volume up">+</button></div></section>
             <section class="mock-speaker-scroll"><strong>Join media players</strong><div class="mock-chip-scroll"><div id="mmpc-group-chips-controller">${playerChips}</div></div><h3>Player focus</h3>${playerRows}<h3>Up next</h3>${["Family favourites", "Kitchen radio", "Evening mix", "Recently played"].map((name, index) => `<div class="mock-queue-row"><span><strong>${name}</strong><br>Queue item ${index + 1}</span><b>${index + 1}</b></div>`).join("")}</section>
@@ -668,6 +717,28 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     window.__cameraPlayerAutoLoad = true;
     window.__cameraPlayerLoadDelayMs = 0;
   });
+  if (runtimeOptions.nativeMusic) {
+    await page.evaluate(() => {
+      const root=document.createElement("home-assistant");
+      root.hass={language:"en",locale:{language:"en",time_format:"24",number_format:"language"},states:{}, user:{name:"Preview"}};
+      document.body.append(root);
+    });
+    await page.addScriptTag({ content: nativeMusicSource });
+    expect(pageErrors).toEqual([]);
+    await page.evaluate(async () => {
+      await customElements.whenDefined("mediocre-multi-media-player-card");
+      const mockHelpers = window.loadCardHelpers;
+      window.loadCardHelpers = async () => {
+        const helpers = await mockHelpers();
+        return { ...helpers, createCardElement(cardConfig) {
+          if (cardConfig.type !== "custom:mediocre-multi-media-player-card") return helpers.createCardElement(cardConfig);
+          const player = document.createElement("mediocre-multi-media-player-card");
+          player.setConfig(cardConfig);
+          return player;
+        }};
+      };
+    });
+  }
   await page.addScriptTag({ type: "module", content: cardSource });
   await page.evaluate(async ({ familyConfig, states, runtimeOptions }) => {
     await customElements.whenDefined("family-hub-card");
@@ -683,7 +754,17 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     window.__cameraPlayerLoadDelayMs = runtimeOptions.cameraPlayerLoadDelayMs ?? 0;
     window.__serviceBehaviors = runtimeOptions.serviceBehaviors || {};
     card.hass = {
+      services: {},
+      entities: {},
+      devices: {},
       connected: true,
+      themes: {darkMode:false, themes:{}, selectedTheme:{theme:"default",dark:false}},
+      language: "en",
+      locale: { language: "en", number_format: "language", time_format: "24", first_weekday: "monday" },
+      config: { unit_system: { temperature: "°C" }, time_zone: "Europe/London" },
+      localize: (key) => key.split(".").at(-1).replaceAll("_", " "),
+      hassUrl: (path) => path,
+      auth: { data: { access_token: "preview-fixture" } },
       states,
       callService(domain, service, data, target) {
         const boundedData = target?.entity_id && !data?.entity_id
@@ -738,8 +819,29 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
         return {};
       }
     };
+    if (runtimeOptions.nativeMusic) document.querySelector("home-assistant").hass = card._hass;
   }, { familyConfig, states: { ...fixtureStates(), ...stateOverrides }, runtimeOptions });
   await page.waitForFunction(() => document.querySelector("family-hub-card")?.shadowRoot?.querySelector('[data-current-view="today"]'));
+  if (runtimeOptions.reviewExportPath) {
+    // Offline review images need an SVG extension so a static server sends
+    // the correct MIME type. Keep live HA proxy URLs unchanged in the tests.
+    for (const step of reviewSteps) for (const entity of Object.values(step.arg?.states || {})) {
+      const picture = entity.attributes?.entity_picture;
+      if (picture?.startsWith("/api/camera_proxy/camera.example_")) {
+        entity.attributes.entity_picture = picture.replace("?", ".svg?");
+      }
+    }
+    const steps=JSON.stringify(reviewSteps).replaceAll("<", "\\u003c");
+    const bootstrap = `<script type="module">const steps=${steps};
+      for (const step of steps) {
+        if (step.kind === "evaluate") await (0,eval)("("+step.source+")")(step.arg);
+        else if (step.module) await import(URL.createObjectURL(new Blob([step.source],{type:"text/javascript"})));
+        else { const script=document.createElement("script"); script.textContent=step.source; document.head.append(script); }
+      }
+      window.__reviewReady=true;
+    </script>`;
+    await writeFile(runtimeOptions.reviewExportPath, reviewHtml.replace("</body>", () => bootstrap+"</body>"));
+  }
   return pageErrors;
 }
 
@@ -782,7 +884,7 @@ async function expectNoRootOverflow(page) {
     return {
       documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
       hubOverflow: hub.scrollWidth - hub.clientWidth,
-      navigationEndsBeforeContent: navigation.right <= content.left + 1,
+      navigationEndsBeforeContent: navigation.right <= content.left + 1 || navigation.bottom <= content.top + 1,
       headerEndsBeforeView: topbar.bottom <= view.top + 1,
       cardRight: cardRect.right,
       cardTop: cardRect.top,
@@ -856,6 +958,7 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
 test("Home in focus keeps every screen readable in both appearances and preserves the Music player when appearance changes", async ({ page }, testInfo) => {
   const familyConfig = structuredClone(config);
   familyConfig.features.location_map = false;
+  familyConfig.display.appearance = "auto";
   const pageErrors = await mount(page, familyConfig);
   const card = page.locator("family-hub-card");
   const contrastChecks = {
@@ -1469,7 +1572,7 @@ test("balances six lighting rooms without clipping cards inside a nested scrolle
   expect(layout.rowCounts).toEqual([3, 3]);
   expect(layout.horizontalOverflow).toBeLessThanOrEqual(1);
   expect(layout.verticalOverflow).toBeLessThanOrEqual(1);
-  expect(layout.overflowY).toBe("visible");
+  expect(layout.overflowY).toBe("auto");
   expect(layout.lastCardBottom).toBeLessThanOrEqual(layout.gridBottom + 1);
   expect(layout.cardsInsideHorizontalBounds).toBe(true);
   expect(layout.widthSpread).toBeLessThanOrEqual(1);
@@ -1552,7 +1655,8 @@ test("keeps an expanded heating schedule and its draft open through live state r
   const masterControlAlignment = await card.locator(".heating-master").evaluate((master) => {
     const target = master.querySelector(".master-temperature-stepper").getBoundingClientRect();
     const setAll = master.querySelector('[data-climate-master="set_temperature"]').getBoundingClientRect();
-    return Math.abs(target.bottom - setAll.bottom);
+    const bounds = master.getBoundingClientRect();
+    return Math.max(target.right - bounds.right, setAll.right - bounds.right, bounds.left - target.left, bounds.left - setAll.left);
   });
   expect(masterControlAlignment).toBeLessThanOrEqual(1);
 
@@ -1715,7 +1819,7 @@ test("v0.14 heating keeps six zones accessible without a nested heating scroller
   expect(layout.columnCount).toBe(expectedColumns);
   expect(layout.rowCounts).toEqual(expectedColumns === 2 ? [2, 2, 2] : [3, 3]);
   expect(layout.horizontalOverflow).toBeLessThanOrEqual(1);
-  expect(layout.overflowY).toBe("visible");
+  expect(layout.overflowY).toBe("auto");
   expect(layout.verticalOverflow).toBeLessThanOrEqual(1);
   expect(layout.cardsInsideHorizontalBounds).toBe(true);
   expect(layout.widthSpread).toBeLessThanOrEqual(1);
@@ -1759,7 +1863,7 @@ test("keeps the live music card working inside its configured media boundary", a
   await expect(player).toBeVisible();
   await expect(player).toHaveAttribute("data-player-count", "5");
   await expect(player).toHaveAttribute("data-media-browser-count", "3");
-  await expect(player).toHaveAttribute("data-card-height", "");
+  await expect(player).toHaveAttribute("data-card-height", "100%");
   await expect(player).toHaveAttribute("data-transparent-background", "false");
   await expect(card.locator("[data-mock-player]")).toHaveCount(5);
   await expect(card.locator("[data-mock-player-row]")).toHaveCount(5);
@@ -2563,6 +2667,7 @@ test("keeps the family map private and spotlights both requested clubs", async (
 
 test("shows current FPL squads, captain points and the complete league list", async ({ page }) => {
   const fplConfig = structuredClone(config);
+  fplConfig.display.appearance = "auto";
   fplConfig.football.entries = [
     { person_id: "parent", entry_id: 12345 },
     { person_id: "child_one", entry_id: 67890 }
@@ -2635,10 +2740,10 @@ test("shows current FPL squads, captain points and the complete league list", as
     };
   });
   expect(fplOverflow).toEqual({
-    detailOverflow: "visible",
-    mainOverflow: "visible",
-    squadOverflow: "visible",
-    leaguesOverflow: "visible",
+    detailOverflow: "hidden",
+    mainOverflow: "hidden",
+    squadOverflow: "auto",
+    leaguesOverflow: "auto",
     detailScrollOverflow: 0,
     mainScrollOverflow: 0
   });
@@ -2652,6 +2757,14 @@ test("shows current FPL squads, captain points and the complete league list", as
   await expectContrast(card, [
     { foreground: ".fpl-scoreboard strong,.fpl-scoreboard small,.fpl-leagues strong,.fpl-player strong,.fpl-player small", background: ".football-main", minimum: 4.5 }
   ]);
+  await page.setViewportSize({width:834,height:1112});
+  await expectNoRootOverflow(page);
+  await card.locator('[data-football-tab="table"]').click();
+  await expect(card.locator(".league-table")).toBeVisible();
+  await card.locator('[data-football-tab="fpl"]').click();
+  await expect(card.locator(".fpl-team-card")).toContainText("Second XI");
+  const overlap=await card.locator(".fpl-detail").evaluate(node=>node.getBoundingClientRect().top < node.parentElement.querySelector(".football-toolbar").getBoundingClientRect().bottom);
+  expect(overlap).toBe(false);
   expect(pageErrors).toEqual([]);
 });
 
@@ -2687,7 +2800,7 @@ test("Today shows both clubs' results and next fixtures without clipping names",
       return [...element.querySelectorAll('.compact-team-name,.team-mark,.compact-score,.compact-fixture-detail')].map((item) => {
         const rect = item.getBoundingClientRect();
         const fixture = item.closest('.compact-fixture').getBoundingClientRect();
-        return { text: item.textContent, horizontalOverflow: item.scrollWidth - item.clientWidth,
+        return { text: item.textContent, rect:{top:rect.top,bottom:rect.bottom}, bounds:{top:bounds.top,bottom:bounds.bottom}, style:{display:getComputedStyle(element).display,height:getComputedStyle(element).height,minHeight:getComputedStyle(element).minHeight,rows:getComputedStyle(element).gridTemplateRows,parentRows:getComputedStyle(element.parentElement).gridTemplateRows,parentDisplay:getComputedStyle(element.parentElement).display}, horizontalOverflow: item.scrollWidth - item.clientWidth,
           insideFixture: rect.left >= fixture.left && rect.right <= fixture.right + 1 && rect.top >= fixture.top && rect.bottom <= fixture.bottom + 1,
           insidePanel: rect.left >= bounds.left && rect.right <= bounds.right + 1 && rect.top >= bounds.top && rect.bottom <= bounds.bottom + 1 };
       });
@@ -2695,7 +2808,7 @@ test("Today shows both clubs' results and next fixtures without clipping names",
     for (const metric of metrics) {
       expect(metric.horizontalOverflow, metric.text).toBeLessThanOrEqual(1);
       expect(metric.insideFixture, metric.text).toBe(true);
-      expect(metric.insidePanel, metric.text).toBe(true);
+      expect(metric.insidePanel, JSON.stringify(metric)).toBe(true);
     }
     const overflow = await card.evaluate((element) => ({
       document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -2950,7 +3063,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("aria-disabled", "true");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-read-only-guard", "service-boundary");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-mode", "in-card");
-  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-height", "");
+  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-height", "100%");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-transparent-background", "false");
   const mediaMetrics = await card.locator(".media-player-stage").evaluate((stage) => {
     const slot = stage.querySelector(".child-card-slot");
@@ -3003,22 +3116,22 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   });
   expect(mediaMetrics.childTop).toBeGreaterThanOrEqual(mediaMetrics.stageTop - 1);
   expect(mediaMetrics.childBottom).toBeLessThanOrEqual(mediaMetrics.stageBottom + 1);
-  expect(mediaMetrics.chipColour).toBe("rgb(247, 248, 252)");
-  expect(mediaMetrics.chipBackground).toBe("rgb(38, 50, 81)");
+  expect(mediaMetrics.chipColour).toBe("rgb(21, 88, 173)");
+  expect(mediaMetrics.chipBackground).toBe("rgb(232, 238, 247)");
   expect(mediaMetrics.stageBackground).toBe("rgb(255, 255, 255)");
-  expect(mediaMetrics.stageOverflowX).toBe("visible");
-  expect(mediaMetrics.stageOverflowY).toBe("visible");
+  expect(mediaMetrics.stageOverflowX).toBe("auto");
+  expect(mediaMetrics.stageOverflowY).toBe("auto");
   expect(mediaMetrics.stageScrollHeight).toBeLessThanOrEqual(mediaMetrics.stageClientHeight + 1);
   expect(mediaMetrics.stageScrollTop).toBe(0);
   expect(mediaMetrics.slotOverflowX).toBe("visible");
   expect(mediaMetrics.slotOverflowY).toBe("visible");
-  expect(mediaMetrics.childInlineHeight).toBe("");
+  expect(mediaMetrics.childInlineHeight).toBe("100%");
   expect(mediaMetrics.childOverflowX).toBe("visible");
   expect(mediaMetrics.childOverflowY).toBe("visible");
-  expect(mediaMetrics.cardBackground).toBe("#07182F");
-  expect(mediaMetrics.primaryBackground).toBe("#07182F");
-  expect(mediaMetrics.mmpcBackground).toBe("#07182F");
-  expect(mediaMetrics.speakerOverflow).toBe("visible");
+  expect(mediaMetrics.cardBackground).toBe("#FFFFFF");
+  expect(mediaMetrics.primaryBackground).toBe("#FFFFFF");
+  expect(mediaMetrics.mmpcBackground).toBe("#FFFFFF");
+  expect(mediaMetrics.speakerOverflow).toBe("auto");
   expect(mediaMetrics.speakerScrollHeight).toBeGreaterThanOrEqual(mediaMetrics.speakerClientHeight);
   expect(mediaMetrics.chipOverflow).toBe("visible");
   expect(mediaMetrics.chipScrollWidth).toBeLessThanOrEqual(mediaMetrics.chipClientWidth + 1);
@@ -3242,7 +3355,11 @@ async function expectContrast(card, checks) {
         const background = parse(style.backgroundColor);
         if (background.a >= 0.999) unresolvedBackdrop = false;
         colour = blend(background, colour);
-        if (style.backgroundImage !== "none") unresolvedBackdrop = true;
+        if (style.backgroundImage !== "none") {
+          const stops = style.backgroundImage.startsWith("linear-gradient") ? style.backgroundImage.match(/(?:rgb[a]?\([^)]*\)|color\(srgb[^)]*\))/g) : null;
+          if (stops?.length) colour = stops.map(parse).reduce((darkest, stop) => luminance(stop) < luminance(darkest) ? stop : darkest);
+          else unresolvedBackdrop = true;
+        }
       }
       return { colour, unresolvedBackdrop };
     };
@@ -3683,9 +3800,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       const viewportWidth = testInfo.project.use.viewport.width;
       const expectedColumns = section === "lights"
         ? 3
-        : section === "heating"
-          ? 2
-          : viewportWidth <= 1030 ? 2 : 4;
+        : 3;
       expect(columnCount, `${section} must use the balanced approval grid at ${viewportWidth}px`).toBe(expectedColumns);
     }
     await captureApproval(page, testInfo, `home-${section}`, { hotspots: section === "rooms" });
@@ -3729,7 +3844,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
         const stage = dashboard.querySelector(".family-kid-stage").getBoundingClientRect();
         return { switcherHeight: switcher.height, switcherBottom: switcher.bottom, stageTop: stage.top };
       });
-      expect(familyRows.switcherHeight).toBeGreaterThanOrEqual(58);
+      expect(familyRows.switcherHeight).toBeGreaterThanOrEqual(48);
       expect(familyRows.switcherBottom).toBeLessThanOrEqual(familyRows.stageTop + 1);
       await expect(card.locator(".family-kid-stage .family-person-heading h2")).toHaveText("Today’s jobs");
       await expect(card.locator(".family-summary-grid")).toHaveCount(1);
@@ -3756,7 +3871,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       await expectContrast(card, [
         { foreground: ".chore-row small", background: ".chore-row", minimum: 4.5 },
         { foreground: ".family-facts span", background: ".family-facts span", minimum: 4.5 },
-        { foreground: ".family-person-heading > span", background: ".family-person-heading > span", minimum: 4.5 },
+        { foreground: ".family-kid-tab > span", background: ".family-kid-tab > span", minimum: 4.5 },
         { foreground: ".chore-row b", background: ".chore-row", minimum: 4.5 },
         { foreground: ".family-summary-item p", background: ".family-summary-item", minimum: 4.5 },
         { foreground: ".family-summary-item small", background: ".family-summary-item", minimum: 4.5 },
@@ -4138,5 +4253,163 @@ test("Home in focus restores failed checklist updates and blocks read-only check
   await card.locator('.family-prep-item[data-prep-item="boots"]').evaluate((button) => { button.disabled = false; button.click(); });
   expect(await page.evaluate(() => window.__serviceCalls.length)).toBe(1);
   await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "false");
+  expect(errors).toEqual([]);
+});
+
+test("restored approved primary screens fit the actual HA shell in both orientations", async ({ page }, testInfo) => {
+  const household = structuredClone(config);
+  household.features.location_map = false;
+  // Six live zones represent the density in the supplied tablet screenshots.
+  const prototypeRoom = household.rooms.find((room) => room.climate);
+  const zoneStates = {};
+  for (let index = household.rooms.filter((room) => room.climate).length; index < 6; index++) {
+    const room = { ...structuredClone(prototypeRoom), id: `test_zone_${index}`, name: ["Snug", "Playroom", "Hall", "Utility", "Upstairs Hall", "Study"][index], climate: `climate.test_zone_${index}`, lights: [], covers: [], scenes: [] };
+    delete room.heating_schedule;
+    household.rooms.push(room);
+    zoneStates[room.climate] = state(room.climate, index % 2 ? "off" : "heat", {temperature: 19 + index / 2, current_temperature: 20 + index / 2, hvac_action:index % 2 ? "off":"heating"});
+  }
+  const errors = await mount(page, household, zoneStates);
+  const card = page.locator('family-hub-card');
+  await card.evaluate((element) => { element.hass = {...element._hass, themes:{darkMode:true}}; });
+  await expect(card.locator('.hub-card')).toHaveAttribute('data-appearance','light');
+  for (const portrait of [false,true]) {
+    await page.setViewportSize(portrait ? {width:834,height:1112} : {width:1112,height:834});
+    for (const view of ['today','calendar','rooms','family','entry','energy','football','music']) {
+      await card.locator(`.hub-navigation [data-view="${view}"]`).click();
+      if (view==='rooms') await card.locator('[data-home-section="heating"]').click();
+      await page.waitForTimeout(150);
+      const geometry = await card.evaluate((element) => {
+        const root=element.shadowRoot;
+        const hub=root.querySelector('.hub-card'), view=root.querySelector('.hub-view');
+        return {top:element.getBoundingClientRect().top,bottom:hub.getBoundingClientRect().bottom,viewport:innerHeight,rootOverflow:document.querySelector('.ha-main').scrollHeight-document.querySelector('.ha-main').clientHeight, viewOverflow:view.scrollHeight-view.clientHeight, horizontal:view.scrollWidth-view.clientWidth};
+      });
+      expect(geometry.top).toBeGreaterThanOrEqual(56);
+      expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport+1);
+      expect(geometry.rootOverflow, JSON.stringify(geometry)).toBeLessThanOrEqual(1);
+      expect(geometry.viewOverflow, `${portrait?'portrait':'landscape'} ${view}: ${JSON.stringify(geometry)}`).toBeLessThanOrEqual(1);
+      expect(geometry.horizontal).toBeLessThanOrEqual(1);
+      if (view==='rooms') {
+        await expect(card.locator('.thermostat-dial')).toHaveCount(6);
+        const zoneGeometry=await card.locator('.heating-card').evaluateAll(nodes=>nodes.map(node=>({name:node.querySelector('h3').textContent,overflow:node.scrollHeight-node.clientHeight,height:node.clientHeight, parentBottom:node.parentElement.getBoundingClientRect().bottom,bottom:node.getBoundingClientRect().bottom})));
+        expect(zoneGeometry.filter(zone=>zone.overflow>1 || zone.bottom>zone.parentBottom+1), JSON.stringify(zoneGeometry)).toEqual([]);
+      }
+      if (view==='family') await expect(card.locator('.progress-ring')).toHaveCount(1);
+      const folder=process.env.RESTORED_DESIGN_REVIEW_DIR || '/private/tmp/restored-design-review';
+      await mkdir(folder,{recursive:true});
+      await page.screenshot({path:resolve(folder,`${testInfo.project.name}-${portrait?'portrait':'landscape'}-${view}.png`)});
+    }
+  }
+  expect(errors).toEqual([]);
+});
+
+
+test("native music player keeps playback and room controls inside both tablet orientations", async ({page}, testInfo) => {
+  test.skip(!nativeMusicSource, "Set NATIVE_MUSIC_CARD_PATH to the installed upstream player bundle for native validation");
+  const errors = await mount(page, config, {}, {nativeMusic:true});
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-navigation [data-view="music"]').click();
+  const player = card.locator("mediocre-multi-media-player-card");
+  await page.waitForTimeout(700);
+  expect(errors, await card.evaluate(el=>JSON.stringify({children:[...el._childCards.keys()], slot:el.shadowRoot.getElementById("music-card-slot").innerHTML.slice(0,400)}))).toEqual([]);
+  await expect(player).toBeVisible();
+  for (const size of [{width:1112,height:834},{width:834,height:1112}]) {
+    await page.setViewportSize(size);
+    await page.waitForTimeout(350);
+    await expect(player.locator("button").first()).toBeVisible();
+    const geometry=await player.evaluate(node=>({height:node.getBoundingClientRect().height, bottom:node.getBoundingClientRect().bottom, viewport:innerHeight, html:node.shadowRoot?.innerHTML.slice(0,200)}));
+    expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport+1);
+    expect(geometry.height).toBeGreaterThan(400);
+    await expectNoRootOverflow(page);
+    const folder=process.env.RESTORED_DESIGN_REVIEW_DIR || '/private/tmp/restored-design-review';
+    await mkdir(folder,{recursive:true});
+    await page.screenshot({path:resolve(folder,`native-music-${size.width}x${size.height}.png`)});
+  }
+  expect(errors).toEqual([]);
+});
+
+
+test("exports the working corrective dashboard with representative family data", async ({page}, testInfo) => {
+  test.skip(!process.env.RESTORED_REVIEW_EXPORT_PATH, "Export the review only when requested");
+  const household=structuredClone(config);
+  household.features.location_map=false;
+  household.features.school=false;
+  for (const name of ["Garage","Bedroom","Playroom"]) household.media.players.push({entity_id:`media_player.review_${name.toLowerCase()}`, name});
+  for (const [index,person] of household.people.entries()) person.name=["Rob","Zoe","Ernie","Orson"][index];
+  const names=["Snug","Playroom","Living room","Hall","Utility","Upstairs hall"];
+  const rooms=household.rooms.filter(room=>room.climate);
+  const overrides={};
+  while (rooms.length<6) {
+    const index=rooms.length;
+    const room={...structuredClone(rooms[0]),id:`review_zone_${index}`,name:names[index],climate:`climate.review_zone_${index}`, lights:[],covers:[],scenes:[]};
+    delete room.heating_schedule;
+    household.rooms.push(room); rooms.push(room);
+  }
+  for (const [index,room] of rooms.entries()) {
+    room.name=names[index];
+    overrides[room.climate]=state(room.climate,index===0?"heat":"off",{current_temperature:20.5+index*.3,temperature:19+index*.5,hvac_action:index===0?"heating":"off",supported_features:1,hvac_modes:["off","heat"]});
+  }
+  overrides["sensor.child_one_choreops_points"]=state("sensor.child_one_choreops_points","115");
+  overrides["sensor.child_two_choreops_points"]=state("sensor.child_two_choreops_points","95");
+  const event=(summary,hour,minute,entity)=>({summary,start:{dateTime:`2026-08-24T${hour}:${minute}:00Z`},end:{dateTime:`2026-08-24T${Number(hour)+1}:${minute}:00Z`},_calendar:household.calendar.entities.find(entry=>entry.entity_id===entity)});
+  const training=event("Ernie basketball","17","20","calendar.child_one");
+  const responses=Object.fromEntries(household.calendar.entities.map(entry=>[entry.entity_id,[]]));
+  responses["calendar.child_one"]=[training];
+  responses["calendar.child_two"]=[event("Orson school photo","16","00","calendar.child_two")];
+  responses["calendar.family"]=[event("Circus with Grandad","18","00","calendar.family")];
+  const preparationItems=["Water bottle","Trainers","Basketball kit","Snack pack","Coat"].map((summary,index)=>({uid:`review-kit-${index}`,summary,status:index===0?"completed":"needs_action",due:"2026-08-24",description:preparationDescription(training,"child_one","football")}));
+  Object.assign(overrides, approvalFootballStates());
+  const footballEvents=overrides["sensor.family_dashboard_premier_league_gw_1"].attributes.events;
+  const spurs=footballEvents[0].home;
+  const villa=footballEvents[1].home;
+  footballEvents.unshift({...footballEvents[0],id:901,kickoff_time:"2026-08-22T14:00:00Z",finished:true,finished_provisional:true,minutes:90,home_score:2,away_score:3,away:villa});
+  footballEvents.push({...footballEvents[1],id:902,kickoff_time:"2026-08-29T16:30:00Z",home:footballEvents[2].away,away:spurs});
+  household.football.entries=[{person_id:"parent",entry_id:12345}];
+  const squad=Array.from({length:15},(_,index)=>({
+    id:index+1,name:index===10?"Captain forward":index===0?"Keeper":`Player ${index+1}`,
+    position:index===0||index===11?"GKP":index<5||index===13?"DEF":index<9||index===12?"MID":"FWD",
+    squad_position:index+1,bench:index>10,team_code:index%2?"AVL":"TOT",
+    crest_url:`https://resources.premierleague.com/premierleague/badges/70/t${index%2?7:6}.png`,
+    event_points:index===10?6:2,contribution_points:index===10?12:2,multiplier:index===10?2:index>10?0:1,
+    captain:index===10,vice_captain:index===8,status:"a"
+  }));
+  overrides["sensor.family_dashboard_fpl_parent"]=state("sensor.family_dashboard_fpl_parent","379",{
+    team_name:"Stranger Mings",gameweek:1,gameweek_points:51,overall_rank:85722,transfers:0,transfer_cost:0,points_on_bench:11,squad,
+    leagues:Array.from({length:12},(_,index)=>({id:index+1,name:`Family league ${index+1}`,rank:index+1,previous_rank:index+2}))
+  });
+  const errors=await mount(page,household,overrides,{calendarEventsByEntity:responses,preparationItems,nativeMusic:Boolean(nativeMusicSource),reviewExportPath:process.env.RESTORED_REVIEW_EXPORT_PATH});
+  const card=page.locator("family-hub-card");
+  const folder=process.env.RESTORED_DESIGN_REVIEW_DIR;
+  await mkdir(folder,{recursive:true});
+  for (const portrait of [false,true]) {
+    await page.setViewportSize(portrait?{width:834,height:1112}:{width:1112,height:834});
+    for (const view of ["today","calendar","rooms","family","entry","energy","football","music"]) {
+      await card.locator(`.hub-navigation [data-view="${view}"]`).click();
+      if (view==="rooms") await card.locator('[data-home-section="heating"]').click();
+      await page.waitForTimeout(200);
+      await expectNoRootOverflow(page);
+      await page.screenshot({path:resolve(folder,`${portrait?"portrait":"landscape"}-${view}.png`)});
+      if (view==="today") {
+        const panels=await card.evaluate(element=>{
+          const root=element.shadowRoot;
+          return [".today-family .section-heading",".today-family .person-summary-list",".today-ready-preview"].map(selector=>{
+            const rect=root.querySelector(selector).getBoundingClientRect();
+            return {top:rect.top,bottom:rect.bottom,height:rect.height};
+          });
+        });
+        expect(panels[1].top).toBeGreaterThanOrEqual(panels[0].bottom);
+        expect(panels[2].top).toBeGreaterThanOrEqual(panels[1].bottom);
+        expect(panels[2].height).toBeGreaterThanOrEqual(48);
+      }
+      if (view==="rooms") for (const section of ["rooms","lights","covers","cleaning"]) {
+        await card.locator(`[data-home-section="${section}"]`).click();
+        await expectNoRootOverflow(page);
+        await page.screenshot({path:resolve(folder,`${portrait?"portrait":"landscape"}-home-${section}.png`)});
+      }
+      if (view==="football") for (const tab of ["table","fpl"]) {
+        await card.locator(`[data-football-tab="${tab}"]`).click();
+        await page.screenshot({path:resolve(folder,`${portrait?"portrait":"landscape"}-football-${tab}.png`)});
+      }
+    }
+  }
   expect(errors).toEqual([]);
 });

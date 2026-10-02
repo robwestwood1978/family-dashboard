@@ -2060,6 +2060,7 @@ export class FamilyHubCard extends HTMLElementBase {
     };
     this._boundPageHide = () => this._closeActiveCamera({ render: false, invalidate: true });
     this._boundResize = () => {
+      this._syncViewportHeight();
       if (this._responsiveStyleFrame !== null) return;
       this._responsiveStyleFrame = requestAnimationFrame(() => {
         this._responsiveStyleFrame = null;
@@ -2084,6 +2085,11 @@ export class FamilyHubCard extends HTMLElementBase {
     globalThis.document?.addEventListener?.("visibilitychange", this._boundVisibilityChange);
     globalThis.addEventListener?.("pagehide", this._boundPageHide);
     globalThis.addEventListener?.("resize", this._boundResize, { passive: true });
+    globalThis.visualViewport?.addEventListener?.("resize", this._boundResize, { passive: true });
+    if (globalThis.ResizeObserver && this.parentElement) {
+      this._viewportObserver = new ResizeObserver(() => this._syncViewportHeight());
+      this._viewportObserver.observe(this.parentElement);
+    }
     this._armFreshnessTimer();
     this._armPhotoFrameIdleTimer();
     void this._loadPhotoFrameMedia();
@@ -2102,6 +2108,8 @@ export class FamilyHubCard extends HTMLElementBase {
     globalThis.document?.removeEventListener?.("visibilitychange", this._boundVisibilityChange);
     globalThis.removeEventListener?.("pagehide", this._boundPageHide);
     globalThis.removeEventListener?.("resize", this._boundResize);
+    globalThis.visualViewport?.removeEventListener?.("resize", this._boundResize);
+    this._viewportObserver?.disconnect();
     if (this._responsiveStyleFrame != null) globalThis.cancelAnimationFrame?.(this._responsiveStyleFrame);
     this._responsiveStyleFrame = null;
     this._clearFreshnessTimer();
@@ -2201,7 +2209,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._hass = hass;
     // Appearance can change without any entity state changing. Update the
     // palette in place so a theme switch preserves Music browsing and streams.
-    this.shadowRoot?.querySelector?.(".hub-card")?.setAttribute("data-appearance", hass?.themes?.darkMode ? "dark" : "light");
+    this.shadowRoot?.querySelector?.(".hub-card")?.setAttribute("data-appearance", this._appearance());
     this._reconcilePhotoFrame(hass?.states || {});
     this._pruneInactiveChildCards();
     for (const [key, child] of this._childCards.entries()) child.hass = this._hassForChild(key);
@@ -2218,6 +2226,20 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     this._loadCalendarEvents();
     void this._loadPreparationItems();
+  }
+
+  _appearance() {
+    const preference = this._config?.display?.appearance || "light";
+    return preference === "auto" ? this._hass?.themes?.darkMode ? "dark" : "light" : preference;
+  }
+
+  _syncViewportHeight() {
+    if (!this.isConnected || !this.getBoundingClientRect) return;
+    const viewport = globalThis.visualViewport;
+    const bottom = viewport ? viewport.height + viewport.offsetTop : globalThis.innerHeight;
+    const top = this.getBoundingClientRect().top;
+    const height = Math.max(160, Math.floor(bottom - top));
+    if (Number.isFinite(height)) this.style.setProperty("--family-viewport-height", `${height}px`);
   }
 
   getCardSize() {
@@ -2676,7 +2698,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const shellGuard = this._photoFrameActive || this._plannerModal ? ' inert aria-hidden="true"' : "";
     this.shadowRoot.innerHTML = `
       <style data-layout="${this._responsiveViewportKey()}">${this._styles()}</style>
-      <ha-card class="hub-card" data-appearance="${this._hass?.themes?.darkMode ? "dark" : "light"}" style="
+      <ha-card class="hub-card" data-appearance="${this._appearance()}" style="
         --hub-accent:${escapeHtml(theme.accent)};
         --hub-background:${escapeHtml(theme.background)};
         --hub-surface:${escapeHtml(theme.surface)};
@@ -2688,7 +2710,6 @@ export class FamilyHubCard extends HTMLElementBase {
         --hub-backdrop-end:${escapeHtml(theme.backdrop_end)};
         --hub-radius:${Number(theme.radius_px)}px;
       ">
-        <header class="focus-app-brand"${shellGuard}><ha-icon icon="mdi:home-outline"></ha-icon><strong>Family Hub</strong><span>${escapeHtml(this._config.product.name || "")}</span></header>
         <div class="hub-shell"${shellGuard}>
           ${this._renderNavigation()}
           <main class="hub-content">
@@ -2721,6 +2742,7 @@ export class FamilyHubCard extends HTMLElementBase {
       }
     } else if (!confirmationFocusHandled) this._restoreRenderFocus(renderFocus);
     this._restoreEmbeddedRenderState(embeddedRenderState);
+    this._syncViewportHeight();
   }
 
   _renderPhotoFrame() {
@@ -3024,7 +3046,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const security = features.entry ? todaySecurityPresentation(states[this._config.entry?.alarm_entity], states[this._config.entry?.garage?.cover_entity], (this._config.entry?.cameras || []).flatMap((camera) => [camera.ringing_entity,camera.person_entity,camera.motion_entity]).filter(Boolean).map((id) => states[id])) : null;
     const preview = features.family && features.calendar ? todayPreparationPreview(this._preparationItems.filter((item) => !next || item?._preparation?.eventKey !== familyPlannerEventKey(next)),this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents(),this._config.people,new Date(),this._config.product.timezone,2) : {total:0,complete:0,rows:[]};
     return `<section class="today-grid focus-today" data-calendar="${features.calendar}" data-secondary-count="${[features.family, features.football, features.music].filter(Boolean).length}" aria-label="Today at a glance">
-      ${room ? `<article class="surface hero-panel today-hero focus-home-card"><div class="daily-home-art" aria-hidden="true"><img src="${HOME_ILLUSTRATION}" alt="" decoding="async"></div><div class="today-hero-copy"><h2>${escapeHtml(room.name)}</h2><p>${Number.isFinite(summary.temperature) ? `${formatTemperature(summary.temperature)} inside` : "Your home controls"}</p></div><button type="button" class="focus-home-open" data-focus-home-room="${escapeHtml(room.id)}" aria-label="Open ${escapeHtml(room.name)} controls"><ha-icon icon="mdi:arrow-top-right"></ha-icon></button><div class="focus-home-controls"><button type="button" data-room-lights="${escapeHtml(room.id)}" data-light-service="${summary.lightsOn ? "turn_off":"turn_on"}" aria-label="Turn ${escapeHtml(room.name)} lights ${summary.lightsOn ? "off":"on"}" aria-pressed="${Boolean(summary.lightsOn)}" ${readOnly || !availableLights.length ? "disabled" : ""}><ha-icon icon="mdi:lamp-outline"></ha-icon><span><strong>${availableLights.length ? summary.lightsOn ? "Lights on":"Lights off" : "Lighting unavailable"}</strong><small>${escapeHtml(room.name)}</small></span></button><button type="button" data-focus-home-room="${escapeHtml(room.id)}"><ha-icon icon="mdi:thermometer"></ha-icon><span><strong>${Number.isFinite(summary.targetTemperature) ? formatTemperature(summary.targetTemperature):"Heating"}</strong><small>Heating target <ha-icon icon="mdi:chevron-right"></ha-icon></small></span></button></div></article>` : `<article class="focus-hello"><h2>${escapeHtml(greetingForTime(new Date(),this._config.product.timezone))}</h2><p>Your family’s day, together.</p></article>`}
+      ${room ? `<article class="surface hero-panel today-hero focus-home-card"><div class="daily-home-art" aria-hidden="true"><img src="${HOME_ILLUSTRATION}" alt="" decoding="async"></div><div class="today-hero-copy"><p class="eyebrow">Home in focus</p><h2>${escapeHtml(greetingForTime(new Date(),this._config.product.timezone))}</h2><p>${Number.isFinite(summary.temperature) ? `${escapeHtml(room.name)} · ${formatTemperature(summary.temperature)} inside` : "A little comfort, a little control."}</p></div><button type="button" class="focus-home-open" data-focus-home-room="${escapeHtml(room.id)}" aria-label="Open ${escapeHtml(room.name)} controls"><ha-icon icon="mdi:arrow-top-right"></ha-icon></button><div class="focus-home-controls"><button type="button" data-room-lights="${escapeHtml(room.id)}" data-light-service="${summary.lightsOn ? "turn_off":"turn_on"}" aria-label="Turn ${escapeHtml(room.name)} lights ${summary.lightsOn ? "off":"on"}" aria-pressed="${Boolean(summary.lightsOn)}" ${readOnly || !availableLights.length ? "disabled" : ""}><ha-icon icon="mdi:lamp-outline"></ha-icon><span><strong>${availableLights.length ? summary.lightsOn ? "Lights on":"Lights off" : "Lighting unavailable"}</strong><small>${escapeHtml(room.name)}</small></span></button><button type="button" ${room.climate ? `data-focus-home-room="${escapeHtml(room.id)}"` : 'data-home-target="heating"'}><ha-icon icon="mdi:thermometer"></ha-icon><span><strong>${Number.isFinite(summary.targetTemperature) ? formatTemperature(summary.targetTemperature):Number.isFinite(home?.averageTemperature) ? formatTemperature(home.averageTemperature):"View heating"}</strong><small>${room.climate ? "Heating target" : "Home temperature"} <ha-icon icon="mdi:chevron-right"></ha-icon></small></span></button></div></article>` : `<article class="focus-hello"><h2>${escapeHtml(greetingForTime(new Date(),this._config.product.timezone))}</h2><p>Your family’s day, together.</p></article>`}
       <div class="focus-today-plan">${this._preparationError ? `<p class="calendar-warning" role="alert">${escapeHtml(this._preparationError)}</p>` : ""}${features.calendar ? `<article class="next-panel today-next"><p class="eyebrow">Coming up</p><h2>${escapeHtml(next?.summary || "No plans yet")}</h2><p class="supporting">${next ? `${escapeHtml(formatDay(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}${isAllDayCalendarEvent(next) ? " · All day":` at ${escapeHtml(formatTime(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}`}`:"The next family event will appear here."}</p>${next?.location ? `<p class="supporting"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(next.location)}</p>`:""}${next ? this._renderFocusChecklist(next, { compact:true }) : ""}<button type="button" class="text-action" ${next ? `data-focus-open-plan="${escapeHtml(familyPlannerEventKey(next))}"`:'data-view="calendar"'}>See the plan <ha-icon icon="mdi:arrow-right"></ha-icon></button></article>`:""}${features.family ? `<article class="children-panel today-family"><div class="section-heading"><h2>A little left to do</h2><button type="button" data-view="family">Tasks <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div>${this._renderTodayTaskPreview(preview)}<div class="person-summary-list">${this._renderChildSummaries()}</div></article>`:""}</div>
       ${football ? `<article class="football-panel today-football" data-fixture-count="${football.fixtureCount || 0}"><div class="section-heading"><h2>${escapeHtml(football.title)}</h2><button type="button" data-view="football">All football <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="featured-fixtures">${football.html}</div></article>`:""}
       ${home || security || energy ? `<footer class="hero-metrics focus-home-summary">${home ? `<button type="button" data-home-target="heating"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${escapeHtml(heating.value)}</strong><small>${escapeHtml(heating.detail)}</small></span></button><button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${escapeHtml(lighting.value)}</strong><small>${escapeHtml(lighting.detail)}</small></span></button>`:""}${security ? `<button type="button" data-view="entry"><ha-icon icon="${security.icon}"></ha-icon><span><strong>${escapeHtml(security.title)}</strong><small>${escapeHtml(security.detail)}</small></span></button>`:""}${energy ? `<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energy.value)}</strong><small>${escapeHtml(energy.detail)}</small></span></button>`:""}</footer>` : ""}
@@ -3186,7 +3208,7 @@ export class FamilyHubCard extends HTMLElementBase {
       ...this._config.people.filter((person) => person.role !== "household")
     ].map((person) => `<button type="button" class="calendar-person-filter ${this._calendarPersonFilter === person.id ? "is-selected" : ""}" data-calendar-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}" aria-pressed="${this._calendarPersonFilter === person.id}"><span>${escapeHtml(person.id === "all" ? "All" : person.name.slice(0, 1))}</span>${escapeHtml(person.name)}</button>`).join("");
     return `
-      <section class="single-surface surface calendar-view">
+      <section class="single-surface surface calendar-view" data-planner-mode="${this._calendarMode}">
         <div class="calendar-toolbar">
           <div class="calendar-context"><span><h2 class="focus-calendar-title">${escapeHtml(new Intl.DateTimeFormat(this._config.product.locale,{month:"long",year:"numeric",timeZone:"UTC"}).format(new Date(`${this._calendarAnchorKey || dateKey(new Date(),this._config.product.timezone)}T12:00:00Z`)))}</h2><strong>Family planner</strong></span></div>
           <div class="calendar-toolbar-actions">${canCreate ? '<button type="button" class="calendar-add-event" data-planner-add-event><ha-icon icon="mdi:plus"></ha-icon>Add event</button>' : ""}<div class="segments calendar-modes" role="group" aria-label="Choose calendar view">${modeButtons}</div></div>
@@ -3477,15 +3499,15 @@ export class FamilyHubCard extends HTMLElementBase {
             <button type="button" class="heating-power ${presentation.isOn ? "is-on" : ""}" data-climate-power="${powerService}" data-entity="${escapeHtml(room.climate)}" aria-label="${escapeHtml(powerLabelText)}"${powerPressed}${powerDisabled}><ha-icon icon="mdi:power"></ha-icon><span>${powerLabel}</span></button>
           </div>
           <div class="heating-body">
-            <div class="heating-current"><small>Current</small><strong class="heating-current-value">${formatTemperature(current)}</strong></div>
-            <div class="heating-target-control" role="group" aria-label="${escapeHtml(room.name)} target temperature, currently ${targetLabel}">
-              <small>Target</small>
-              <div class="heating-stepper">
-                <button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower ${escapeHtml(room.name)} target from ${targetLabel}"${targetDisabled}>−</button>
-                <output class="heating-target-value">${targetLabel}</output>
-                <button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Raise ${escapeHtml(room.name)} target from ${targetLabel}"${targetDisabled}>+</button>
-              </div>
+            <div class="thermostat-dial" style="--temperature-progress:${Number.isFinite(target) ? Math.max(0, Math.min(100, (target - 5) / 30 * 100)) : 0}" role="img" aria-label="${escapeHtml(room.name)} target ${targetLabel}, current ${formatTemperature(current)}">
+              <svg viewBox="0 0 180 180" aria-hidden="true"><circle class="thermostat-track" cx="90" cy="90" r="74"/><circle class="thermostat-value" cx="90" cy="90" r="74" pathLength="100" stroke-dasharray="${Number.isFinite(target) ? Math.max(0, Math.min(100, (target - 5) / 30 * 75)) : 0} 100"/></svg>
+              <div><small>Target</small><output class="heating-target-value">${targetLabel}</output><span>Inside <strong class="heating-current-value">${formatTemperature(current)}</strong></span></div>
             </div>
+            <div class="heating-target-control" role="group" aria-label="${escapeHtml(room.name)} target temperature, currently ${targetLabel}"><div class="heating-stepper">
+              <button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower ${escapeHtml(room.name)} target from ${targetLabel}"${targetDisabled}>−</button>
+              <span>${escapeHtml(presentation.label)}</span>
+              <button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Raise ${escapeHtml(room.name)} target from ${targetLabel}"${targetDisabled}>+</button>
+            </div></div>
           </div>
           <details class="heating-schedule" data-heating-schedule="${escapeHtml(room.id)}"${scheduleOpen ? " open" : ""}><summary><span><ha-icon icon="mdi:calendar-clock"></ha-icon><strong>Daily schedule</strong><small>${escapeHtml(scheduleSummary)}</small></span><ha-icon class="schedule-chevron" icon="mdi:chevron-down"></ha-icon></summary>${room.heating_schedule ? this._renderHeatingScheduleEditor(schedulePeriods, room.id, readOnly) : '<p class="hub-empty-state compact">Add this thermostat’s schedule entities in Admin to edit it here.</p>'}</details>
         </article>
@@ -3494,7 +3516,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const availableZones = heatingRooms.filter((room) => isEntityAvailable(states[room.climate])).length;
     const masterOpen = this._expandedHeatingSchedules.has("all");
     const masterPeriods = this._heatingScheduleDrafts.get("all") || masterSchedule;
-    return `<section class="heating-experience"><article class="surface heating-master ${masterOpen ? "is-schedule-open" : ""}"><div class="heating-master-copy"><p class="eyebrow">Whole house</p><h2>Master heating</h2><span>${availableZones} of ${heatingRooms.length} zones available</span></div><div class="heating-master-target"><span>All-room target</span><div class="master-temperature-stepper"><button type="button" data-master-temperature-adjust="-0.5" aria-label="Lower all-room target" ${readOnly ? "disabled" : ""}>−</button><label><span class="sr-only">All-room target temperature</span><input type="number" min="5" max="35" step="0.5" value="${this._masterTemperature}" data-master-temperature ${readOnly ? "disabled" : ""}><b>°</b></label><button type="button" data-master-temperature-adjust="0.5" aria-label="Raise all-room target" ${readOnly ? "disabled" : ""}>+</button></div></div><div class="heating-master-actions"><button type="button" data-climate-master="set_temperature" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:thermometer-check"></ha-icon><span>Set all rooms</span></button><button type="button" data-climate-master="turn_on" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:radiator"></ha-icon><span>All on</span></button><button type="button" data-climate-master="turn_off" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:power"></ha-icon><span>All off</span></button></div><details class="heating-schedule master-schedule" data-heating-schedule="all"${masterOpen ? " open" : ""}><summary><span><ha-icon icon="mdi:calendar-sync"></ha-icon><strong>Whole-house schedule</strong><small>Use the same four periods in every configured room</small></span><ha-icon class="schedule-chevron" icon="mdi:chevron-down"></ha-icon></summary>${this._renderHeatingScheduleEditor(masterPeriods, "all", readOnly || schedulableRooms.length === 0)}</details></article><div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="hub-empty-state">No heating controls are available yet.</p>'}</div></section>`;
+    return `<section class="heating-experience"><article class="surface heating-master ${masterOpen ? "is-schedule-open" : ""}"><div class="heating-master-copy"><p class="eyebrow">Whole house</p><h2>Master heating</h2><span>${availableZones} of ${heatingRooms.length} zones available</span></div><div class="heating-master-target"><span>All-room target</span><div class="master-dial"><svg viewBox="0 0 180 180" aria-hidden="true"><circle class="thermostat-track" cx="90" cy="90" r="74"/><circle class="thermostat-value" cx="90" cy="90" r="74" pathLength="100" stroke-dasharray="${Math.max(0, Math.min(75, (this._masterTemperature - 5) / 30 * 75))} 100"/></svg><div class="master-temperature-stepper"><button type="button" data-master-temperature-adjust="-0.5" aria-label="Lower all-room target" ${readOnly ? "disabled" : ""}>−</button><label><span class="sr-only">All-room target temperature</span><input type="number" min="5" max="35" step="0.5" value="${this._masterTemperature}" data-master-temperature ${readOnly ? "disabled" : ""}><b>°</b></label><button type="button" data-master-temperature-adjust="0.5" aria-label="Raise all-room target" ${readOnly ? "disabled" : ""}>+</button></div></div></div><div class="heating-master-actions"><button type="button" data-climate-master="set_temperature" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:thermometer-check"></ha-icon><span>Set all rooms</span></button><button type="button" data-climate-master="turn_on" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:radiator"></ha-icon><span>All on</span></button><button type="button" data-climate-master="turn_off" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:power"></ha-icon><span>All off</span></button></div><details class="heating-schedule master-schedule" data-heating-schedule="all"${masterOpen ? " open" : ""}><summary><span><ha-icon icon="mdi:calendar-sync"></ha-icon><strong>Whole-house schedule</strong><small>Use the same four periods in every configured room</small></span><ha-icon class="schedule-chevron" icon="mdi:chevron-down"></ha-icon></summary>${this._renderHeatingScheduleEditor(masterPeriods, "all", readOnly || schedulableRooms.length === 0)}</details></article><div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="hub-empty-state">No heating controls are available yet.</p>'}</div></section>`;
   }
 
   _renderHeatingScheduleEditor(periods, scope, disabled = false) {
@@ -4140,8 +4162,8 @@ export class FamilyHubCard extends HTMLElementBase {
         ? `<button type="button" class="reward-claim" ${canClaim ? `data-reward-claim="${escapeHtml(claimEntity)}" data-reward-status="${escapeHtml(item.entityId)}" data-person-id="${escapeHtml(personId)}"` : "disabled"}>${pending ? "Requesting…" : "Claim reward"}</button>`
         : "";
       return `
-      <div class="family-summary-item is-${escapeHtml(item.tone)}">
-        <span><ha-icon icon="${escapeHtml(item.icon)}" aria-hidden="true"></ha-icon></span>
+      <div class="family-summary-item is-${escapeHtml(item.tone)} award-${item.kind}">
+        <span class="award-art" style="--progress:${Math.round(progress)}"><ha-icon icon="${escapeHtml(item.icon)}" aria-hidden="true"></ha-icon></span>
         <div><p>${labels[item.kind]}</p><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.label)}</small><i class="family-progress"><b style="width:${Math.round(progress)}%"></b></i>${claimAction}</div>
       </div>
     `;
@@ -4250,7 +4272,7 @@ export class FamilyHubCard extends HTMLElementBase {
           <span class="chore-check"><ha-icon icon="${escapeHtml(kidMode ? choreIcon(presentation.name) : presentation.tone === "done" ? "mdi:check" : presentation.tone === "overdue" ? "mdi:alert" : "mdi:circle-small")}" aria-hidden="true"></ha-icon></span>
           <span><strong>${escapeHtml(presentation.name)}</strong><small>${escapeHtml(pending ? "Marking as done…" : presentation.label)}${presentation.due ? ` · ${escapeHtml(formatTime(presentation.due, this._config.product.locale, this._config.product.timezone))}` : ""}</small></span>
           ${Number.isFinite(presentation.points) ? `<b>+${presentation.points}</b>` : ""}
-          ${kidMode ? `<button type="button" class="chore-claim-action" ${interactive ? `data-chore-claim="${escapeHtml(claimEntity)}" data-chore-status="${escapeHtml(entityId)}" data-person-id="${escapeHtml(person.id)}"` : "disabled"}>${pending ? "Saving…" : presentation.tone === "done" ? "Done" : presentation.tone === "waiting" ? "Waiting for a grown-up" : interactive ? "Mark as done" : presentation.label}</button>` : ""}
+          ${kidMode ? `<button type="button" class="chore-claim-action" ${interactive ? `data-chore-claim="${escapeHtml(claimEntity)}" data-chore-status="${escapeHtml(entityId)}" data-person-id="${escapeHtml(person.id)}"` : "disabled"}><span class="sr-only">${pending ? "Saving…" : presentation.tone === "done" ? "Done" : presentation.tone === "waiting" ? "Waiting for a grown-up" : interactive ? "Mark as done" : presentation.label}</span></button>` : ""}
         </li>
       `;
     }).join("");
@@ -4269,7 +4291,7 @@ export class FamilyHubCard extends HTMLElementBase {
     return `
       <article class="surface family-person ${kidMode ? "is-kid-mode" : ""}" style="--person-colour:${escapeHtml(person.colour)}">
         <div class="family-person-heading"><span>${escapeHtml(person.name.slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person.name)}</p><h2>${escapeHtml(presence)}</h2></div></div>
-        ${kidMode && choresEnabled && chore ? `<section class="kid-mission ${completedJobs === totalJobs && totalJobs ? "is-complete" : ""}"><span class="kid-mission-orbit"><ha-icon icon="${completedJobs === totalJobs && totalJobs ? "mdi:trophy" : "mdi:rocket-launch"}"></ha-icon></span><div><p>${completedJobs === totalJobs && totalJobs ? "Mission complete!" : "Today’s mission"}</p><strong>${completedJobs} of ${totalJobs} jobs finished</strong><i><b style="width:${missionProgress}%"></b></i></div><em>${missionProgress}%</em></section>` : ""}
+        ${kidMode && choresEnabled && chore ? `<section class="kid-mission ${completedJobs === totalJobs && totalJobs ? "is-complete" : ""}"><span class="kid-mission-orbit progress-ring" style="--progress:${missionProgress}" role="img" aria-label="${missionProgress}% of jobs complete"><span>${missionProgress}%</span></span><div><p>${completedJobs === totalJobs && totalJobs ? "Mission complete!" : "Today’s mission"}</p><strong>${completedJobs} of ${totalJobs} jobs finished</strong></div><ha-icon class="mission-symbol" icon="${completedJobs === totalJobs && totalJobs ? "mdi:trophy-outline" : "mdi:rocket-launch-outline"}" aria-hidden="true"></ha-icon></section>` : ""}
         ${factItems ? `<div class="family-facts">${factItems}</div>` : ""}
         ${choresEnabled && !chore ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps is not connected for this child.</p>' : choresEnabled && (!pointsAvailable || !choresSummaryAvailable) ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps data is currently unavailable.</p>' : ""}
         <div class="focus-task-workspace"><section class="focus-task-jobs">
@@ -4588,7 +4610,7 @@ export class FamilyHubCard extends HTMLElementBase {
       : "Awaiting first check";
     this._gameweek = gameweek;
     return `
-      <section class="football-experience">
+      <section class="football-experience ${this._footballTab === "fpl" ? "is-fpl" : ""}">
         <article class="football-favourites-stage ${hasLiveFavourite ? "is-live" : ""}">
           <div class="football-hero-heading"><div><p class="eyebrow">Premier League · Matchweek ${gameweek}</p><h2>${escapeHtml(this._favouriteTitle(favouriteModels))}</h2></div><span class="football-freshness is-${freshness.status}"><i></i><span><strong>${escapeHtml(freshness.title)}</strong><small>${escapeHtml(freshness.status === "live" ? `${freshness.detail} ${checkedLabel}.` : `${checkedLabel}.`)}</small></span></span></div>
           ${freshness.status === "live" ? "" : `<p class="football-health-note is-${freshness.status}" role="status">${escapeHtml(freshness.detail)}</p>`}
@@ -4749,6 +4771,7 @@ export class FamilyHubCard extends HTMLElementBase {
         type: this._config.media.card_type,
         size: "large",
         mode: "in-card",
+        height: "100%",
         entity_id: this._config.media.initial_player,
         media_players: mediaPlayers,
         options: {
