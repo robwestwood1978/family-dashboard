@@ -1215,4 +1215,54 @@ export const DAILY_BRIEF_STYLES = `
     .home-surface:has(.heating-experience) { grid-template-rows:48px minmax(0,1fr); gap:4px; }
     .home-surface:has(.heating-experience) .home-segments { padding:0; }
   }
+  /* Room targets use the same centred dial and side buttons as Master heating. */
+  .heating-card .heating-body { flex:1; justify-content:center; gap:6px; }
+  .heating-card .heating-stepper { position:relative; display:block; margin:0; }
+  .heating-card .thermostat-dial { width:112px; height:112px; min-height:112px; margin:0 auto; }
+  .heating-card .heating-stepper button { position:absolute; top:50%; transform:translateY(-50%); z-index:1; width:48px; height:48px; border-radius:50%; background:var(--daily-soft); color:var(--daily-text); }
+  .heating-card .heating-stepper button:first-child { left:0; }
+  .heating-card .heating-stepper button:last-child { right:0; }
+  @media (max-width:850px) {
+    .heating-card .thermostat-dial { width:125px; height:125px; min-height:125px; }
+  }
+  @media (max-width:620px) {
+    .heating-grid { grid-template-columns:1fr; }
+    .heating-card .thermostat-dial { width:145px; height:145px; min-height:145px; }
+  }
+
+  .heating-schedule.schedule-open-action { display:flex; align-items:center; justify-content:space-between; width:100%; min-height:48px; border:0; border-radius:12px; padding:8px 10px; background:var(--daily-surface); color:var(--daily-text); text-align:left; }
+  .schedule-open-action > span { display:grid; grid-template-columns:24px 1fr; align-items:center; gap:4px 8px; }
+  .schedule-open-action strong { font-size:14px; font-weight:600; }
+  .schedule-open-action small { display:none; }
+  .schedule-open-action ha-icon { color:var(--daily-accent); width:22px; height:22px; }
+  .heating-master .schedule-open-action { background:var(--daily-soft); margin-top:16px; }
+  .schedule-open-action:hover,.schedule-open-action:focus-visible { background:var(--daily-accent-soft); outline:2px solid var(--daily-accent); outline-offset:2px; }
+  .heating-schedule-modal { width:min(680px,calc(100% - 32px)); max-height:calc(100% - 32px); }
+  .heating-schedule-modal > header { background:var(--daily-surface); padding:22px 26px 18px; }
+  .heating-schedule-modal > header h2 { font-size:26px; margin:6px 48px 8px 0; }
+  .heating-schedule-modal > header p:last-child { line-height:1.5; margin:0 42px 0 0; }
+  .heating-schedule-modal .planner-modal-body { padding:18px 26px; }
+  .heating-schedule-modal .schedule-periods { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .heating-schedule-modal .schedule-period { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:0; padding:10px 16px 14px; border:1px solid var(--daily-line); border-radius:16px; background:var(--daily-soft); }
+  .heating-schedule-modal .schedule-period legend { display:flex; align-items:center; gap:8px; width:auto; padding:0 6px; font-size:15px; }
+  .heating-schedule-modal .schedule-period legend span { width:26px; height:26px; display:grid; place-items:center; border-radius:8px; background:var(--daily-accent-soft); color:var(--daily-accent); }
+  .heating-schedule-modal .schedule-period legend small { color:var(--daily-muted); }
+  .heating-schedule-modal .schedule-period label { display:grid; gap:5px; }
+  .heating-schedule-modal .schedule-period label > span:first-child { font-size:13px; font-weight:500; color:var(--daily-muted); }
+  .heating-schedule-modal .schedule-period input { width:100%; min-width:0; min-height:48px; padding:8px 12px; border:1px solid var(--daily-line); border-radius:10px; background:var(--daily-surface); color:var(--daily-text); font:inherit; }
+  .heating-schedule-modal .schedule-temp { display:flex; align-items:center; gap:8px; }
+  .heating-schedule-modal .schedule-temp b { font-weight:400; }
+  .heating-schedule-modal > footer { display:flex; justify-content:flex-end; gap:12px; padding:16px 26px; background:var(--daily-surface); }
+  .heating-schedule-modal > footer button { min-height:48px; border:0; padding:10px 20px; border-radius:12px; background:var(--daily-soft); color:var(--daily-text); }
+  .heating-schedule-modal > footer [data-heating-schedule-apply] { background:var(--daily-accent); color:white; }
+  .heating-schedule-modal .schedule-error { color:#a4342f; line-height:1.5; }
+  .heating-schedule-modal .schedule-editor { border:0; padding:0; margin:0; }
+  .heating-schedule-modal .schedule-temp { border:0; background:transparent; padding:0; }
+  @media (max-width:620px) {
+    .heating-schedule-modal .schedule-periods { grid-template-columns:1fr; }
+    .heating-schedule-modal > header,.heating-schedule-modal .planner-modal-body,.heating-schedule-modal > footer { padding:16px; }
+  }
+  .heating-card.is-off .heating-target-control { opacity:1; }
+  .heating-card.is-off .heating-stepper button { background:var(--daily-surface); }
+  .heating-card.is-off .thermostat-track { stroke:var(--daily-surface); }
 `;

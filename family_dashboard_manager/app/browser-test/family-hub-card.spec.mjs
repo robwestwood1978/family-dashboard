@@ -856,7 +856,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       }
       window.__reviewReady=true;
     </script>`;
-    await writeFile(runtimeOptions.reviewExportPath, reviewHtml.replace("</body>", () => bootstrap+"</body>"));
+    await writeFile(runtimeOptions.reviewExportPath, reviewHtml.replace("<head>", '<head><meta charset="utf-8">').replace("</body>", () => bootstrap+"</body>"));
   }
   return pageErrors;
 }
@@ -1628,64 +1628,61 @@ test("offers brightness controls for dimmable lights while keeping lamps binary"
   expect(pageErrors).toEqual([]);
 });
 
-test("keeps an expanded heating schedule and its draft open through live state refreshes", async ({ page }) => {
+test("opens heating schedules in a readable dialog, preserves drafts and saves only configured rooms", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
   await card.locator('.hub-nav-button[data-view="rooms"]').click();
   await card.locator('[data-home-section="heating"]').click();
-
-  const livingCard = card.locator('[data-climate-card="climate.living_room"]');
-  const schedule = livingCard.locator('details[data-heating-schedule="living_room"]');
-  await schedule.locator("summary").click();
-  await expect(schedule).toHaveAttribute("open", "");
-  await expect(livingCard).toHaveClass(/is-schedule-open/);
+  const dialControls = await card.locator('.heating-card .heating-stepper').evaluateAll((controls) => controls.map((control) => {
+    const dial = control.querySelector('.thermostat-dial').getBoundingClientRect();
+    const buttons = [...control.querySelectorAll('button')].map((button) => button.getBoundingClientRect());
+    return buttons.every((bounds) => bounds.width >= 48 && bounds.height >= 48 && Math.abs((bounds.top + bounds.bottom) / 2 - (dial.top + dial.bottom) / 2) <= 1)
+      && buttons[0].left < dial.left && buttons[1].right > dial.right;
+  }));
+  expect(dialControls.every(Boolean)).toBe(true);
+  const opener = card.locator('[data-heating-schedule-open="living_room"]');
+  await opener.click();
+  const schedule = card.locator('.heating-schedule-modal');
+  await expect(schedule).toHaveAttribute("role", "dialog");
   await expect(schedule.locator(".schedule-period")).toHaveCount(4);
-  await expect(schedule.locator(".schedule-period").first()).toContainText("Starts");
-  await expect(schedule.locator(".schedule-period").first()).toContainText("Temperature");
-  const legendLabels = await schedule.locator(".schedule-period legend").evaluateAll((legends) => legends.map((legend) => {
-    const name = legend.querySelector("strong").getBoundingClientRect();
-    const description = legend.querySelector("small").getBoundingClientRect();
-    return { nameBottom: name.bottom, descriptionTop: description.top, width: legend.getBoundingClientRect().width };
-  }));
-  expect(legendLabels.every(({ nameBottom, descriptionTop, width }) => descriptionTop >= nameBottom - 1 && width >= 120)).toBe(true);
-
-  const wakeTime = schedule.locator('[data-schedule-time="0"]');
-  await wakeTime.fill("06:30");
-  await updateEntityState(card, state("climate.kitchen", "heat", {
-    current_temperature: 19.3,
-    temperature: 20,
-    hvac_action: "idle"
-  }));
-  await expect(card.locator('[data-climate-card="climate.living_room"] details[data-heating-schedule="living_room"]')).toHaveAttribute("open", "");
-  await expect(card.locator('[data-climate-card="climate.living_room"] [data-schedule-time="0"]')).toHaveValue("06:30");
-
-  const masterSchedule = card.locator('details[data-heating-schedule="all"]');
-  await masterSchedule.locator("summary").click();
-  await expect(masterSchedule.locator(".schedule-period")).toHaveCount(4);
-  const masterLabels = await masterSchedule.locator(".schedule-period legend").evaluateAll((legends) => legends.map((legend) => {
-    const name = legend.querySelector("strong").getBoundingClientRect();
-    const description = legend.querySelector("small").getBoundingClientRect();
-    return { nameBottom: name.bottom, descriptionTop: description.top };
-  }));
-  expect(masterLabels.every(({ nameBottom, descriptionTop }) => descriptionTop >= nameBottom - 1)).toBe(true);
-  const masterControlAlignment = await card.locator(".heating-master").evaluate((master) => {
-    const target = master.querySelector(".master-temperature-stepper").getBoundingClientRect();
-    const setAll = master.querySelector('[data-climate-master="set_temperature"]').getBoundingClientRect();
-    const bounds = master.getBoundingClientRect();
-    return Math.max(target.right - bounds.right, setAll.right - bounds.right, bounds.left - target.left, bounds.left - setAll.left);
+  const insidePanel = await schedule.evaluate((panel) => {
+    const body = panel.querySelector('.planner-modal-body').getBoundingClientRect();
+    const outer = panel.getBoundingClientRect();
+    return [...panel.querySelectorAll('input')].every((input) => {
+      const bounds = input.getBoundingClientRect();
+      return bounds.top >= body.top && bounds.bottom <= body.bottom + 1 && bounds.left >= outer.left && bounds.right <= outer.right;
+    });
   });
-  expect(masterControlAlignment).toBeLessThanOrEqual(1);
-
-  const masterBounds = await card.locator(".heating-master").evaluate((master) => {
-    const outer = master.getBoundingClientRect();
-    const controls = [...master.querySelectorAll("button, input, summary")].map((control) => control.getBoundingClientRect());
-    return {
-      left: Math.min(...controls.map((bounds) => bounds.left)) - outer.left,
-      right: Math.max(...controls.map((bounds) => bounds.right)) - outer.right
-    };
-  });
-  expect(masterBounds.left).toBeGreaterThanOrEqual(-1);
-  expect(masterBounds.right).toBeLessThanOrEqual(1);
+  expect(insidePanel).toBe(true);
+  await schedule.locator('[data-schedule-time="0"]').fill("06:30");
+  await updateEntityState(card, state("climate.kitchen", "heat", { current_temperature:19.3, temperature:20, hvac_action:"idle" }));
+  await expect(schedule.locator('[data-schedule-time="0"]')).toHaveValue("06:30");
+  await expect(schedule.locator('[data-schedule-time="0"]')).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(schedule).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await opener.click();
+  await expect(schedule.locator('[data-schedule-time="0"]')).toHaveValue("06:30");
+  await schedule.locator('[data-schedule-temperature="0"]').fill("40");
+  await schedule.locator('[data-heating-schedule-apply]').click();
+  await expect(schedule.locator('[role="alert"]')).toBeVisible();
+  expect(await page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  await schedule.locator('[data-schedule-temperature="0"]').fill("20");
+  await schedule.locator('[data-heating-schedule-apply]').click();
+  await expect(schedule).toHaveCount(0);
+  const roomEntity = config.rooms.find((room) => room.id === "living_room").heating_schedule.entity_id;
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([{domain:"text",service:"set_value",data:{entity_id:roomEntity,value:expect.any(String)}}]);
+  await card.locator('[data-heating-schedule-open="all"]').click();
+  await expect(schedule.locator(".schedule-period")).toHaveCount(4);
+  await schedule.locator('[data-heating-schedule-apply]').click();
+  await expect(schedule).toHaveCount(0);
+  const calls = await page.evaluate(() => window.__serviceCalls);
+  expect(calls.slice(1).map((call) => call.data.entity_id).sort()).toEqual(config.rooms.filter((room) => room.climate && room.heating_schedule).map((room) => room.heating_schedule.entity_id).sort());
+  await card.evaluate((element) => { element._config.display.read_only = true; element._render(); });
+  await opener.click();
+  await expect(schedule.locator('[data-heating-schedule-apply]')).toBeDisabled();
+  await schedule.locator('[data-heating-schedule-apply]').evaluate((button) => { button.disabled=false; button.click(); });
+  expect(await page.evaluate(() => window.__serviceCalls)).toHaveLength(calls.length);
   await expectNoRootOverflow(page);
   expect(pageErrors).toEqual([]);
 });

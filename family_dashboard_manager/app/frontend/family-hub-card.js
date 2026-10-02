@@ -2023,7 +2023,6 @@ export class FamilyHubCard extends HTMLElementBase {
     this._footballTab = "fixtures";
     this._fplEntryId = null;
     this._masterTemperature = 20;
-    this._expandedHeatingSchedules = new Set();
     this._heatingScheduleDrafts = new Map();
     this._gameweek = null;
     this._entityIds = new Set();
@@ -2057,7 +2056,6 @@ export class FamilyHubCard extends HTMLElementBase {
     this._boundClick = (event) => this._handleClick(event);
     this._boundChange = (event) => this._handleChange(event);
     this._boundInput = (event) => this._handleInput(event);
-    this._boundToggle = (event) => this._handleToggle(event);
     this._boundKeydown = (event) => this._handleKeydown(event);
     this._boundPointerActivity = () => this._handlePhotoFrameActivity();
     this._boundVisibilityChange = () => {
@@ -2094,7 +2092,6 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.addEventListener("click", this._boundClick);
     this.shadowRoot.addEventListener("change", this._boundChange);
     this.shadowRoot.addEventListener("input", this._boundInput);
-    this.shadowRoot.addEventListener("toggle", this._boundToggle, true);
     this.shadowRoot.addEventListener("keydown", this._boundKeydown);
     this.shadowRoot.addEventListener("pointerdown", this._boundPointerActivity, { passive: true });
     globalThis.document?.addEventListener?.("visibilitychange", this._boundVisibilityChange);
@@ -2117,7 +2114,6 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.removeEventListener("click", this._boundClick);
     this.shadowRoot.removeEventListener("change", this._boundChange);
     this.shadowRoot.removeEventListener("input", this._boundInput);
-    this.shadowRoot.removeEventListener("toggle", this._boundToggle, true);
     this.shadowRoot.removeEventListener("keydown", this._boundKeydown);
     this.shadowRoot.removeEventListener("pointerdown", this._boundPointerActivity);
     globalThis.document?.removeEventListener?.("visibilitychange", this._boundVisibilityChange);
@@ -2151,8 +2147,6 @@ export class FamilyHubCard extends HTMLElementBase {
       ? this._cameraConfigGeneration + 1
       : 1;
     this._config = config;
-    this._expandedHeatingSchedules ||= new Set();
-    this._expandedHeatingSchedules.clear();
     this._heatingScheduleDrafts ||= new Map();
     this._heatingScheduleDrafts.clear();
     this._clearPhotoFrameTimers();
@@ -2703,6 +2697,9 @@ export class FamilyHubCard extends HTMLElementBase {
   _render() {
     if (!this._config || !this.shadowRoot) return;
     const renderFocus = this._captureRenderFocus();
+    const scheduleFocus = this._plannerModal?.type === "heating" ? this.shadowRoot.activeElement?.dataset : null;
+    const scheduleFocusSelector = scheduleFocus?.scheduleTime !== undefined ? `[data-schedule-time="${scheduleFocus.scheduleTime}"]`
+      : scheduleFocus?.scheduleTemperature !== undefined ? `[data-schedule-temperature="${scheduleFocus.scheduleTemperature}"]` : null;
     const embeddedRenderState = this._captureEmbeddedRenderState();
     const confirmationFocusAction = this._pendingConfirmation
       ? this.shadowRoot.activeElement?.dataset?.confirmAction || "cancel"
@@ -2754,9 +2751,13 @@ export class FamilyHubCard extends HTMLElementBase {
     if (this._plannerModal) {
       const modal = this.shadowRoot.querySelector(".planner-modal");
       if (modal && !modal.contains(this.shadowRoot.activeElement)) {
-        (modal.querySelector('[data-planner-field="summary"]') || modal.querySelector("button:not([disabled])"))?.focus();
+        (scheduleFocusSelector && modal.querySelector(scheduleFocusSelector) || modal.querySelector('[data-planner-field="summary"]') || modal.querySelector("button:not([disabled])"))?.focus();
       }
     } else if (!confirmationFocusHandled) this._restoreRenderFocus(renderFocus);
+    if (this._heatingScheduleReturnScope) {
+      [...this.shadowRoot.querySelectorAll("[data-heating-schedule-open]")].find((button) => button.dataset.heatingScheduleOpen === this._heatingScheduleReturnScope)?.focus();
+      this._heatingScheduleReturnScope = null;
+    }
     this._restoreEmbeddedRenderState(embeddedRenderState);
     this._syncViewportHeight();
   }
@@ -3479,8 +3480,6 @@ export class FamilyHubCard extends HTMLElementBase {
     const states = this._hass?.states || {};
     const readOnly = this._config.display.read_only === true;
     const heatingRooms = this._config.rooms.filter((room) => room.climate);
-    const schedulableRooms = heatingRooms.filter((room) => room.heating_schedule?.entity_id);
-    const masterSchedule = schedulableRooms.map((room) => decodeHeatingSchedule(states[room.heating_schedule.entity_id]?.state)?.periods).find(Boolean) || DEFAULT_HEATING_SCHEDULE;
     const zones = heatingRooms.map((room) => {
       const state = states[room.climate];
       const current = roomTemperature(room, states);
@@ -3508,39 +3507,36 @@ export class FamilyHubCard extends HTMLElementBase {
           ? `Next ${formatTemperature(nextPeriod.temperature)} at ${nextPeriod.time}${nextPeriod.tomorrow ? " tomorrow" : ""}`
           : "Schedule waiting for thermostat"
         : "No schedule entity configured";
-      const scheduleOpen = this._expandedHeatingSchedules.has(room.id);
-      const schedulePeriods = this._heatingScheduleDrafts.get(room.id) || decodedSchedule?.periods || DEFAULT_HEATING_SCHEDULE;
       return `
-        <article class="surface heating-card is-${escapeHtml(presentation.tone)} ${presentation.available ? presentation.isOn ? "is-on" : "is-off" : "is-state-unavailable"} ${scheduleOpen ? "is-schedule-open" : ""}" data-climate-card="${escapeHtml(room.climate)}">
+        <article class="surface heating-card is-${escapeHtml(presentation.tone)} ${presentation.available ? presentation.isOn ? "is-on" : "is-off" : "is-state-unavailable"}" data-climate-card="${escapeHtml(room.climate)}">
           <div class="heating-card-heading">
             <span class="heating-icon"><ha-icon icon="${ICONS.climate}"></ha-icon></span>
             <div><h3>${escapeHtml(room.name)}</h3><p class="heating-status"><span aria-hidden="true"></span>${escapeHtml(presentation.label)}</p></div>
             <button type="button" class="heating-power ${presentation.isOn ? "is-on" : ""}" data-climate-power="${powerService}" data-entity="${escapeHtml(room.climate)}" aria-label="${escapeHtml(powerLabelText)}"${powerPressed}${powerDisabled}><ha-icon icon="mdi:power"></ha-icon><span>${powerLabel}</span></button>
           </div>
           <div class="heating-body">
-            <div class="thermostat-dial" style="--temperature-progress:${Number.isFinite(target) ? Math.max(0, Math.min(100, (target - 5) / 30 * 100)) : 0}" role="img" aria-label="${escapeHtml(room.name)} target ${targetLabel}, current ${formatTemperature(current)}">
-              <svg viewBox="0 0 180 180" aria-hidden="true"><circle class="thermostat-track" cx="90" cy="90" r="84"/><circle class="thermostat-value" cx="90" cy="90" r="84" pathLength="100" stroke-dasharray="${Number.isFinite(target) ? Math.max(0, Math.min(100, (target - 5) / 30 * 75)) : 0} 100"/></svg>
-              <div><small>Target</small><output class="heating-target-value">${targetLabel}</output></div></div><p class="heating-inside">Inside <strong class="heating-current-value">${formatTemperature(current)}</strong></p>
             <div class="heating-target-control" role="group" aria-label="${escapeHtml(room.name)} target temperature, currently ${targetLabel}"><div class="heating-stepper">
               <button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower ${escapeHtml(room.name)} target from ${targetLabel}"${targetDisabled}>−</button>
-              <span>${escapeHtml(presentation.label)}</span>
+              <div class="thermostat-dial" style="--temperature-progress:${Number.isFinite(target) ? Math.max(0, Math.min(100, (target - 5) / 30 * 100)) : 0}" role="img" aria-label="${escapeHtml(room.name)} target ${targetLabel}, current ${formatTemperature(current)}">
+                <svg viewBox="0 0 180 180" aria-hidden="true"><circle class="thermostat-track" cx="90" cy="90" r="84"/><circle class="thermostat-value" cx="90" cy="90" r="84" pathLength="100" stroke-dasharray="${Number.isFinite(target) ? Math.max(0, Math.min(100, (target - 5) / 30 * 75)) : 0} 100"/></svg>
+                <div><small>Target</small><output class="heating-target-value">${targetLabel}</output></div>
+              </div>
               <button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Raise ${escapeHtml(room.name)} target from ${targetLabel}"${targetDisabled}>+</button>
             </div></div>
+            <p class="heating-inside">Inside <strong class="heating-current-value">${formatTemperature(current)}</strong></p>
           </div>
-          <details class="heating-schedule" data-heating-schedule="${escapeHtml(room.id)}"${scheduleOpen ? " open" : ""}><summary><span><ha-icon icon="mdi:calendar-clock"></ha-icon><strong>Daily schedule</strong><small>${escapeHtml(scheduleSummary)}</small></span><ha-icon class="schedule-chevron" icon="mdi:chevron-down"></ha-icon></summary>${room.heating_schedule ? this._renderHeatingScheduleEditor(schedulePeriods, room.id, readOnly) : '<p class="hub-empty-state compact">Add this thermostat’s schedule entities in Admin to edit it here.</p>'}</details>
+          <button type="button" class="heating-schedule schedule-open-action" data-heating-schedule-open="${escapeHtml(room.id)}"><span><ha-icon icon="mdi:calendar-clock"></ha-icon><strong>Daily schedule</strong><small>${escapeHtml(scheduleSummary)}</small></span><ha-icon class="schedule-chevron" icon="mdi:chevron-right"></ha-icon></button>
         </article>
       `;
     }).join("");
     const availableZones = heatingRooms.filter((room) => isEntityAvailable(states[room.climate])).length;
-    const masterOpen = this._expandedHeatingSchedules.has("all");
-    const masterPeriods = this._heatingScheduleDrafts.get("all") || masterSchedule;
-    return `<section class="heating-experience"><article class="surface heating-master ${masterOpen ? "is-schedule-open" : ""}"><div class="heating-master-copy"><p class="eyebrow">Whole house</p><h2>Master heating</h2><span>${availableZones} of ${heatingRooms.length} zones available</span></div><div class="heating-master-target"><span>All-room target</span><div class="master-dial"><svg viewBox="0 0 180 180" aria-hidden="true"><circle class="thermostat-track" cx="90" cy="90" r="84"/><circle class="thermostat-value" cx="90" cy="90" r="84" pathLength="100" stroke-dasharray="${Math.max(0, Math.min(75, (this._masterTemperature - 5) / 30 * 75))} 100"/></svg><div class="master-temperature-stepper"><button type="button" data-master-temperature-adjust="-0.5" aria-label="Lower all-room target" ${readOnly ? "disabled" : ""}>−</button><label><span class="sr-only">All-room target temperature</span><input type="number" min="5" max="35" step="0.5" value="${this._masterTemperature}" data-master-temperature ${readOnly ? "disabled" : ""}><b>°</b></label><button type="button" data-master-temperature-adjust="0.5" aria-label="Raise all-room target" ${readOnly ? "disabled" : ""}>+</button></div></div></div><div class="heating-master-actions"><button type="button" data-climate-master="set_temperature" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:thermometer-check"></ha-icon><span>Set all rooms</span></button><button type="button" data-climate-master="turn_on" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:radiator"></ha-icon><span>All on</span></button><button type="button" data-climate-master="turn_off" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:power"></ha-icon><span>All off</span></button></div><details class="heating-schedule master-schedule" data-heating-schedule="all"${masterOpen ? " open" : ""}><summary><span><ha-icon icon="mdi:calendar-sync"></ha-icon><strong>Whole-house schedule</strong><small>Use the same four periods in every configured room</small></span><ha-icon class="schedule-chevron" icon="mdi:chevron-down"></ha-icon></summary>${this._renderHeatingScheduleEditor(masterPeriods, "all", readOnly || schedulableRooms.length === 0)}</details></article><div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="hub-empty-state">No heating controls are available yet.</p>'}</div></section>`;
+    return `<section class="heating-experience"><article class="surface heating-master"><div class="heating-master-copy"><p class="eyebrow">Whole house</p><h2>Master heating</h2><span>${availableZones} of ${heatingRooms.length} zones available</span></div><div class="heating-master-target"><span>All-room target</span><div class="master-dial"><svg viewBox="0 0 180 180" aria-hidden="true"><circle class="thermostat-track" cx="90" cy="90" r="84"/><circle class="thermostat-value" cx="90" cy="90" r="84" pathLength="100" stroke-dasharray="${Math.max(0, Math.min(75, (this._masterTemperature - 5) / 30 * 75))} 100"/></svg><div class="master-temperature-stepper"><button type="button" data-master-temperature-adjust="-0.5" aria-label="Lower all-room target" ${readOnly ? "disabled" : ""}>−</button><label><span class="sr-only">All-room target temperature</span><input type="number" min="5" max="35" step="0.5" value="${this._masterTemperature}" data-master-temperature ${readOnly ? "disabled" : ""}><b>°</b></label><button type="button" data-master-temperature-adjust="0.5" aria-label="Raise all-room target" ${readOnly ? "disabled" : ""}>+</button></div></div></div><div class="heating-master-actions"><button type="button" data-climate-master="set_temperature" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:thermometer-check"></ha-icon><span>Set all rooms</span></button><button type="button" data-climate-master="turn_on" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:radiator"></ha-icon><span>All on</span></button><button type="button" data-climate-master="turn_off" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:power"></ha-icon><span>All off</span></button></div><button type="button" class="heating-schedule master-schedule schedule-open-action" data-heating-schedule-open="all"><span><ha-icon icon="mdi:calendar-sync"></ha-icon><strong>Whole-house schedule</strong><small>Use the same four periods in every configured room</small></span><ha-icon class="schedule-chevron" icon="mdi:chevron-right"></ha-icon></button></article><div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="hub-empty-state">No heating controls are available yet.</p>'}</div></section>`;
   }
 
-  _renderHeatingScheduleEditor(periods, scope, disabled = false) {
+  _renderHeatingScheduleEditor(periods, scope, disabled = false, showSave = true) {
     const names = ["Wake", "Away", "Home", "Sleep"];
     const descriptions = ["Morning", "Daytime", "Evening", "Overnight"];
-    return `<div class="schedule-editor" data-schedule-editor="${escapeHtml(scope)}"><div class="schedule-periods">${periods.map((period, index) => `<fieldset class="schedule-period"><legend><span>${index + 1}</span><strong>${names[index]}</strong><small>${descriptions[index]}</small></legend><label><span>Starts</span><input type="time" value="${escapeHtml(period.time)}" data-schedule-time="${index}" ${disabled ? "disabled" : ""}></label><label><span>Temperature</span><span class="schedule-temp"><input type="number" min="5" max="35" step="0.5" value="${Number(period.temperature)}" data-schedule-temperature="${index}" ${disabled ? "disabled" : ""}><b>°C</b></span></label></fieldset>`).join("")}</div><button type="button" data-heating-schedule-apply="${escapeHtml(scope)}" ${disabled ? "disabled" : ""}><ha-icon icon="mdi:content-save-outline"></ha-icon>${scope === "all" ? "Apply schedule to all rooms" : "Save schedule"}</button></div>`;
+    return `<div class="schedule-editor" data-schedule-editor="${escapeHtml(scope)}"><div class="schedule-periods">${periods.map((period, index) => `<fieldset class="schedule-period"><legend><span>${index + 1}</span><strong>${names[index]}</strong><small>${descriptions[index]}</small></legend><label><span>Starts</span><input type="time" value="${escapeHtml(period.time)}" data-schedule-time="${index}" ${disabled ? "disabled" : ""}></label><label><span>Temperature</span><span class="schedule-temp"><input type="number" min="5" max="35" step="0.5" value="${Number(period.temperature)}" data-schedule-temperature="${index}" ${disabled ? "disabled" : ""}><b>°C</b></span></label></fieldset>`).join("")}</div>${showSave ? `<button type="button" data-heating-schedule-apply="${escapeHtml(scope)}" ${disabled ? "disabled" : ""}><ha-icon icon="mdi:content-save-outline"></ha-icon>${scope === "all" ? "Apply schedule to all rooms" : "Save schedule"}</button>` : ""}</div>`;
   }
 
   _renderAllCovers() {
@@ -4049,8 +4045,71 @@ export class FamilyHubCard extends HTMLElementBase {
     `;
   }
 
+  _openHeatingSchedule(scope) {
+    if (!this._config.features.rooms || (scope !== "all" && !this._config.rooms.some((room) => room.id === scope && room.climate))) return;
+    this._plannerModal = { type: "heating", scope, error: "", saving: false };
+    this._scheduleRender(true);
+  }
+
+  _closeHeatingSchedule() {
+    this._heatingScheduleReturnScope = this._plannerModal.scope;
+    this._plannerModal = null;
+    this._scheduleRender(true);
+  }
+
+  _renderHeatingScheduleModal() {
+    const { scope, error, saving } = this._plannerModal;
+    const rooms = this._config.rooms.filter((room) => room.climate && (scope === "all" || room.id === scope));
+    const configured = rooms.filter((room) => this._controlPolicy.scheduleTexts.has(room.heating_schedule?.entity_id));
+    const saved = configured.map((room) => decodeHeatingSchedule(this._hass?.states?.[room.heating_schedule.entity_id]?.state)?.periods).find(Boolean);
+    const periods = this._heatingScheduleDrafts.get(scope) || saved || DEFAULT_HEATING_SCHEDULE;
+    const disabled = this._config.display.read_only === true || saving;
+    const title = scope === "all" ? "Whole-house schedule" : `${rooms[0]?.name || "Room"} schedule`;
+    return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal heating-schedule-modal" role="dialog" aria-modal="true" aria-labelledby="heating-schedule-title">
+      <header><button type="button" class="planner-modal-close" data-planner-close aria-label="Close schedule"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">Heating · daily schedule</p><h2 id="heating-schedule-title">${escapeHtml(title)}</h2><p>${scope === "all" ? `Apply these four periods to ${configured.length} configured ${configured.length === 1 ? "room" : "rooms"}.` : "Choose when each period starts and the temperature you want."}</p></header>
+      <div class="planner-modal-body">${configured.length ? this._renderHeatingScheduleEditor(periods, scope, disabled, false) : '<p class="planner-no-prep">No schedule entity is configured for this thermostat yet.</p>'}${error ? `<p class="schedule-error" role="alert">${escapeHtml(error)}</p>` : ""}</div>
+      <footer><button type="button" data-planner-close>Close</button>${configured.length ? `<button type="button" data-heating-schedule-apply="${escapeHtml(scope)}" ${disabled ? "disabled" : ""}>${saving ? "Saving…" : scope === "all" ? "Apply to all rooms" : "Save schedule"}</button>` : ""}</footer>
+    </section></div>`;
+  }
+
+  async _saveHeatingSchedule(scope) {
+    const modal = this._plannerModal;
+    if (modal?.type !== "heating" || modal.scope !== scope || modal.saving || this._config.display.read_only === true || !this._config.features.rooms) return;
+    const editor = this.shadowRoot.querySelector('.heating-schedule-modal [data-schedule-editor]');
+    const periods = [0, 1, 2, 3].map((stage) => ({ stage,
+      time: editor?.querySelector(`[data-schedule-time="${stage}"]`)?.value,
+      temperature: Number(editor?.querySelector(`[data-schedule-temperature="${stage}"]`)?.value)
+    }));
+    const ordered = periods.every((period, index) => Number.isFinite(period.temperature) && (!index || period.time > periods[index - 1].time));
+    const encoded = ordered ? encodeHeatingSchedule(periods) : null;
+    const targets = this._config.rooms.filter((room) => room.climate && (scope === "all" || room.id === scope))
+      .map((room) => room.heating_schedule?.entity_id).filter((entityId) => this._controlPolicy.scheduleTexts.has(entityId));
+    if (!encoded || !targets.length) {
+      modal.error = "Enter four valid start times in order and temperatures between 5°C and 35°C.";
+      this._scheduleRender(true);
+      return;
+    }
+    this._heatingScheduleDrafts.set(scope, periods);
+    modal.saving = true;
+    modal.error = "";
+    this._scheduleRender(true);
+    try {
+      if (!this._hass?.callService) throw new Error("Service unavailable");
+      await Promise.all(targets.map((entity_id) => this._hass.callService("text", "set_value", { entity_id, value: encoded })));
+      if (this._heatingScheduleDrafts.get(scope) === periods) this._heatingScheduleDrafts.delete(scope);
+      if (this._plannerModal === modal) this._closeHeatingSchedule();
+    } catch {
+      if (this._plannerModal === modal) {
+        modal.saving = false;
+        modal.error = "The schedule could not be saved. Please try again.";
+        this._scheduleRender(true);
+      }
+    }
+  }
+
   _renderPlannerModal() {
     if (!this._plannerModal) return "";
+    if (this._plannerModal.type === "heating") return this._renderHeatingScheduleModal();
     if (this._plannerModal.type === "add") return this._renderPlannerAddModal();
     const event = this._plannerEventByKey(this._plannerModal.eventKey);
     if (!event) return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal" role="dialog" aria-modal="true" aria-labelledby="planner-event-missing-title">
@@ -5143,8 +5202,8 @@ export class FamilyHubCard extends HTMLElementBase {
     if (this._plannerModal) {
       if (event.key === "Escape") {
         event.preventDefault();
-        this._plannerModal = null;
-        this._scheduleRender(true);
+        if (this._plannerModal.type === "heating") this._closeHeatingSchedule();
+        else { this._plannerModal = null; this._scheduleRender(true); }
         return;
       }
       if (event.key === "Tab") {
@@ -5273,26 +5332,6 @@ export class FamilyHubCard extends HTMLElementBase {
       temperature: Number(editor.querySelector(`[data-schedule-temperature="${stage}"]`)?.value)
     }));
     this._heatingScheduleDrafts.set(scope, periods);
-  }
-
-  _handleToggle(event) {
-    const details = event.target?.closest?.("details[data-heating-schedule]");
-    if (!details?.isConnected) return;
-    const scope = details.dataset.heatingSchedule;
-    const wasOpen = this._expandedHeatingSchedules.has(scope);
-    if (details.open) {
-      if (scope !== "all") {
-        for (const current of this._expandedHeatingSchedules) {
-          if (current !== "all" && current !== scope) this._expandedHeatingSchedules.delete(current);
-        }
-      }
-      this._expandedHeatingSchedules.add(scope);
-    } else {
-      this._expandedHeatingSchedules.delete(scope);
-    }
-    const changed = wasOpen !== details.open
-      || (details.open && scope !== "all" && [...this._expandedHeatingSchedules].filter((current) => current !== "all").length > 1);
-    if (changed) this._scheduleRender(true);
   }
 
   async _callPlannerAction(domain, service, entityId, data = {}) {
@@ -5455,6 +5494,11 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     this._armPhotoFrameIdleTimer();
+    if (this._plannerModal?.type === "heating") {
+      if (target.dataset.plannerClose !== undefined) this._closeHeatingSchedule();
+      else if (target.dataset.heatingScheduleApply) void this._saveHeatingSchedule(target.dataset.heatingScheduleApply);
+      return;
+    }
     if (this._plannerModal) {
       if (target.dataset.plannerClose !== undefined) {
         this._plannerModal = null;
@@ -5485,6 +5529,10 @@ export class FamilyHubCard extends HTMLElementBase {
     // Navigation remains local; checklist writes use the existing bounded
     // to-do action path shared with the event editor.
     if (this._pendingConfirmation && !target.dataset.confirmAction) return;
+    if (target.dataset.heatingScheduleOpen) {
+      this._openHeatingSchedule(target.dataset.heatingScheduleOpen);
+      return;
+    }
     if (target.dataset.focusHomeRoom) {
       if (!this._config.features.rooms || !this._config.rooms.some((room) => room.id === target.dataset.focusHomeRoom)) return;
       if (this._view === "entry") this._closeActiveCamera({ render: false, invalidate: true });
@@ -5778,22 +5826,6 @@ export class FamilyHubCard extends HTMLElementBase {
       } else if (CLIMATE_POWER_SERVICES.has(service) && entityIds.length) {
         this._hass?.callService?.("climate", service, { entity_id: entityIds });
       }
-      return;
-    }
-    if (target.dataset.heatingScheduleApply) {
-      const scope = target.dataset.heatingScheduleApply;
-      const editor = target.closest("[data-schedule-editor]");
-      const periods = [0, 1, 2, 3].map((stage) => ({
-        stage,
-        time: editor?.querySelector(`[data-schedule-time="${stage}"]`)?.value,
-        temperature: Number(editor?.querySelector(`[data-schedule-temperature="${stage}"]`)?.value)
-      }));
-      const encoded = encodeHeatingSchedule(periods);
-      if (!encoded) return;
-      const targets = this._config.rooms.filter((room) => scope === "all" || room.id === scope)
-        .map((room) => room.heating_schedule?.entity_id)
-        .filter((entityId) => entityId && this._controlPolicy.scheduleTexts.has(entityId));
-      for (const entityId of targets) this._hass?.callService?.("text", "set_value", { entity_id: entityId, value: encoded });
       return;
     }
     if (target.dataset.cleaningCommand) {
