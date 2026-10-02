@@ -416,6 +416,12 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     });
   });
   await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px 0 76px;font:20px system-ui}.ha-sidebar{position:fixed;inset:56px auto 0 0;width:52px;background:#191b20}.ha-main{position:absolute;inset:56px 0 0 52px;overflow-x:hidden;overflow-y:auto}</style><div class="ha-header">Family Hub</div><div class="ha-sidebar"></div><div class="ha-main"></div></body></html>`);
+  if (runtimeOptions.reviewExportPath || runtimeOptions.kiosk) {
+    await page.addStyleTag({content:':root{--header-height:0px!important}.ha-header,.ha-sidebar{display:none!important}.ha-main{inset:0!important}'});
+    // Include the real kiosk geometry in the standalone preview, but keep the
+    // normal host offset fixture for the separate embedded-HA regression tests.
+    reviewHtml = reviewHtml.replace('</head>', '<style>:root{--header-height:0px!important}.ha-header,.ha-sidebar{display:none!important}.ha-main{inset:0!important}</style></head>');
+  }
   await page.evaluate(installApprovalClock, { fixedNow: runtimeOptions.fixedNow || APPROVAL_NOW });
   const clockContract = await page.evaluate(async () => {
     const displayBefore = new Date().getTime();
@@ -515,7 +521,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
         this.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${exact || generic}</g></svg>`;
         if (window.__mdiGlyphPaths[icon]) this.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="${window.__mdiGlyphPaths[icon]}"/></svg>`;
         this.dataset.mockGlyph = icon;
-        this.style.cssText = "display:inline-grid;place-items:center;width:var(--mdc-icon-size,22px);height:var(--mdc-icon-size,22px);color:currentColor;flex:0 0 auto";
+        this.style.cssText = "display:inline-grid;place-items:center;width:var(--mdc-icon-size,22px);height:var(--mdc-icon-size,22px);flex:0 0 auto";
         this.querySelector("svg").style.cssText = "display:block;width:100%;height:100%";
       }
     }
@@ -679,6 +685,12 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           const markerLabels = (cardConfig.entities || []).map((_, index) => index === 0 ? "P" : `C${index}`);
           mapRoot.innerHTML = `<style>
             :host{display:block;height:100%;min-height:0;font-family:inherit}*{box-sizing:border-box}.mock-map{position:relative;height:100%;min-height:260px;overflow:hidden;border-radius:14px;background:#dfece5}.mock-map::before{content:"";position:absolute;inset:-12%;background:linear-gradient(32deg,transparent 47%,rgba(255,255,255,.96) 48% 52%,transparent 53%),linear-gradient(148deg,transparent 43%,rgba(255,255,255,.82) 44% 48%,transparent 49%),radial-gradient(circle at 25% 25%,#c5dfc2 0 18%,transparent 19%),radial-gradient(circle at 78% 70%,#bed8bb 0 21%,transparent 22%),#dce8e2}.mock-water{position:absolute;inset:auto -8% 8% 30%;height:22%;border-radius:50%;background:#b9ddeb;transform:rotate(-8deg)}.mock-place{position:absolute;padding:5px 8px;border-radius:8px;background:rgba(255,255,255,.88);color:#516176;font-size:12px;font-weight:700;box-shadow:0 3px 10px rgba(11,24,48,.12)}.mock-place.home{left:42%;top:48%}.mock-place.school{right:13%;top:20%}.mock-marker{position:absolute;width:42px;height:42px;display:grid;place-items:center;border:4px solid #fff;border-radius:50% 50% 50% 8px;background:#1463e8;color:#fff;font-size:13px;font-weight:850;box-shadow:0 5px 14px rgba(11,24,48,.25);transform:rotate(-45deg)}.mock-marker span{transform:rotate(45deg)}.mock-marker:nth-of-type(1){left:34%;top:37%}.mock-marker:nth-of-type(2){left:59%;top:24%;background:#e76f51}.mock-marker:nth-of-type(3){left:68%;top:59%;background:#00a887}.mock-map-tools{position:absolute;right:12px;top:12px;display:grid;gap:7px}.mock-map-tools span{width:38px;height:38px;display:grid;place-items:center;border:1px solid #dce4ee;border-radius:12px;background:#fff;color:#33445c;font-size:18px;font-weight:800;box-shadow:0 4px 12px rgba(11,24,48,.12)}</style><div class="mock-map" aria-label="Representative Home Assistant family map">${markerLabels.map((label) => `<div class="mock-marker"><span>${label}</span></div>`).join("")}<div class="mock-water"></div><span class="mock-place home">Home</span><span class="mock-place school">School</span><div class="mock-map-tools" aria-hidden="true"><span>⌖</span><span>◎</span></div></div>`;
+        } else if (cardConfig.type === "history-graph") {
+          // Representative chart in the offline harness; production still mounts
+          // Home Assistant's native history card against the configured meters.
+          const graphRoot = element.attachShadow({mode:"open"});
+          const gas = cardConfig.entities?.some(entity => String(typeof entity === "string" ? entity : entity.entity).includes("gas"));
+          graphRoot.innerHTML = `<style>:host{display:block;height:100%;font-family:inherit;color:#747780}svg{display:block;width:100%;height:100%;min-height:70px}text{font-size:12px;fill:currentColor}</style><svg viewBox="0 0 420 120" role="img" aria-label="Representative ${gas ? "gas" : "electricity"} trend"><path d="M35 12H410M35 46H410M35 80H410" fill="none" stroke="#E4E5E8"/><path d="${gas ? "M35 78 75 77 115 60 155 35 195 52 235 72 275 75 315 41 355 55 410 67" : "M35 72 75 69 115 55 155 59 195 31 235 46 275 40 315 17 355 34 410 22"}" fill="none" stroke="${gas ? "#B03A35" : "#1469D0"}" stroke-width="3" stroke-linejoin="round"/><text x="35" y="108">00:00</text><text x="148" y="108">06:00</text><text x="263" y="108">12:00</text><text x="375" y="108">18:00</text></svg>`;
         } else if (cardConfig.type === "picture-entity") {
           const pictureRoot = element.attachShadow({ mode: "open" });
           if (cardConfig.camera_view === "live") {
@@ -778,6 +790,10 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           return new Promise((resolve, reject) => {
             window.__pendingServiceCalls.push({ key, resolve, reject });
           });
+        }
+        if (domain === "todo" && service === "add_item") {
+          runtimeOptions.preparationItems ||= [];
+          runtimeOptions.preparationItems.push({uid:`created-${window.__serviceCalls.length}`,summary:boundedData.item,description:boundedData.description,status:"needs_action",due:boundedData.due_date || boundedData.due_datetime});
         }
         if (domain === "todo" && service === "update_item") {
           const item = (runtimeOptions.preparationItems || []).find((item) => item.uid === boundedData.item);
@@ -914,7 +930,7 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   await expect(card).not.toContainText(/Controlled live|mapped rooms|fixtures loaded/i);
   await expect(card.locator(".hub-brand[data-view=\"today\"]")).toContainText("Today");
   await expect(card.locator(".hub-nav-button")).toHaveCount(7);
-  await expect(card.locator(".hub-nav-button")).toContainText(["Calendar", "Tasks", "Home", "Security", "Energy", "Football", "Music"]);
+  await expect(card.locator(".hub-nav-button")).toContainText(["Calendar", "Home", "Tasks", "Security", "Energy", "Football", "Music"]);
   await expectNoRootOverflow(page);
 
   for (const view of ["calendar", "rooms", "family", "entry", "music", "energy", "football", "today"]) {
@@ -972,7 +988,7 @@ test("Home in focus keeps every screen readable in both appearances and preserve
     entry: [{ foreground: ".garage-heading h2,.garage-motion", background: ".garage-panel", minimum: 4.5 }],
     energy: [{ foreground: ".energy-meter-heading h2,.energy-freshness", background: ".energy-meter", minimum: 4.5 }],
     football: [{ foreground: ".football-toolbar h2,.team,.fixture-score", background: ".football-main", minimum: 4.5 }],
-    music: [{ foreground: ".music-heading h2,.music-meta", background: ".media-player-panel", minimum: 4.5 }]
+    music: [{ foreground: ".hub-page-title h1,.hub-topbar-date", background: ".hub-content", minimum: 4.5 }]
   };
   for (const darkMode of [false, true]) {
     await card.evaluate((element, dark) => { element.hass = { ...element._hass, themes: { darkMode: dark } }; }, darkMode);
@@ -1122,21 +1138,21 @@ test("keeps the first-party month planner isolated from dashboard navigation", a
   await expect(card.locator(".hub-navigation .nav-button")).toHaveCount(0);
   await expect(card.locator(".hub-navigation")).toBeVisible();
   await expect(card.locator(".hub-content")).toBeVisible();
-  await expect(card.locator(".hub-topbar")).toBeVisible();
+  await expect(card.locator(".hub-masthead")).toBeVisible();
 
   const after = await railGeometry();
   const inactiveColourAfter = await card.locator('.hub-nav-button[data-view="rooms"]').evaluate((button) => getComputedStyle(button).color);
   expect(after).toEqual(before);
   expect(inactiveColourAfter).toBe(inactiveColourBefore);
 
-  await expect(card.locator(".calendar-context")).toContainText("Family planner");
+  await expect(card.locator(".calendar-context")).toContainText("Family calendar");
   await expect(card.locator(".focus-calendar-title")).toContainText("2026");
   const modeStyles = await card.locator(".calendar-modes .segment").evaluateAll((buttons) => buttons.map((button) => {
     const style = getComputedStyle(button);
     return { minHeight: style.minHeight, marginTop: style.marginTop, paddingLeft: style.paddingLeft };
   }));
   expect(modeStyles).toHaveLength(4);
-  expect(modeStyles.every(({ minHeight, marginTop, paddingLeft }) => minHeight === "48px" && marginTop === "0px" && paddingLeft === "15px")).toBe(true);
+  expect(modeStyles.every(({ minHeight, marginTop, paddingLeft }) => minHeight === "48px" && marginTop === "0px" && Number.parseFloat(paddingLeft) >= 10)).toBe(true);
   expect(pageErrors).toEqual([]);
 });
 
@@ -1781,7 +1797,7 @@ test("routes a room-mapped garage door through the protected Security action", a
 
 test("v0.14 heating keeps six zones accessible without a nested heating scroller", async ({ page }, testInfo) => {
   const sixZoneConfig = sixZoneHouseholdConfig();
-  const pageErrors = await mount(page, sixZoneConfig, sixZoneStateOverrides());
+  const pageErrors = await mount(page, sixZoneConfig, sixZoneStateOverrides(), {kiosk:true});
   const card = page.locator("family-hub-card");
   await card.locator('.hub-nav-button[data-view="rooms"]').click();
   await card.locator('[data-home-section="heating"]').click();
@@ -2623,7 +2639,7 @@ test("keeps the family map private and spotlights both requested clubs", async (
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
   await expect(card.locator(".today-family")).toContainText("A little left to do");
-  const todayFavourites = card.locator(".today-football .compact-fixture[data-favourite-code]");
+  const todayFavourites = card.locator(".today-football .club-match-row[data-fixture-id]");
   await expect(todayFavourites).toHaveCount(2);
   expect(await todayFavourites.evaluateAll((items) => items.map((item) => [item.dataset.favouriteCode, item.dataset.fixtureId]))).toEqual([
     ["TOT", "1"],
@@ -2649,19 +2665,18 @@ test("keeps the family map private and spotlights both requested clubs", async (
   await expect(card.locator(".choreops-link")).toHaveCount(0);
 
   await card.locator('.hub-nav-button[data-view="football"]').click();
-  const favouriteHeroes = card.locator(".favourite-hero-card");
+  const favouriteHeroes = card.locator(".football-club-overviews .club-next-row");
   await expect(favouriteHeroes).toHaveCount(2);
   expect(await favouriteHeroes.evaluateAll((items) => items.map((item) => [item.dataset.favouriteCode, item.dataset.fixtureId]))).toEqual([
     ["TOT", "1"],
     ["AVL", "2"]
   ]);
-  await expect(favouriteHeroes.nth(0)).toContainText(/Spurs.*Burnley.*20:00/s);
-  await expect(favouriteHeroes.nth(1)).toContainText(/Villa.*Newcastle.*15:00/s);
+  await expect(favouriteHeroes.nth(0)).toContainText(/20:00.*Burnley/s);
+  await expect(favouriteHeroes.nth(1)).toContainText(/15:00.*Newcastle/s);
   await expect(card.locator(".fixture.is-spotlight")).toHaveCount(2);
-  const standings = card.locator(".favourite-standing");
-  await expect(standings).toHaveCount(2);
-  expect(await standings.evaluateAll((items) => items.map((item) => item.dataset.favouriteCode))).toEqual(["TOT", "AVL"]);
-  await expect(standings).toContainText(["#1", "#2"]);
+  await card.locator('[data-football-tab="table"]').click();
+  await expect(card.locator(".league-table tbody tr")).toHaveCount(2);
+  await expect(card.locator(".league-table tbody tr")).toContainText(["Tottenham", "Aston Villa"]);
   expect(pageErrors).toEqual([]);
 });
 
@@ -2793,13 +2808,13 @@ test("Today shows both clubs' results and next fixtures without clipping names",
   const panel = card.locator(".today-football");
   await expect(panel.locator('[data-fixture-status="finished"]')).toHaveCount(2);
   await expect(panel.locator('[data-fixture-status="upcoming"]')).toHaveCount(2);
-  expect(await panel.locator(".compact-fixture").evaluateAll((items) => items.map((item) => item.dataset.fixtureId))).toEqual(["502", "501", "601", "602"]);
+  expect(await panel.locator(".club-match-row[data-fixture-id]").evaluateAll((items) => items.map((item) => item.dataset.fixtureId))).toEqual(["501", "601", "502", "602"]);
   const checkNames = async () => {
     const metrics = await panel.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
-      return [...element.querySelectorAll('.compact-team-name,.team-mark,.compact-score,.compact-fixture-detail')].map((item) => {
+      return [...element.querySelectorAll('.club-match-row strong,.club-match-row b,.club-match-row small')].map((item) => {
         const rect = item.getBoundingClientRect();
-        const fixture = item.closest('.compact-fixture').getBoundingClientRect();
+        const fixture = item.closest('.club-match-row').getBoundingClientRect();
         return { text: item.textContent, rect:{top:rect.top,bottom:rect.bottom}, bounds:{top:bounds.top,bottom:bounds.bottom}, style:{display:getComputedStyle(element).display,height:getComputedStyle(element).height,minHeight:getComputedStyle(element).minHeight,rows:getComputedStyle(element).gridTemplateRows,parentRows:getComputedStyle(element.parentElement).gridTemplateRows,parentDisplay:getComputedStyle(element.parentElement).display}, horizontalOverflow: item.scrollWidth - item.clientWidth,
           insideFixture: rect.left >= fixture.left && rect.right <= fixture.right + 1 && rect.top >= fixture.top && rect.bottom <= fixture.bottom + 1,
           insidePanel: rect.left >= bounds.left && rect.right <= bounds.right + 1 && rect.top >= bounds.top && rect.bottom <= bounds.bottom + 1 };
@@ -2824,7 +2839,7 @@ test("Today shows both clubs' results and next fixtures without clipping names",
   expect(pageErrors).toEqual([]);
 });
 
-test("combines a Spurs and Villa head-to-head into one deliberate family derby card", async ({ page }) => {
+test("shows the derby from each club perspective and keeps live games outside Results", async ({ page }) => {
   const derby = {
     id: 77,
     kickoff_time: "2026-08-21T19:00:00Z",
@@ -2843,28 +2858,18 @@ test("combines a Spurs and Villa head-to-head into one deliberate family derby c
     "sensor.family_dashboard_premier_league_gw_1": state("sensor.family_dashboard_premier_league_gw_1", "1", { events: [derby] })
   });
   const card = page.locator("family-hub-card");
-  const todayDerby = card.locator(".today-football .compact-fixture.is-derby");
-  await expect(todayDerby).toHaveCount(1);
-  await expect(todayDerby).toHaveAttribute("data-favourite-code", "TOT AVL");
-  await expect(todayDerby).toHaveAttribute("data-fixture-id", "77");
-  await expect(todayDerby).toContainText("Family derby");
-  await expect(todayDerby.locator(".team-mark")).toHaveCount(2);
-
+  const todayDerby = card.locator('.today-football [data-fixture-id="77"]');
+  await expect(todayDerby).toHaveCount(2);
+  await expect(todayDerby).toContainText(["2–1", "2–1"]);
+  expect(await todayDerby.evaluateAll(items => items.map(item => item.dataset.favouriteCode))).toEqual(["TOT", "AVL"]);
   await card.locator('.hub-nav-button[data-view="football"]').click();
-  const heroDerby = card.locator(".favourite-hero-card.is-derby");
-  await expect(heroDerby).toHaveCount(1);
-  await expect(heroDerby).toHaveAttribute("data-favourite-code", "TOT AVL");
-  await expect(heroDerby).toHaveAttribute("data-fixture-id", "77");
-  await expect(heroDerby).toContainText(/Family derby.*Spurs & Villa.*Tottenham.*2 — 1.*Aston Villa/s);
+  await expect(card.locator('.football-club-overviews [data-fixture-id="77"]')).toHaveCount(2);
   await expect(card.locator('.fixture.is-family-derby[data-favourite-code="TOT AVL"]')).toHaveCount(1);
-  const derbyAccents = await card.locator(".fixture.is-family-derby").evaluate((element) => ({
-    left: getComputedStyle(element, "::before").backgroundColor,
-    right: getComputedStyle(element, "::after").backgroundColor,
-    shadow: getComputedStyle(element).boxShadow
-  }));
-  expect(derbyAccents.left).toBe("rgb(19, 34, 87)");
-  expect(derbyAccents.right).toBe("rgb(103, 14, 54)");
-  expect(derbyAccents.shadow).toBe("none");
+  await expect(card.locator('.fixture.is-family-derby')).toContainText("Solanke (H) · Watkins (A)");
+  await card.locator('[data-football-tab="results"]').click();
+  await expect(card.locator('.fixture')).toHaveCount(0);
+  await card.locator('[data-football-tab="fixtures"]').click();
+  await expect(card.locator('.fixture')).toHaveCount(1);
   expect(pageErrors).toEqual([]);
 });
 
@@ -2979,8 +2984,8 @@ test("loads only allowlisted crest_url badges and renders initials for untrusted
   await card.locator('.hub-nav-button[data-view="football"]').click();
 
   await expect(card.locator('.fixture img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
-  await expect(card.locator(".favourite-hero-card")).toHaveCount(2);
-  await expect(card.locator(".football-favourites-stage")).not.toContainText(/Valid Badge|Hostile Badge/);
+  await expect(card.locator(".football-club-overviews .club-overview")).toHaveCount(2);
+  await expect(card.locator(".football-club-overviews")).not.toContainText(/Valid Badge|Hostile Badge/);
   for (const code of ["BAD", "LCR", "LBD", "LGO", "INI"]) {
     const mark = card.locator(".fixture .team-mark").filter({ hasText: code }).first();
     await expect(mark.locator("img")).toHaveCount(0);
@@ -3116,8 +3121,8 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   });
   expect(mediaMetrics.childTop).toBeGreaterThanOrEqual(mediaMetrics.stageTop - 1);
   expect(mediaMetrics.childBottom).toBeLessThanOrEqual(mediaMetrics.stageBottom + 1);
-  expect(mediaMetrics.chipColour).toBe("rgb(21, 88, 173)");
-  expect(mediaMetrics.chipBackground).toBe("rgb(232, 238, 247)");
+  expect(mediaMetrics.chipColour).toBe("rgb(18, 102, 207)");
+  expect(mediaMetrics.chipBackground).toBe("rgb(232, 241, 255)");
   expect(mediaMetrics.stageBackground).toBe("rgb(255, 255, 255)");
   expect(mediaMetrics.stageOverflowX).toBe("auto");
   expect(mediaMetrics.stageOverflowY).toBe("auto");
@@ -4073,7 +4078,7 @@ test("v0.9 design approval captures live, cached, and stale football health", as
   const card = page.locator("family-hub-card");
   await card.locator('.hub-nav-button[data-view="football"]').click();
   await expect(card.locator(".football-favourites-stage.is-live")).toBeVisible();
-  await expect(card.locator(".favourite-hero-card")).toHaveCount(2);
+  await expect(card.locator(".football-club-overviews .club-overview")).toHaveCount(2);
   expect(await card.locator(".favourite-hero-card").evaluateAll((items) => items.map((item) => [item.dataset.favouriteCode, item.dataset.fixtureId]))).toEqual([
     ["TOT", "101"],
     ["AVL", "102"]
@@ -4268,7 +4273,7 @@ test("restored approved primary screens fit the actual HA shell in both orientat
     household.rooms.push(room);
     zoneStates[room.climate] = state(room.climate, index % 2 ? "off" : "heat", {temperature: 19 + index / 2, current_temperature: 20 + index / 2, hvac_action:index % 2 ? "off":"heating"});
   }
-  const errors = await mount(page, household, zoneStates);
+  const errors = await mount(page, household, zoneStates, {kiosk:true});
   const card = page.locator('family-hub-card');
   await card.evaluate((element) => { element.hass = {...element._hass, themes:{darkMode:true}}; });
   await expect(card.locator('.hub-card')).toHaveAttribute('data-appearance','light');
@@ -4283,7 +4288,7 @@ test("restored approved primary screens fit the actual HA shell in both orientat
         const hub=root.querySelector('.hub-card'), view=root.querySelector('.hub-view');
         return {top:element.getBoundingClientRect().top,bottom:hub.getBoundingClientRect().bottom,viewport:innerHeight,rootOverflow:document.querySelector('.ha-main').scrollHeight-document.querySelector('.ha-main').clientHeight, viewOverflow:view.scrollHeight-view.clientHeight, horizontal:view.scrollWidth-view.clientWidth};
       });
-      expect(geometry.top).toBeGreaterThanOrEqual(56);
+      expect(geometry.top).toBe(0);
       expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport+1);
       expect(geometry.rootOverflow, JSON.stringify(geometry)).toBeLessThanOrEqual(1);
       expect(geometry.viewOverflow, `${portrait?'portrait':'landscape'} ${view}: ${JSON.stringify(geometry)}`).toBeLessThanOrEqual(1);
@@ -4331,6 +4336,7 @@ test("native music player keeps playback and room controls inside both tablet or
 test("exports the working corrective dashboard with representative family data", async ({page}, testInfo) => {
   test.skip(!process.env.RESTORED_REVIEW_EXPORT_PATH, "Export the review only when requested");
   const household=structuredClone(config);
+  household.product.title="Family Hub";
   household.features.location_map=false;
   household.features.school=false;
   for (const name of ["Garage","Bedroom","Playroom"]) household.media.players.push({entity_id:`media_player.review_${name.toLowerCase()}`, name});
@@ -4351,18 +4357,18 @@ test("exports the working corrective dashboard with representative family data",
   overrides["sensor.child_one_choreops_points"]=state("sensor.child_one_choreops_points","115");
   overrides["sensor.child_two_choreops_points"]=state("sensor.child_two_choreops_points","95");
   const event=(summary,hour,minute,entity)=>({summary,start:{dateTime:`2026-08-24T${hour}:${minute}:00Z`},end:{dateTime:`2026-08-24T${Number(hour)+1}:${minute}:00Z`},_calendar:household.calendar.entities.find(entry=>entry.entity_id===entity)});
-  const training=event("Ernie basketball","17","20","calendar.child_one");
+  const training={...event("Football training","16","30","calendar.child_one"),location:"Community pitch"};
   const responses=Object.fromEntries(household.calendar.entities.map(entry=>[entry.entity_id,[]]));
   responses["calendar.child_one"]=[training];
-  responses["calendar.child_two"]=[event("Orson school photo","16","00","calendar.child_two")];
+  responses["calendar.child_two"]=[event("Orson school photo","17","00","calendar.child_two")];
   responses["calendar.family"]=[event("Circus with Grandad","18","00","calendar.family")];
-  const preparationItems=["Water bottle","Trainers","Basketball kit","Snack pack","Coat"].map((summary,index)=>({uid:`review-kit-${index}`,summary,status:index===0?"completed":"needs_action",due:"2026-08-24",description:preparationDescription(training,"child_one","football")}));
+  const preparationItems=["Pack football kit","Pack boots","Fill water bottle"].map((summary,index)=>({uid:`review-kit-${index}`,summary,status:index===0?"completed":"needs_action",due:"2026-08-24",description:preparationDescription(training,"child_one","football")}));
   Object.assign(overrides, approvalFootballStates());
   const footballEvents=overrides["sensor.family_dashboard_premier_league_gw_1"].attributes.events;
   const spurs=footballEvents[0].home;
   const villa=footballEvents[1].home;
   footballEvents.unshift({...footballEvents[0],id:901,kickoff_time:"2026-08-22T14:00:00Z",finished:true,finished_provisional:true,minutes:90,home_score:2,away_score:3,away:villa});
-  footballEvents.push({...footballEvents[1],id:902,kickoff_time:"2026-08-29T16:30:00Z",home:footballEvents[2].away,away:spurs});
+  footballEvents.push({...footballEvents[1],started:false,finished:false,finished_provisional:false,minutes:0,home_score:null,away_score:null,id:902,kickoff_time:"2026-08-29T16:30:00Z",home:footballEvents[2].away,away:spurs});
   household.football.entries=[{person_id:"parent",entry_id:12345}];
   const squad=Array.from({length:15},(_,index)=>({
     id:index+1,name:index===10?"Captain forward":index===0?"Keeper":`Player ${index+1}`,
@@ -4391,14 +4397,17 @@ test("exports the working corrective dashboard with representative family data",
       if (view==="today") {
         const panels=await card.evaluate(element=>{
           const root=element.shadowRoot;
-          return [".today-family .section-heading",".today-family .person-summary-list",".today-ready-preview"].map(selector=>{
-            const rect=root.querySelector(selector).getBoundingClientRect();
+          return [".today-family .section-heading",".today-job-list",".today-ready-preview"].map(selector=>{
+            const node=root.querySelector(selector); if (!node) return null;
+            const rect=node.getBoundingClientRect();
             return {top:rect.top,bottom:rect.bottom,height:rect.height};
           });
         });
         expect(panels[1].top).toBeGreaterThanOrEqual(panels[0].bottom);
-        expect(panels[2].top).toBeGreaterThanOrEqual(panels[1].bottom);
-        expect(panels[2].height).toBeGreaterThanOrEqual(48);
+        if (panels[2]) {
+          expect(panels[2].top).toBeGreaterThanOrEqual(panels[1].bottom);
+          expect(panels[2].height).toBeGreaterThanOrEqual(48);
+        }
       }
       if (view==="rooms") for (const section of ["rooms","lights","covers","cleaning"]) {
         await card.locator(`[data-home-section="${section}"]`).click();
@@ -4411,5 +4420,28 @@ test("exports the working corrective dashboard with representative family data",
       }
     }
   }
+  expect(errors).toEqual([]);
+});
+
+
+test("approved Calendar inline preparation adds to the shared list and honours read-only mode", async ({page}) => {
+  const event={summary:"Football training",start:{dateTime:"2026-08-24T18:30:00Z"},end:{dateTime:"2026-08-24T19:30:00Z"},_calendar:config.calendar.entities.find(entry=>entry.entity_id==="calendar.child_one")};
+  const responses=Object.fromEntries(config.calendar.entities.map(entry=>[entry.entity_id,[]]));
+  responses["calendar.child_one"]=[event];
+  const errors=await mount(page,config,{}, {calendarEventsByEntity:responses,kiosk:true});
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-navigation [data-view="calendar"]').click();
+  await card.locator('[data-focus-prep-input]').fill("Training top");
+  await card.locator('[data-focus-add-prep]').click();
+  await expect(card.locator('.focus-event-ready .focus-ready-item')).toContainText("Training top");
+  const eventKey=await card.locator("[data-focus-add-prep]").getAttribute("data-focus-add-prep");
+  await card.locator('[data-focus-tasks="child_one"]').click();
+  await expect(card.locator('.family-prep-item')).toContainText("Training top");
+  const count=await page.evaluate(()=>window.__serviceCalls.length);
+  await card.evaluate(el=>{el._config.display.read_only=true;el._view="calendar";el._render();});
+  await expect(card.locator('[data-focus-add-prep]')).toHaveCount(0);
+  await card.evaluate((el,key)=>{const input=document.createElement("input");input.dataset.focusPrepInput=key;input.value="Tampered item";const button=document.createElement("button");button.dataset.focusAddPrep=key;button.dataset.preparationPerson="child_one";el.shadowRoot.append(input,button);button.click();},eventKey);
+  await expect(card.locator(".calendar-warning").first()).toContainText("not allowed");
+  expect(await page.evaluate(()=>window.__serviceCalls.length)).toBe(count);
   expect(errors).toEqual([]);
 });

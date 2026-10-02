@@ -3145,11 +3145,12 @@ test("keeps the Football heroes club-specific while Today includes each club's n
   assert.match(today.html, /data-fixture-id="31" data-favourite-code="TOT"/);
 
   const football = card._renderFootball();
-  assert.match(football, /data-favourite-code="TOT" data-fixture-id="32"/);
-  assert.match(football, /data-favourite-code="AVL" data-fixture-id="33"/);
-  assert.doesNotMatch(football, /favourite-hero-card[^>]+data-fixture-id="31"/);
-  assert.match(football, /data-favourite-code="TOT"[^>]*>.*#5/s);
-  assert.match(football, /data-favourite-code="AVL"[^>]*>.*#8/s);
+  assert.match(football, /data-fixture-id="32" data-favourite-code="TOT"/);
+  assert.match(football, /data-fixture-id="33" data-favourite-code="AVL"/);
+  assert.match(football, /data-fixture-id="31" data-favourite-code="TOT"/);
+  card._footballTab = "table";
+  assert.match(card._renderFootball(), /Premier League/);
+  assert.match(football, /data-football-tab="results"/);
 });
 
 test("renders the selected FPL squad and every supplied league", () => {
@@ -3233,13 +3234,15 @@ test("keeps both family clubs visible and never calls unavailable Football data 
   assert.match(today.html, /data-favourite-code="AVL"/);
   assert.equal((today.html.match(/Fixture data unavailable/g) || []).length, 2);
 
-  const waiting = card._renderFootball();
+  card._view = "football";
+  card._config.features = {};
+  const waiting = card._renderHeader() + card._renderFootball();
   assert.match(waiting, /Waiting for fixtures/);
   assert.doesNotMatch(waiting, /Scores up to date|#5/);
   assert.equal((waiting.match(/Fixture data unavailable/g) || []).length, 2);
 
   card._hass.states["sensor.football"] = { state: "unavailable", attributes: {} };
-  const unavailable = card._renderFootball();
+  const unavailable = card._renderHeader() + card._renderFootball();
   assert.match(unavailable, /Scores unavailable/);
   assert.match(unavailable, /cannot read the football feed/);
 });

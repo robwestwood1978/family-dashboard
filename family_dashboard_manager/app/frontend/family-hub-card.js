@@ -12,6 +12,21 @@ const VIEW_DEFINITIONS = [
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
 
+// Small outline icons keep the shared navigation independent of HA's filled glyphs.
+function outlineIcon(name) {
+  const paths = {
+    today:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/>',
+    calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18m-14 4h.01M12 15h.01M17 15h.01M7 18h.01M12 18h.01"/>',
+    rooms:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-8H9v8H4a1 1 0 0 1-1-1Z"/>',
+    family:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+    entry:'<path d="m12 3 8 3v6c0 5-5 8-8 9-3-1-8-4-8-9V6Z"/><path d="m8 12 3 3 5-6"/>',
+    energy:'<path d="m13 2-9 12h7l-1 8 10-12h-7Z"/>',
+    football:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1"/>',
+    music:'<path d="M9 18V4l10 3v11M9 4v5l10 3"/><ellipse cx="6" cy="18" rx="3" ry="3"/><ellipse cx="16" cy="18" rx="3" ry="3"/>'
+  };
+  return `<svg class="hub-outline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.rooms}</svg>`;
+}
+
 const ICONS = {
   light: "mdi:lightbulb-outline",
   climate: "mdi:radiator",
@@ -2710,6 +2725,7 @@ export class FamilyHubCard extends HTMLElementBase {
         --hub-backdrop-end:${escapeHtml(theme.backdrop_end)};
         --hub-radius:${Number(theme.radius_px)}px;
       ">
+        ${this._renderMasthead(shellGuard)}
         <div class="hub-shell"${shellGuard}>
           ${this._renderNavigation()}
           <main class="hub-content">
@@ -2888,55 +2904,38 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _renderNavigation() {
     const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
-    const renderButtons = (views) => views.map((view) => `
-      <button class="hub-nav-button ${this._view === view.id ? "is-active" : ""}" type="button" data-view="${view.id}" aria-label="${escapeHtml(view.label)}" aria-current="${this._view === view.id ? "page" : "false"}">
-        <ha-icon icon="${view.icon}" aria-hidden="true"></ha-icon>
-        <span>${escapeHtml(view.label)}</span>
-      </button>
-    `).join("");
-    const views = this._enabledViews().filter((view) => !view.primary);
-    const group = (label, ids, extraClass = "") => {
-      const entries = ids.map((id) => views.find((view) => view.id === id)).filter(Boolean);
-      return entries.length ? `<div class="hub-nav-items ${extraClass}" aria-label="${label}"><span class="hub-nav-label" aria-hidden="true">${label}</span>${renderButtons(entries)}</div>` : "";
-    };
-    return `
-      <nav class="hub-navigation" aria-label="Family Dashboard views"${confirmationGuard}>
-        <button class="hub-brand ${this._view === "today" ? "is-active" : ""}" type="button" data-view="today" aria-label="Open Today" aria-current="${this._view === "today" ? "page" : "false"}"><ha-icon icon="mdi:home-heart" aria-hidden="true"></ha-icon><span>Today</span></button>
-        ${group("Family", ["calendar", "family"], "hub-nav-core")}
-        ${group("House", ["rooms", "entry", "energy"])}
-        ${group("Your world", ["football", "music"], "hub-nav-utility")}
-      </nav>
-    `;
+    const views = this._enabledViews();
+    const order = ["today", "calendar", "rooms", "family", "entry", "energy", "football", "music"];
+    return `<nav class="hub-navigation" aria-label="Family Dashboard views"${confirmationGuard}>${order.map(id => views.find(view => view.id === id)).filter(Boolean).map(view => `
+      <button class="${view.id === "today" ? "hub-brand" : "hub-nav-button"} ${this._view === view.id ? "is-active" : ""}" type="button" data-view="${view.id}" aria-label="${view.id === "today" ? "Open Today" : escapeHtml(view.label)}" aria-current="${this._view === view.id ? "page" : "false"}">
+        ${outlineIcon(view.id)}<span>${escapeHtml(view.label)}</span>
+      </button>`).join("")}</nav>`;
+  }
+
+  _renderMasthead(shellGuard = "") {
+    const date = new Intl.DateTimeFormat(this._config.product.locale, {weekday:"long",day:"numeric",month:"long",timeZone:this._config.product.timezone}).format(new Date());
+    const states = this._hass?.states || {};
+    const security = this._config.features.entry ? todaySecurityPresentation(states[this._config.entry?.alarm_entity], states[this._config.entry?.garage?.cover_entity], (this._config.entry?.cameras || []).flatMap(camera => [camera.ringing_entity,camera.person_entity,camera.motion_entity]).filter(Boolean).map(id => states[id])) : null;
+    const name = this._hass?.user?.name || this._config.people.find(person => person.role !== "child" && person.role !== "household")?.name || "Family";
+    const initials = name.split(/\s+/).map(part => part[0]).slice(0,2).join("");
+    return `<header class="hub-masthead"${shellGuard}><button type="button" class="hub-masthead-brand" data-view="today">${outlineIcon("rooms")}<span>${escapeHtml(this._config.product.title)}</span></button><div class="hub-masthead-status"><span class="hub-masthead-date">${escapeHtml(date)}</span>${security ? `<button type="button" class="hub-quiet-status" data-view="entry" title="${escapeHtml(security.detail)}">${outlineIcon("entry")}<span>${escapeHtml(["Protected","Quiet at home"].includes(security.title) ? "All quiet" : security.title)}</span></button>` : ""}<span class="hub-profile" aria-label="${escapeHtml(name)}">${escapeHtml(initials)}</span>${this._hass?.user?.is_admin && this._config.display.kiosk ? '<a class="hub-ha-escape" href="?disable_km" aria-label="Open Home Assistant navigation" title="Home Assistant">↗</a>' : ""}</div></header>`;
   }
 
   _renderHeader() {
     const now = new Date();
     const locale = this._config.product.locale;
-    const date = new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", timeZone: this._config.product.timezone }).format(now);
-    const time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", timeZone: this._config.product.timezone }).format(now);
-    const weatherEnabled = this._config.features.weather === true;
-    const weather = weatherEnabled ? this._hass?.states?.[this._config.weather.entity_id] : null;
-    const temperature = weather?.attributes?.temperature;
-    const weatherText = weather
-      ? `${formatTemperature(temperature)} · ${weatherStateLabel(weather.state)}`
-      : "Home";
-    const currentDefinition = VIEW_DEFINITIONS.find((view) => view.id === this._view) || VIEW_DEFINITIONS[0];
-    const confirmationGuard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
-    return `
-      <header class="hub-topbar"${confirmationGuard}>
-        <div class="hub-page-title">
-          <p class="hub-topbar-date">${escapeHtml(date)}</p>
-          <h1>${escapeHtml(currentDefinition.label)}</h1>
-        </div>
-        <div class="hub-header-actions">
-          ${weatherEnabled ? `<button class="hub-weather-pill" type="button" data-more-info="${escapeHtml(this._config.weather.entity_id)}" ${this._config.display.read_only ? 'aria-disabled="true"' : ""}>
-            <ha-icon icon="mdi:weather-partly-cloudy" aria-hidden="true"></ha-icon>
-            <span>${escapeHtml(weatherText)}</span>
-          </button>` : ""}
-          <time class="hub-topbar-time">${escapeHtml(time)}</time>
-        </div>
-      </header>
-    `;
+    const timezone = this._config.product.timezone;
+    const date = new Intl.DateTimeFormat(locale, {day:"numeric",month:"long",timeZone:timezone}).format(now);
+    const time = new Intl.DateTimeFormat(locale, {hour:"2-digit",minute:"2-digit",timeZone:timezone}).format(now);
+    const weekday = new Intl.DateTimeFormat(locale, {weekday:"long",timeZone:timezone}).format(now);
+    const weather = this._config.features.weather ? this._hass?.states?.[this._config.weather.entity_id] : null;
+    const definition = VIEW_DEFINITIONS.find(view => view.id === this._view) || VIEW_DEFINITIONS[0];
+    const subtitles = {rooms:"Your home, room by room.",family:"Jobs, rewards and a little progress.",entry:"Entry cameras and home protection.",energy:"Your home’s usage and cost.",music:"Browse, group and play.",football:"Results, fixtures and your FPL teams."};
+    const title = this._view === "today" ? weekday : this._view === "football" ? this._config.football.spotlight_team_codes.map(code => this._clubPresentation(code).label).join(" & ") : definition.label;
+    const football = this._view === "football" ? this._footballState() : null;
+    const freshness = football ? (!isEntityAvailable(football.gameweekState) && isEntityAvailable(football.index) ? {status:"waiting",title:"Waiting for fixtures",detail:"The selected matchweek has not arrived yet."} : footballFreshness(football.index)) : null;
+    const guard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
+    return `<header class="hub-topbar ${this._view === "calendar" ? "is-calendar-header" : ""}"${guard}><div class="hub-page-title"><h1>${escapeHtml(title)}</h1><p class="hub-topbar-date">${escapeHtml(this._view === "today" ? `${date} · ${time}` : subtitles[this._view] || date)}</p></div><div class="hub-header-actions">${freshness ? `<span class="football-freshness is-${escapeHtml(freshness.status)}" title="${escapeHtml(freshness.detail)}"><strong>${escapeHtml(freshness.title)}</strong></span>` : ""}${weather && this._view === "today" ? `<button class="hub-weather-pill" type="button" data-more-info="${escapeHtml(this._config.weather.entity_id)}" aria-label="${escapeHtml(weatherStateLabel(weather.state))}, ${formatTemperature(weather.attributes?.temperature)}"><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon><span>${formatTemperature(weather.attributes?.temperature)}</span></button>` : ""}</div></header>`;
   }
 
   _renderView() {
@@ -2995,11 +2994,19 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderFocusCalendarPlan() {
-    const day=this._focusCalendarDay();
+    const day = this._focusCalendarDay();
     if (!day) return "";
-    const events=this._filteredCalendarEvents().filter((event)=>dateKey(calendarEventStart(event),this._config.product.timezone)===day.key);
-    const selected=events.find((event)=>familyPlannerEventKey(event)===this._calendarFocusEvent) || events.find((event)=>isCurrentOrFutureCalendarEvent(event,new Date(),this._config.product.timezone)) || events[0];
-    return `<div class="focus-calendar-layout"><section class="focus-calendar-agenda"><header><h2>${escapeHtml(formatDay(`${day.key}T12:00:00`,this._config.product.locale,this._config.product.timezone))}</h2><small>${events.length} plan${events.length===1 ? "":"s"}</small></header>${events.map((event)=>`<div class="focus-agenda-row">${this._renderPlannerEventButton(event)}<button type="button" class="focus-plan-select" data-calendar-focus="${escapeHtml(familyPlannerEventKey(event))}" aria-label="Show ${escapeHtml(event.summary || "event")} checklist" aria-pressed="${selected===event}"><ha-icon icon="mdi:bag-personal-outline"></ha-icon>Get ready</button></div>`).join("") || '<p class="family-planner-empty">A little breathing room. Add a plan when you need one.</p>'}</section>${selected ? this._renderFocusPreparation(selected):""}</div>`;
+    const events = this._filteredCalendarEvents().filter(event => dateKey(calendarEventStart(event), this._config.product.timezone) === day.key);
+    const selected = events.find(event => familyPlannerEventKey(event) === this._calendarFocusEvent) || events.find(event => isCurrentOrFutureCalendarEvent(event,new Date(),this._config.product.timezone)) || events[0];
+    return `<div class="focus-calendar-layout"><section class="focus-calendar-agenda"><header><h2>${escapeHtml(formatDay(`${day.key}T12:00:00`,this._config.product.locale,this._config.product.timezone))}</h2><small>${events.length} plan${events.length === 1 ? "" : "s"}</small></header>${events.map(event => {
+      const key = familyPlannerEventKey(event), progress = preparationProgress(this._preparationItems,key);
+      const people = familyPlannerPeople(event,this._config.people).filter(person => person.role !== "household");
+      const person = people[0], colour = person?.colour || event._calendar?.colour || this._config.theme.accent;
+      const personLabel = people.map(person => person.name).join(" · ") || "Everyone";
+      const start = isAllDayCalendarEvent(event) ? "All day" : formatTime(calendarEventStart(event),this._config.product.locale,this._config.product.timezone);
+      const end = !isAllDayCalendarEvent(event) && calendarEventEnd(event) ? formatTime(calendarEventEnd(event),this._config.product.locale,this._config.product.timezone) : "";
+      return `<div class="focus-agenda-row"><div class="focus-agenda-time"><span>${escapeHtml(start)}</span><small>${escapeHtml(end)}</small></div><button type="button" class="family-planner-event focus-agenda-event ${selected === event ? "is-selected" : ""}" data-calendar-focus="${escapeHtml(key)}" aria-label="Show ${escapeHtml(event.summary || "event")} checklist" aria-pressed="${selected === event}" style="--calendar-colour:${escapeHtml(colour)}"><span class="focus-event-token">${outlineIcon("calendar")}</span><span class="focus-event-copy"><strong>${escapeHtml(event.summary || "Family event")}</strong><small>${escapeHtml(personLabel)}${event.location ? ` · ${escapeHtml(event.location)}` : ""}</small>${progress.total ? `<span class="planner-ready-state"><ha-icon icon="mdi:bag-personal-outline"></ha-icon>${progress.complete}/${progress.total} ready</span>` : ""}</span><ha-icon class="focus-event-chevron" icon="mdi:chevron-right"></ha-icon></button></div>`;
+    }).join("") || '<p class="family-planner-empty">A little breathing room. Add a plan when you need one.</p>'}</section>${selected ? this._renderFocusPreparation(selected) : ""}</div>`;
   }
 
   _renderFocusPreparation(event) {
@@ -3017,12 +3024,13 @@ export class FamilyHubCard extends HTMLElementBase {
     const day = formatDay(calendarEventStart(event), this._config.product.locale, this._config.product.timezone);
     const time = isAllDayCalendarEvent(event) ? "All day" : formatTime(calendarEventStart(event), this._config.product.locale, this._config.product.timezone);
     return `<aside class="focus-event-ready">
-      <ha-icon class="focus-prep-icon" icon="mdi:bag-personal-outline"></ha-icon>
+      <span class="focus-prep-icon"><ha-icon icon="mdi:bag-personal-outline"></ha-icon></span>
       <p class="eyebrow">Get ready</p>
       <h2>${escapeHtml(event.summary || "Your next plan")}</h2>
       <p class="supporting">${escapeHtml(day)} · ${escapeHtml(time)}</p>
       ${event.location ? `<p class="supporting"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(event.location)}</p>` : ""}
       ${checklist || '<p class="planner-no-prep">No checklist linked yet.</p>'}
+      ${children.length && !this._config.display.read_only ? `<p class="focus-prep-note">Also in ${escapeHtml(children[0].name)}’s task list.</p><div class="focus-prep-add"><input data-focus-prep-input="${escapeHtml(key)}" placeholder="Add an item" aria-label="Add a preparation item"><button type="button" data-focus-add-prep="${escapeHtml(key)}" data-preparation-person="${escapeHtml(children[0].id)}" aria-label="Add checklist item"><ha-icon icon="mdi:plus"></ha-icon></button></div>` : ""}
       <div class="focus-prep-links">
         <button type="button" data-planner-event="${escapeHtml(key)}">Event details <ha-icon icon="mdi:arrow-top-right"></ha-icon></button>
         ${this._config.features.family && children.length ? `<button type="button" data-focus-tasks="${escapeHtml(children[0].id)}">Tasks <ha-icon icon="mdi:arrow-right"></ha-icon></button>` : ""}
@@ -3046,11 +3054,22 @@ export class FamilyHubCard extends HTMLElementBase {
     const security = features.entry ? todaySecurityPresentation(states[this._config.entry?.alarm_entity], states[this._config.entry?.garage?.cover_entity], (this._config.entry?.cameras || []).flatMap((camera) => [camera.ringing_entity,camera.person_entity,camera.motion_entity]).filter(Boolean).map((id) => states[id])) : null;
     const preview = features.family && features.calendar ? todayPreparationPreview(this._preparationItems.filter((item) => !next || item?._preparation?.eventKey !== familyPlannerEventKey(next)),this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents(),this._config.people,new Date(),this._config.product.timezone,2) : {total:0,complete:0,rows:[]};
     return `<section class="today-grid focus-today" data-calendar="${features.calendar}" data-secondary-count="${[features.family, features.football, features.music].filter(Boolean).length}" aria-label="Today at a glance">
-      ${room ? `<article class="surface hero-panel today-hero focus-home-card"><div class="daily-home-art" aria-hidden="true"><img src="${HOME_ILLUSTRATION}" alt="" decoding="async"></div><div class="today-hero-copy"><p class="eyebrow">Home in focus</p><h2>${escapeHtml(greetingForTime(new Date(),this._config.product.timezone))}</h2><p>${Number.isFinite(summary.temperature) ? `${escapeHtml(room.name)} · ${formatTemperature(summary.temperature)} inside` : "A little comfort, a little control."}</p></div><button type="button" class="focus-home-open" data-focus-home-room="${escapeHtml(room.id)}" aria-label="Open ${escapeHtml(room.name)} controls"><ha-icon icon="mdi:arrow-top-right"></ha-icon></button><div class="focus-home-controls"><button type="button" data-room-lights="${escapeHtml(room.id)}" data-light-service="${summary.lightsOn ? "turn_off":"turn_on"}" aria-label="Turn ${escapeHtml(room.name)} lights ${summary.lightsOn ? "off":"on"}" aria-pressed="${Boolean(summary.lightsOn)}" ${readOnly || !availableLights.length ? "disabled" : ""}><ha-icon icon="mdi:lamp-outline"></ha-icon><span><strong>${availableLights.length ? summary.lightsOn ? "Lights on":"Lights off" : "Lighting unavailable"}</strong><small>${escapeHtml(room.name)}</small></span></button><button type="button" ${room.climate ? `data-focus-home-room="${escapeHtml(room.id)}"` : 'data-home-target="heating"'}><ha-icon icon="mdi:thermometer"></ha-icon><span><strong>${Number.isFinite(summary.targetTemperature) ? formatTemperature(summary.targetTemperature):Number.isFinite(home?.averageTemperature) ? formatTemperature(home.averageTemperature):"View heating"}</strong><small>${room.climate ? "Heating target" : "Home temperature"} <ha-icon icon="mdi:chevron-right"></ha-icon></small></span></button></div></article>` : `<article class="focus-hello"><h2>${escapeHtml(greetingForTime(new Date(),this._config.product.timezone))}</h2><p>Your family’s day, together.</p></article>`}
-      <div class="focus-today-plan">${this._preparationError ? `<p class="calendar-warning" role="alert">${escapeHtml(this._preparationError)}</p>` : ""}${features.calendar ? `<article class="next-panel today-next"><p class="eyebrow">Coming up</p><h2>${escapeHtml(next?.summary || "No plans yet")}</h2><p class="supporting">${next ? `${escapeHtml(formatDay(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}${isAllDayCalendarEvent(next) ? " · All day":` at ${escapeHtml(formatTime(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}`}`:"The next family event will appear here."}</p>${next?.location ? `<p class="supporting"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(next.location)}</p>`:""}${next ? this._renderFocusChecklist(next, { compact:true }) : ""}<button type="button" class="text-action" ${next ? `data-focus-open-plan="${escapeHtml(familyPlannerEventKey(next))}"`:'data-view="calendar"'}>See the plan <ha-icon icon="mdi:arrow-right"></ha-icon></button></article>`:""}${features.family ? `<article class="children-panel today-family"><div class="section-heading"><h2>A little left to do</h2><button type="button" data-view="family">Tasks <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div>${this._renderTodayTaskPreview(preview)}<div class="person-summary-list">${this._renderChildSummaries()}</div></article>`:""}</div>
-      ${football ? `<article class="football-panel today-football" data-fixture-count="${football.fixtureCount || 0}"><div class="section-heading"><h2>${escapeHtml(football.title)}</h2><button type="button" data-view="football">All football <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="featured-fixtures">${football.html}</div></article>`:""}
-      ${home || security || energy ? `<footer class="hero-metrics focus-home-summary">${home ? `<button type="button" data-home-target="heating"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${escapeHtml(heating.value)}</strong><small>${escapeHtml(heating.detail)}</small></span></button><button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${escapeHtml(lighting.value)}</strong><small>${escapeHtml(lighting.detail)}</small></span></button>`:""}${security ? `<button type="button" data-view="entry"><ha-icon icon="${security.icon}"></ha-icon><span><strong>${escapeHtml(security.title)}</strong><small>${escapeHtml(security.detail)}</small></span></button>`:""}${energy ? `<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energy.value)}</strong><small>${escapeHtml(energy.detail)}</small></span></button>`:""}</footer>` : ""}
+      ${room ? `<article class="surface hero-panel today-hero focus-home-card"><div class="daily-home-art" aria-hidden="true"><img src="${HOME_ILLUSTRATION}" alt="" decoding="async"></div><div class="today-hero-copy"><h2>${escapeHtml(room.name)}</h2><p>${Number.isFinite(summary.temperature) ? `${escapeHtml(room.name)} · ${formatTemperature(summary.temperature)}` : "Your home controls"}</p></div><button type="button" class="focus-home-open" data-focus-home-room="${escapeHtml(room.id)}" aria-label="Open ${escapeHtml(room.name)} controls"><ha-icon icon="mdi:arrow-top-right"></ha-icon></button><div class="focus-home-controls"><button type="button" data-room-lights="${escapeHtml(room.id)}" data-light-service="${summary.lightsOn ? "turn_off":"turn_on"}" aria-label="Turn ${escapeHtml(room.name)} lights ${summary.lightsOn ? "off":"on"}" aria-pressed="${Boolean(summary.lightsOn)}" ${readOnly || !availableLights.length ? "disabled" : ""}><ha-icon icon="mdi:lamp-outline"></ha-icon><span><strong>${availableLights.length ? summary.lightsOn ? "Lights on":"Lights off" : "Lighting unavailable"}</strong><small>${escapeHtml(room.name)}</small></span></button><button type="button" ${room.climate ? `data-focus-home-room="${escapeHtml(room.id)}"` : 'data-home-target="heating"'}><ha-icon icon="mdi:thermometer"></ha-icon><span><strong>${Number.isFinite(summary.targetTemperature) ? formatTemperature(summary.targetTemperature):Number.isFinite(home?.averageTemperature) ? formatTemperature(home.averageTemperature):"View heating"}</strong><small>${room.climate ? "Heating target" : "Home temperature"} <ha-icon icon="mdi:chevron-right"></ha-icon></small></span></button></div></article>` : `<article class="focus-hello"><h2>${escapeHtml(greetingForTime(new Date(),this._config.product.timezone))}</h2><p>Your family’s day, together.</p></article>`}
+      <div class="focus-today-plan">${this._preparationError ? `<p class="calendar-warning" role="alert">${escapeHtml(this._preparationError)}</p>` : ""}${features.calendar ? `<article class="next-panel today-next"><p class="eyebrow">${next ? `Next, ${isAllDayCalendarEvent(next) ? "all day" : `at ${escapeHtml(formatTime(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}`}` : "Coming up"}</p><h2>${escapeHtml(next?.summary || "No plans yet")}</h2><p class="supporting">${next ? `${escapeHtml(familyPlannerPeople(next,this._config.people).filter(person => person.role !== "household").map(person => person.name).join(", ") || "Everyone")}${next.location ? ` · ${escapeHtml(next.location)}` : ""}` : "The next family event will appear here."}</p>${next ? this._renderFocusChecklist(next, { compact:true }) : ""}<button type="button" class="text-action" ${next ? `data-focus-open-plan="${escapeHtml(familyPlannerEventKey(next))}"`:'data-view="calendar"'}>See the plan <ha-icon icon="mdi:arrow-right"></ha-icon></button></article>`:""}${features.family ? `<article class="children-panel today-family"><div class="section-heading"><h2>A little left to do</h2><button type="button" data-view="family">Tasks <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="today-job-list">${this._renderTodayJobs()}</div>${this._renderTodayTaskPreview(preview)}</article>`:""}</div>
+      ${football ? `<article class="football-panel today-football" data-fixture-count="${football.fixtureCount || 0}"><div class="section-heading"><h2>This week in football</h2><button type="button" data-view="football">All football <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="featured-fixtures">${football.html}</div></article>`:""}
+      ${home || security || energy ? `<footer class="hero-metrics focus-home-summary">${home ? `<button type="button" data-home-target="heating"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${escapeHtml(`${heating.value} · ${heating.detail}`)}</strong><small>${escapeHtml(heating.detail)}</small></span></button><button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${escapeHtml(`${lighting.value} · ${lighting.detail}`)}</strong><small>${escapeHtml(lighting.detail)}</small></span></button>`:""}${security ? `<button type="button" data-view="entry"><ha-icon icon="${security.icon}"></ha-icon><span><strong>${escapeHtml(security.title)}</strong><small>${escapeHtml(security.detail)}</small></span></button>`:""}${energy ? `<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energy.value)}</strong><small>${escapeHtml(energy.detail)}</small></span></button>`:""}</footer>` : ""}
     </section>`;
+  }
+
+  _renderTodayJobs() {
+    const states = this._hass?.states || {};
+    return this._config.people.filter(person => person.role === "child").map(person => {
+      const user = this._config.features.chores ? this._config.chores.users.find(user => user.person_id === person.id) : null;
+      const job = (user?.status_entities || []).map(entity => ({entity,presentation:normaliseChoreStatus(states[entity],entity)})).find(job => job.presentation.tone !== "done");
+      const claim = job ? choreClaimEntityId(job.entity) : "";
+      const available = job && ["pending","due","overdue","missed"].includes(job.presentation.status) && isCommandEntityAvailable(states[claim]) && !this._config.display.read_only && !this._pendingChoreClaims.has(claim);
+      return `<div class="today-job" style="--person-colour:${escapeHtml(person.colour)}"><span class="today-person-token">${escapeHtml(person.name.slice(0,1))}</span><div><strong>${escapeHtml(person.name)} · ${escapeHtml(job?.presentation.name || "Your tasks")}</strong><small>${job ? `${Number.isFinite(job.presentation.points) ? `${job.presentation.points} points · ` : ""}${escapeHtml(job.presentation.label)}` : "See jobs and rewards"}</small></div><button type="button" class="today-job-action" ${available ? `data-chore-claim="${escapeHtml(claim)}" data-chore-status="${escapeHtml(job.entity)}" data-person-id="${escapeHtml(person.id)}" aria-label="Mark ${escapeHtml(job.presentation.name)} as done for ${escapeHtml(person.name)}"` : `data-focus-tasks="${escapeHtml(person.id)}" aria-label="Open ${escapeHtml(person.name)} tasks"`}><ha-icon icon="${available ? "mdi:circle-outline" : "mdi:arrow-top-right"}"></ha-icon></button></div>`;
+    }).join("");
   }
 
   _renderTodayTaskPreview(preview) {
@@ -3066,7 +3085,7 @@ export class FamilyHubCard extends HTMLElementBase {
       return `<button type="button" class="today-ready-item ${completed ? "is-complete" : ""}" data-prep-item="${escapeHtml(itemId)}" data-prep-status="${completed ? "needs_action" : "completed"}" style="--person-colour:${escapeHtml(person.colour)}" aria-label="${completed ? "Mark not ready" : "Mark ready"}: ${escapeHtml(item.summary || item.item || "Preparation item")}"><span><ha-icon icon="${completed ? "mdi:check" : "mdi:circle-outline"}"></ha-icon></span><div><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong><small>${escapeHtml(`${person.name} · ${event.summary || "Upcoming event"} · ${dayLabel} ${timeLabel}`)}</small></div></button>`;
     }).join("");
     const overflow = Math.max(0, preview.total - preview.rows.length);
-    return `<section class="today-ready-preview" aria-label="Ready for upcoming events"><div class="today-ready-heading"><span><strong>Ready next</strong><small>${remaining ? `${remaining} still to do` : "Everything packed"}</small></span><b>${preview.complete}/${preview.total}</b></div><div class="today-ready-list">${rows}</div>${overflow ? `<button type="button" class="today-ready-more" data-view="family">${overflow} more in Tasks <ha-icon icon="mdi:arrow-right"></ha-icon></button>` : ""}</section>`;
+    return `<details class="today-ready-preview" aria-label="Ready for upcoming events"><summary class="today-ready-heading"><span><strong>Ready next</strong><small>${remaining ? `${remaining} still to do` : "Everything packed"}</small></span><b>${preview.complete}/${preview.total}</b></summary><div class="today-ready-list">${rows}</div>${overflow ? `<button type="button" class="today-ready-more" data-view="family">${overflow} more in Tasks <ha-icon icon="mdi:arrow-right"></ha-icon></button>` : ""}</details>`;
   }
 
   _energyPresentation() {
@@ -3200,27 +3219,27 @@ export class FamilyHubCard extends HTMLElementBase {
       { id: "month", label: "Month", icon: "mdi:calendar-month" },
       { id: "agenda", label: "Agenda", icon: "mdi:format-list-bulleted" }
     ];
-    const modeButtons = modes.map((mode) => `<button type="button" class="segment ${mode.id === this._calendarMode ? "is-selected" : ""}" data-calendar-mode="${mode.id}" aria-pressed="${mode.id === this._calendarMode}"><ha-icon icon="${mode.icon}" aria-hidden="true"></ha-icon>${mode.label}</button>`).join("");
+    const modeButtons = modes.map((mode) => `<button type="button" class="segment ${mode.id === this._calendarMode ? "is-selected" : ""}" data-calendar-mode="${mode.id}" aria-pressed="${mode.id === this._calendarMode}">${mode.label}</button>`).join("");
     const canCreate = !this._config.display.read_only
       && this._config.calendar.entities.some((entry) => entry.allow_create === true);
     const personFilters = [
       { id: "all", name: "Everyone", colour: this._config.theme.accent },
       ...this._config.people.filter((person) => person.role !== "household")
-    ].map((person) => `<button type="button" class="calendar-person-filter ${this._calendarPersonFilter === person.id ? "is-selected" : ""}" data-calendar-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}" aria-pressed="${this._calendarPersonFilter === person.id}"><span>${escapeHtml(person.id === "all" ? "All" : person.name.slice(0, 1))}</span>${escapeHtml(person.name)}</button>`).join("");
+    ].map((person) => `<button type="button" class="calendar-person-filter ${this._calendarPersonFilter === person.id ? "is-selected" : ""}" data-calendar-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}" aria-pressed="${this._calendarPersonFilter === person.id}"><span aria-hidden="true"></span>${escapeHtml(person.name)}</button>`).join("");
     return `
       <section class="single-surface surface calendar-view" data-planner-mode="${this._calendarMode}">
         <div class="calendar-toolbar">
-          <div class="calendar-context"><span><h2 class="focus-calendar-title">${escapeHtml(new Intl.DateTimeFormat(this._config.product.locale,{month:"long",year:"numeric",timeZone:"UTC"}).format(new Date(`${this._calendarAnchorKey || dateKey(new Date(),this._config.product.timezone)}T12:00:00Z`)))}</h2><strong>Family planner</strong></span></div>
-          <div class="calendar-toolbar-actions">${canCreate ? '<button type="button" class="calendar-add-event" data-planner-add-event><ha-icon icon="mdi:plus"></ha-icon>Add event</button>' : ""}<div class="segments calendar-modes" role="group" aria-label="Choose calendar view">${modeButtons}</div></div>
+          <div class="calendar-context"><span><h2 class="focus-calendar-title">${escapeHtml(new Intl.DateTimeFormat(this._config.product.locale,{month:"long",year:"numeric",timeZone:"UTC"}).format(new Date(`${this._calendarAnchorKey || dateKey(new Date(),this._config.product.timezone)}T12:00:00Z`)))}</h2><strong>Family calendar</strong></span></div>
+          <div class="calendar-toolbar-actions">${canCreate ? '<button type="button" class="calendar-add-event" data-planner-add-event><ha-icon icon="mdi:plus"></ha-icon>Add event</button>' : ""}</div>
         </div>
-        <div class="calendar-person-filters" role="group" aria-label="Filter by family member">${personFilters}</div>
-        <div class="calendar-navigation">
+        <div class="calendar-controls"><div class="segments calendar-modes" role="group" aria-label="Choose calendar view">${modeButtons}</div><div class="calendar-navigation">
           <button type="button" data-calendar-nav="previous" aria-label="Previous period"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
           <button type="button" data-calendar-nav="today">Today</button>
           <strong data-calendar-range>${escapeHtml(this._calendarRangeLabel())}</strong>
           <button type="button" data-calendar-refresh aria-label="Refresh calendars"><ha-icon icon="mdi:refresh"></ha-icon></button>
           <button type="button" data-calendar-nav="next" aria-label="Next period"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
-        </div>
+        </div></div>
+        <div class="calendar-person-filters" role="group" aria-label="Filter by family member">${personFilters}</div>
         ${this._preparationError ? `<p class="calendar-warning" role="alert">${escapeHtml(this._preparationError)}</p>` : ""}
         <div class="family-planner-slot">${this._calendarMode === "month"
           ? this._renderPlannerMonth()
@@ -3500,9 +3519,8 @@ export class FamilyHubCard extends HTMLElementBase {
           </div>
           <div class="heating-body">
             <div class="thermostat-dial" style="--temperature-progress:${Number.isFinite(target) ? Math.max(0, Math.min(100, (target - 5) / 30 * 100)) : 0}" role="img" aria-label="${escapeHtml(room.name)} target ${targetLabel}, current ${formatTemperature(current)}">
-              <svg viewBox="0 0 180 180" aria-hidden="true"><circle class="thermostat-track" cx="90" cy="90" r="74"/><circle class="thermostat-value" cx="90" cy="90" r="74" pathLength="100" stroke-dasharray="${Number.isFinite(target) ? Math.max(0, Math.min(100, (target - 5) / 30 * 75)) : 0} 100"/></svg>
-              <div><small>Target</small><output class="heating-target-value">${targetLabel}</output><span>Inside <strong class="heating-current-value">${formatTemperature(current)}</strong></span></div>
-            </div>
+              <svg viewBox="0 0 180 180" aria-hidden="true"><circle class="thermostat-track" cx="90" cy="90" r="84"/><circle class="thermostat-value" cx="90" cy="90" r="84" pathLength="100" stroke-dasharray="${Number.isFinite(target) ? Math.max(0, Math.min(100, (target - 5) / 30 * 75)) : 0} 100"/></svg>
+              <div><small>Target</small><output class="heating-target-value">${targetLabel}</output></div></div><p class="heating-inside">Inside <strong class="heating-current-value">${formatTemperature(current)}</strong></p>
             <div class="heating-target-control" role="group" aria-label="${escapeHtml(room.name)} target temperature, currently ${targetLabel}"><div class="heating-stepper">
               <button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="Lower ${escapeHtml(room.name)} target from ${targetLabel}"${targetDisabled}>−</button>
               <span>${escapeHtml(presentation.label)}</span>
@@ -3516,7 +3534,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const availableZones = heatingRooms.filter((room) => isEntityAvailable(states[room.climate])).length;
     const masterOpen = this._expandedHeatingSchedules.has("all");
     const masterPeriods = this._heatingScheduleDrafts.get("all") || masterSchedule;
-    return `<section class="heating-experience"><article class="surface heating-master ${masterOpen ? "is-schedule-open" : ""}"><div class="heating-master-copy"><p class="eyebrow">Whole house</p><h2>Master heating</h2><span>${availableZones} of ${heatingRooms.length} zones available</span></div><div class="heating-master-target"><span>All-room target</span><div class="master-dial"><svg viewBox="0 0 180 180" aria-hidden="true"><circle class="thermostat-track" cx="90" cy="90" r="74"/><circle class="thermostat-value" cx="90" cy="90" r="74" pathLength="100" stroke-dasharray="${Math.max(0, Math.min(75, (this._masterTemperature - 5) / 30 * 75))} 100"/></svg><div class="master-temperature-stepper"><button type="button" data-master-temperature-adjust="-0.5" aria-label="Lower all-room target" ${readOnly ? "disabled" : ""}>−</button><label><span class="sr-only">All-room target temperature</span><input type="number" min="5" max="35" step="0.5" value="${this._masterTemperature}" data-master-temperature ${readOnly ? "disabled" : ""}><b>°</b></label><button type="button" data-master-temperature-adjust="0.5" aria-label="Raise all-room target" ${readOnly ? "disabled" : ""}>+</button></div></div></div><div class="heating-master-actions"><button type="button" data-climate-master="set_temperature" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:thermometer-check"></ha-icon><span>Set all rooms</span></button><button type="button" data-climate-master="turn_on" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:radiator"></ha-icon><span>All on</span></button><button type="button" data-climate-master="turn_off" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:power"></ha-icon><span>All off</span></button></div><details class="heating-schedule master-schedule" data-heating-schedule="all"${masterOpen ? " open" : ""}><summary><span><ha-icon icon="mdi:calendar-sync"></ha-icon><strong>Whole-house schedule</strong><small>Use the same four periods in every configured room</small></span><ha-icon class="schedule-chevron" icon="mdi:chevron-down"></ha-icon></summary>${this._renderHeatingScheduleEditor(masterPeriods, "all", readOnly || schedulableRooms.length === 0)}</details></article><div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="hub-empty-state">No heating controls are available yet.</p>'}</div></section>`;
+    return `<section class="heating-experience"><article class="surface heating-master ${masterOpen ? "is-schedule-open" : ""}"><div class="heating-master-copy"><p class="eyebrow">Whole house</p><h2>Master heating</h2><span>${availableZones} of ${heatingRooms.length} zones available</span></div><div class="heating-master-target"><span>All-room target</span><div class="master-dial"><svg viewBox="0 0 180 180" aria-hidden="true"><circle class="thermostat-track" cx="90" cy="90" r="84"/><circle class="thermostat-value" cx="90" cy="90" r="84" pathLength="100" stroke-dasharray="${Math.max(0, Math.min(75, (this._masterTemperature - 5) / 30 * 75))} 100"/></svg><div class="master-temperature-stepper"><button type="button" data-master-temperature-adjust="-0.5" aria-label="Lower all-room target" ${readOnly ? "disabled" : ""}>−</button><label><span class="sr-only">All-room target temperature</span><input type="number" min="5" max="35" step="0.5" value="${this._masterTemperature}" data-master-temperature ${readOnly ? "disabled" : ""}><b>°</b></label><button type="button" data-master-temperature-adjust="0.5" aria-label="Raise all-room target" ${readOnly ? "disabled" : ""}>+</button></div></div></div><div class="heating-master-actions"><button type="button" data-climate-master="set_temperature" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:thermometer-check"></ha-icon><span>Set all rooms</span></button><button type="button" data-climate-master="turn_on" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:radiator"></ha-icon><span>All on</span></button><button type="button" data-climate-master="turn_off" ${readOnly || !availableZones ? "disabled" : ""}><ha-icon icon="mdi:power"></ha-icon><span>All off</span></button></div><details class="heating-schedule master-schedule" data-heating-schedule="all"${masterOpen ? " open" : ""}><summary><span><ha-icon icon="mdi:calendar-sync"></ha-icon><strong>Whole-house schedule</strong><small>Use the same four periods in every configured room</small></span><ha-icon class="schedule-chevron" icon="mdi:chevron-down"></ha-icon></summary>${this._renderHeatingScheduleEditor(masterPeriods, "all", readOnly || schedulableRooms.length === 0)}</details></article><div class="heating-grid" data-zone-count="${heatingRooms.length}">${zones || '<p class="hub-empty-state">No heating controls are available yet.</p>'}</div></section>`;
   }
 
   _renderHeatingScheduleEditor(periods, scope, disabled = false) {
@@ -3911,7 +3929,7 @@ export class FamilyHubCard extends HTMLElementBase {
       return `
         <article class="surface security-camera ${item.camera.id === selected?.camera.id ? "is-selected" : ""}">
           <div class="camera-tile-media">
-            <div id="camera-poster-tile-${escapeHtml(item.camera.id)}" class="camera-poster-slot camera-tile-poster"><span class="camera-poster-fallback"><ha-icon icon="${item.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon>${item.camera.still_entity_id ? "Loading snapshot…" : "Ready for live view"}</span></div>
+            <div id="camera-poster-tile-${escapeHtml(item.camera.id)}" class="camera-poster-slot camera-tile-poster"><span class="camera-poster-fallback"><ha-icon icon="${item.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon><span class="camera-poster-caption">${item.camera.still_entity_id ? "Loading snapshot…" : "Ready for live view"}</span></span></div>
             <button type="button" class="camera-poster-action" data-camera-open="${escapeHtml(item.camera.id)}" aria-label="${actionLabel}" ${item.canOpen ? "" : 'disabled aria-disabled="true"'}><span><ha-icon icon="${actionIcon}"></ha-icon>${actionText}</span></button>
           </div>
           <div class="camera-tile-details">
@@ -4327,46 +4345,40 @@ export class FamilyHubCard extends HTMLElementBase {
     return { index, gameweek, gameweekState, table };
   }
 
+  _allFootballFixtures() {
+    const {index} = this._footballState();
+    if (!isEntityAvailable(index)) return [];
+    const weeks = index?.attributes?.available_gameweeks || Array.from({length:38},(_,index) => index + 1);
+    const fixtures = weeks.flatMap(week => {
+      const state = this._hass?.states?.[`${this._config.football.gameweek_entity_prefix}${week}`];
+      return isEntityAvailable(state) ? state.attributes?.events || [] : [];
+    });
+    return [...new Map(fixtures.map(fixture => [fixtureIdentity(fixture),fixture])).values()];
+  }
+
+  _clubOverviewModels() {
+    const {table} = this._footballState(), fixtures = this._allFootballFixtures();
+    return buildFavouriteClubModels(fixtures,this._config.football.spotlight_team_codes,table?.attributes?.rows || []).map(model => {
+      const own = fixtures.filter(fixture => fixtureIncludesTeam(fixture,model.code));
+      const byTime = (a,b) => new Date(a.kickoff_time) - new Date(b.kickoff_time);
+      return {...model,live:own.find(fixture => normaliseFixtureStatus(fixture) === "live"),latest:own.filter(fixture => normaliseFixtureStatus(fixture) === "finished").sort(byTime).at(-1),next:own.filter(fixture => normaliseFixtureStatus(fixture) === "upcoming").sort(byTime)[0]};
+    });
+  }
+
+  _renderClubOverview(model, compact = false) {
+    const result = model.live || model.latest, next = model.next;
+    const presentation = this._clubPresentation(model.code);
+    const opponent = fixture => footballTeamCode(fixture.home) === model.code ? fixture.away : fixture.home;
+    const matchTitle = fixture => compact ? `${compactClubName(fixture.home)} vs ${compactClubName(fixture.away)}` : `vs ${compactClubName(opponent(fixture))}`;
+    const score = fixture => compact || footballTeamCode(fixture.home) === model.code ? `${fixture.home_score ?? "–"}–${fixture.away_score ?? "–"}` : `${fixture.away_score ?? "–"}–${fixture.home_score ?? "–"}`;
+    const detail = fixture => `${formatDay(fixture.kickoff_time,this._config.product.locale,this._config.product.timezone)} · ${formatTime(fixture.kickoff_time,this._config.product.locale,this._config.product.timezone)}`;
+    const resultStatus = model.live ? `LIVE · ${result.minutes || 0}'` : "Latest result · Full time";
+    return `<article class="club-overview ${compact ? "is-compact" : ""}" data-favourite-code="${escapeHtml(model.code)}"><header>${this._renderTeamMark(model.team,"favourite")}<div><h2>${escapeHtml(presentation.label)}</h2>${compact ? "" : '<small>Your club</small>'}</div></header>${compact ? "" : `<p class="eyebrow">${escapeHtml(resultStatus)}</p>`}<button type="button" class="club-match-row" data-view="football" ${result ? `data-fixture-id="${escapeHtml(result.id ?? "")}" data-favourite-code="${escapeHtml(model.code)}" data-fixture-status="${normaliseFixtureStatus(result)}"` : ""}><span><strong>${result ? escapeHtml(matchTitle(result)) : "Fixture data unavailable"}</strong><small>${compact ? escapeHtml(result ? resultStatus : "Waiting for fixtures") : result ? escapeHtml(formatDay(result.kickoff_time,this._config.product.locale,this._config.product.timezone)) : "Home Assistant will retry"}</small></span><b>${result ? score(result) : "—"}</b></button><button type="button" class="club-match-row club-next-row" data-view="football" ${next ? `data-fixture-id="${escapeHtml(next.id ?? "")}" data-favourite-code="${escapeHtml(model.code)}" data-fixture-status="upcoming"` : ""}><span><strong>${next ? escapeHtml(compact ? matchTitle(next) : detail(next)) : "Next fixture to be announced"}</strong><small>${next ? escapeHtml(compact ? "Next fixture" : `${footballTeamCode(next.home) === model.code ? "Home against" : "Away at"} ${compactClubName(footballTeamCode(next.home) === model.code ? next.away : next.home)}`) : "No upcoming fixture loaded"}</small></span>${compact && next ? `<small>${escapeHtml(detail(next))}</small>` : outlineIcon("calendar")}</button></article>`;
+  }
+
   _featuredFixtures() {
-    const { index } = this._footballState();
-    if (!isEntityAvailable(index)) {
-      return {
-        title: this._config.football.spotlight_team_codes.join(" & "),
-        html: this._config.football.spotlight_team_codes
-          .map((code) => this._renderCompactUnavailableFavourite(code))
-          .join("")
-      };
-    }
-    const configuredWeeks = Array.isArray(index.attributes?.available_gameweeks)
-      ? index.attributes.available_gameweeks
-      : Array.from({ length: 38 }, (_, offset) => offset + 1);
-    const gameweekStates = configuredWeeks
-      .map((gameweek) => this._hass?.states?.[`${this._config.football.gameweek_entity_prefix}${gameweek}`])
-      .filter(isEntityAvailable);
-    if (!gameweekStates.length) {
-      return {
-        title: this._config.football.spotlight_team_codes.join(" & "),
-        html: this._config.football.spotlight_team_codes
-          .map((code) => this._renderCompactUnavailableFavourite(code))
-          .join("")
-      };
-    }
-    const fixtures = gameweekStates.flatMap((state) => Array.isArray(state.attributes?.events) ? state.attributes.events : []);
-    const selected = selectHomeFootballFixtures(fixtures, this._config.football.spotlight_team_codes);
-    const models = buildFavouriteClubModels(fixtures, this._config.football.spotlight_team_codes);
-    const html = selected.map((fixture) => {
-      const favouriteCodes = this._config.football.spotlight_team_codes.filter((code) => fixtureIncludesTeam(fixture, code));
-      return this._renderCompactFixture(fixture, {
-        derby: favouriteCodes.length > 1,
-        favouriteCode: favouriteCodes.join(" ")
-      });
-    }).join("") + models.filter((model) => !selected.some((fixture) => fixtureIncludesTeam(fixture, model.code)))
-      .map((model) => this._renderCompactFavourite(model)).join("");
-    return {
-      title: this._favouriteTitle(models),
-      fixtureCount: selected.length,
-      html: html || '<p class="hub-empty-state">No favourite clubs are configured yet.</p>'
-    };
+    const models = this._clubOverviewModels();
+    return {title:this._favouriteTitle(models),fixtureCount:new Set(models.flatMap(model => [model.live || model.latest,model.next]).filter(Boolean).map(fixtureIdentity)).size,html:models.map(model => this._renderClubOverview(model,true)).join("")};
   }
 
   _renderCompactFixture(fixture, { favouriteCode = "", derby = false } = {}) {
@@ -4588,59 +4600,15 @@ export class FamilyHubCard extends HTMLElementBase {
     const events = gameweekState?.attributes?.events || [];
     const available = index?.attributes?.available_gameweeks || Array.from({ length: 38 }, (_, position) => position + 1);
     const fixtureDataAvailable = isEntityAvailable(index) && isEntityAvailable(gameweekState);
-    const favouriteModels = buildFavouriteClubModels(
-      events,
-      this._config.football.spotlight_team_codes,
-      isEntityAvailable(table) ? table.attributes?.rows || [] : []
-    );
-    const derbyFixture = favouriteDerbyFixture(favouriteModels);
-    const hasLiveFavourite = favouriteModels.some((model) => model.status === "live");
-    const indexFreshness = footballFreshness(index);
-    const freshness = !isEntityAvailable(index)
-      ? indexFreshness
-      : !isEntityAvailable(gameweekState)
-        ? {
-          status: "waiting",
-          title: "Waiting for fixtures",
-          detail: "The selected matchweek has not arrived yet."
-        }
-        : indexFreshness;
-    const checkedLabel = index?.attributes?.last_checked
-      ? `Checked ${formatTime(index.attributes.last_checked, this._config.product.locale, this._config.product.timezone)}`
-      : "Awaiting first check";
     this._gameweek = gameweek;
-    return `
-      <section class="football-experience ${this._footballTab === "fpl" ? "is-fpl" : ""}">
-        <article class="football-favourites-stage ${hasLiveFavourite ? "is-live" : ""}">
-          <div class="football-hero-heading"><div><p class="eyebrow">Premier League · Matchweek ${gameweek}</p><h2>${escapeHtml(this._favouriteTitle(favouriteModels))}</h2></div><span class="football-freshness is-${freshness.status}"><i></i><span><strong>${escapeHtml(freshness.title)}</strong><small>${escapeHtml(freshness.status === "live" ? `${freshness.detail} ${checkedLabel}.` : `${checkedLabel}.`)}</small></span></span></div>
-          ${freshness.status === "live" ? "" : `<p class="football-health-note is-${freshness.status}" role="status">${escapeHtml(freshness.detail)}</p>`}
-          <div class="favourite-hero-grid">${fixtureDataAvailable
-            ? derbyFixture ? this._renderDerbyHero(favouriteModels, derbyFixture) : favouriteModels.map((model) => this._renderFavouriteHero(model)).join("")
-            : this._config.football.spotlight_team_codes.map((code) => this._renderUnavailableFavourite(code)).join("")}</div>
-        </article>
-        <div class="football-layout ${this._footballTab === "fpl" ? "is-fpl" : ""}">
-          <article class="surface football-main">
-          <div class="football-toolbar">
-            <div><p class="eyebrow">${this._footballTab === "fpl" ? "Fantasy Premier League" : "Match centre"}</p><h2>${this._footballTab === "fpl" ? "Our teams" : `Matchweek ${gameweek}`}</h2></div>
-            ${this._footballTab === "fpl" ? '<span class="football-toolbar-spacer"></span>' : `<div class="matchweek-controls">
-              <button type="button" data-gameweek="${Math.max(1, gameweek - 1)}" ${gameweek <= 1 ? "disabled" : ""} aria-label="Previous matchweek"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
-              <label><span class="sr-only">Choose matchweek</span><span class="select-shell"><select data-gameweek-select>${available.map((entry) => `<option value="${entry}" ${entry === gameweek ? "selected" : ""}>MW ${entry}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span></label>
-              <button type="button" data-gameweek="${Math.min(38, gameweek + 1)}" ${gameweek >= 38 ? "disabled" : ""} aria-label="Next matchweek"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
-            </div>`}
-            <div class="segments football-tabs" role="group" aria-label="Football view">
-              <button type="button" class="segment ${this._footballTab === "fixtures" ? "is-selected" : ""}" data-football-tab="fixtures" aria-pressed="${this._footballTab === "fixtures"}">Fixtures</button>
-              <button type="button" class="segment ${this._footballTab === "table" ? "is-selected" : ""}" data-football-tab="table" aria-pressed="${this._footballTab === "table"}">Table</button>
-              <button type="button" class="segment ${this._footballTab === "fpl" ? "is-selected" : ""}" data-football-tab="fpl" aria-pressed="${this._footballTab === "fpl"}">Our FPL</button>
-            </div>
-          </div>
-          ${this._footballTab === "fpl" ? this._renderFplTeams() : this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(events, fixtureDataAvailable)}
-          </article>
-          ${this._footballTab === "fpl" ? "" : `<aside class="football-sidebar">
-            ${this._renderFavouriteStandings(favouriteModels)}
-          </aside>`}
-        </div>
-      </section>
-    `;
+    const models = this._clubOverviewModels();
+    const tabs = [["fixtures","Fixtures"],["results","Results"],["table","Table"],["fpl","FPL"]];
+    const shown = this._footballTab === "results" ? events.filter(fixture => normaliseFixtureStatus(fixture) === "finished") : events;
+    return `<section class="football-experience ${this._footballTab === "fpl" ? "is-fpl" : ""}">
+
+      <div class="football-club-overviews">${models.map(model => this._renderClubOverview(model)).join("")}</div>
+      <div class="football-layout ${this._footballTab === "fpl" ? "is-fpl" : ""}"><article class="football-main"><div class="segments football-tabs" role="group" aria-label="Football view">${tabs.map(([id,label]) => `<button type="button" class="segment ${this._footballTab === id ? "is-selected" : ""}" data-football-tab="${id}" aria-pressed="${this._footballTab === id}">${label}</button>`).join("")}</div><div class="football-toolbar"><h2>${this._footballTab === "results" ? "Results" : this._footballTab === "table" ? "Premier League" : this._footballTab === "fpl" ? "Our teams" : "Matchweek fixtures"}</h2>${this._footballTab === "fpl" ? "" : `<div class="matchweek-controls"><button type="button" data-gameweek="${Math.max(1,gameweek-1)}" ${gameweek <= 1 ? "disabled" : ""} aria-label="Previous matchweek"><ha-icon icon="mdi:chevron-left"></ha-icon></button><label><span class="sr-only">Choose matchweek</span><select data-gameweek-select>${available.map(week => `<option value="${week}" ${week === gameweek ? "selected" : ""}>Matchweek ${week}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down"></ha-icon></label><button type="button" data-gameweek="${Math.min(38,gameweek+1)}" ${gameweek >= 38 ? "disabled" : ""} aria-label="Next matchweek"><ha-icon icon="mdi:chevron-right"></ha-icon></button></div>`}</div>${this._footballTab === "fpl" ? this._renderFplTeams() : this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(shown,fixtureDataAvailable)}</article></div>
+    </section>`;
   }
 
   _renderFixtures(events, available = true) {
@@ -4674,7 +4642,7 @@ export class FamilyHubCard extends HTMLElementBase {
     ];
     const favouriteCodes = this._config.football.spotlight_team_codes.filter((code) => fixtureIncludesTeam(fixture, code));
     return `
-      <div class="fixture ${fixture.spotlight ? "is-spotlight" : ""} ${status === "live" ? "is-live" : ""} ${favouriteCodes.length > 1 ? "is-family-derby" : ""}"${favouriteCodes.length ? ` data-favourite-code="${escapeHtml(favouriteCodes.join(" "))}"` : ""}>
+      <div data-fixture-id="${escapeHtml(String(fixture.id || fixtureIdentity(fixture)))}" data-fixture-status="${status}" class="fixture ${fixture.spotlight ? "is-spotlight" : ""} ${status === "live" ? "is-live" : ""} ${favouriteCodes.length > 1 ? "is-family-derby" : ""}"${favouriteCodes.length ? ` data-favourite-code="${escapeHtml(favouriteCodes.join(" "))}"` : ""}>
         <span class="team home-team">${this._renderTeamMark(fixture.home)}<span>${escapeHtml(fixture.home?.name || "Home")}</span></span>
         <strong class="fixture-score">${escapeHtml(score)}<small>${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "FT" : ""}</small></strong>
         <span class="team away-team"><span>${escapeHtml(fixture.away?.name || "Away")}</span>${this._renderTeamMark(fixture.away)}</span>
@@ -5560,6 +5528,14 @@ export class FamilyHubCard extends HTMLElementBase {
       }
       return;
     }
+    if (target.dataset.focusAddPrep) {
+      const input = [...this.shadowRoot.querySelectorAll("[data-focus-prep-input]")].find(node => node.dataset.focusPrepInput === target.dataset.focusAddPrep);
+      if (input?.value?.trim()) {
+        void this._addCustomPreparationForEvent(target.dataset.focusAddPrep,target.dataset.preparationPerson,input.value);
+        input.value = "";
+      }
+      return;
+    }
     if (target.dataset.addPreparation) {
       void this._addPreparationForEvent(target.dataset.addPreparation, target.dataset.preparationTemplate, target.dataset.preparationPerson);
       return;
@@ -5660,7 +5636,7 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     if (target.dataset.footballTab) {
-      if (!new Set(["fixtures", "table", "fpl"]).has(target.dataset.footballTab)) return;
+      if (!new Set(["fixtures", "results", "table", "fpl"]).has(target.dataset.footballTab)) return;
       this._footballTab = target.dataset.footballTab;
       this._scheduleRender(true);
       return;
