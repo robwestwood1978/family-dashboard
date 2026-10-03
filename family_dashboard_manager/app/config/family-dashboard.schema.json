@@ -53,6 +53,7 @@
       ],
       "properties": {
         "orientation": { "enum": ["landscape", "portrait"] },
+        "appearance": { "enum": ["light", "dark", "auto"] },
         "kiosk": { "type": "boolean" },
         "legacy_ios": { "type": "boolean" },
         "read_only": { "type": "boolean" },

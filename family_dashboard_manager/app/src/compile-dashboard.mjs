@@ -47,10 +47,7 @@ export function compileDashboard(candidate) {
   if (config.display.kiosk) {
     lines.push(
       "kiosk_mode:",
-      "  non_admin_settings:",
-      "    kiosk: true",
-      "  admin_settings:",
-      "    kiosk: false"
+      "  kiosk: true"
     );
   }
 

@@ -68,10 +68,10 @@ test("embeds the complete schema-v7 house, family, school, cleaning and Security
   ]);
 });
 
-test("keeps kiosk mode bounded so administrators retain the Home Assistant escape", () => {
+test("uses kiosk mode for every account while retaining the explicit disable_km escape", () => {
   const yaml = compileDashboard(example);
-  assert.match(yaml, /non_admin_settings:\n    kiosk: true/);
-  assert.match(yaml, /admin_settings:\n    kiosk: false/);
+  assert.match(yaml, /kiosk_mode:\n  kiosk: true/);
+  assert.doesNotMatch(yaml, /admin_settings/);
 });
 
 test("keeps Security inside the first-party confirmation boundary", () => {

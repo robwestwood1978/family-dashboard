@@ -440,3 +440,16 @@ test("rejects unknown fields through the production schema gate", () => {
   config.rooms[0].invented_control = "switch.unknown";
   assert.throws(() => validateConfig(config), /invented_control: must NOT have additional properties/);
 });
+
+
+test("allows an explicit dashboard appearance without requiring it in existing households", () => {
+  for (const appearance of [undefined, "light", "dark", "auto"]) {
+    const config = structuredClone(example);
+    if (appearance) config.display.appearance = appearance;
+    else delete config.display.appearance;
+    assert.equal(validateConfig(config).schema_version, CURRENT_SCHEMA_VERSION);
+  }
+  const invalid = structuredClone(example);
+  invalid.display.appearance = "sepia";
+  assert.throws(() => validateConfig(invalid), /appearance/);
+});

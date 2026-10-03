@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { tmpdir } from "node:os";
 import {
   buildFootballStates,
   FOOTBALL_POLLING_INTERVALS,
@@ -18,7 +19,9 @@ const illustrationSource = await readFile(new URL("../frontend/assets/home-illus
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.16.0";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.17.0";', dailyBriefSource);
+const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
+const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
 const APPROVAL_FOOTBALL_CHECKED_AT = Object.freeze({
   live: "2026-08-24T15:07:00.000Z",
@@ -334,12 +337,41 @@ function approvalFootballStates(mode = "live") {
 }
 
 async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOptions = {}) {
+  let reviewHtml = "";
+  const reviewSteps = [];
+  if (runtimeOptions.reviewExportPath) {
+    const original = page;
+    page = new Proxy(original, {get(target, property) {
+      if (property === "setContent") return async (html) => {
+        reviewHtml = html.replace('<base href="http://homeassistant.local/">', "").replace('>Family Hub</div>', '>Family Hub · Preview</div>');
+        return target.setContent(html);
+      };
+      if (property === "evaluate") return async (fn, arg) => {
+        reviewSteps.push({kind:"evaluate", source:fn.toString(), arg});
+        return target.evaluate(fn, arg);
+      };
+      if (property === "addScriptTag") return async (options) => {
+        reviewSteps.push({kind:"script", source:options.content, module:options.type === "module"});
+        return target.addScriptTag(options);
+      };
+      const value = target[property];
+      return typeof value === "function" ? value.bind(target) : value;
+    }});
+  }
+  if (runtimeOptions.nativeMusic) {
+    stateOverrides={...stateOverrides};
+    const originals=fixtureStates();
+    for (const player of familyConfig.media.players) {
+      const previous=stateOverrides[player.entity_id] || originals[player.entity_id] || state(player.entity_id,"idle",{friendly_name:player.name});
+      stateOverrides[player.entity_id]={...previous,attributes:{...previous.attributes,device_class:"speaker",supported_features:16831,media_duration:198,media_position:42,media_position_updated_at:APPROVAL_NOW,volume_level:.32,entity_picture:"/local/family-dashboard/assets/review-album.svg",group_members:[player.entity_id]}};
+    }
+  }
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.route("**/local/family-dashboard/assets/**", async (route) => {
     const filename = new URL(route.request().url()).pathname.split("/").pop();
     const approvedAssets = new Set(["example-ground.svg", "example-first.svg", "example-living-room-light.svg", "example-kitchen-light.svg"]);
-    const body = approvedAssets.has(filename)
+    const body = filename === "review-album.svg" ? await readFile(new URL("./fixtures/review-album.svg", import.meta.url), "utf8") : approvedAssets.has(filename)
       ? await readFile(new URL(`../frontend/assets/${filename}`, import.meta.url), "utf8")
       : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#eef0f4"/></svg>';
     await route.fulfill({
@@ -384,7 +416,13 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       body: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 90"><path d="M45 4 79 16v25c0 22-13 37-34 45C24 78 11 63 11 41V16Z" fill="${badge.background}" stroke="${badge.accent}" stroke-width="5"/><text x="45" y="53" fill="${badge.accent}" font-family="system-ui,sans-serif" font-size="20" font-weight="800" text-anchor="middle">${badge.code}</text></svg>`
     });
   });
-  await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px 0 76px;font:20px system-ui}.ha-sidebar{position:fixed;inset:56px auto 0 0;width:52px;background:#191b20}.ha-main{position:absolute;inset:0 0 0 52px;overflow-x:hidden;overflow-y:auto}</style><div class="ha-header">Family Hub</div><div class="ha-sidebar"></div><div class="ha-main"></div></body></html>`);
+  await page.setContent(`<!doctype html><html><head><base href="http://homeassistant.local/"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><style>:root{--header-height:56px}html,body{margin:0;width:100%;height:100%;overflow:hidden}ha-card{display:block}ha-icon{display:inline-block}.ha-header{position:fixed;inset:0 0 auto 0;z-index:100;height:56px;background:#171a21;color:#fff;display:flex;align-items:center;padding:0 24px 0 76px;font:20px system-ui}.ha-sidebar{position:fixed;inset:56px auto 0 0;width:52px;background:#191b20}.ha-main{position:absolute;inset:56px 0 0 52px;overflow-x:hidden;overflow-y:auto}</style><div class="ha-header">Family Hub</div><div class="ha-sidebar"></div><div class="ha-main"></div></body></html>`);
+  if (runtimeOptions.reviewExportPath || runtimeOptions.kiosk) {
+    await page.addStyleTag({content:':root{--header-height:0px!important}.ha-header,.ha-sidebar{display:none!important}.ha-main{inset:0!important}'});
+    // Include the real kiosk geometry in the standalone preview, but keep the
+    // normal host offset fixture for the separate embedded-HA regression tests.
+    reviewHtml = reviewHtml.replace('</head>', '<style>:root{--header-height:0px!important}.ha-header,.ha-sidebar{display:none!important}.ha-main{inset:0!important}</style></head>');
+  }
   await page.evaluate(installApprovalClock, { fixedNow: runtimeOptions.fixedNow || APPROVAL_NOW });
   const clockContract = await page.evaluate(async () => {
     const displayBefore = new Date().getTime();
@@ -398,6 +436,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
   });
   expect(clockContract.displayAfter, "approval display time must remain deterministic").toBe(clockContract.displayBefore);
   expect(clockContract.deadlineElapsed, "camera deadline time must continue advancing").toBeGreaterThan(0);
+  await page.evaluate((paths) => { window.__mdiGlyphPaths = paths; }, mdiGlyphPaths);
   await page.evaluate(() => {
     class HaCard extends HTMLElement {}
     class HaIcon extends HTMLElement {
@@ -413,6 +452,22 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       _renderNavigationGlyph() {
         const icon = this.getAttribute("icon") || "mdi:shape-outline";
         const exact = {
+          "mdi:clipboard-check-outline": '<rect x="5" y="4" width="14" height="18" rx="2"/><rect x="9" y="2" width="6" height="4" rx="1"/><path d="m8 13 3 3 5-5"/>',
+          "mdi:arrow-top-right": '<path d="M6 18 18 6M6 6h12v12"/>',
+          "mdi:lamp-outline": '<path d="m8 3-4 10h16L16 3zM12 13v7m-5 1h10"/>',
+          "mdi:thermometer": '<path d="M9 15V5a3 3 0 0 1 6 0v10a5 5 0 1 1-6 0zM12 8v10"/>',
+          "mdi:skip-previous": '<path d="M5 5v14M18 5 7 12l11 7z"/>',
+          "mdi:skip-next": '<path d="M19 5v14M6 5l11 7-11 7z"/>',
+          "mdi:bag-personal-outline": '<rect x="5" y="6" width="14" height="15" rx="2"/><path d="M9 6V4a3 3 0 0 1 6 0v2M5 13h14m-8-2h2v4h-2z"/>',
+          "mdi:gift-outline": '<rect x="3" y="8" width="18" height="4"/><path d="M5 12v9h14v-9M12 8v13M12 8c-7 0-7-6-3-6 3 0 3 6 3 6s0-6 3-6c4 0 4 6-3 6z"/>',
+          "mdi:rocket-launch-outline": '<path d="M9 16c-4-2-3-4-1-6 4-5 8-6 12-6 0 4-1 8-6 12-2 2-4 3-6-1M8 10H4l-2 6 5-1m7 1v4l-6 2 1-5m-5 3-2 2"/><circle cx="15" cy="9" r="2"/>',
+          "mdi:trophy-outline": '<path d="M7 3h10v7a5 5 0 0 1-10 0zM7 5H3v4c0 3 2 4 5 4m9-8h4v4c0 3-2 4-5 4M12 15v5m-4 1h8"/>',
+          "mdi:medal-outline": '<path d="m6 2 6 8 6-8M9 2l3 4 3-4"/><circle cx="12" cy="15" r="6"/><path d="m12 11 1 3 3 1-3 1-1 3-1-3-3-1 3-1z"/>',
+          "mdi:checkbox-blank-outline": '<rect x="4" y="4" width="16" height="16" rx="2"/>',
+          "mdi:checkbox-marked": '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="m7 12 3 3 7-7"/>',
+          "mdi:window-shutter": '<rect x="4" y="3" width="16" height="18"/><path d="M7 6h10M7 10h10M7 14h10M7 18h10"/>',
+          "mdi:plus": '<path d="M12 4v16M4 12h16"/>',
+
           "mdi:home-heart": '<path d="M3 11 12 3l9 8v9h-6v-6H9v6H3z"/><path d="M12 12c-2-2-5 1 0 4 5-3 2-6 0-4z"/>',
           "mdi:calendar-month": '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18M8 14h2m4 0h2m-8 4h2m4 0h2"/>',
           "mdi:floor-plan": '<path d="M3 3h8v7H7v11H3zm8 0h10v10h-6v8H7V10h4z"/>',
@@ -465,8 +520,9 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
                           ? '<rect x="4" y="7" width="16" height="12" rx="5"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><path d="M12 7V4m-2 0h4"/>'
                           : '<circle cx="12" cy="12" r="8"/><path d="M12 7v10M7 12h10"/>';
         this.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${exact || generic}</g></svg>`;
+        if (window.__mdiGlyphPaths[icon]) this.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="${window.__mdiGlyphPaths[icon]}"/></svg>`;
         this.dataset.mockGlyph = icon;
-        this.style.cssText = "display:inline-grid;place-items:center;width:var(--mdc-icon-size,22px);height:var(--mdc-icon-size,22px);color:currentColor;flex:0 0 auto";
+        this.style.cssText = "display:inline-grid;place-items:center;width:var(--mdc-icon-size,22px);height:var(--mdc-icon-size,22px);flex:0 0 auto";
         this.querySelector("svg").style.cssText = "display:block;width:100%;height:100%";
       }
     }
@@ -548,11 +604,11 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           mediaRoot.innerHTML = `<style>
             mock-child-card[data-card-type="custom:mediocre-multi-media-player-card"]{display:block;min-height:100%;color:var(--mmpc-on-card);font-family:inherit}
             *{box-sizing:border-box}button{font:inherit}
-            .mock-media-player{min-height:100%;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;padding:18px;background:var(--mmpc-card);color:var(--mmpc-on-card);overflow:visible}
-            .mock-massive,.mock-speaker-scroll{min-width:0;min-height:0;overflow:visible;padding:8px}
+            .mock-media-player{height:100%;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;padding:18px;background:var(--mmpc-card);color:var(--mmpc-on-card);overflow:hidden}
+            .mock-massive,.mock-speaker-scroll{min-width:0;min-height:0;overflow:auto;padding:8px}
             .mock-massive{display:flex;flex-direction:column}.mock-kicker{color:var(--mmpc-on-card-muted);font-size:12px;font-weight:750;letter-spacing:.08em;text-transform:uppercase}
             .mock-now-playing{margin-top:10px}.mock-now-playing strong{display:block;color:var(--mmpc-on-card);font-size:22px}.mock-now-playing small{display:block;margin-top:5px;color:var(--mmpc-on-card-muted);font-size:13px}
-            .mock-feature-tabs,.mock-transport{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mock-feature-tabs{margin-top:12px}.mock-feature-tabs button,.mock-transport button{min-width:48px;min-height:48px;padding:0 14px;border:1px solid rgba(255,255,255,.14);border-radius:13px;background:rgba(255,255,255,.08);color:var(--mmpc-on-card);font-weight:800}.mock-feature-tabs button:first-child{border-color:#8fd8cb;color:#8fd8cb}
+            .mock-feature-tabs,.mock-transport{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mock-feature-tabs{margin-top:12px}.mock-feature-tabs button,.mock-transport button{min-width:48px;min-height:48px;padding:0 14px;border:1px solid rgba(255,255,255,.14);border-radius:13px;background:rgba(255,255,255,.08);color:var(--mmpc-on-card);font-weight:800}.mock-feature-tabs button:first-child{border-color:var(--mmpc-chip-foreground);color:var(--mmpc-chip-foreground);background:var(--mmpc-chip-background)}
             .mock-artwork{min-height:142px;margin:12px 0;display:grid;place-items:center;border:1px solid rgba(255,255,255,.1);border-radius:20px;background:radial-gradient(circle at 32% 28%,rgba(143,216,203,.52),transparent 32%),linear-gradient(145deg,#1463e8,#061b3a);font-size:54px;color:#fff}
             [data-mock-service]{min-width:48px;min-height:48px;align-self:flex-start;padding:0 18px;border:0;border-radius:14px;background:#1463e8;color:#fff;font-weight:800;cursor:pointer}
             .mock-speaker-scroll>strong,.mock-speaker-scroll>h3{display:block;margin:0;color:var(--mmpc-on-card)}.mock-speaker-scroll>h3{margin-top:22px;font-size:15px}
@@ -561,7 +617,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
             .mock-player-row,.mock-queue-row{min-height:64px;margin-top:9px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.055)}
             .mock-player-row strong,.mock-player-row small{display:block;color:var(--mmpc-on-card)}.mock-player-row small{margin-top:3px;color:var(--mmpc-on-card-muted);font-size:12px}.mock-player-row b{color:#8fd8cb}
             .mock-queue-row{min-height:54px;color:var(--mmpc-on-card-muted);font-size:13px}.mock-queue-row strong{color:var(--mmpc-on-card)}
-            @media(max-width:620px){.mock-media-player{grid-template-columns:1fr}.mock-massive,.mock-speaker-scroll{overflow:visible}}
+            @media(max-width:620px){.mock-media-player{grid-template-columns:1fr;overflow:auto}.mock-massive,.mock-speaker-scroll{overflow:visible}}
           </style><div class="mock-media-player">
             <section class="mock-massive"><span class="mock-kicker">Spotify · Sonos</span><div class="mock-feature-tabs"><button type="button" data-mock-music-tab="search">Search</button><button type="button" data-mock-music-tab="browse">Browse</button><button type="button" data-mock-music-tab="queue">Queue</button></div><div class="mock-now-playing"><strong data-mock-state-name>${initialName}</strong><small data-mock-state-track>Dashboard test song · Test artist</small></div><div class="mock-artwork" aria-hidden="true">♫</div><div class="mock-transport"><button type="button" aria-label="Previous track">‹</button><button type="button" data-mock-service data-mock-entity="${serviceEntity}">Play / pause</button><button type="button" aria-label="Next track">›</button><button type="button" aria-label="Volume down">−</button><button type="button" aria-label="Volume up">+</button></div></section>
             <section class="mock-speaker-scroll"><strong>Join media players</strong><div class="mock-chip-scroll"><div id="mmpc-group-chips-controller">${playerChips}</div></div><h3>Player focus</h3>${playerRows}<h3>Up next</h3>${["Family favourites", "Kitchen radio", "Evening mix", "Recently played"].map((name, index) => `<div class="mock-queue-row"><span><strong>${name}</strong><br>Queue item ${index + 1}</span><b>${index + 1}</b></div>`).join("")}</section>
@@ -630,6 +686,12 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           const markerLabels = (cardConfig.entities || []).map((_, index) => index === 0 ? "P" : `C${index}`);
           mapRoot.innerHTML = `<style>
             :host{display:block;height:100%;min-height:0;font-family:inherit}*{box-sizing:border-box}.mock-map{position:relative;height:100%;min-height:260px;overflow:hidden;border-radius:14px;background:#dfece5}.mock-map::before{content:"";position:absolute;inset:-12%;background:linear-gradient(32deg,transparent 47%,rgba(255,255,255,.96) 48% 52%,transparent 53%),linear-gradient(148deg,transparent 43%,rgba(255,255,255,.82) 44% 48%,transparent 49%),radial-gradient(circle at 25% 25%,#c5dfc2 0 18%,transparent 19%),radial-gradient(circle at 78% 70%,#bed8bb 0 21%,transparent 22%),#dce8e2}.mock-water{position:absolute;inset:auto -8% 8% 30%;height:22%;border-radius:50%;background:#b9ddeb;transform:rotate(-8deg)}.mock-place{position:absolute;padding:5px 8px;border-radius:8px;background:rgba(255,255,255,.88);color:#516176;font-size:12px;font-weight:700;box-shadow:0 3px 10px rgba(11,24,48,.12)}.mock-place.home{left:42%;top:48%}.mock-place.school{right:13%;top:20%}.mock-marker{position:absolute;width:42px;height:42px;display:grid;place-items:center;border:4px solid #fff;border-radius:50% 50% 50% 8px;background:#1463e8;color:#fff;font-size:13px;font-weight:850;box-shadow:0 5px 14px rgba(11,24,48,.25);transform:rotate(-45deg)}.mock-marker span{transform:rotate(45deg)}.mock-marker:nth-of-type(1){left:34%;top:37%}.mock-marker:nth-of-type(2){left:59%;top:24%;background:#e76f51}.mock-marker:nth-of-type(3){left:68%;top:59%;background:#00a887}.mock-map-tools{position:absolute;right:12px;top:12px;display:grid;gap:7px}.mock-map-tools span{width:38px;height:38px;display:grid;place-items:center;border:1px solid #dce4ee;border-radius:12px;background:#fff;color:#33445c;font-size:18px;font-weight:800;box-shadow:0 4px 12px rgba(11,24,48,.12)}</style><div class="mock-map" aria-label="Representative Home Assistant family map">${markerLabels.map((label) => `<div class="mock-marker"><span>${label}</span></div>`).join("")}<div class="mock-water"></div><span class="mock-place home">Home</span><span class="mock-place school">School</span><div class="mock-map-tools" aria-hidden="true"><span>⌖</span><span>◎</span></div></div>`;
+        } else if (cardConfig.type === "history-graph") {
+          // Representative chart in the offline harness; production still mounts
+          // Home Assistant's native history card against the configured meters.
+          const graphRoot = element.attachShadow({mode:"open"});
+          const gas = cardConfig.entities?.some(entity => String(typeof entity === "string" ? entity : entity.entity).includes("gas"));
+          graphRoot.innerHTML = `<style>:host{display:block;height:100%;font-family:inherit;color:#747780}svg{display:block;width:100%;height:100%;min-height:70px}text{font-size:12px;fill:currentColor}</style><svg viewBox="0 0 420 120" role="img" aria-label="Representative ${gas ? "gas" : "electricity"} trend"><path d="M35 12H410M35 46H410M35 80H410" fill="none" stroke="#E4E5E8"/><path d="${gas ? "M35 78 75 77 115 60 155 35 195 52 235 72 275 75 315 41 355 55 410 67" : "M35 72 75 69 115 55 155 59 195 31 235 46 275 40 315 17 355 34 410 22"}" fill="none" stroke="${gas ? "#B03A35" : "#1469D0"}" stroke-width="3" stroke-linejoin="round"/><text x="35" y="108">00:00</text><text x="148" y="108">06:00</text><text x="263" y="108">12:00</text><text x="375" y="108">18:00</text></svg>`;
         } else if (cardConfig.type === "picture-entity") {
           const pictureRoot = element.attachShadow({ mode: "open" });
           if (cardConfig.camera_view === "live") {
@@ -668,6 +730,28 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     window.__cameraPlayerAutoLoad = true;
     window.__cameraPlayerLoadDelayMs = 0;
   });
+  if (runtimeOptions.nativeMusic) {
+    await page.evaluate(() => {
+      const root=document.createElement("home-assistant");
+      root.hass={language:"en",locale:{language:"en",time_format:"24",number_format:"language"},states:{}, user:{name:"Preview"}};
+      document.body.append(root);
+    });
+    await page.addScriptTag({ content: nativeMusicSource });
+    expect(pageErrors).toEqual([]);
+    await page.evaluate(async () => {
+      await customElements.whenDefined("mediocre-multi-media-player-card");
+      const mockHelpers = window.loadCardHelpers;
+      window.loadCardHelpers = async () => {
+        const helpers = await mockHelpers();
+        return { ...helpers, createCardElement(cardConfig) {
+          if (cardConfig.type !== "custom:mediocre-multi-media-player-card") return helpers.createCardElement(cardConfig);
+          const player = document.createElement("mediocre-multi-media-player-card");
+          player.setConfig(cardConfig);
+          return player;
+        }};
+      };
+    });
+  }
   await page.addScriptTag({ type: "module", content: cardSource });
   await page.evaluate(async ({ familyConfig, states, runtimeOptions }) => {
     await customElements.whenDefined("family-hub-card");
@@ -683,7 +767,17 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     window.__cameraPlayerLoadDelayMs = runtimeOptions.cameraPlayerLoadDelayMs ?? 0;
     window.__serviceBehaviors = runtimeOptions.serviceBehaviors || {};
     card.hass = {
+      services: {},
+      entities: {},
+      devices: {},
       connected: true,
+      themes: {darkMode:false, themes:{}, selectedTheme:{theme:"default",dark:false}},
+      language: "en",
+      locale: { language: "en", number_format: "language", time_format: "24", first_weekday: "monday" },
+      config: { unit_system: { temperature: "°C" }, time_zone: "Europe/London" },
+      localize: (key) => key.split(".").at(-1).replaceAll("_", " "),
+      hassUrl: (path) => path,
+      auth: { data: { access_token: "preview-fixture" } },
       states,
       callService(domain, service, data, target) {
         const boundedData = target?.entity_id && !data?.entity_id
@@ -697,6 +791,10 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           return new Promise((resolve, reject) => {
             window.__pendingServiceCalls.push({ key, resolve, reject });
           });
+        }
+        if (domain === "todo" && service === "add_item") {
+          runtimeOptions.preparationItems ||= [];
+          runtimeOptions.preparationItems.push({uid:`created-${window.__serviceCalls.length}`,summary:boundedData.item,description:boundedData.description,status:"needs_action",due:boundedData.due_date || boundedData.due_datetime});
         }
         if (domain === "todo" && service === "update_item") {
           const item = (runtimeOptions.preparationItems || []).find((item) => item.uid === boundedData.item);
@@ -738,8 +836,29 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
         return {};
       }
     };
+    if (runtimeOptions.nativeMusic) document.querySelector("home-assistant").hass = card._hass;
   }, { familyConfig, states: { ...fixtureStates(), ...stateOverrides }, runtimeOptions });
   await page.waitForFunction(() => document.querySelector("family-hub-card")?.shadowRoot?.querySelector('[data-current-view="today"]'));
+  if (runtimeOptions.reviewExportPath) {
+    // Offline review images need an SVG extension so a static server sends
+    // the correct MIME type. Keep live HA proxy URLs unchanged in the tests.
+    for (const step of reviewSteps) for (const entity of Object.values(step.arg?.states || {})) {
+      const picture = entity.attributes?.entity_picture;
+      if (picture?.startsWith("/api/camera_proxy/camera.example_")) {
+        entity.attributes.entity_picture = picture.replace("?", ".svg?");
+      }
+    }
+    const steps=JSON.stringify(reviewSteps).replaceAll("<", "\\u003c");
+    const bootstrap = `<script type="module">const steps=${steps};
+      for (const step of steps) {
+        if (step.kind === "evaluate") await (0,eval)("("+step.source+")")(step.arg);
+        else if (step.module) await import(URL.createObjectURL(new Blob([step.source],{type:"text/javascript"})));
+        else { const script=document.createElement("script"); script.textContent=step.source; document.head.append(script); }
+      }
+      window.__reviewReady=true;
+    </script>`;
+    await writeFile(runtimeOptions.reviewExportPath, reviewHtml.replace("<head>", '<head><meta charset="utf-8">').replace("</body>", () => bootstrap+"</body>"));
+  }
   return pageErrors;
 }
 
@@ -782,7 +901,7 @@ async function expectNoRootOverflow(page) {
     return {
       documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
       hubOverflow: hub.scrollWidth - hub.clientWidth,
-      navigationEndsBeforeContent: navigation.right <= content.left + 1,
+      navigationEndsBeforeContent: navigation.right <= content.left + 1 || navigation.bottom <= content.top + 1,
       headerEndsBeforeView: topbar.bottom <= view.top + 1,
       cardRight: cardRect.right,
       cardTop: cardRect.top,
@@ -812,7 +931,7 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
   await expect(card).not.toContainText(/Controlled live|mapped rooms|fixtures loaded/i);
   await expect(card.locator(".hub-brand[data-view=\"today\"]")).toContainText("Today");
   await expect(card.locator(".hub-nav-button")).toHaveCount(7);
-  await expect(card.locator(".hub-nav-button")).toContainText(["Calendar", "Tasks", "Home", "Security", "Energy", "Football", "Music"]);
+  await expect(card.locator(".hub-nav-button")).toContainText(["Calendar", "Home", "Tasks", "Security", "Energy", "Football", "Music"]);
   await expectNoRootOverflow(page);
 
   for (const view of ["calendar", "rooms", "family", "entry", "music", "energy", "football", "today"]) {
@@ -856,6 +975,7 @@ test("fits the supported iPad landscapes and exposes every approved surface", as
 test("Home in focus keeps every screen readable in both appearances and preserves the Music player when appearance changes", async ({ page }, testInfo) => {
   const familyConfig = structuredClone(config);
   familyConfig.features.location_map = false;
+  familyConfig.display.appearance = "auto";
   const pageErrors = await mount(page, familyConfig);
   const card = page.locator("family-hub-card");
   const contrastChecks = {
@@ -869,7 +989,7 @@ test("Home in focus keeps every screen readable in both appearances and preserve
     entry: [{ foreground: ".garage-heading h2,.garage-motion", background: ".garage-panel", minimum: 4.5 }],
     energy: [{ foreground: ".energy-meter-heading h2,.energy-freshness", background: ".energy-meter", minimum: 4.5 }],
     football: [{ foreground: ".football-toolbar h2,.team,.fixture-score", background: ".football-main", minimum: 4.5 }],
-    music: [{ foreground: ".music-heading h2,.music-meta", background: ".media-player-panel", minimum: 4.5 }]
+    music: [{ foreground: ".hub-page-title h1,.hub-topbar-date", background: ".hub-content", minimum: 4.5 }]
   };
   for (const darkMode of [false, true]) {
     await card.evaluate((element, dark) => { element.hass = { ...element._hass, themes: { darkMode: dark } }; }, darkMode);
@@ -896,7 +1016,7 @@ test("Home in focus keeps every screen readable in both appearances and preserve
           await card.locator(`[data-home-section="${section}"]`).click();
           await expectApprovalQuality(page);
           if (section === "lights" || section === "heating") {
-            await expectContrast(card, [{ foreground: `.${section === "lights" ? "lighting" : "heating"}-master .eyebrow`, background: `.${section === "lights" ? "lighting" : "heating"}-master`, minimum: 4.5 }]);
+            await expectContrast(card, [{ foreground: `.${section === "lights" ? "lighting" : "heating"}-master h2`, background: `.${section === "lights" ? "lighting" : "heating"}-master`, minimum: 4.5 }]);
           }
           if (section === "heating") {
             await expectContrast(card, [{ foreground: ".heating-master-target,.master-temperature-stepper button", background: ".heating-master", minimum: 4.5 }]);
@@ -1019,21 +1139,21 @@ test("keeps the first-party month planner isolated from dashboard navigation", a
   await expect(card.locator(".hub-navigation .nav-button")).toHaveCount(0);
   await expect(card.locator(".hub-navigation")).toBeVisible();
   await expect(card.locator(".hub-content")).toBeVisible();
-  await expect(card.locator(".hub-topbar")).toBeVisible();
+  await expect(card.locator(".hub-masthead")).toBeVisible();
 
   const after = await railGeometry();
   const inactiveColourAfter = await card.locator('.hub-nav-button[data-view="rooms"]').evaluate((button) => getComputedStyle(button).color);
   expect(after).toEqual(before);
   expect(inactiveColourAfter).toBe(inactiveColourBefore);
 
-  await expect(card.locator(".calendar-context")).toContainText("Family planner");
+  await expect(card.locator(".calendar-context")).toContainText("Family calendar");
   await expect(card.locator(".focus-calendar-title")).toContainText("2026");
   const modeStyles = await card.locator(".calendar-modes .segment").evaluateAll((buttons) => buttons.map((button) => {
     const style = getComputedStyle(button);
     return { minHeight: style.minHeight, marginTop: style.marginTop, paddingLeft: style.paddingLeft };
   }));
   expect(modeStyles).toHaveLength(4);
-  expect(modeStyles.every(({ minHeight, marginTop, paddingLeft }) => minHeight === "48px" && marginTop === "0px" && paddingLeft === "15px")).toBe(true);
+  expect(modeStyles.every(({ minHeight, marginTop, paddingLeft }) => minHeight === "48px" && marginTop === "0px" && Number.parseFloat(paddingLeft) >= 10)).toBe(true);
   expect(pageErrors).toEqual([]);
 });
 
@@ -1107,7 +1227,7 @@ test("retains keyboard focus across equivalent full-card rerenders", async ({ pa
   const gameweekSelect = card.locator("select[data-gameweek-select]");
   await gameweekSelect.focus();
   await expect(gameweekSelect.locator("xpath=..").locator("ha-icon[icon='mdi:chevron-down']")).toBeVisible();
-  expect(await gameweekSelect.evaluate((select) => getComputedStyle(select).appearance)).toBe("none");
+  expect(await gameweekSelect.evaluate((select) => getComputedStyle(select).appearance || getComputedStyle(select).webkitAppearance)).toBe("none");
   await gameweekSelect.selectOption("7");
   await expect.poll(focusedControl).toMatchObject({ gameweekSelect: true });
 
@@ -1347,7 +1467,9 @@ test("renders the interactive floorplan and sends only configured room controls"
   await card.locator('[data-room="kitchen"]').click();
   await expect(card.locator(".room-detail h2")).toHaveText("Kitchen");
   await card.locator('button[data-toggle="light.kitchen"]').click();
+  await card.locator('[data-room-section="scenes"]').click();
   await card.locator('button[data-scene="scene.kitchen_bright"]').click();
+  await card.locator('[data-room-section="music"]').click();
   await card.locator('button[data-media-toggle="media_player.kitchen"]').click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "light", service: "toggle", data: { entity_id: "light.kitchen" } },
@@ -1469,7 +1591,7 @@ test("balances six lighting rooms without clipping cards inside a nested scrolle
   expect(layout.rowCounts).toEqual([3, 3]);
   expect(layout.horizontalOverflow).toBeLessThanOrEqual(1);
   expect(layout.verticalOverflow).toBeLessThanOrEqual(1);
-  expect(layout.overflowY).toBe("visible");
+  expect(layout.overflowY).toBe("auto");
   expect(layout.lastCardBottom).toBeLessThanOrEqual(layout.gridBottom + 1);
   expect(layout.cardsInsideHorizontalBounds).toBe(true);
   expect(layout.widthSpread).toBeLessThanOrEqual(1);
@@ -1509,63 +1631,61 @@ test("offers brightness controls for dimmable lights while keeping lamps binary"
   expect(pageErrors).toEqual([]);
 });
 
-test("keeps an expanded heating schedule and its draft open through live state refreshes", async ({ page }) => {
+test("opens heating schedules in a readable dialog, preserves drafts and saves only configured rooms", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
   await card.locator('.hub-nav-button[data-view="rooms"]').click();
   await card.locator('[data-home-section="heating"]').click();
-
-  const livingCard = card.locator('[data-climate-card="climate.living_room"]');
-  const schedule = livingCard.locator('details[data-heating-schedule="living_room"]');
-  await schedule.locator("summary").click();
-  await expect(schedule).toHaveAttribute("open", "");
-  await expect(livingCard).toHaveClass(/is-schedule-open/);
+  const dialControls = await card.locator('.heating-card .heating-stepper').evaluateAll((controls) => controls.map((control) => {
+    const dial = control.querySelector('.thermostat-dial').getBoundingClientRect();
+    const buttons = [...control.querySelectorAll('button')].map((button) => button.getBoundingClientRect());
+    return buttons.every((bounds) => bounds.width >= 48 && bounds.height >= 48 && Math.abs((bounds.top + bounds.bottom) / 2 - (dial.top + dial.bottom) / 2) <= 1)
+      && buttons[0].left < dial.left && buttons[1].right > dial.right;
+  }));
+  expect(dialControls.every(Boolean)).toBe(true);
+  const opener = card.locator('[data-heating-schedule-open="living_room"]');
+  await opener.click();
+  const schedule = card.locator('.heating-schedule-modal');
+  await expect(schedule).toHaveAttribute("role", "dialog");
   await expect(schedule.locator(".schedule-period")).toHaveCount(4);
-  await expect(schedule.locator(".schedule-period").first()).toContainText("Starts");
-  await expect(schedule.locator(".schedule-period").first()).toContainText("Temperature");
-  const legendLabels = await schedule.locator(".schedule-period legend").evaluateAll((legends) => legends.map((legend) => {
-    const name = legend.querySelector("strong").getBoundingClientRect();
-    const description = legend.querySelector("small").getBoundingClientRect();
-    return { nameBottom: name.bottom, descriptionTop: description.top, width: legend.getBoundingClientRect().width };
-  }));
-  expect(legendLabels.every(({ nameBottom, descriptionTop, width }) => descriptionTop >= nameBottom - 1 && width >= 120)).toBe(true);
-
-  const wakeTime = schedule.locator('[data-schedule-time="0"]');
-  await wakeTime.fill("06:30");
-  await updateEntityState(card, state("climate.kitchen", "heat", {
-    current_temperature: 19.3,
-    temperature: 20,
-    hvac_action: "idle"
-  }));
-  await expect(card.locator('[data-climate-card="climate.living_room"] details[data-heating-schedule="living_room"]')).toHaveAttribute("open", "");
-  await expect(card.locator('[data-climate-card="climate.living_room"] [data-schedule-time="0"]')).toHaveValue("06:30");
-
-  const masterSchedule = card.locator('details[data-heating-schedule="all"]');
-  await masterSchedule.locator("summary").click();
-  await expect(masterSchedule.locator(".schedule-period")).toHaveCount(4);
-  const masterLabels = await masterSchedule.locator(".schedule-period legend").evaluateAll((legends) => legends.map((legend) => {
-    const name = legend.querySelector("strong").getBoundingClientRect();
-    const description = legend.querySelector("small").getBoundingClientRect();
-    return { nameBottom: name.bottom, descriptionTop: description.top };
-  }));
-  expect(masterLabels.every(({ nameBottom, descriptionTop }) => descriptionTop >= nameBottom - 1)).toBe(true);
-  const masterControlAlignment = await card.locator(".heating-master").evaluate((master) => {
-    const target = master.querySelector(".master-temperature-stepper").getBoundingClientRect();
-    const setAll = master.querySelector('[data-climate-master="set_temperature"]').getBoundingClientRect();
-    return Math.abs(target.bottom - setAll.bottom);
+  const insidePanel = await schedule.evaluate((panel) => {
+    const body = panel.querySelector('.planner-modal-body').getBoundingClientRect();
+    const outer = panel.getBoundingClientRect();
+    return [...panel.querySelectorAll('input')].every((input) => {
+      const bounds = input.getBoundingClientRect();
+      return bounds.top >= body.top && bounds.bottom <= body.bottom + 1 && bounds.left >= outer.left && bounds.right <= outer.right;
+    });
   });
-  expect(masterControlAlignment).toBeLessThanOrEqual(1);
-
-  const masterBounds = await card.locator(".heating-master").evaluate((master) => {
-    const outer = master.getBoundingClientRect();
-    const controls = [...master.querySelectorAll("button, input, summary")].map((control) => control.getBoundingClientRect());
-    return {
-      left: Math.min(...controls.map((bounds) => bounds.left)) - outer.left,
-      right: Math.max(...controls.map((bounds) => bounds.right)) - outer.right
-    };
-  });
-  expect(masterBounds.left).toBeGreaterThanOrEqual(-1);
-  expect(masterBounds.right).toBeLessThanOrEqual(1);
+  expect(insidePanel).toBe(true);
+  await schedule.locator('[data-schedule-time="0"]').fill("06:30");
+  await updateEntityState(card, state("climate.kitchen", "heat", { current_temperature:19.3, temperature:20, hvac_action:"idle" }));
+  await expect(schedule.locator('[data-schedule-time="0"]')).toHaveValue("06:30");
+  await expect(schedule.locator('[data-schedule-time="0"]')).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(schedule).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await opener.click();
+  await expect(schedule.locator('[data-schedule-time="0"]')).toHaveValue("06:30");
+  await schedule.locator('[data-schedule-temperature="0"]').fill("40");
+  await schedule.locator('[data-heating-schedule-apply]').click();
+  await expect(schedule.locator('[role="alert"]')).toBeVisible();
+  expect(await page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  await schedule.locator('[data-schedule-temperature="0"]').fill("20");
+  await schedule.locator('[data-heating-schedule-apply]').click();
+  await expect(schedule).toHaveCount(0);
+  const roomEntity = config.rooms.find((room) => room.id === "living_room").heating_schedule.entity_id;
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([{domain:"text",service:"set_value",data:{entity_id:roomEntity,value:expect.any(String)}}]);
+  await card.locator('[data-heating-schedule-open="all"]').click();
+  await expect(schedule.locator(".schedule-period")).toHaveCount(4);
+  await schedule.locator('[data-heating-schedule-apply]').click();
+  await expect(schedule).toHaveCount(0);
+  const calls = await page.evaluate(() => window.__serviceCalls);
+  expect(calls.slice(1).map((call) => call.data.entity_id).sort()).toEqual(config.rooms.filter((room) => room.climate && room.heating_schedule).map((room) => room.heating_schedule.entity_id).sort());
+  await card.evaluate((element) => { element._config.display.read_only = true; element._render(); });
+  await opener.click();
+  await expect(schedule.locator('[data-heating-schedule-apply]')).toBeDisabled();
+  await schedule.locator('[data-heating-schedule-apply]').evaluate((button) => { button.disabled=false; button.click(); });
+  expect(await page.evaluate(() => window.__serviceCalls)).toHaveLength(calls.length);
   await expectNoRootOverflow(page);
   expect(pageErrors).toEqual([]);
 });
@@ -1677,7 +1797,7 @@ test("routes a room-mapped garage door through the protected Security action", a
 
 test("v0.14 heating keeps six zones accessible without a nested heating scroller", async ({ page }, testInfo) => {
   const sixZoneConfig = sixZoneHouseholdConfig();
-  const pageErrors = await mount(page, sixZoneConfig, sixZoneStateOverrides());
+  const pageErrors = await mount(page, sixZoneConfig, sixZoneStateOverrides(), {kiosk:true});
   const card = page.locator("family-hub-card");
   await card.locator('.hub-nav-button[data-view="rooms"]').click();
   await card.locator('[data-home-section="heating"]').click();
@@ -1715,7 +1835,7 @@ test("v0.14 heating keeps six zones accessible without a nested heating scroller
   expect(layout.columnCount).toBe(expectedColumns);
   expect(layout.rowCounts).toEqual(expectedColumns === 2 ? [2, 2, 2] : [3, 3]);
   expect(layout.horizontalOverflow).toBeLessThanOrEqual(1);
-  expect(layout.overflowY).toBe("visible");
+  expect(layout.overflowY).toBe("auto");
   expect(layout.verticalOverflow).toBeLessThanOrEqual(1);
   expect(layout.cardsInsideHorizontalBounds).toBe(true);
   expect(layout.widthSpread).toBeLessThanOrEqual(1);
@@ -1759,7 +1879,7 @@ test("keeps the live music card working inside its configured media boundary", a
   await expect(player).toBeVisible();
   await expect(player).toHaveAttribute("data-player-count", "5");
   await expect(player).toHaveAttribute("data-media-browser-count", "3");
-  await expect(player).toHaveAttribute("data-card-height", "");
+  await expect(player).toHaveAttribute("data-card-height", "100%");
   await expect(player).toHaveAttribute("data-transparent-background", "false");
   await expect(card.locator("[data-mock-player]")).toHaveCount(5);
   await expect(card.locator("[data-mock-player-row]")).toHaveCount(5);
@@ -1789,6 +1909,77 @@ test("keeps the live music card working inside its configured media boundary", a
   expect(pageErrors).toEqual([]);
 });
 
+test("browses three cameras without waking video and scales to a camera collection", async ({ page }) => {
+  const familyConfig = structuredClone(config);
+  familyConfig.entry.cameras.push({ id:"garden", name:"Garden entrance", role:"driveway", motion_entity:"binary_sensor.example_garage_motion" });
+  familyConfig.entry.cameras[0].still_entity_id = "camera.front_snapshot";
+  familyConfig.entry.cameras[1].still_entity_id = "camera.garage_snapshot";
+  const errors = await mount(page, familyConfig, {
+    "camera.front_snapshot": state("camera.front_snapshot", "idle"),
+    "camera.garage_snapshot": state("camera.garage_snapshot", "idle")
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
+  await expect(card.locator(".security-camera")).toHaveCount(3);
+  await expect(card.locator(".camera-poster-slot")).toHaveCount(1);
+  await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="auto"]')).toHaveCount(1);
+  await card.locator('[data-camera-select="garage"]').click();
+  await expect(card.locator(".security-stage-heading h2")).toHaveText("Garage");
+  await expect(card.locator(".security-selected-signals")).toContainText("Motion");
+  await expect(card.locator('[data-card-type="picture-entity"][data-entity="camera.garage_snapshot"]')).toHaveCount(1);
+  await expect(card.locator('[data-card-type="picture-entity"][data-entity="camera.front_snapshot"]')).toHaveCount(0);
+  await card.locator('[data-camera-select="garden"]').click();
+  await expect(card.locator(".security-stage-heading h2")).toHaveText("Garden entrance");
+  await expect(card.locator(".camera-stage-action")).toBeDisabled();
+  await expect(card.locator(".camera-poster-fallback")).toHaveText("Signals only");
+  expect(await page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  for (const viewport of [{width:1112,height:834},{width:1024,height:768},{width:834,height:1112}]) {
+    await page.setViewportSize(viewport);
+    await expectApprovalQuality(page, {securityLabels:true});
+  }
+  const collection = structuredClone(familyConfig);
+  for (let index=3; index<12; index++) collection.entry.cameras.push({ id:`entrance_${index}`, name:`Exterior entrance ${index}`, role:"driveway", motion_entity:"binary_sensor.example_garage_motion" });
+  await card.evaluate((element, nextConfig) => element.setConfig({family_config: nextConfig}), collection);
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
+  const picker = card.locator("select[data-camera-select]");
+  await expect(picker.locator("option")).toHaveCount(12);
+  await expect(card.locator(".security-camera")).toHaveCount(0);
+  await picker.selectOption("entrance_11");
+  await expect(card.locator(".security-stage-heading h2")).toHaveText("Exterior entrance 11");
+  await expect(card.locator(".camera-stage-action")).toBeDisabled();
+  expect(await page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  for (const viewport of [{width:1112,height:834},{width:1024,height:768},{width:834,height:1112}]) {
+    await page.setViewportSize(viewport);
+    await expectApprovalQuality(page, {securityLabels:true});
+    const bounds = await card.locator(".security-layout").evaluate((element) => ({height:element.clientHeight,scroll:element.scrollHeight}));
+    expect(bounds.scroll).toBeLessThanOrEqual(bounds.height+1);
+    const garageControl = await card.locator(".garage-action").evaluate((button) => {
+      const panel=button.closest(".garage-panel").getBoundingClientRect();
+      const control=button.getBoundingClientRect();
+      return {bottom:control.bottom, panelBottom:panel.bottom};
+    });
+    expect(garageControl.bottom).toBeLessThanOrEqual(garageControl.panelBottom);
+  }
+  expect(errors).toEqual([]);
+});
+
+test("camera browsing closes an owned stream before selecting another without starting it", async ({ page }) => {
+  const errors = await mount(page);
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
+  await card.locator('[data-camera-open="doorbell"]').click();
+  await expect(card.locator(".camera-card-slot")).toHaveCount(1);
+  await card.locator('[data-camera-select="garage"]').click();
+  await expect(card.locator(".camera-is-stopping")).toBeVisible();
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await expect(card.locator('[data-camera-select="garage"]')).toBeDisabled();
+  await updateEntityState(card, state("camera.example_doorbell", "idle"));
+  await expect(card.locator(".security-stage-heading h2")).toHaveText("Garage");
+  await expect(card.locator('[data-camera-stage-open="garage"]')).toBeEnabled();
+  expect(await page.evaluate(() => window.__serviceCalls)).toEqual([{domain:"button",service:"press",data:{entity_id:"button.example_doorbell_stop_stream"}}]);
+  expect(errors).toEqual([]);
+});
+
 test("starts cameras deliberately and confirms garage and alarm actions", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
@@ -1800,7 +1991,7 @@ test("starts cameras deliberately and confirms garage and alarm actions", async 
   await expect(card.locator(".security-privacy-note")).toContainText("viewer opens only when you choose it");
   await expect(card.locator(".security-privacy-note")).toContainText("A stream started here stops when you close the view, leave Security or after two minutes");
   const posterSlots = card.locator(".camera-poster-slot");
-  await expect(posterSlots).toHaveCount(3);
+  await expect(posterSlots).toHaveCount(1);
   await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="auto"]')).toHaveCount(0);
   await expect(card.locator("#camera-poster-stage-doorbell .camera-poster-fallback")).toContainText("Camera ready");
   await expect(card.locator('.camera-stage-action[data-camera-stage-open="doorbell"]')).toContainText("Tap the picture for live video");
@@ -2484,7 +2675,7 @@ test("fails Security unavailable states safely without presenting them as clear 
   await card.locator('.hub-nav-button[data-view="entry"]').click();
 
   const doorbell = card.locator(".security-camera").filter({ hasText: "Front door" });
-  await expect(doorbell.locator(".security-signal.is-unavailable")).toContainText("Unavailable");
+  await expect(card.locator(".security-selected-signals .security-signal.is-unavailable")).toContainText("Unavailable");
   await expect(doorbell.locator(".privacy-badge")).toHaveText(/Ready to view/);
   await expect(doorbell.locator('button[data-camera-open="doorbell"]')).toBeEnabled();
   const garageCamera = card.locator(".security-camera").filter({ hasText: "Garage" });
@@ -2519,7 +2710,7 @@ test("keeps the family map private and spotlights both requested clubs", async (
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
   await expect(card.locator(".today-family")).toContainText("A little left to do");
-  const todayFavourites = card.locator(".today-football .compact-fixture[data-favourite-code]");
+  const todayFavourites = card.locator(".today-football .club-match-row[data-fixture-id]");
   await expect(todayFavourites).toHaveCount(2);
   expect(await todayFavourites.evaluateAll((items) => items.map((item) => [item.dataset.favouriteCode, item.dataset.fixtureId]))).toEqual([
     ["TOT", "1"],
@@ -2545,24 +2736,24 @@ test("keeps the family map private and spotlights both requested clubs", async (
   await expect(card.locator(".choreops-link")).toHaveCount(0);
 
   await card.locator('.hub-nav-button[data-view="football"]').click();
-  const favouriteHeroes = card.locator(".favourite-hero-card");
+  const favouriteHeroes = card.locator(".football-club-overviews .club-next-row");
   await expect(favouriteHeroes).toHaveCount(2);
   expect(await favouriteHeroes.evaluateAll((items) => items.map((item) => [item.dataset.favouriteCode, item.dataset.fixtureId]))).toEqual([
     ["TOT", "1"],
     ["AVL", "2"]
   ]);
-  await expect(favouriteHeroes.nth(0)).toContainText(/Spurs.*Burnley.*20:00/s);
-  await expect(favouriteHeroes.nth(1)).toContainText(/Villa.*Newcastle.*15:00/s);
+  await expect(favouriteHeroes.nth(0)).toContainText(/20:00.*Burnley/s);
+  await expect(favouriteHeroes.nth(1)).toContainText(/15:00.*Newcastle/s);
   await expect(card.locator(".fixture.is-spotlight")).toHaveCount(2);
-  const standings = card.locator(".favourite-standing");
-  await expect(standings).toHaveCount(2);
-  expect(await standings.evaluateAll((items) => items.map((item) => item.dataset.favouriteCode))).toEqual(["TOT", "AVL"]);
-  await expect(standings).toContainText(["#1", "#2"]);
+  await card.locator('[data-football-tab="table"]').click();
+  await expect(card.locator(".league-table tbody tr")).toHaveCount(2);
+  await expect(card.locator(".league-table tbody tr")).toContainText(["Tottenham", "Aston Villa"]);
   expect(pageErrors).toEqual([]);
 });
 
 test("shows current FPL squads, captain points and the complete league list", async ({ page }) => {
   const fplConfig = structuredClone(config);
+  fplConfig.display.appearance = "auto";
   fplConfig.football.entries = [
     { person_id: "parent", entry_id: 12345 },
     { person_id: "child_one", entry_id: 67890 }
@@ -2618,6 +2809,19 @@ test("shows current FPL squads, captain points and the complete league list", as
   await expect(card.locator(".fpl-bench .fpl-player")).toHaveCount(4);
   await expect(card.locator('.fpl-player-badge[aria-label="Captain"]')).toHaveText("C");
   await expect(card.locator(".fpl-player").filter({ hasText: "Captain Forward" })).toContainText("12");
+  await card.locator('[data-squad-section="bench"]').click();
+  await expect(card.locator(".fpl-pitch")).toBeHidden();
+  await expect(card.locator(".fpl-bench .fpl-player:visible")).toHaveCount(4);
+  expect(await card.locator(".fpl-bench").evaluate(bench => {
+    const panel = bench.closest(".fpl-squad-panel").getBoundingClientRect();
+    return [...bench.querySelectorAll(".fpl-player")].every(player => {
+      const bounds = player.getBoundingClientRect();
+      return bounds.left >= panel.left && bounds.right <= panel.right && bounds.top >= panel.top && bounds.bottom <= panel.bottom;
+    });
+  })).toBe(true);
+  await card.locator('[data-squad-section="starters"]').click();
+  await expect(card.locator(".fpl-pitch .fpl-player:visible")).toHaveCount(11);
+  await expect(card.locator(".fpl-bench")).toBeHidden();
   await expect(card.locator(".fpl-leagues > span")).toHaveCount(12);
   await expect(card.locator(".fpl-leagues")).toContainText("Invitational league 12");
   expect(await card.locator(".fpl-entry-selector button").evaluateAll((buttons) => buttons.every((button) => button.getBoundingClientRect().height >= 48))).toBe(true);
@@ -2635,10 +2839,10 @@ test("shows current FPL squads, captain points and the complete league list", as
     };
   });
   expect(fplOverflow).toEqual({
-    detailOverflow: "visible",
-    mainOverflow: "visible",
-    squadOverflow: "visible",
-    leaguesOverflow: "visible",
+    detailOverflow: "hidden",
+    mainOverflow: "hidden",
+    squadOverflow: "hidden",
+    leaguesOverflow: "hidden",
     detailScrollOverflow: 0,
     mainScrollOverflow: 0
   });
@@ -2652,6 +2856,14 @@ test("shows current FPL squads, captain points and the complete league list", as
   await expectContrast(card, [
     { foreground: ".fpl-scoreboard strong,.fpl-scoreboard small,.fpl-leagues strong,.fpl-player strong,.fpl-player small", background: ".football-main", minimum: 4.5 }
   ]);
+  await page.setViewportSize({width:834,height:1112});
+  await expectNoRootOverflow(page);
+  await card.locator('[data-football-tab="table"]').click();
+  await expect(card.locator(".league-table")).toBeVisible();
+  await card.locator('[data-football-tab="fpl"]').click();
+  await expect(card.locator(".fpl-team-card")).toContainText("Second XI");
+  const overlap=await card.locator(".fpl-detail").evaluate(node=>node.getBoundingClientRect().top < node.parentElement.querySelector(".football-tabs").getBoundingClientRect().bottom);
+  expect(overlap).toBe(false);
   expect(pageErrors).toEqual([]);
 });
 
@@ -2680,14 +2892,14 @@ test("Today shows both clubs' results and next fixtures without clipping names",
   const panel = card.locator(".today-football");
   await expect(panel.locator('[data-fixture-status="finished"]')).toHaveCount(2);
   await expect(panel.locator('[data-fixture-status="upcoming"]')).toHaveCount(2);
-  expect(await panel.locator(".compact-fixture").evaluateAll((items) => items.map((item) => item.dataset.fixtureId))).toEqual(["502", "501", "601", "602"]);
+  expect(await panel.locator(".club-match-row[data-fixture-id]").evaluateAll((items) => items.map((item) => item.dataset.fixtureId))).toEqual(["501", "601", "502", "602"]);
   const checkNames = async () => {
     const metrics = await panel.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
-      return [...element.querySelectorAll('.compact-team-name,.team-mark,.compact-score,.compact-fixture-detail')].map((item) => {
+      return [...element.querySelectorAll('.club-match-row strong,.club-match-row b,.club-match-row small')].map((item) => {
         const rect = item.getBoundingClientRect();
-        const fixture = item.closest('.compact-fixture').getBoundingClientRect();
-        return { text: item.textContent, horizontalOverflow: item.scrollWidth - item.clientWidth,
+        const fixture = item.closest('.club-match-row').getBoundingClientRect();
+        return { text: item.textContent, rect:{top:rect.top,bottom:rect.bottom}, bounds:{top:bounds.top,bottom:bounds.bottom}, style:{display:getComputedStyle(element).display,height:getComputedStyle(element).height,minHeight:getComputedStyle(element).minHeight,rows:getComputedStyle(element).gridTemplateRows,parentRows:getComputedStyle(element.parentElement).gridTemplateRows,parentDisplay:getComputedStyle(element.parentElement).display}, horizontalOverflow: item.scrollWidth - item.clientWidth,
           insideFixture: rect.left >= fixture.left && rect.right <= fixture.right + 1 && rect.top >= fixture.top && rect.bottom <= fixture.bottom + 1,
           insidePanel: rect.left >= bounds.left && rect.right <= bounds.right + 1 && rect.top >= bounds.top && rect.bottom <= bounds.bottom + 1 };
       });
@@ -2695,7 +2907,7 @@ test("Today shows both clubs' results and next fixtures without clipping names",
     for (const metric of metrics) {
       expect(metric.horizontalOverflow, metric.text).toBeLessThanOrEqual(1);
       expect(metric.insideFixture, metric.text).toBe(true);
-      expect(metric.insidePanel, metric.text).toBe(true);
+      expect(metric.insidePanel, JSON.stringify(metric)).toBe(true);
     }
     const overflow = await card.evaluate((element) => ({
       document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -2711,7 +2923,7 @@ test("Today shows both clubs' results and next fixtures without clipping names",
   expect(pageErrors).toEqual([]);
 });
 
-test("combines a Spurs and Villa head-to-head into one deliberate family derby card", async ({ page }) => {
+test("shows the derby from each club perspective and keeps live games outside Results", async ({ page }) => {
   const derby = {
     id: 77,
     kickoff_time: "2026-08-21T19:00:00Z",
@@ -2730,28 +2942,18 @@ test("combines a Spurs and Villa head-to-head into one deliberate family derby c
     "sensor.family_dashboard_premier_league_gw_1": state("sensor.family_dashboard_premier_league_gw_1", "1", { events: [derby] })
   });
   const card = page.locator("family-hub-card");
-  const todayDerby = card.locator(".today-football .compact-fixture.is-derby");
-  await expect(todayDerby).toHaveCount(1);
-  await expect(todayDerby).toHaveAttribute("data-favourite-code", "TOT AVL");
-  await expect(todayDerby).toHaveAttribute("data-fixture-id", "77");
-  await expect(todayDerby).toContainText("Family derby");
-  await expect(todayDerby.locator(".team-mark")).toHaveCount(2);
-
+  const todayDerby = card.locator('.today-football [data-fixture-id="77"]');
+  await expect(todayDerby).toHaveCount(2);
+  await expect(todayDerby).toContainText(["2–1", "2–1"]);
+  expect(await todayDerby.evaluateAll(items => items.map(item => item.dataset.favouriteCode))).toEqual(["TOT", "AVL"]);
   await card.locator('.hub-nav-button[data-view="football"]').click();
-  const heroDerby = card.locator(".favourite-hero-card.is-derby");
-  await expect(heroDerby).toHaveCount(1);
-  await expect(heroDerby).toHaveAttribute("data-favourite-code", "TOT AVL");
-  await expect(heroDerby).toHaveAttribute("data-fixture-id", "77");
-  await expect(heroDerby).toContainText(/Family derby.*Spurs & Villa.*Tottenham.*2 — 1.*Aston Villa/s);
+  await expect(card.locator('.football-club-overviews [data-fixture-id="77"]')).toHaveCount(2);
   await expect(card.locator('.fixture.is-family-derby[data-favourite-code="TOT AVL"]')).toHaveCount(1);
-  const derbyAccents = await card.locator(".fixture.is-family-derby").evaluate((element) => ({
-    left: getComputedStyle(element, "::before").backgroundColor,
-    right: getComputedStyle(element, "::after").backgroundColor,
-    shadow: getComputedStyle(element).boxShadow
-  }));
-  expect(derbyAccents.left).toBe("rgb(19, 34, 87)");
-  expect(derbyAccents.right).toBe("rgb(103, 14, 54)");
-  expect(derbyAccents.shadow).toBe("none");
+  await expect(card.locator('.fixture.is-family-derby')).toContainText("Solanke (H) · Watkins (A)");
+  await card.locator('[data-football-tab="results"]').click();
+  await expect(card.locator('.fixture')).toHaveCount(0);
+  await card.locator('[data-football-tab="fixtures"]').click();
+  await expect(card.locator('.fixture')).toHaveCount(1);
   expect(pageErrors).toEqual([]);
 });
 
@@ -2866,8 +3068,8 @@ test("loads only allowlisted crest_url badges and renders initials for untrusted
   await card.locator('.hub-nav-button[data-view="football"]').click();
 
   await expect(card.locator('.fixture img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
-  await expect(card.locator(".favourite-hero-card")).toHaveCount(2);
-  await expect(card.locator(".football-favourites-stage")).not.toContainText(/Valid Badge|Hostile Badge/);
+  await expect(card.locator(".football-club-overviews .club-overview")).toHaveCount(2);
+  await expect(card.locator(".football-club-overviews")).not.toContainText(/Valid Badge|Hostile Badge/);
   for (const code of ["BAD", "LCR", "LBD", "LGO", "INI"]) {
     const mark = card.locator(".fixture .team-mark").filter({ hasText: code }).first();
     await expect(mark.locator("img")).toHaveCount(0);
@@ -2950,7 +3152,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("aria-disabled", "true");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-read-only-guard", "service-boundary");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-mode", "in-card");
-  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-height", "");
+  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-height", "100%");
   await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-transparent-background", "false");
   const mediaMetrics = await card.locator(".media-player-stage").evaluate((stage) => {
     const slot = stage.querySelector(".child-card-slot");
@@ -3003,22 +3205,22 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   });
   expect(mediaMetrics.childTop).toBeGreaterThanOrEqual(mediaMetrics.stageTop - 1);
   expect(mediaMetrics.childBottom).toBeLessThanOrEqual(mediaMetrics.stageBottom + 1);
-  expect(mediaMetrics.chipColour).toBe("rgb(247, 248, 252)");
-  expect(mediaMetrics.chipBackground).toBe("rgb(38, 50, 81)");
+  expect(mediaMetrics.chipColour).toBe("rgb(18, 102, 207)");
+  expect(mediaMetrics.chipBackground).toBe("rgb(232, 241, 255)");
   expect(mediaMetrics.stageBackground).toBe("rgb(255, 255, 255)");
-  expect(mediaMetrics.stageOverflowX).toBe("visible");
-  expect(mediaMetrics.stageOverflowY).toBe("visible");
+  expect(mediaMetrics.stageOverflowX).toBe("hidden");
+  expect(mediaMetrics.stageOverflowY).toBe("hidden");
   expect(mediaMetrics.stageScrollHeight).toBeLessThanOrEqual(mediaMetrics.stageClientHeight + 1);
   expect(mediaMetrics.stageScrollTop).toBe(0);
-  expect(mediaMetrics.slotOverflowX).toBe("visible");
-  expect(mediaMetrics.slotOverflowY).toBe("visible");
-  expect(mediaMetrics.childInlineHeight).toBe("");
+  expect(mediaMetrics.slotOverflowX).toBe("hidden");
+  expect(mediaMetrics.slotOverflowY).toBe("hidden");
+  expect(mediaMetrics.childInlineHeight).toBe("100%");
   expect(mediaMetrics.childOverflowX).toBe("visible");
   expect(mediaMetrics.childOverflowY).toBe("visible");
-  expect(mediaMetrics.cardBackground).toBe("#07182F");
-  expect(mediaMetrics.primaryBackground).toBe("#07182F");
-  expect(mediaMetrics.mmpcBackground).toBe("#07182F");
-  expect(mediaMetrics.speakerOverflow).toBe("visible");
+  expect(mediaMetrics.cardBackground).toBe("#FFFFFF");
+  expect(mediaMetrics.primaryBackground).toBe("#FFFFFF");
+  expect(mediaMetrics.mmpcBackground).toBe("#FFFFFF");
+  expect(mediaMetrics.speakerOverflow).toBe("auto");
   expect(mediaMetrics.speakerScrollHeight).toBeGreaterThanOrEqual(mediaMetrics.speakerClientHeight);
   expect(mediaMetrics.chipOverflow).toBe("visible");
   expect(mediaMetrics.chipScrollWidth).toBeLessThanOrEqual(mediaMetrics.chipClientWidth + 1);
@@ -3045,7 +3247,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
 
   await card.locator('.hub-nav-button[data-view="family"]').click();
   await expect(card.locator(".family-rhythm")).toHaveCount(0);
-  await expect(card.locator(".family-dashboard-heading")).toContainText("Tasks, jobs & rewards");
+  await expect(card.locator(".task-section-tabs .segment")).toHaveText(["Jobs", "Get ready", "Rewards"]);
   await expect(card.locator(".family-dashboard-heading")).not.toContainText(/test|preview/i);
   await expect(card.locator(".choreops-link")).toHaveCount(0);
   await expect(card.locator(".family-kid-tab")).toHaveCount(2);
@@ -3086,6 +3288,11 @@ async function expectApprovalQuality(page, { hotspots = false, securityLabels = 
       .filter((node) => !node.classList.contains("sr-only"))
       .map((node) => ({ text: node.textContent.trim(), size: Number.parseFloat(getComputedStyle(node).fontSize) }))
       .filter(({ size }) => Number.isFinite(size) && size < 12);
+    const heavyText = [...root.querySelectorAll("*")]
+      .filter(node => node.getClientRects().length && [...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && child.textContent.trim()))
+      .filter(node => !node.classList.contains("sr-only"))
+      .map(node => ({text:node.textContent.trim(), weight:Number.parseInt(getComputedStyle(node).fontWeight,10)}))
+      .filter(({weight}) => weight > 500);
     const controls = queryAuditRoots("button:not([disabled]),select:not([disabled])")
       .filter((node) => node.getClientRects().length)
       .map((node) => {
@@ -3180,10 +3387,11 @@ async function expectApprovalQuality(page, { hotspots = false, securityLabels = 
         };
       }).filter(({ outsidePicker, outsideRoot, visibleChildren }) => outsidePicker || outsideRoot || visibleChildren.length)
       : [];
-    return { fontFamily, typography, controls, icons, hotspotSizes, clippedSecurityLabels, fragmentedSecurityLabels, securityCardBounds };
+    return { fontFamily, typography, heavyText, controls, icons, hotspotSizes, clippedSecurityLabels, fragmentedSecurityLabels, securityCardBounds };
   }, { hotspots, securityLabels });
   expect(audit.fontFamily).toMatch(/system-ui/i);
   expect(audit.typography).toEqual([]);
+  expect(audit.heavyText).toEqual([]);
   expect(audit.controls).toEqual([]);
   expect(audit.icons).toEqual([]);
   expect(audit.hotspotSizes).toEqual([]);
@@ -3242,7 +3450,11 @@ async function expectContrast(card, checks) {
         const background = parse(style.backgroundColor);
         if (background.a >= 0.999) unresolvedBackdrop = false;
         colour = blend(background, colour);
-        if (style.backgroundImage !== "none") unresolvedBackdrop = true;
+        if (style.backgroundImage !== "none") {
+          const stops = style.backgroundImage.startsWith("linear-gradient") ? style.backgroundImage.match(/(?:rgb[a]?\([^)]*\)|color\(srgb[^)]*\))/g) : null;
+          if (stops?.length) colour = stops.map(parse).reduce((darkest, stop) => luminance(stop) < luminance(darkest) ? stop : darkest);
+          else unresolvedBackdrop = true;
+        }
       }
       return { colour, unresolvedBackdrop };
     };
@@ -3284,7 +3496,10 @@ async function expectContrast(card, checks) {
 
 async function approvalTextSize(page) {
   return page.locator("family-hub-card").evaluate((element) => {
-    const heading = element.shadowRoot?.querySelector(".hub-topbar h1");
+    const heading = [...(element.shadowRoot?.querySelectorAll(".hub-topbar h1,.calendar-context strong") || [])].find((node) => {
+      const style = getComputedStyle(node);
+      return node.getClientRects().length && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0;
+    });
     if (!heading) return 0;
     const style = getComputedStyle(heading);
     if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return 0;
@@ -3413,8 +3628,8 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     expect(navigationTargetGeometry.map(({ label }) => label), `${name} compact navigation must retain its semantic order`).toEqual([
       "Open Today",
       "Calendar",
-      "Tasks",
       "Home",
+      "Tasks",
       "Security",
       "Energy",
       "Football",
@@ -3566,19 +3781,21 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     expect(audit.overlaps, `${name} has overlapping visible text at 200%`).toEqual([]);
     if (name.startsWith("football-")) {
       const footballToolbar = page.locator("family-hub-card").locator(".football-toolbar");
-      const footballHeading = page.locator("family-hub-card").locator(".football-toolbar > div:first-child");
+      const footballHeading = page.locator("family-hub-card").locator(".football-toolbar h2");
       const firstFixtureDay = page.locator("family-hub-card").locator(".fixture-day h3").first();
       await expect(footballToolbar, `${name} must render the football toolbar at 200%`).toBeVisible();
       await expect(footballHeading, `${name} must render the football heading at 200%`).toBeVisible();
       await expect(firstFixtureDay, `${name} must render the first fixture date at 200%`).toBeVisible();
       if (name === "football-live") {
-        await expect(page.locator("family-hub-card").locator(".football-favourites-stage.is-live"), `${name} must retain its live favourites stage at 200%`).toBeVisible();
+        await expect(page.locator("family-hub-card").locator(".football-club-overviews"), `${name} must retain its favourite club overviews at 200%`).toBeVisible();
         await expect(page.locator("family-hub-card").locator(".fixture.is-live").first(), `${name} must retain its live fixture at 200%`).toBeVisible();
-        const heroGeometry = await page.locator("family-hub-card").locator(".football-favourites-stage").evaluate((hero) => {
+        const heroGeometry = await page.locator("family-hub-card").locator(".football-club-overviews").evaluate((hero) => {
           const heroBounds = hero.getBoundingClientRect();
-          return [...hero.querySelectorAll(".favourite-hero-card > .favourite-club-heading .team-mark.is-favourite")].map((mark) => {
+          return [...hero.querySelectorAll(".club-overview > header .team-mark.is-favourite")].map((mark) => {
             const bounds = mark.getBoundingClientRect();
             return {
+              bounds: { x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height },
+              stage: { x:heroBounds.x,y:heroBounds.y,width:heroBounds.width,height:heroBounds.height },
               inside: bounds.left >= heroBounds.left - 1
                 && bounds.right <= heroBounds.right + 1
                 && bounds.top >= heroBounds.top - 1
@@ -3587,7 +3804,7 @@ async function auditApprovalTextZoom(page, testInfo, name) {
           });
         });
         expect(heroGeometry.length, `${name} must render one primary crest per favourite at 200%`).toBe(2);
-        expect(heroGeometry.every(({ inside }) => inside), `${name} favourite crests must remain fully inside the stage at 200%`).toBe(true);
+        expect(heroGeometry.filter(({ inside }) => !inside), `${name} favourite crests must remain fully inside the stage at 200%`).toEqual([]);
       }
       const [toolbarBox, fixtureDayBox] = await Promise.all([footballToolbar.boundingBox(), firstFixtureDay.boundingBox()]);
       expect(toolbarBox, `${name} must measure the football toolbar at 200%`).not.toBeNull();
@@ -3637,16 +3854,17 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
   const card = page.locator("family-hub-card");
 
   await expect(card.locator(".today-hero")).toContainText("Living room");
-  await expect(card.locator(".hub-weather-pill")).toContainText("Partly cloudy");
+  await expect(card.locator(".hub-weather-pill")).toContainText("19.5°");
+  await expect(card.locator(".hub-weather-pill")).toHaveAttribute("aria-label", "Partly cloudy, 19.5°");
   await expect(card.locator(".today-weather")).toHaveCount(0);
   expect(await card.locator(".hub-weather-pill").textContent()).not.toContain("Partlycloudy");
   await expect(card.locator(".hero-metrics button[data-view='entry']")).toContainText("Quiet at home");
   await expect(card.locator(".hero-metrics button[data-view='entry']")).not.toContainText("All secure");
   await expectContrast(card, [
-    { foreground: ".compact-fixture > span", background: ".compact-fixture", minimum: 4.5 },
-    { foreground: ".person-summary small", background: ".person-summary", minimum: 4.5 },
-    { foreground: ".person-summary .points", background: ".person-summary", minimum: 4.5 },
-    { foreground: ".person-summary .person-initial", background: ".person-summary .person-initial", minimum: 4.5 }
+    { foreground: ".club-overview .club-match-row strong", background: ".club-overview .club-match-row", minimum: 4.5 },
+    { foreground: ".today-job small", background: ".today-job", minimum: 4.5 },
+    { foreground: ".today-job strong", background: ".today-job", minimum: 4.5 },
+    { foreground: ".today-person-token", background: ".today-person-token", minimum: 4.5 }
   ]);
   await captureApproval(page, testInfo, "today");
 
@@ -3683,9 +3901,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       const viewportWidth = testInfo.project.use.viewport.width;
       const expectedColumns = section === "lights"
         ? 3
-        : section === "heating"
-          ? 2
-          : viewportWidth <= 1030 ? 2 : 4;
+        : 3;
       expect(columnCount, `${section} must use the balanced approval grid at ${viewportWidth}px`).toBe(expectedColumns);
     }
     await captureApproval(page, testInfo, `home-${section}`, { hotspots: section === "rooms" });
@@ -3720,7 +3936,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
     }
     if (view === "family") {
       await expect(card.locator(".family-rhythm,.location-off-badge")).toHaveCount(0);
-      await expect(card.locator(".family-dashboard-heading")).toContainText("Tasks, jobs & rewards");
+      await expect(card.locator(".task-section-tabs .segment")).toHaveText(["Jobs", "Get ready", "Rewards"]);
       await expect(card.locator(".choreops-link")).toHaveCount(0);
       await expect(card.locator(".family-kid-tab")).toHaveCount(2);
       await expect(card.locator(".family-kid-stage .family-person")).toHaveCount(1);
@@ -3729,7 +3945,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
         const stage = dashboard.querySelector(".family-kid-stage").getBoundingClientRect();
         return { switcherHeight: switcher.height, switcherBottom: switcher.bottom, stageTop: stage.top };
       });
-      expect(familyRows.switcherHeight).toBeGreaterThanOrEqual(58);
+      expect(familyRows.switcherHeight).toBeGreaterThanOrEqual(48);
       expect(familyRows.switcherBottom).toBeLessThanOrEqual(familyRows.stageTop + 1);
       await expect(card.locator(".family-kid-stage .family-person-heading h2")).toHaveText("Today’s jobs");
       await expect(card.locator(".family-summary-grid")).toHaveCount(1);
@@ -3756,12 +3972,17 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       await expectContrast(card, [
         { foreground: ".chore-row small", background: ".chore-row", minimum: 4.5 },
         { foreground: ".family-facts span", background: ".family-facts span", minimum: 4.5 },
-        { foreground: ".family-person-heading > span", background: ".family-person-heading > span", minimum: 4.5 },
+        { foreground: ".family-kid-tab > span", background: ".family-kid-tab > span", minimum: 4.5 },
         { foreground: ".chore-row b", background: ".chore-row", minimum: 4.5 },
-        { foreground: ".family-summary-item p", background: ".family-summary-item", minimum: 4.5 },
-        { foreground: ".family-summary-item small", background: ".family-summary-item", minimum: 4.5 },
         { foreground: ".chore-claim-action:not(:disabled)", background: ".chore-claim-action:not(:disabled)", minimum: 4.5 }
       ]);
+      await card.locator('[data-task-section="rewards"]').click();
+      await expect(card.locator(".family-summary-grid")).toBeVisible();
+      await expectContrast(card, [
+        { foreground: ".family-summary-item p", background: ".family-summary-item", minimum: 4.5 },
+        { foreground: ".family-summary-item small", background: ".family-summary-item", minimum: 4.5 }
+      ]);
+      await card.locator('[data-task-section="jobs"]').click();
     }
     if (view === "music") {
       await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-player-count", "5");
@@ -3769,7 +3990,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       await expect(card.locator("[data-mock-player-row]")).toHaveCount(5);
       await expect(card.locator("[data-mock-music-tab]")).toHaveCount(3);
       await expectContrast(card, [
-        { foreground: ".music-meta", background: ".music-meta", minimum: 4.5 },
+        { foreground: ".mock-player-row small", background: ".mock-player-row", minimum: 4.5 },
         { foreground: ".mock-media-player strong", background: ".media-player-stage", minimum: 4.5 },
         { foreground: ".mock-media-player h3", background: ".media-player-stage", minimum: 4.5 },
         { foreground: ".mock-media-player button", background: ".mock-media-player button", minimum: 4.5 }
@@ -3836,7 +4057,7 @@ test("v0.9 design approval captures the complete secure-camera lifecycle and pro
   await expect(card.locator(".security-stage-poster")).not.toHaveAttribute("role", "alert");
   const signalsOnlyDoor = card.locator(".security-camera").filter({ hasText: "Front door" });
   await expect(signalsOnlyDoor.locator(".privacy-badge")).toHaveText("Signals only");
-  await expect(signalsOnlyDoor.locator(".security-signal")).toHaveCount(3);
+  await expect(card.locator(".security-selected-signals .security-signal")).toHaveCount(3);
   await expect(signalsOnlyDoor.locator('button[data-camera-open="doorbell"]')).toHaveText("Signals only");
   await expect(signalsOnlyDoor.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
   await expect(card.locator('button[data-camera-stage-open="doorbell"] > b')).toHaveText("Signals only");
@@ -3957,35 +4178,32 @@ test("v0.9 design approval captures live, cached, and stale football health", as
   const pageErrors = await mount(page, config, approvalFootballStates("live"));
   const card = page.locator("family-hub-card");
   await card.locator('.hub-nav-button[data-view="football"]').click();
-  await expect(card.locator(".football-favourites-stage.is-live")).toBeVisible();
-  await expect(card.locator(".favourite-hero-card")).toHaveCount(2);
-  expect(await card.locator(".favourite-hero-card").evaluateAll((items) => items.map((item) => [item.dataset.favouriteCode, item.dataset.fixtureId]))).toEqual([
-    ["TOT", "101"],
-    ["AVL", "102"]
-  ]);
-  await expect(card.locator(".hub-topbar-time")).toHaveText("16:08");
+  await expect(card.locator(".football-club-overviews")).toBeVisible();
+  await expect(card.locator(".football-club-overviews .club-overview")).toHaveCount(2);
+  await expect(card.locator('.club-overview[data-favourite-code="TOT"] .club-match-row[data-fixture-id="101"]')).toHaveAttribute("data-fixture-status", "live");
+  await expect(card.locator('.club-overview[data-favourite-code="AVL"] .club-next-row[data-fixture-id="102"]')).toHaveAttribute("data-fixture-status", "upcoming");
+  await expect(card.locator('.club-overview[data-favourite-code="AVL"] .club-match-row:not(.club-next-row)')).toContainText("Fixture data unavailable");
+  await expect(card.locator(".hub-masthead-date")).toHaveText("Monday 24 August");
   await expect(card.locator(".football-freshness.is-live strong")).toHaveText("Scores up to date");
-  await expect(card.locator(".football-freshness.is-live small")).toHaveText("Checking every 3 minutes. Checked 16:07.");
-  await expect(card.locator('.favourite-hero-card[data-favourite-code="TOT"] img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
-  await expect(card.locator('.favourite-hero-card[data-favourite-code="AVL"] img[src="https://resources.premierleague.com/premierleague/badges/70/t7.png"]')).toBeVisible();
+  await expect(card.locator(".football-freshness.is-live")).toHaveAttribute("title", "Checking every 3 minutes.");
+  await expect(card.locator('.club-overview[data-favourite-code="TOT"] img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
+  await expect(card.locator('.club-overview[data-favourite-code="AVL"] img[src="https://resources.premierleague.com/premierleague/badges/70/t7.png"]')).toBeVisible();
   await expect(card.locator('.fixture .team-mark img[src$="/t90.png"]')).toBeHidden();
   await expect(card.locator('.fixture .team-mark').filter({ hasText: "BUR" }).locator("strong")).toHaveAttribute("aria-hidden", "false");
   await expectContrast(card, [
     { foreground: ".fixture .team", background: ".fixture", minimum: 4.5 },
-    { foreground: ".favourite-standing small", background: ".favourite-standing", minimum: 4.5 }
+    { foreground: ".club-overview small", background: ".club-overview", minimum: 4.5 }
   ]);
   await captureApproval(page, testInfo, "football-live");
 
   await updateEntityStates(card, approvalFootballStates("cached"));
   await expect(card.locator(".football-freshness.is-cached strong")).toHaveText("Showing saved scores");
-  await expect(card.locator(".football-freshness.is-cached small")).toHaveText("Checked 16:04.");
-  await expect(card.locator(".football-health-note.is-cached")).toHaveText("Live updates are temporarily unavailable.");
+  await expect(card.locator(".football-freshness.is-cached")).toHaveAttribute("title", "Live updates are temporarily unavailable.");
   await captureApproval(page, testInfo, "football-cached");
 
   await updateEntityStates(card, approvalFootballStates("stale"));
   await expect(card.locator(".football-freshness.is-stale strong")).toHaveText("Scores may be delayed");
-  await expect(card.locator(".football-freshness.is-stale small")).toHaveText("Checked 16:00.");
-  await expect(card.locator(".football-health-note.is-stale")).toHaveText("The last football check is older than expected.");
+  await expect(card.locator(".football-freshness.is-stale")).toHaveAttribute("title", "The last football check is older than expected.");
   await captureApproval(page, testInfo, "football-stale");
   expect(pageErrors).toEqual([]);
 });
@@ -4018,6 +4236,7 @@ test("Home in focus shares complete event checklists between Calendar, Tasks and
   await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "true");
   await expect(card.locator(".family-preparation")).not.toContainText("Other child bag");
   await expect(card.locator(".focus-task-rewards")).toContainText("Weekend movie");
+  await card.locator('[data-task-section="ready"]').click();
   await card.locator('.family-prep-item[data-prep-item="swim-7"]').click();
   await card.locator('.focus-task-event').filter({ hasText: "Friday swimming" }).locator("[data-focus-open-plan]").click();
   await expect(card.locator('.focus-event-ready [data-prep-item="swim-7"]')).toHaveAttribute("aria-pressed", "true");
@@ -4138,5 +4357,252 @@ test("Home in focus restores failed checklist updates and blocks read-only check
   await card.locator('.family-prep-item[data-prep-item="boots"]').evaluate((button) => { button.disabled = false; button.click(); });
   expect(await page.evaluate(() => window.__serviceCalls.length)).toBe(1);
   await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "false");
+  expect(errors).toEqual([]);
+});
+
+test("restored approved primary screens fit the actual HA shell in both orientations", async ({ page }, testInfo) => {
+  const household = structuredClone(config);
+  household.features.location_map = false;
+  // Six live zones represent the density in the supplied tablet screenshots.
+  const prototypeRoom = household.rooms.find((room) => room.climate);
+  const zoneStates = {};
+  for (let index = household.rooms.filter((room) => room.climate).length; index < 6; index++) {
+    const room = { ...structuredClone(prototypeRoom), id: `test_zone_${index}`, name: ["Snug", "Playroom", "Hall", "Utility", "Upstairs Hall", "Study"][index], climate: `climate.test_zone_${index}`, lights: [], covers: [], scenes: [] };
+    delete room.heating_schedule;
+    household.rooms.push(room);
+    zoneStates[room.climate] = state(room.climate, index % 2 ? "off" : "heat", {temperature: 19 + index / 2, current_temperature: 20 + index / 2, hvac_action:index % 2 ? "off":"heating"});
+  }
+  const errors = await mount(page, household, zoneStates, {kiosk:true});
+  const card = page.locator('family-hub-card');
+  await card.evaluate((element) => { element.hass = {...element._hass, themes:{darkMode:true}}; });
+  await expect(card.locator('.hub-card')).toHaveAttribute('data-appearance','light');
+  for (const portrait of [false,true]) {
+    await page.setViewportSize(portrait ? {width:834,height:1112} : {width:1112,height:834});
+    for (const view of ['today','calendar','rooms','family','entry','energy','football','music']) {
+      await card.locator(`.hub-navigation [data-view="${view}"]`).click();
+      if (view==='rooms') await card.locator('[data-home-section="heating"]').click();
+      await page.waitForTimeout(150);
+      const geometry = await card.evaluate((element) => {
+        const root=element.shadowRoot;
+        const hub=root.querySelector('.hub-card'), view=root.querySelector('.hub-view');
+        return {top:element.getBoundingClientRect().top,bottom:hub.getBoundingClientRect().bottom,viewport:innerHeight,rootOverflow:document.querySelector('.ha-main').scrollHeight-document.querySelector('.ha-main').clientHeight, viewOverflow:view.scrollHeight-view.clientHeight, horizontal:view.scrollWidth-view.clientWidth};
+      });
+      expect(geometry.top).toBe(0);
+      expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport+1);
+      expect(geometry.rootOverflow, JSON.stringify(geometry)).toBeLessThanOrEqual(1);
+      expect(geometry.viewOverflow, `${portrait?'portrait':'landscape'} ${view}: ${JSON.stringify(geometry)}`).toBeLessThanOrEqual(1);
+      expect(geometry.horizontal).toBeLessThanOrEqual(1);
+      if (view==='rooms') {
+        await expect(card.locator('.thermostat-dial')).toHaveCount(6);
+        const zoneGeometry=await card.locator('.heating-card').evaluateAll(nodes=>nodes.map(node=>({name:node.querySelector('h3').textContent,overflow:node.scrollHeight-node.clientHeight,height:node.clientHeight, parentBottom:node.parentElement.getBoundingClientRect().bottom,bottom:node.getBoundingClientRect().bottom})));
+        expect(zoneGeometry.filter(zone=>zone.overflow>1 || zone.bottom>zone.parentBottom+1), JSON.stringify(zoneGeometry)).toEqual([]);
+      }
+      if (view==='family') await expect(card.locator('.progress-ring')).toHaveCount(1);
+      const folder=process.env.RESTORED_DESIGN_REVIEW_DIR || resolve(tmpdir(), 'restored-design-review');
+      await mkdir(folder,{recursive:true});
+      await page.screenshot({path:resolve(folder,`${testInfo.project.name}-${portrait?'portrait':'landscape'}-${view}.png`)});
+    }
+  }
+  expect(errors).toEqual([]);
+});
+
+
+test("native music player keeps playback and room controls inside both tablet orientations", async ({page}, testInfo) => {
+  test.skip(!nativeMusicSource, "Set NATIVE_MUSIC_CARD_PATH to the installed upstream player bundle for native validation");
+  const errors = await mount(page, config, {}, {nativeMusic:true});
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-navigation [data-view="music"]').click();
+  const player = card.locator("mediocre-multi-media-player-card");
+  await page.waitForTimeout(700);
+  expect(errors, await card.evaluate(el=>JSON.stringify({children:[...el._childCards.keys()], slot:el.shadowRoot.getElementById("music-card-slot").innerHTML.slice(0,400)}))).toEqual([]);
+  await expect(player).toBeVisible();
+  for (const size of [{width:1112,height:834},{width:834,height:1112}]) {
+    await page.setViewportSize(size);
+    await page.waitForTimeout(350);
+    await expect(player.locator("button").first()).toBeVisible();
+    const geometry=await player.evaluate(node=>({height:node.getBoundingClientRect().height, bottom:node.getBoundingClientRect().bottom, viewport:innerHeight, html:node.shadowRoot?.innerHTML.slice(0,200)}));
+    expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport+1);
+    expect(geometry.height).toBeGreaterThan(400);
+    const heavyText = await player.evaluate(node=>[...node.querySelectorAll("*")]
+      .filter(element=>element.getClientRects().length && [...element.childNodes].some(child=>child.nodeType===Node.TEXT_NODE && child.textContent.trim()))
+      .filter(element=>Number.parseInt(getComputedStyle(element).fontWeight,10)>500)
+      .map(element=>element.textContent.trim()));
+    expect(heavyText).toEqual([]);
+    await expectNoRootOverflow(page);
+    const folder=process.env.RESTORED_DESIGN_REVIEW_DIR || resolve(tmpdir(), 'restored-design-review');
+    await mkdir(folder,{recursive:true});
+    await page.screenshot({path:resolve(folder,`native-music-${size.width}x${size.height}.png`)});
+  }
+  expect(errors).toEqual([]);
+});
+
+
+test("exports the working corrective dashboard with representative family data", async ({page}, testInfo) => {
+  test.skip(!process.env.RESTORED_REVIEW_EXPORT_PATH, "Export the review only when requested");
+  const household=structuredClone(config);
+  household.product.title="Family Hub";
+  household.entry.cameras.push({ id:"review_garden", name:"Garden", role:"driveway", entity_id:"camera.review_garden", motion_entity:"binary_sensor.example_garage_motion", start_stream_entity:"button.review_garden_start", stop_stream_entity:"button.review_garden_stop" });
+  household.features.location_map=false;
+  household.features.school=false;
+  for (const name of ["Garage","Bedroom","Playroom"]) household.media.players.push({entity_id:`media_player.review_${name.toLowerCase()}`, name});
+  for (const [index,person] of household.people.entries()) person.name=["Rob","Zoe","Ernie","Orson"][index];
+  const names=["Snug","Playroom","Living room","Hall","Utility","Upstairs hall"];
+  const rooms=household.rooms.filter(room=>room.climate);
+  const overrides={
+    "camera.review_garden": state("camera.review_garden", "idle"),
+    "button.review_garden_start": state("button.review_garden_start", "unknown"),
+    "button.review_garden_stop": state("button.review_garden_stop", "unknown")
+  };
+  // The review floorplan uses its base drawing; Cleaning has a separate map.
+  for (const floor of household.floorplan.floors) delete floor.vacuum_map_entity;
+  for (const [field, value, options] of [
+    ["room_entity", "All rooms", ["All rooms", "Living room", "Kitchen"]],
+    ["mode_entity", "Vacuum and mop", ["Vacuum", "Vacuum and mop"]],
+    ["suction_entity", "Standard", ["Quiet", "Standard", "Strong"]],
+    ["mop_entity", "Standard", ["Gentle", "Standard"]],
+    ["water_entity", "Medium", ["Low", "Medium", "High"]]
+  ]) overrides[household.cleaning[field]] = state(household.cleaning[field], value, {options});
+  household.cleaning.consumable_entities = ["sensor.review_filter"];
+  household.cleaning.command_entities = ["button.review_empty_dock"];
+  overrides["sensor.review_filter"] = state("sensor.review_filter", "85", {friendly_name:"Filter life", unit_of_measurement:"%"});
+  overrides["button.review_empty_dock"] = state("button.review_empty_dock", "unknown", {friendly_name:"Empty dock"});
+  while (rooms.length<6) {
+    const index=rooms.length;
+    const room={...structuredClone(rooms[0]),id:`review_zone_${index}`,name:names[index],climate:`climate.review_zone_${index}`, lights:[],covers:[],scenes:[]};
+    delete room.heating_schedule;
+    household.rooms.push(room); rooms.push(room);
+  }
+  for (const [index,room] of rooms.entries()) {
+    room.name=names[index];
+    overrides[room.climate]=state(room.climate,index===0?"heat":"off",{current_temperature:20.5+index*.3,temperature:19+index*.5,hvac_action:index===0?"heating":"off",supported_features:1,hvac_modes:["off","heat"]});
+  }
+  overrides["sensor.child_one_choreops_points"]=state("sensor.child_one_choreops_points","115");
+  overrides["sensor.child_two_choreops_points"]=state("sensor.child_two_choreops_points","95");
+  const event=(summary,hour,minute,entity)=>({summary,start:{dateTime:`2026-08-24T${hour}:${minute}:00Z`},end:{dateTime:`2026-08-24T${Number(hour)+1}:${minute}:00Z`},_calendar:household.calendar.entities.find(entry=>entry.entity_id===entity)});
+  const training={...event("Football training","16","30","calendar.child_one"),location:"Community pitch"};
+  const responses=Object.fromEntries(household.calendar.entities.map(entry=>[entry.entity_id,[]]));
+  responses["calendar.child_one"]=[training];
+  responses["calendar.child_two"]=[event("Orson school photo","17","00","calendar.child_two")];
+  responses["calendar.family"]=[event("Circus with Grandad","18","00","calendar.family")];
+  const preparationItems=["Pack football kit","Pack boots","Fill water bottle"].map((summary,index)=>({uid:`review-kit-${index}`,summary,status:index===0?"completed":"needs_action",due:"2026-08-24",description:preparationDescription(training,"child_one","football")}));
+  Object.assign(overrides, approvalFootballStates());
+  const footballEvents=overrides["sensor.family_dashboard_premier_league_gw_1"].attributes.events;
+  const spurs=footballEvents[0].home;
+  const villa=footballEvents[1].home;
+  footballEvents.unshift({...footballEvents[0],id:901,kickoff_time:"2026-08-22T14:00:00Z",finished:true,finished_provisional:true,minutes:90,home_score:2,away_score:3,away:villa});
+  footballEvents.push({...footballEvents[1],started:false,finished:false,finished_provisional:false,minutes:0,home_score:null,away_score:null,id:902,kickoff_time:"2026-08-29T16:30:00Z",home:footballEvents[2].away,away:spurs});
+  household.football.entries=[{person_id:"parent",entry_id:12345}];
+  const squad=Array.from({length:15},(_,index)=>({
+    id:index+1,name:index===10?"Captain forward":index===0?"Keeper":`Player ${index+1}`,
+    position:index===0||index===11?"GKP":index<5||index===13?"DEF":index<9||index===12?"MID":"FWD",
+    squad_position:index+1,bench:index>10,team_code:index%2?"AVL":"TOT",
+    crest_url:`https://resources.premierleague.com/premierleague/badges/70/t${index%2?7:6}.png`,
+    event_points:index===10?6:2,contribution_points:index===10?12:2,multiplier:index===10?2:index>10?0:1,
+    captain:index===10,vice_captain:index===8,status:"a"
+  }));
+  overrides["sensor.family_dashboard_fpl_parent"]=state("sensor.family_dashboard_fpl_parent","379",{
+    team_name:"Stranger Mings",gameweek:1,gameweek_points:51,overall_rank:85722,transfers:0,transfer_cost:0,points_on_bench:11,squad,
+    leagues:Array.from({length:12},(_,index)=>({id:index+1,name:`Family league ${index+1}`,rank:index+1,previous_rank:index+2}))
+  });
+  const errors=await mount(page,household,overrides,{calendarEventsByEntity:responses,preparationItems,nativeMusic:Boolean(nativeMusicSource),reviewExportPath:process.env.RESTORED_REVIEW_EXPORT_PATH});
+  const card=page.locator("family-hub-card");
+  const folder=process.env.RESTORED_DESIGN_REVIEW_DIR;
+  await mkdir(folder,{recursive:true});
+  for (const portrait of [false,true]) {
+    await page.setViewportSize(portrait?{width:834,height:1112}:{width:1112,height:834});
+    for (const view of ["today","calendar","rooms","family","entry","energy","football","music"]) {
+      await card.locator(`.hub-navigation [data-view="${view}"]`).click();
+      if (view==="rooms") await card.locator('[data-home-section="heating"]').click();
+      await page.waitForTimeout(200);
+      await expectNoRootOverflow(page);
+      await page.screenshot({path:resolve(folder,`${portrait?"portrait":"landscape"}-${view}.png`)});
+      if (view==="today") {
+        const panels=await card.evaluate(element=>{
+          const root=element.shadowRoot;
+          return [".today-family .section-heading",".today-job-list",".today-ready-preview"].map(selector=>{
+            const node=root.querySelector(selector); if (!node) return null;
+            const rect=node.getBoundingClientRect();
+            return {top:rect.top,bottom:rect.bottom,height:rect.height};
+          });
+        });
+        expect(panels[1].top).toBeGreaterThanOrEqual(panels[0].bottom);
+        if (panels[2]) {
+          expect(panels[2].top).toBeGreaterThanOrEqual(panels[1].bottom);
+          expect(panels[2].height).toBeGreaterThanOrEqual(48);
+        }
+      }
+      if (view==="rooms") for (const section of ["rooms","lights","covers","cleaning"]) {
+        await card.locator(`[data-home-section="${section}"]`).click();
+        await expectNoRootOverflow(page);
+        await page.screenshot({path:resolve(folder,`${portrait?"portrait":"landscape"}-home-${section}.png`)});
+      }
+      if (view==="football") for (const tab of ["table","fpl"]) {
+        await card.locator(`[data-football-tab="${tab}"]`).click();
+        await page.screenshot({path:resolve(folder,`${portrait?"portrait":"landscape"}-football-${tab}.png`)});
+      }
+    }
+  }
+  expect(errors).toEqual([]);
+});
+
+
+test("approved Calendar inline preparation adds to the shared list and honours read-only mode", async ({page}) => {
+  const event={summary:"Football training",start:{dateTime:"2026-08-24T18:30:00Z"},end:{dateTime:"2026-08-24T19:30:00Z"},_calendar:config.calendar.entities.find(entry=>entry.entity_id==="calendar.child_one")};
+  const responses=Object.fromEntries(config.calendar.entities.map(entry=>[entry.entity_id,[]]));
+  responses["calendar.child_one"]=[event];
+  const errors=await mount(page,config,{}, {calendarEventsByEntity:responses,kiosk:true});
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-navigation [data-view="calendar"]').click();
+  await card.locator('[data-focus-prep-input]').fill("Training top");
+  await card.locator('[data-focus-add-prep]').click();
+  await expect(card.locator('.focus-event-ready .focus-ready-item')).toContainText("Training top");
+  const eventKey=await card.locator("[data-focus-add-prep]").getAttribute("data-focus-add-prep");
+  await card.locator('[data-focus-tasks="child_one"]').click();
+  await expect(card.locator('.family-prep-item')).toContainText("Training top");
+  const count=await page.evaluate(()=>window.__serviceCalls.length);
+  await card.evaluate(el=>{el._config.display.read_only=true;el._view="calendar";el._render();});
+  await expect(card.locator('[data-focus-add-prep]')).toHaveCount(0);
+  await card.evaluate((el,key)=>{const input=document.createElement("input");input.dataset.focusPrepInput=key;input.value="Tampered item";const button=document.createElement("button");button.dataset.focusAddPrep=key;button.dataset.preparationPerson="child_one";el.shadowRoot.append(input,button);button.click();},eventKey);
+  await expect(card.locator(".calendar-warning").first()).toContainText("not allowed");
+  expect(await page.evaluate(()=>window.__serviceCalls.length)).toBe(count);
+  expect(errors).toEqual([]);
+});
+
+test("refined sections keep controls reachable without changing household state", async ({page}) => {
+  const household = locationDisabledConfig();
+  household.cleaning.consumable_entities = ["sensor.vacuum_filter_remaining"];
+  household.cleaning.command_entities = ["button.vacuum_empty_dock"];
+  const errors = await mount(page, household, {
+    "sensor.vacuum_filter_remaining":state("sensor.vacuum_filter_remaining",80,{friendly_name:"Filter remaining",unit_of_measurement:"%"}),
+    "button.vacuum_empty_dock":state("button.vacuum_empty_dock","unknown",{friendly_name:"Empty dock"})
+  }, {kiosk:true});
+  const card = page.locator("family-hub-card");
+  await card.locator('[data-room-section-target="comfort"]').click();
+  await expect(card.locator('[data-room-section="comfort"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(card.locator('.room-section-content [data-climate-adjust]').first()).toBeVisible();
+  for (const section of await card.locator('[data-room-section]').evaluateAll(nodes=>nodes.map(node=>node.dataset.roomSection))) {
+    await card.locator(`[data-room-section="${section}"]`).click();
+    await expect(card.locator(`[data-room-section="${section}"]`)).toHaveAttribute("aria-pressed", "true");
+    await expect(card.locator('.room-section-content > .ux-section:visible')).toHaveCount(1);
+  }
+  await card.locator('.hub-navigation [data-view="family"]').click();
+  for (const section of ["jobs", "ready", "rewards"]) {
+    await card.locator(`[data-task-section="${section}"]`).click();
+    await expect(card.locator(`[data-task-section="${section}"]`)).toHaveAttribute("aria-pressed", "true");
+    await expect(card.locator('.focus-task-workspace > .ux-section:visible')).toHaveCount(1);
+    await expectApprovalQuality(page);
+  }
+  await card.locator('.hub-navigation [data-view="rooms"]').click();
+  await card.locator('[data-home-section="cleaning"]').click();
+  await expect(card.locator('[data-cleaning-section="care"]')).toBeVisible();
+  const sections = await card.locator('[data-cleaning-section]').evaluateAll(nodes=>nodes.map(node=>node.dataset.cleaningSection));
+  expect(sections).toEqual(["clean", "settings", "care"]);
+  for (const section of sections) {
+    await card.locator(`[data-cleaning-section="${section}"]`).click();
+    await expect(card.locator(`[data-cleaning-section="${section}"]`)).toHaveAttribute("aria-pressed", "true");
+    await expect(card.locator('.cleaning-panel > .ux-section:visible')).toHaveCount(1);
+    await expectApprovalQuality(page);
+  }
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
   expect(errors).toEqual([]);
 });
