@@ -1151,7 +1151,7 @@ export const DAILY_BRIEF_STYLES = `
   .football-experience .fixture::before,.football-experience .fixture::after { content:none; }
   .matchweek-controls label { position:relative; display:flex; align-items:center; }
   .matchweek-controls label ha-icon { position:absolute; right:6px; pointer-events:none; --mdc-icon-size:16px; }
-  .matchweek-controls select { padding-right:26px; appearance:none; }
+  .matchweek-controls select { padding-right:26px; appearance:none; -webkit-appearance:none; }
 
   .hub-card button,.hub-card select { min-height:48px; min-width:48px; }
   .hub-card .today-job { grid-template-columns:42px minmax(0,1fr) 48px; }

@@ -1,4 +1,4 @@
-## Unreleased
+## 0.17.0
 
 - Use one neutral Security viewer with compact camera choices, selected-camera activity and a dropdown for larger camera collections. Browsing does not start video; private viewing and protected alarm/garage actions keep their existing safeguards.
 

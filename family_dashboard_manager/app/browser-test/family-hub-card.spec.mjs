@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { tmpdir } from "node:os";
 import {
   buildFootballStates,
   FOOTBALL_POLLING_INTERVALS,
@@ -18,7 +19,7 @@ const illustrationSource = await readFile(new URL("../frontend/assets/home-illus
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.16.0";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.17.0";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -1226,7 +1227,7 @@ test("retains keyboard focus across equivalent full-card rerenders", async ({ pa
   const gameweekSelect = card.locator("select[data-gameweek-select]");
   await gameweekSelect.focus();
   await expect(gameweekSelect.locator("xpath=..").locator("ha-icon[icon='mdi:chevron-down']")).toBeVisible();
-  expect(await gameweekSelect.evaluate((select) => getComputedStyle(select).appearance)).toBe("none");
+  expect(await gameweekSelect.evaluate((select) => getComputedStyle(select).appearance || getComputedStyle(select).webkitAppearance)).toBe("none");
   await gameweekSelect.selectOption("7");
   await expect.poll(focusedControl).toMatchObject({ gameweekSelect: true });
 
@@ -4389,7 +4390,7 @@ test("restored approved primary screens fit the actual HA shell in both orientat
         expect(zoneGeometry.filter(zone=>zone.overflow>1 || zone.bottom>zone.parentBottom+1), JSON.stringify(zoneGeometry)).toEqual([]);
       }
       if (view==='family') await expect(card.locator('.progress-ring')).toHaveCount(1);
-      const folder=process.env.RESTORED_DESIGN_REVIEW_DIR || '/private/tmp/restored-design-review';
+      const folder=process.env.RESTORED_DESIGN_REVIEW_DIR || resolve(tmpdir(), 'restored-design-review');
       await mkdir(folder,{recursive:true});
       await page.screenshot({path:resolve(folder,`${testInfo.project.name}-${portrait?'portrait':'landscape'}-${view}.png`)});
     }
@@ -4420,7 +4421,7 @@ test("native music player keeps playback and room controls inside both tablet or
       .map(element=>element.textContent.trim()));
     expect(heavyText).toEqual([]);
     await expectNoRootOverflow(page);
-    const folder=process.env.RESTORED_DESIGN_REVIEW_DIR || '/private/tmp/restored-design-review';
+    const folder=process.env.RESTORED_DESIGN_REVIEW_DIR || resolve(tmpdir(), 'restored-design-review');
     await mkdir(folder,{recursive:true});
     await page.screenshot({path:resolve(folder,`native-music-${size.width}x${size.height}.png`)});
   }

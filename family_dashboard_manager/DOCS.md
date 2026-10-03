@@ -1,6 +1,6 @@
 # Family Dashboard Manager
 
-Version 0.16 introduces Home in focus, a focused Calendar agenda with shared event checklists, a persistent Music dock, and adaptive portrait layouts across all eight screens. Lighting, heating schedules, tasks, rewards and awards, Calendar, Security, Energy, Football/FPL and the full native Music player are retained. It uses the same Home Assistant app slug, published image, configuration directory, dashboard path and Secure MCP Tunnel. See [the Home in focus release note](./app/docs/home-in-focus.md).
+Version 0.17 restores the approved tablet design across all eight screens, adds readable schedule dialogs and a scalable neutral camera picker. It retains Home in focus, a focused Calendar agenda with shared event checklists, a persistent Music dock, and adaptive portrait layouts across all eight screens. Lighting, heating schedules, tasks, rewards and awards, Calendar, Security, Energy, Football/FPL and the full native Music player are retained. It uses the same Home Assistant app slug, published image, configuration directory, dashboard path and Secure MCP Tunnel. See [the Home in focus release note](./app/docs/home-in-focus.md).
 
 The Admin design and direct-claim boundary are described in [the v0.12 rollout note](./app/docs/v012-manager-admin.md). The colour-coded Family Planner, **Ready** checklist, private kiosk photo frame and calendar-only School fallback remain intact. All controlled-live and rollback boundaries below remain in force.
 
@@ -12,9 +12,9 @@ This release requires Home Assistant OS 2026.8.0 or newer.
 
 1. Create a Home Assistant backup.
 2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
-3. Update the installed **Family Dashboard Manager** to v0.16.0; do not uninstall it.
+3. Update the installed **Family Dashboard Manager** to v0.17.0; do not uninstall it.
 4. Keep the existing Secure MCP Tunnel options unchanged and restart the app.
-5. Confirm the manager reconnects through the existing tunnel and reports v0.16.0.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.17.0.
 
 The app exposes no host port. Home Assistant Supervisor reaches the internal ingress port and restricts the Admin panel to administrators; the MCP route retains its independent localhost host check for the existing in-container tunnel.
 
@@ -43,7 +43,7 @@ lovelace:
 Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.16.0
+/local/family-dashboard/family-hub-card.js?v=0.17.0
 ```
 
 The stock Home Assistant Overview remains available to administrators.
@@ -77,7 +77,7 @@ The schema-v7 household configuration retains the existing panel path and explic
 
 Run `validate_household_config` first. Validation is read-only and returns the exact configuration hash required by `deploy_household_config` with `confirm=true`. Deployment writes only the existing Family Dashboard configuration and fixed frontend allow-list after creating a raw, hash-verified snapshot. Private floorplans are preserved separately.
 
-Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.16.0, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
+Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.17.0, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
 
 ## Household mappings retained from v0.9
 
