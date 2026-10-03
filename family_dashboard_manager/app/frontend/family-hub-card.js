@@ -3931,17 +3931,17 @@ export class FamilyHubCard extends HTMLElementBase {
               : "mdi:camera-off-outline";
       return `
         <article class="surface security-camera ${item.camera.id === selected?.camera.id ? "is-selected" : ""}">
-          <div class="camera-tile-media">
-            <div id="camera-poster-tile-${escapeHtml(item.camera.id)}" class="camera-poster-slot camera-tile-poster"><span class="camera-poster-fallback"><ha-icon icon="${item.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon><span class="camera-poster-caption">${item.camera.still_entity_id ? "Loading snapshot…" : "Ready for live view"}</span></span></div>
-            <button type="button" class="camera-poster-action" data-camera-open="${escapeHtml(item.camera.id)}" aria-label="${actionLabel}" ${item.canOpen ? "" : 'disabled aria-disabled="true"'}><span><ha-icon icon="${actionIcon}"></ha-icon>${actionText}</span></button>
-          </div>
-          <div class="camera-tile-details">
-            <div class="security-card-heading"><div><p class="eyebrow">${escapeHtml(titleCase(item.camera.role))}</p><h2>${escapeHtml(item.camera.name)}</h2></div><span class="privacy-badge"><ha-icon icon="${item.badgeIcon}"></ha-icon>${item.badgeLabel}</span></div>
-            ${item.signals ? `<div class="security-signals">${item.signals}</div>` : ""}
-          </div>
+          <button type="button" class="camera-select-action" data-camera-select="${escapeHtml(item.camera.id)}" aria-pressed="${item.camera.id === selected?.camera.id}" aria-label="Select ${escapeHtml(item.camera.name)} camera" ${cameraOperationPending ? "disabled" : ""}>
+            <ha-icon icon="${item.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon>
+            <span><strong>${escapeHtml(item.camera.name)}</strong><small class="privacy-badge">${item.badgeLabel}</small></span>
+          </button>
+          <button type="button" class="camera-picker-live" data-camera-open="${escapeHtml(item.camera.id)}" aria-label="${actionLabel}" title="${actionLabel}" ${item.canOpen ? "" : 'disabled aria-disabled="true"'}><ha-icon icon="${actionIcon}"></ha-icon><span class="camera-picker-action-label">${actionText}</span></button>
         </article>
       `;
     }).join("");
+    const cameraPicker = cameras.length > 3
+      ? `<label class="camera-collection-picker"><ha-icon icon="mdi:cctv"></ha-icon><span><small>${cameras.length} cameras</small><select data-camera-select aria-label="Choose a camera" ${cameraOperationPending ? "disabled" : ""}>${cameras.map((item) => `<option value="${escapeHtml(item.camera.id)}" ${item.camera.id === selected?.camera.id ? "selected" : ""}>${escapeHtml(item.camera.name)} · ${escapeHtml(item.badgeLabel)}</option>`).join("")}</select></span></label>`
+      : `<div class="camera-choice-list" style="--camera-count:${Math.max(1,cameras.length)}">${cameraCards}</div>`;
     const bufferingMessage = selected?.session?.slow
       ? "Still loading—this camera is taking longer than usual. Keep this screen open."
       : "The secure stream is ready; waiting for the first picture.";
@@ -4003,7 +4003,7 @@ export class FamilyHubCard extends HTMLElementBase {
           : "This camera is currently unavailable.";
     const selectedStream = `
       <div class="camera-stage-stack ${selected?.isViewing ? "is-live" : "is-poster"} ${!selected?.session ? "security-stage-poster" : ""}" data-camera-phase="${escapeHtml(selected?.session?.phase || "idle")}" ${!selected?.session && selected?.cameraError ? 'role="alert"' : ""}>
-        <div id="camera-poster-stage-${escapeHtml(selected?.camera.id || "")}" class="camera-poster-slot camera-stage-poster-slot"><span class="camera-poster-fallback"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon>${selected?.camera?.still_entity_id ? "Loading latest snapshot…" : "Camera ready · live on demand"}</span></div>
+        <div id="camera-poster-stage-${escapeHtml(selected?.camera.id || "")}" class="camera-poster-slot camera-stage-poster-slot"><span class="camera-poster-fallback"><ha-icon icon="${selected?.camera.role === "doorbell" ? "mdi:doorbell-video" : "mdi:cctv"}"></ha-icon>${selected?.camera?.still_entity_id ? "Loading latest snapshot…" : selected?.cameraAvailable && selected?.cameraReady && !selected?.readOnlyStartBlocked ? "Camera ready · live on demand" : escapeHtml(selected?.badgeLabel || "Camera unavailable")}</span></div>
         ${selected?.hasMountedStream ? `<slot id="camera-card-slot-${escapeHtml(selected.camera.id)}" name="camera-${escapeHtml(selected.camera.id)}" class="child-card-slot camera-card-slot"></slot>` : ""}
         ${selected?.isViewing ? '<span class="camera-live-indicator" role="status"><span></span>Live</span>' : ""}
         ${stageStatus ? `<div class="camera-stream-overlay camera-is-${escapeHtml(selected.session?.phase || "waiting")}" role="status" aria-live="polite" aria-busy="true"><ha-icon icon="${stageStatus.icon}"></ha-icon><div><strong>${escapeHtml(stageStatus.title)}</strong><small>${escapeHtml(stageStatus.detail)}</small></div></div>` : ""}
@@ -4013,11 +4013,12 @@ export class FamilyHubCard extends HTMLElementBase {
     return `
       <section class="security-layout">
         <div class="security-main"${confirmationGuard}>
+          <div class="security-camera-picker" aria-label="Choose an entry camera">${cameraPicker}</div>
           <article class="security-stage" aria-label="Selected secure camera">
             <div class="security-stage-heading"><div><p class="eyebrow">Live view</p><h2>${escapeHtml(selected?.camera.name || "Entry camera")}</h2></div><span class="stage-privacy"><ha-icon icon="mdi:shield-lock-outline"></ha-icon>Private · on demand</span></div>
             <div class="security-stage-media">${selectedStream}</div>
+            ${selected?.signals ? `<div class="security-selected-signals security-signals" aria-label="${escapeHtml(selected.camera.name)} activity">${selected.signals}</div>` : ""}
           </article>
-          <div class="security-camera-picker" aria-label="Choose an entry camera">${cameraCards}</div>
         </div>
         <aside class="security-sidebar"${confirmationGuard}>
           <article class="surface alarm-panel" tabindex="-1" aria-label="Home alarm controls">
@@ -4745,9 +4746,6 @@ export class FamilyHubCard extends HTMLElementBase {
       && this._config.cleaning?.map_entity) keys.add("vacuum-map");
     if (this._view === "entry" && this._config.features?.entry !== false) {
       const cameras = this._config.entry?.cameras || [];
-      for (const camera of cameras) {
-        if (camera.still_entity_id) keys.add(`camera-poster:tile:${camera.id}`);
-      }
       const selectedId = this._cameraSession?.id
         || this._securityCameraId
         || this._config.entry?.primary_camera_id
@@ -4848,14 +4846,6 @@ export class FamilyHubCard extends HTMLElementBase {
         hold_action: { action: "none" },
         double_tap_action: { action: "none" }
       });
-      for (const camera of this._config.entry.cameras || []) {
-        if (!camera.still_entity_id) continue;
-        this._ensureChildCard(
-          `camera-poster:tile:${camera.id}`,
-          posterConfig(camera),
-          `camera-poster-tile-${camera.id}`
-        );
-      }
       const selectedId = this._cameraSession?.id
         || this._securityCameraId
         || this._config.entry.primary_camera_id
@@ -5260,6 +5250,11 @@ export class FamilyHubCard extends HTMLElementBase {
   _handleChange(event) {
     this._armPhotoFrameIdleTimer();
     if (this._pendingConfirmation || this._photoFrameActive) return;
+    const cameraPicker = event.target.closest?.("select[data-camera-select]");
+    if (cameraPicker) {
+      this._selectCamera(cameraPicker.value);
+      return;
+    }
     const dockPlayer = event.target.closest?.("[data-dock-player]");
     if (dockPlayer) {
       if (this._config.media.players.some((player) => player.entity_id === dockPlayer.value)) {
@@ -5722,6 +5717,10 @@ export class FamilyHubCard extends HTMLElementBase {
       this._scheduleRender(true);
       return;
     }
+    if (target.dataset.cameraSelect) {
+      this._selectCamera(target.dataset.cameraSelect);
+      return;
+    }
     if (target.dataset.cameraOpen) {
       void this._openCamera(target.dataset.cameraOpen);
       return;
@@ -5979,6 +5978,16 @@ export class FamilyHubCard extends HTMLElementBase {
       this._scheduleRender(true);
     }, 2500);
     timer?.unref?.();
+  }
+
+  _selectCamera(cameraId) {
+    if (this._view !== "entry" || this._cameraSession?.phase === "stopping" || this._cameraRecoveryPromise
+      || !this._config.entry.cameras.some((camera) => camera.id === cameraId)) return;
+    if (this._securityCameraId === cameraId) return;
+    this._securityCameraId = cameraId;
+    // Browsing cameras never wakes a stream. An owned view closes before switching.
+    if (this._cameraSession) this._closeActiveCamera();
+    this._scheduleRender(true);
   }
 
   async _openCamera(cameraId) {

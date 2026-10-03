@@ -1908,6 +1908,77 @@ test("keeps the live music card working inside its configured media boundary", a
   expect(pageErrors).toEqual([]);
 });
 
+test("browses three cameras without waking video and scales to a camera collection", async ({ page }) => {
+  const familyConfig = structuredClone(config);
+  familyConfig.entry.cameras.push({ id:"garden", name:"Garden entrance", role:"driveway", motion_entity:"binary_sensor.example_garage_motion" });
+  familyConfig.entry.cameras[0].still_entity_id = "camera.front_snapshot";
+  familyConfig.entry.cameras[1].still_entity_id = "camera.garage_snapshot";
+  const errors = await mount(page, familyConfig, {
+    "camera.front_snapshot": state("camera.front_snapshot", "idle"),
+    "camera.garage_snapshot": state("camera.garage_snapshot", "idle")
+  });
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
+  await expect(card.locator(".security-camera")).toHaveCount(3);
+  await expect(card.locator(".camera-poster-slot")).toHaveCount(1);
+  await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="auto"]')).toHaveCount(1);
+  await card.locator('[data-camera-select="garage"]').click();
+  await expect(card.locator(".security-stage-heading h2")).toHaveText("Garage");
+  await expect(card.locator(".security-selected-signals")).toContainText("Motion");
+  await expect(card.locator('[data-card-type="picture-entity"][data-entity="camera.garage_snapshot"]')).toHaveCount(1);
+  await expect(card.locator('[data-card-type="picture-entity"][data-entity="camera.front_snapshot"]')).toHaveCount(0);
+  await card.locator('[data-camera-select="garden"]').click();
+  await expect(card.locator(".security-stage-heading h2")).toHaveText("Garden entrance");
+  await expect(card.locator(".camera-stage-action")).toBeDisabled();
+  await expect(card.locator(".camera-poster-fallback")).toHaveText("Signals only");
+  expect(await page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  for (const viewport of [{width:1112,height:834},{width:1024,height:768},{width:834,height:1112}]) {
+    await page.setViewportSize(viewport);
+    await expectApprovalQuality(page, {securityLabels:true});
+  }
+  const collection = structuredClone(familyConfig);
+  for (let index=3; index<12; index++) collection.entry.cameras.push({ id:`entrance_${index}`, name:`Exterior entrance ${index}`, role:"driveway", motion_entity:"binary_sensor.example_garage_motion" });
+  await card.evaluate((element, nextConfig) => element.setConfig({family_config: nextConfig}), collection);
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
+  const picker = card.locator("select[data-camera-select]");
+  await expect(picker.locator("option")).toHaveCount(12);
+  await expect(card.locator(".security-camera")).toHaveCount(0);
+  await picker.selectOption("entrance_11");
+  await expect(card.locator(".security-stage-heading h2")).toHaveText("Exterior entrance 11");
+  await expect(card.locator(".camera-stage-action")).toBeDisabled();
+  expect(await page.evaluate(() => window.__serviceCalls)).toEqual([]);
+  for (const viewport of [{width:1112,height:834},{width:1024,height:768},{width:834,height:1112}]) {
+    await page.setViewportSize(viewport);
+    await expectApprovalQuality(page, {securityLabels:true});
+    const bounds = await card.locator(".security-layout").evaluate((element) => ({height:element.clientHeight,scroll:element.scrollHeight}));
+    expect(bounds.scroll).toBeLessThanOrEqual(bounds.height+1);
+    const garageControl = await card.locator(".garage-action").evaluate((button) => {
+      const panel=button.closest(".garage-panel").getBoundingClientRect();
+      const control=button.getBoundingClientRect();
+      return {bottom:control.bottom, panelBottom:panel.bottom};
+    });
+    expect(garageControl.bottom).toBeLessThanOrEqual(garageControl.panelBottom);
+  }
+  expect(errors).toEqual([]);
+});
+
+test("camera browsing closes an owned stream before selecting another without starting it", async ({ page }) => {
+  const errors = await mount(page);
+  const card = page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="entry"]').click();
+  await card.locator('[data-camera-open="doorbell"]').click();
+  await expect(card.locator(".camera-card-slot")).toHaveCount(1);
+  await card.locator('[data-camera-select="garage"]').click();
+  await expect(card.locator(".camera-is-stopping")).toBeVisible();
+  await expect(card.locator(".camera-card-slot")).toHaveCount(0);
+  await expect(card.locator('[data-camera-select="garage"]')).toBeDisabled();
+  await updateEntityState(card, state("camera.example_doorbell", "idle"));
+  await expect(card.locator(".security-stage-heading h2")).toHaveText("Garage");
+  await expect(card.locator('[data-camera-stage-open="garage"]')).toBeEnabled();
+  expect(await page.evaluate(() => window.__serviceCalls)).toEqual([{domain:"button",service:"press",data:{entity_id:"button.example_doorbell_stop_stream"}}]);
+  expect(errors).toEqual([]);
+});
+
 test("starts cameras deliberately and confirms garage and alarm actions", async ({ page }) => {
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
@@ -1919,7 +1990,7 @@ test("starts cameras deliberately and confirms garage and alarm actions", async 
   await expect(card.locator(".security-privacy-note")).toContainText("viewer opens only when you choose it");
   await expect(card.locator(".security-privacy-note")).toContainText("A stream started here stops when you close the view, leave Security or after two minutes");
   const posterSlots = card.locator(".camera-poster-slot");
-  await expect(posterSlots).toHaveCount(3);
+  await expect(posterSlots).toHaveCount(1);
   await expect(card.locator('[data-card-type="picture-entity"][data-camera-view="auto"]')).toHaveCount(0);
   await expect(card.locator("#camera-poster-stage-doorbell .camera-poster-fallback")).toContainText("Camera ready");
   await expect(card.locator('.camera-stage-action[data-camera-stage-open="doorbell"]')).toContainText("Tap the picture for live video");
@@ -2603,7 +2674,7 @@ test("fails Security unavailable states safely without presenting them as clear 
   await card.locator('.hub-nav-button[data-view="entry"]').click();
 
   const doorbell = card.locator(".security-camera").filter({ hasText: "Front door" });
-  await expect(doorbell.locator(".security-signal.is-unavailable")).toContainText("Unavailable");
+  await expect(card.locator(".security-selected-signals .security-signal.is-unavailable")).toContainText("Unavailable");
   await expect(doorbell.locator(".privacy-badge")).toHaveText(/Ready to view/);
   await expect(doorbell.locator('button[data-camera-open="doorbell"]')).toBeEnabled();
   const garageCamera = card.locator(".security-camera").filter({ hasText: "Garage" });
@@ -3553,8 +3624,8 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     expect(navigationTargetGeometry.map(({ label }) => label), `${name} compact navigation must retain its semantic order`).toEqual([
       "Open Today",
       "Calendar",
-      "Tasks",
       "Home",
+      "Tasks",
       "Security",
       "Energy",
       "Football",
@@ -3974,7 +4045,7 @@ test("v0.9 design approval captures the complete secure-camera lifecycle and pro
   await expect(card.locator(".security-stage-poster")).not.toHaveAttribute("role", "alert");
   const signalsOnlyDoor = card.locator(".security-camera").filter({ hasText: "Front door" });
   await expect(signalsOnlyDoor.locator(".privacy-badge")).toHaveText("Signals only");
-  await expect(signalsOnlyDoor.locator(".security-signal")).toHaveCount(3);
+  await expect(card.locator(".security-selected-signals .security-signal")).toHaveCount(3);
   await expect(signalsOnlyDoor.locator('button[data-camera-open="doorbell"]')).toHaveText("Signals only");
   await expect(signalsOnlyDoor.locator('button[data-camera-open="doorbell"]')).toBeDisabled();
   await expect(card.locator('button[data-camera-stage-open="doorbell"] > b')).toHaveText("Signals only");
@@ -4361,13 +4432,18 @@ test("exports the working corrective dashboard with representative family data",
   test.skip(!process.env.RESTORED_REVIEW_EXPORT_PATH, "Export the review only when requested");
   const household=structuredClone(config);
   household.product.title="Family Hub";
+  household.entry.cameras.push({ id:"review_garden", name:"Garden", role:"driveway", entity_id:"camera.review_garden", motion_entity:"binary_sensor.example_garage_motion", start_stream_entity:"button.review_garden_start", stop_stream_entity:"button.review_garden_stop" });
   household.features.location_map=false;
   household.features.school=false;
   for (const name of ["Garage","Bedroom","Playroom"]) household.media.players.push({entity_id:`media_player.review_${name.toLowerCase()}`, name});
   for (const [index,person] of household.people.entries()) person.name=["Rob","Zoe","Ernie","Orson"][index];
   const names=["Snug","Playroom","Living room","Hall","Utility","Upstairs hall"];
   const rooms=household.rooms.filter(room=>room.climate);
-  const overrides={};
+  const overrides={
+    "camera.review_garden": state("camera.review_garden", "idle"),
+    "button.review_garden_start": state("button.review_garden_start", "unknown"),
+    "button.review_garden_stop": state("button.review_garden_stop", "unknown")
+  };
   // The review floorplan uses its base drawing; Cleaning has a separate map.
   for (const floor of household.floorplan.floors) delete floor.vacuum_map_entity;
   for (const [field, value, options] of [

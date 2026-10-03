@@ -12,7 +12,7 @@ The v0.16.0 dashboard inherited Home Assistant's dark appearance, added redundan
 - Tasks uses a completion ring, compact actionable jobs, visible reward/badge/achievement progress and the same preparation items used by Calendar. Checklist writes continue through the existing shared preparation service.
 - Calendar keeps Day, Week, Month and Agenda, person filters, date navigation, event editing and preparation controls. Week indicators no longer overlap month labels.
 - Football preserves favourite fixtures/results, matchweek browsing, the table and FPL squad/bench/leagues. The portrait toolbar lays out before the team selector rather than overlapping it.
-- Security retains its on-demand camera lifecycle, automatic teardown, guarded alarm and garage actions, read-only and unavailable states. Its layout changes do not start streams.
+- Security uses a single neutral viewer with compact choices for one to three configured exterior cameras and a dropdown for larger collections. Show only the selected camera’s snapshot and activity. Camera selection never wakes video and closes an owned live view before switching; explicit View live, automatic teardown, guarded alarm and garage actions, read-only and unavailable states remain intact.
 - Music retains the native multi-player component, playback, room grouping and browsing. Its child configuration receives a bounded full-height layout and the selected dashboard palette.
 
 ## Review and validation

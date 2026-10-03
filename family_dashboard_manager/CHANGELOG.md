@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Use one neutral Security viewer with compact camera choices, selected-camera activity and a dropdown for larger camera collections. Browsing does not start video; private viewing and protected alarm/garage actions keep their existing safeguards.
+
 - Restore the approved tablet design across all eight pages: white navigation and masthead, a warm grey canvas, consistent blue actions, and regular body text with medium headings and lighter temperature readouts.
 - Keep the master and room heating controls beside their circular dials. Move daily and whole-house schedules into a readable four-period dialog with persistent Save and Close actions.
 - Reduce scrolling with dedicated Jobs, Get ready and Rewards sections; room control sections; Cleaning sections; and a starting-eleven/bench switch for FPL. Keep complete lists available in one contained scroll area where necessary.

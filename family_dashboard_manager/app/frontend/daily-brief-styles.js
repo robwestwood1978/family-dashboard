@@ -1488,4 +1488,62 @@ export const DAILY_BRIEF_STYLES = `
     .room-detail .detail-segments { flex-wrap:wrap; }
     .room-detail .detail-segments .segment { flex:1 1 40%; }
   }
+
+  /* One viewer and compact choices, regardless of the configured camera count. */
+  .security-main { grid-template-rows:88px minmax(0,1fr); }
+  .security-camera-picker { display:block; min-width:0; }
+  .camera-choice-list { display:grid; height:100%; grid-template-columns:repeat(var(--camera-count),minmax(0,1fr)); gap:10px; }
+  .security-camera { display:flex; height:100%; padding:4px; min-width:0; align-items:center; gap:2px; border:1px solid transparent; border-radius:18px; background:var(--daily-surface); box-shadow:none; }
+  .security-camera.is-selected { border-color:var(--daily-accent); background:var(--daily-accent-soft); }
+  .security-camera .camera-select-action { flex:1 1 0; display:flex; min-width:0; min-height:60px; align-items:center; gap:8px; padding:4px 6px; background:transparent; color:var(--daily-text); border:0; text-align:left; border-radius:12px; }
+  .camera-select-action > ha-icon { flex:none; color:var(--daily-accent); --mdc-icon-size:22px; }
+  .camera-select-action > span { min-width:0; }
+  .camera-select-action strong { display:block; font-size:14px; line-height:1.3; overflow-wrap:break-word; }
+  .security-camera .privacy-badge { display:block; margin-top:3px; padding:0; border:0; border-radius:0; background:transparent; color:var(--daily-muted); font-size:12px; line-height:1.25; white-space:normal; }
+  .camera-picker-live { flex:none; min-width:48px; min-height:48px; max-width:80px; padding:4px 8px; border:0; border-radius:12px; background:var(--daily-soft); color:var(--daily-accent); font-size:12px; }
+  .camera-picker-live { display:grid; place-items:center; width:48px; padding:0; border-radius:50%; }
+  .camera-picker-live ha-icon { --mdc-icon-size:24px; }
+  .camera-picker-action-label { display:none; }
+  .camera-picker-live:disabled { color:var(--daily-muted); }
+  .camera-collection-picker { height:100%; display:flex; align-items:center; gap:14px; padding:8px 16px; border-radius:18px; background:var(--daily-surface); }
+  .camera-collection-picker > ha-icon { flex:none; --mdc-icon-size:26px; color:var(--daily-accent); }
+  .camera-collection-picker > span { flex:1; min-width:0; padding-right:20px; position:relative; }
+  .camera-collection-picker > span::after { content:""; position:absolute; right:2px; top:34px; width:8px; height:8px; border-right:2px solid var(--daily-muted); border-bottom:2px solid var(--daily-muted); transform:rotate(45deg); pointer-events:none; }
+  .camera-collection-picker small { display:block; color:var(--daily-muted); font-size:12px; }
+  .camera-collection-picker select { appearance:none; -webkit-appearance:none; height:48px; width:100%; min-height:48px; border:0; background:transparent; color:var(--daily-text); font-size:16px; padding:0 8px 0 0; }
+  .security-stage { grid-template-rows:48px minmax(0,1fr) auto; gap:10px; }
+  .security-stage-media,.camera-stage-stack,.camera-poster-slot { background:var(--daily-soft); color:var(--daily-muted); }
+  .camera-poster-fallback { color:var(--daily-muted); font-size:14px; }
+  .camera-poster-fallback ha-icon { color:var(--daily-accent); }
+  .camera-stage-action { padding:14px; gap:12px; background:linear-gradient(transparent 45%,var(--daily-surface) 85%); color:var(--daily-text); }
+  .camera-stage-action > span { max-width:calc(100% - 124px); }
+  .camera-stage-action strong { font-size:16px; }
+  .camera-stage-action small { color:var(--daily-muted); font-size:12px; }
+  .camera-stage-action b { background:var(--daily-accent); color:#fff; min-width:108px; min-height:48px; }
+  .camera-stage-action:disabled b { background:var(--daily-soft); color:var(--daily-muted); }
+  .camera-stream-overlay { background:var(--daily-soft); color:var(--daily-text); }
+  .camera-stream-overlay > ha-icon { color:var(--daily-accent); }
+  .camera-stream-overlay small { color:var(--daily-muted); }
+  .camera-close { background:var(--daily-surface); color:var(--daily-accent); border:1px solid var(--daily-accent); }
+  .camera-live-indicator { background:var(--daily-surface); color:var(--daily-text); }
+  .security-selected-signals { display:flex; flex-wrap:wrap; gap:8px; }
+  .security-selected-signals .security-signal { display:grid; flex:1 1 90px; grid-template-columns:22px auto; grid-template-rows:auto auto; padding:8px 12px; min-height:48px; background:var(--daily-soft); color:var(--daily-text); border:0; border-radius:12px; text-align:left; }
+  .security-selected-signals .security-signal ha-icon { grid-row:1 / 3; align-self:center; color:var(--daily-muted); --mdc-icon-size:20px; }
+  .security-selected-signals .security-signal.is-active { background:var(--daily-warning-soft); }
+  .security-selected-signals .security-signal.is-active ha-icon { color:var(--daily-warning); }
+  .security-selected-signals .security-signal small { color:var(--daily-muted); }
+  .camera-select-action:focus-visible,.camera-picker-live:focus-visible,.camera-collection-picker select:focus-visible { outline:2px solid var(--daily-accent); outline-offset:2px; }
+  @media (max-width:850px) and (min-width:621px) {
+    .security-layout { grid-template-rows:minmax(0,1fr) 252px; }
+    .security-main { grid-template-rows:88px minmax(0,1fr); }
+  }
+  @media (max-width:620px) {
+    .security-main { display:flex; flex-direction:column; }
+    .security-camera-picker { flex:none; }
+    .camera-choice-list { height:auto; grid-template-columns:1fr; }
+    .security-camera { height:72px; }
+    .security-stage { min-height:420px; }
+    .security-stage-heading { flex-wrap:wrap; }
+    .security-stage { grid-template-rows:auto minmax(0,1fr) auto; }
+  }
 `;
