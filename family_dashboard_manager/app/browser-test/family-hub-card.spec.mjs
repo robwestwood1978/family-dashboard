@@ -3496,7 +3496,10 @@ async function expectContrast(card, checks) {
 
 async function approvalTextSize(page) {
   return page.locator("family-hub-card").evaluate((element) => {
-    const heading = element.shadowRoot?.querySelector(".hub-topbar h1");
+    const heading = [...(element.shadowRoot?.querySelectorAll(".hub-topbar h1,.calendar-context strong") || [])].find((node) => {
+      const style = getComputedStyle(node);
+      return node.getClientRects().length && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0;
+    });
     if (!heading) return 0;
     const style = getComputedStyle(heading);
     if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return 0;
@@ -3778,19 +3781,21 @@ async function auditApprovalTextZoom(page, testInfo, name) {
     expect(audit.overlaps, `${name} has overlapping visible text at 200%`).toEqual([]);
     if (name.startsWith("football-")) {
       const footballToolbar = page.locator("family-hub-card").locator(".football-toolbar");
-      const footballHeading = page.locator("family-hub-card").locator(".football-toolbar > div:first-child");
+      const footballHeading = page.locator("family-hub-card").locator(".football-toolbar h2");
       const firstFixtureDay = page.locator("family-hub-card").locator(".fixture-day h3").first();
       await expect(footballToolbar, `${name} must render the football toolbar at 200%`).toBeVisible();
       await expect(footballHeading, `${name} must render the football heading at 200%`).toBeVisible();
       await expect(firstFixtureDay, `${name} must render the first fixture date at 200%`).toBeVisible();
       if (name === "football-live") {
-        await expect(page.locator("family-hub-card").locator(".football-favourites-stage.is-live"), `${name} must retain its live favourites stage at 200%`).toBeVisible();
+        await expect(page.locator("family-hub-card").locator(".football-club-overviews"), `${name} must retain its favourite club overviews at 200%`).toBeVisible();
         await expect(page.locator("family-hub-card").locator(".fixture.is-live").first(), `${name} must retain its live fixture at 200%`).toBeVisible();
-        const heroGeometry = await page.locator("family-hub-card").locator(".football-favourites-stage").evaluate((hero) => {
+        const heroGeometry = await page.locator("family-hub-card").locator(".football-club-overviews").evaluate((hero) => {
           const heroBounds = hero.getBoundingClientRect();
-          return [...hero.querySelectorAll(".favourite-hero-card > .favourite-club-heading .team-mark.is-favourite")].map((mark) => {
+          return [...hero.querySelectorAll(".club-overview > header .team-mark.is-favourite")].map((mark) => {
             const bounds = mark.getBoundingClientRect();
             return {
+              bounds: { x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height },
+              stage: { x:heroBounds.x,y:heroBounds.y,width:heroBounds.width,height:heroBounds.height },
               inside: bounds.left >= heroBounds.left - 1
                 && bounds.right <= heroBounds.right + 1
                 && bounds.top >= heroBounds.top - 1
@@ -3799,7 +3804,7 @@ async function auditApprovalTextZoom(page, testInfo, name) {
           });
         });
         expect(heroGeometry.length, `${name} must render one primary crest per favourite at 200%`).toBe(2);
-        expect(heroGeometry.every(({ inside }) => inside), `${name} favourite crests must remain fully inside the stage at 200%`).toBe(true);
+        expect(heroGeometry.filter(({ inside }) => !inside), `${name} favourite crests must remain fully inside the stage at 200%`).toEqual([]);
       }
       const [toolbarBox, fixtureDayBox] = await Promise.all([footballToolbar.boundingBox(), firstFixtureDay.boundingBox()]);
       expect(toolbarBox, `${name} must measure the football toolbar at 200%`).not.toBeNull();
@@ -3849,16 +3854,17 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
   const card = page.locator("family-hub-card");
 
   await expect(card.locator(".today-hero")).toContainText("Living room");
-  await expect(card.locator(".hub-weather-pill")).toContainText("Partly cloudy");
+  await expect(card.locator(".hub-weather-pill")).toContainText("19.5°");
+  await expect(card.locator(".hub-weather-pill")).toHaveAttribute("aria-label", "Partly cloudy, 19.5°");
   await expect(card.locator(".today-weather")).toHaveCount(0);
   expect(await card.locator(".hub-weather-pill").textContent()).not.toContain("Partlycloudy");
   await expect(card.locator(".hero-metrics button[data-view='entry']")).toContainText("Quiet at home");
   await expect(card.locator(".hero-metrics button[data-view='entry']")).not.toContainText("All secure");
   await expectContrast(card, [
-    { foreground: ".compact-fixture > span", background: ".compact-fixture", minimum: 4.5 },
-    { foreground: ".person-summary small", background: ".person-summary", minimum: 4.5 },
-    { foreground: ".person-summary .points", background: ".person-summary", minimum: 4.5 },
-    { foreground: ".person-summary .person-initial", background: ".person-summary .person-initial", minimum: 4.5 }
+    { foreground: ".club-overview .club-match-row strong", background: ".club-overview .club-match-row", minimum: 4.5 },
+    { foreground: ".today-job small", background: ".today-job", minimum: 4.5 },
+    { foreground: ".today-job strong", background: ".today-job", minimum: 4.5 },
+    { foreground: ".today-person-token", background: ".today-person-token", minimum: 4.5 }
   ]);
   await captureApproval(page, testInfo, "today");
 
@@ -3968,10 +3974,15 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
         { foreground: ".family-facts span", background: ".family-facts span", minimum: 4.5 },
         { foreground: ".family-kid-tab > span", background: ".family-kid-tab > span", minimum: 4.5 },
         { foreground: ".chore-row b", background: ".chore-row", minimum: 4.5 },
-        { foreground: ".family-summary-item p", background: ".family-summary-item", minimum: 4.5 },
-        { foreground: ".family-summary-item small", background: ".family-summary-item", minimum: 4.5 },
         { foreground: ".chore-claim-action:not(:disabled)", background: ".chore-claim-action:not(:disabled)", minimum: 4.5 }
       ]);
+      await card.locator('[data-task-section="rewards"]').click();
+      await expect(card.locator(".family-summary-grid")).toBeVisible();
+      await expectContrast(card, [
+        { foreground: ".family-summary-item p", background: ".family-summary-item", minimum: 4.5 },
+        { foreground: ".family-summary-item small", background: ".family-summary-item", minimum: 4.5 }
+      ]);
+      await card.locator('[data-task-section="jobs"]').click();
     }
     if (view === "music") {
       await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-player-count", "5");
@@ -3979,7 +3990,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       await expect(card.locator("[data-mock-player-row]")).toHaveCount(5);
       await expect(card.locator("[data-mock-music-tab]")).toHaveCount(3);
       await expectContrast(card, [
-        { foreground: ".music-meta", background: ".music-meta", minimum: 4.5 },
+        { foreground: ".mock-player-row small", background: ".mock-player-row", minimum: 4.5 },
         { foreground: ".mock-media-player strong", background: ".media-player-stage", minimum: 4.5 },
         { foreground: ".mock-media-player h3", background: ".media-player-stage", minimum: 4.5 },
         { foreground: ".mock-media-player button", background: ".mock-media-player button", minimum: 4.5 }
@@ -4167,35 +4178,32 @@ test("v0.9 design approval captures live, cached, and stale football health", as
   const pageErrors = await mount(page, config, approvalFootballStates("live"));
   const card = page.locator("family-hub-card");
   await card.locator('.hub-nav-button[data-view="football"]').click();
-  await expect(card.locator(".football-favourites-stage.is-live")).toBeVisible();
+  await expect(card.locator(".football-club-overviews")).toBeVisible();
   await expect(card.locator(".football-club-overviews .club-overview")).toHaveCount(2);
-  expect(await card.locator(".favourite-hero-card").evaluateAll((items) => items.map((item) => [item.dataset.favouriteCode, item.dataset.fixtureId]))).toEqual([
-    ["TOT", "101"],
-    ["AVL", "102"]
-  ]);
-  await expect(card.locator(".hub-topbar-time")).toHaveText("16:08");
+  await expect(card.locator('.club-overview[data-favourite-code="TOT"] .club-match-row[data-fixture-id="101"]')).toHaveAttribute("data-fixture-status", "live");
+  await expect(card.locator('.club-overview[data-favourite-code="AVL"] .club-next-row[data-fixture-id="102"]')).toHaveAttribute("data-fixture-status", "upcoming");
+  await expect(card.locator('.club-overview[data-favourite-code="AVL"] .club-match-row:not(.club-next-row)')).toContainText("Fixture data unavailable");
+  await expect(card.locator(".hub-masthead-date")).toHaveText("Monday 24 August");
   await expect(card.locator(".football-freshness.is-live strong")).toHaveText("Scores up to date");
-  await expect(card.locator(".football-freshness.is-live small")).toHaveText("Checking every 3 minutes. Checked 16:07.");
-  await expect(card.locator('.favourite-hero-card[data-favourite-code="TOT"] img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
-  await expect(card.locator('.favourite-hero-card[data-favourite-code="AVL"] img[src="https://resources.premierleague.com/premierleague/badges/70/t7.png"]')).toBeVisible();
+  await expect(card.locator(".football-freshness.is-live")).toHaveAttribute("title", "Checking every 3 minutes.");
+  await expect(card.locator('.club-overview[data-favourite-code="TOT"] img[src="https://resources.premierleague.com/premierleague/badges/70/t6.png"]')).toBeVisible();
+  await expect(card.locator('.club-overview[data-favourite-code="AVL"] img[src="https://resources.premierleague.com/premierleague/badges/70/t7.png"]')).toBeVisible();
   await expect(card.locator('.fixture .team-mark img[src$="/t90.png"]')).toBeHidden();
   await expect(card.locator('.fixture .team-mark').filter({ hasText: "BUR" }).locator("strong")).toHaveAttribute("aria-hidden", "false");
   await expectContrast(card, [
     { foreground: ".fixture .team", background: ".fixture", minimum: 4.5 },
-    { foreground: ".favourite-standing small", background: ".favourite-standing", minimum: 4.5 }
+    { foreground: ".club-overview small", background: ".club-overview", minimum: 4.5 }
   ]);
   await captureApproval(page, testInfo, "football-live");
 
   await updateEntityStates(card, approvalFootballStates("cached"));
   await expect(card.locator(".football-freshness.is-cached strong")).toHaveText("Showing saved scores");
-  await expect(card.locator(".football-freshness.is-cached small")).toHaveText("Checked 16:04.");
-  await expect(card.locator(".football-health-note.is-cached")).toHaveText("Live updates are temporarily unavailable.");
+  await expect(card.locator(".football-freshness.is-cached")).toHaveAttribute("title", "Live updates are temporarily unavailable.");
   await captureApproval(page, testInfo, "football-cached");
 
   await updateEntityStates(card, approvalFootballStates("stale"));
   await expect(card.locator(".football-freshness.is-stale strong")).toHaveText("Scores may be delayed");
-  await expect(card.locator(".football-freshness.is-stale small")).toHaveText("Checked 16:00.");
-  await expect(card.locator(".football-health-note.is-stale")).toHaveText("The last football check is older than expected.");
+  await expect(card.locator(".football-freshness.is-stale")).toHaveAttribute("title", "The last football check is older than expected.");
   await captureApproval(page, testInfo, "football-stale");
   expect(pageErrors).toEqual([]);
 });

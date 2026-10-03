@@ -870,9 +870,10 @@ export const DAILY_BRIEF_STYLES = `
   .focus-today .today-family .section-heading button { min-height:48px; font-size:14px; }
   .today-job-list { display:grid; gap:2px; }
   .today-job { display:grid; grid-template-columns:42px minmax(0,1fr) 44px; align-items:center; gap:12px; padding:6px 0; min-height:58px; }
-  .today-person-token { width:42px; height:42px; display:grid; place-items:center; color:var(--person-colour); background:color-mix(in srgb,var(--person-colour) 10%,var(--daily-surface)); border-radius:14px; font-size:14px; }
+  .today-person-token { width:42px; height:42px; display:grid; place-items:center; color:color-mix(in srgb,var(--person-colour) 60%,var(--daily-text)); background:color-mix(in srgb,var(--person-colour) 10%,var(--daily-surface)); border-radius:14px; font-size:14px; }
   .today-job strong,.today-job small { display:block; font-size:14px; font-weight:400; }
   .today-job small { font-size:12px; color:var(--daily-muted); margin-top:4px; }
+  .chore-row.is-done small { color:var(--daily-text); }
   .today-job-action { width:44px; height:44px; border:0; border-radius:50%; background:var(--daily-surface); color:var(--daily-text); cursor:pointer; }
   .focus-today .today-family .today-ready-preview { grid-row:auto; overflow:visible; flex:none; padding-top:7px; }
   .focus-today .today-football { grid-template-rows:32px minmax(0,1fr); gap:8px; border-top:0; }
@@ -1440,6 +1441,7 @@ export const DAILY_BRIEF_STYLES = `
     .heating-experience { grid-template-rows:auto auto; }
     .focus-calendar-layout { display:flex; flex-direction:column; }
     .focus-prep-body { overflow:visible; }
+    .football-experience { grid-template-rows:auto auto; }
     .football-experience.is-table { display:block; }
   }
   .media-player-stage .embedded-card { font-family:inherit; }
