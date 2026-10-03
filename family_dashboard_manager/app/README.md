@@ -2,7 +2,7 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.17.0 provides:
+Version 0.17.1 provides:
 
 - Home in focus, a focused Calendar with shared checklists, persistent Music playback, neutral light/dark surfaces, portrait layouts, and equal latest/next match summaries for both favourite clubs;
 - a secret-rejecting schema-v7 household contract;

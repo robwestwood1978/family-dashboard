@@ -1447,6 +1447,7 @@ export const DAILY_BRIEF_STYLES = `
   .media-player-stage .embedded-card { font-family:inherit; }
   .media-player-stage .embedded-card * { font-family:inherit; font-weight:400; }
   .media-player-stage .embedded-card :is(h1,h2,h3,strong,b) { font-weight:500; }
+  .media-player-stage #mmpc-group-chips-controller > button { flex:0 0 auto !important; width:auto !important; max-width:100%; min-height:48px; gap:8px; padding:8px 14px; white-space:normal; overflow-wrap:anywhere; }
 
   .focus-prep-add { flex:none; }
   @media (min-width:621px) {
