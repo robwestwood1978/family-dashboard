@@ -1015,7 +1015,7 @@ test("Home in focus keeps every screen readable in both appearances and preserve
           await card.locator(`[data-home-section="${section}"]`).click();
           await expectApprovalQuality(page);
           if (section === "lights" || section === "heating") {
-            await expectContrast(card, [{ foreground: `.${section === "lights" ? "lighting" : "heating"}-master .eyebrow`, background: `.${section === "lights" ? "lighting" : "heating"}-master`, minimum: 4.5 }]);
+            await expectContrast(card, [{ foreground: `.${section === "lights" ? "lighting" : "heating"}-master h2`, background: `.${section === "lights" ? "lighting" : "heating"}-master`, minimum: 4.5 }]);
           }
           if (section === "heating") {
             await expectContrast(card, [{ foreground: ".heating-master-target,.master-temperature-stepper button", background: ".heating-master", minimum: 4.5 }]);
@@ -1466,7 +1466,9 @@ test("renders the interactive floorplan and sends only configured room controls"
   await card.locator('[data-room="kitchen"]').click();
   await expect(card.locator(".room-detail h2")).toHaveText("Kitchen");
   await card.locator('button[data-toggle="light.kitchen"]').click();
+  await card.locator('[data-room-section="scenes"]').click();
   await card.locator('button[data-scene="scene.kitchen_bright"]').click();
+  await card.locator('[data-room-section="music"]').click();
   await card.locator('button[data-media-toggle="media_player.kitchen"]').click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
     { domain: "light", service: "toggle", data: { entity_id: "light.kitchen" } },
@@ -2735,6 +2737,19 @@ test("shows current FPL squads, captain points and the complete league list", as
   await expect(card.locator(".fpl-bench .fpl-player")).toHaveCount(4);
   await expect(card.locator('.fpl-player-badge[aria-label="Captain"]')).toHaveText("C");
   await expect(card.locator(".fpl-player").filter({ hasText: "Captain Forward" })).toContainText("12");
+  await card.locator('[data-squad-section="bench"]').click();
+  await expect(card.locator(".fpl-pitch")).toBeHidden();
+  await expect(card.locator(".fpl-bench .fpl-player:visible")).toHaveCount(4);
+  expect(await card.locator(".fpl-bench").evaluate(bench => {
+    const panel = bench.closest(".fpl-squad-panel").getBoundingClientRect();
+    return [...bench.querySelectorAll(".fpl-player")].every(player => {
+      const bounds = player.getBoundingClientRect();
+      return bounds.left >= panel.left && bounds.right <= panel.right && bounds.top >= panel.top && bounds.bottom <= panel.bottom;
+    });
+  })).toBe(true);
+  await card.locator('[data-squad-section="starters"]').click();
+  await expect(card.locator(".fpl-pitch .fpl-player:visible")).toHaveCount(11);
+  await expect(card.locator(".fpl-bench")).toBeHidden();
   await expect(card.locator(".fpl-leagues > span")).toHaveCount(12);
   await expect(card.locator(".fpl-leagues")).toContainText("Invitational league 12");
   expect(await card.locator(".fpl-entry-selector button").evaluateAll((buttons) => buttons.every((button) => button.getBoundingClientRect().height >= 48))).toBe(true);
@@ -2754,8 +2769,8 @@ test("shows current FPL squads, captain points and the complete league list", as
   expect(fplOverflow).toEqual({
     detailOverflow: "hidden",
     mainOverflow: "hidden",
-    squadOverflow: "auto",
-    leaguesOverflow: "auto",
+    squadOverflow: "hidden",
+    leaguesOverflow: "hidden",
     detailScrollOverflow: 0,
     mainScrollOverflow: 0
   });
@@ -2775,7 +2790,7 @@ test("shows current FPL squads, captain points and the complete league list", as
   await expect(card.locator(".league-table")).toBeVisible();
   await card.locator('[data-football-tab="fpl"]').click();
   await expect(card.locator(".fpl-team-card")).toContainText("Second XI");
-  const overlap=await card.locator(".fpl-detail").evaluate(node=>node.getBoundingClientRect().top < node.parentElement.querySelector(".football-toolbar").getBoundingClientRect().bottom);
+  const overlap=await card.locator(".fpl-detail").evaluate(node=>node.getBoundingClientRect().top < node.parentElement.querySelector(".football-tabs").getBoundingClientRect().bottom);
   expect(overlap).toBe(false);
   expect(pageErrors).toEqual([]);
 });
@@ -3121,12 +3136,12 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   expect(mediaMetrics.chipColour).toBe("rgb(18, 102, 207)");
   expect(mediaMetrics.chipBackground).toBe("rgb(232, 241, 255)");
   expect(mediaMetrics.stageBackground).toBe("rgb(255, 255, 255)");
-  expect(mediaMetrics.stageOverflowX).toBe("auto");
-  expect(mediaMetrics.stageOverflowY).toBe("auto");
+  expect(mediaMetrics.stageOverflowX).toBe("hidden");
+  expect(mediaMetrics.stageOverflowY).toBe("hidden");
   expect(mediaMetrics.stageScrollHeight).toBeLessThanOrEqual(mediaMetrics.stageClientHeight + 1);
   expect(mediaMetrics.stageScrollTop).toBe(0);
-  expect(mediaMetrics.slotOverflowX).toBe("visible");
-  expect(mediaMetrics.slotOverflowY).toBe("visible");
+  expect(mediaMetrics.slotOverflowX).toBe("hidden");
+  expect(mediaMetrics.slotOverflowY).toBe("hidden");
   expect(mediaMetrics.childInlineHeight).toBe("100%");
   expect(mediaMetrics.childOverflowX).toBe("visible");
   expect(mediaMetrics.childOverflowY).toBe("visible");
@@ -3160,7 +3175,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
 
   await card.locator('.hub-nav-button[data-view="family"]').click();
   await expect(card.locator(".family-rhythm")).toHaveCount(0);
-  await expect(card.locator(".family-dashboard-heading")).toContainText("Tasks, jobs & rewards");
+  await expect(card.locator(".task-section-tabs .segment")).toHaveText(["Jobs", "Get ready", "Rewards"]);
   await expect(card.locator(".family-dashboard-heading")).not.toContainText(/test|preview/i);
   await expect(card.locator(".choreops-link")).toHaveCount(0);
   await expect(card.locator(".family-kid-tab")).toHaveCount(2);
@@ -3201,6 +3216,11 @@ async function expectApprovalQuality(page, { hotspots = false, securityLabels = 
       .filter((node) => !node.classList.contains("sr-only"))
       .map((node) => ({ text: node.textContent.trim(), size: Number.parseFloat(getComputedStyle(node).fontSize) }))
       .filter(({ size }) => Number.isFinite(size) && size < 12);
+    const heavyText = [...root.querySelectorAll("*")]
+      .filter(node => node.getClientRects().length && [...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && child.textContent.trim()))
+      .filter(node => !node.classList.contains("sr-only"))
+      .map(node => ({text:node.textContent.trim(), weight:Number.parseInt(getComputedStyle(node).fontWeight,10)}))
+      .filter(({weight}) => weight > 500);
     const controls = queryAuditRoots("button:not([disabled]),select:not([disabled])")
       .filter((node) => node.getClientRects().length)
       .map((node) => {
@@ -3295,10 +3315,11 @@ async function expectApprovalQuality(page, { hotspots = false, securityLabels = 
         };
       }).filter(({ outsidePicker, outsideRoot, visibleChildren }) => outsidePicker || outsideRoot || visibleChildren.length)
       : [];
-    return { fontFamily, typography, controls, icons, hotspotSizes, clippedSecurityLabels, fragmentedSecurityLabels, securityCardBounds };
+    return { fontFamily, typography, heavyText, controls, icons, hotspotSizes, clippedSecurityLabels, fragmentedSecurityLabels, securityCardBounds };
   }, { hotspots, securityLabels });
   expect(audit.fontFamily).toMatch(/system-ui/i);
   expect(audit.typography).toEqual([]);
+  expect(audit.heavyText).toEqual([]);
   expect(audit.controls).toEqual([]);
   expect(audit.icons).toEqual([]);
   expect(audit.hotspotSizes).toEqual([]);
@@ -3837,7 +3858,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
     }
     if (view === "family") {
       await expect(card.locator(".family-rhythm,.location-off-badge")).toHaveCount(0);
-      await expect(card.locator(".family-dashboard-heading")).toContainText("Tasks, jobs & rewards");
+      await expect(card.locator(".task-section-tabs .segment")).toHaveText(["Jobs", "Get ready", "Rewards"]);
       await expect(card.locator(".choreops-link")).toHaveCount(0);
       await expect(card.locator(".family-kid-tab")).toHaveCount(2);
       await expect(card.locator(".family-kid-stage .family-person")).toHaveCount(1);
@@ -4135,6 +4156,7 @@ test("Home in focus shares complete event checklists between Calendar, Tasks and
   await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "true");
   await expect(card.locator(".family-preparation")).not.toContainText("Other child bag");
   await expect(card.locator(".focus-task-rewards")).toContainText("Weekend movie");
+  await card.locator('[data-task-section="ready"]').click();
   await card.locator('.family-prep-item[data-prep-item="swim-7"]').click();
   await card.locator('.focus-task-event').filter({ hasText: "Friday swimming" }).locator("[data-focus-open-plan]").click();
   await expect(card.locator('.focus-event-ready [data-prep-item="swim-7"]')).toHaveAttribute("aria-pressed", "true");
@@ -4321,6 +4343,11 @@ test("native music player keeps playback and room controls inside both tablet or
     const geometry=await player.evaluate(node=>({height:node.getBoundingClientRect().height, bottom:node.getBoundingClientRect().bottom, viewport:innerHeight, html:node.shadowRoot?.innerHTML.slice(0,200)}));
     expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport+1);
     expect(geometry.height).toBeGreaterThan(400);
+    const heavyText = await player.evaluate(node=>[...node.querySelectorAll("*")]
+      .filter(element=>element.getClientRects().length && [...element.childNodes].some(child=>child.nodeType===Node.TEXT_NODE && child.textContent.trim()))
+      .filter(element=>Number.parseInt(getComputedStyle(element).fontWeight,10)>500)
+      .map(element=>element.textContent.trim()));
+    expect(heavyText).toEqual([]);
     await expectNoRootOverflow(page);
     const folder=process.env.RESTORED_DESIGN_REVIEW_DIR || '/private/tmp/restored-design-review';
     await mkdir(folder,{recursive:true});
@@ -4341,6 +4368,19 @@ test("exports the working corrective dashboard with representative family data",
   const names=["Snug","Playroom","Living room","Hall","Utility","Upstairs hall"];
   const rooms=household.rooms.filter(room=>room.climate);
   const overrides={};
+  // The review floorplan uses its base drawing; Cleaning has a separate map.
+  for (const floor of household.floorplan.floors) delete floor.vacuum_map_entity;
+  for (const [field, value, options] of [
+    ["room_entity", "All rooms", ["All rooms", "Living room", "Kitchen"]],
+    ["mode_entity", "Vacuum and mop", ["Vacuum", "Vacuum and mop"]],
+    ["suction_entity", "Standard", ["Quiet", "Standard", "Strong"]],
+    ["mop_entity", "Standard", ["Gentle", "Standard"]],
+    ["water_entity", "Medium", ["Low", "Medium", "High"]]
+  ]) overrides[household.cleaning[field]] = state(household.cleaning[field], value, {options});
+  household.cleaning.consumable_entities = ["sensor.review_filter"];
+  household.cleaning.command_entities = ["button.review_empty_dock"];
+  overrides["sensor.review_filter"] = state("sensor.review_filter", "85", {friendly_name:"Filter life", unit_of_measurement:"%"});
+  overrides["button.review_empty_dock"] = state("button.review_empty_dock", "unknown", {friendly_name:"Empty dock"});
   while (rooms.length<6) {
     const index=rooms.length;
     const room={...structuredClone(rooms[0]),id:`review_zone_${index}`,name:names[index],climate:`climate.review_zone_${index}`, lights:[],covers:[],scenes:[]};
@@ -4440,5 +4480,44 @@ test("approved Calendar inline preparation adds to the shared list and honours r
   await card.evaluate((el,key)=>{const input=document.createElement("input");input.dataset.focusPrepInput=key;input.value="Tampered item";const button=document.createElement("button");button.dataset.focusAddPrep=key;button.dataset.preparationPerson="child_one";el.shadowRoot.append(input,button);button.click();},eventKey);
   await expect(card.locator(".calendar-warning").first()).toContainText("not allowed");
   expect(await page.evaluate(()=>window.__serviceCalls.length)).toBe(count);
+  expect(errors).toEqual([]);
+});
+
+test("refined sections keep controls reachable without changing household state", async ({page}) => {
+  const household = locationDisabledConfig();
+  household.cleaning.consumable_entities = ["sensor.vacuum_filter_remaining"];
+  household.cleaning.command_entities = ["button.vacuum_empty_dock"];
+  const errors = await mount(page, household, {
+    "sensor.vacuum_filter_remaining":state("sensor.vacuum_filter_remaining",80,{friendly_name:"Filter remaining",unit_of_measurement:"%"}),
+    "button.vacuum_empty_dock":state("button.vacuum_empty_dock","unknown",{friendly_name:"Empty dock"})
+  }, {kiosk:true});
+  const card = page.locator("family-hub-card");
+  await card.locator('[data-room-section-target="comfort"]').click();
+  await expect(card.locator('[data-room-section="comfort"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(card.locator('.room-section-content [data-climate-adjust]').first()).toBeVisible();
+  for (const section of await card.locator('[data-room-section]').evaluateAll(nodes=>nodes.map(node=>node.dataset.roomSection))) {
+    await card.locator(`[data-room-section="${section}"]`).click();
+    await expect(card.locator(`[data-room-section="${section}"]`)).toHaveAttribute("aria-pressed", "true");
+    await expect(card.locator('.room-section-content > .ux-section:visible')).toHaveCount(1);
+  }
+  await card.locator('.hub-navigation [data-view="family"]').click();
+  for (const section of ["jobs", "ready", "rewards"]) {
+    await card.locator(`[data-task-section="${section}"]`).click();
+    await expect(card.locator(`[data-task-section="${section}"]`)).toHaveAttribute("aria-pressed", "true");
+    await expect(card.locator('.focus-task-workspace > .ux-section:visible')).toHaveCount(1);
+    await expectApprovalQuality(page);
+  }
+  await card.locator('.hub-navigation [data-view="rooms"]').click();
+  await card.locator('[data-home-section="cleaning"]').click();
+  await expect(card.locator('[data-cleaning-section="care"]')).toBeVisible();
+  const sections = await card.locator('[data-cleaning-section]').evaluateAll(nodes=>nodes.map(node=>node.dataset.cleaningSection));
+  expect(sections).toEqual(["clean", "settings", "care"]);
+  for (const section of sections) {
+    await card.locator(`[data-cleaning-section="${section}"]`).click();
+    await expect(card.locator(`[data-cleaning-section="${section}"]`)).toHaveAttribute("aria-pressed", "true");
+    await expect(card.locator('.cleaning-panel > .ux-section:visible')).toHaveCount(1);
+    await expectApprovalQuality(page);
+  }
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
   expect(errors).toEqual([]);
 });

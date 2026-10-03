@@ -1,3 +1,11 @@
+## Unreleased
+
+- Restore the approved tablet design across all eight pages: white navigation and masthead, a warm grey canvas, consistent blue actions, and regular body text with medium headings and lighter temperature readouts.
+- Keep the master and room heating controls beside their circular dials. Move daily and whole-house schedules into a readable four-period dialog with persistent Save and Close actions.
+- Reduce scrolling with dedicated Jobs, Get ready and Rewards sections; room control sections; Cleaning sections; and a starting-eleven/bench switch for FPL. Keep complete lists available in one contained scroll area where necessary.
+- Make Today’s next plan and essential controls fit the smaller supported tablet, keep Calendar’s add-item control reachable, and preserve the full native Music player with consistent typography and touch targets.
+- Preserve existing entity mappings, read-only protections, shared checklist IDs, ChoreOps boundaries and private camera lifecycle.
+
 ## 0.16.0
 
 - Replace Today’s brief with Home in focus: a large room illustration, direct lighting, a heating shortcut, the next family plan, jobs, and both favourite clubs’ match summaries.

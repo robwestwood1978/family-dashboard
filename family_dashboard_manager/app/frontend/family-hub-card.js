@@ -2957,7 +2957,8 @@ export class FamilyHubCard extends HTMLElementBase {
     const items = this._preparationItems.filter((item) => item?._preparation?.eventKey === eventKey && (!personId || item._preparation.personId === personId));
     if (!items.length) return "";
     const progress = preparationProgress(items,eventKey);
-    return `<div class="focus-checklist ${compact ? "is-compact":""}">${items.map((item) => {const done=String(item.status).toLowerCase()==="completed";const id=item.uid || item.id || item.summary;const person=this._config.people.find((person)=>person.id===item._preparation.personId);return `<button type="button" class="focus-ready-item ${done ? "is-complete":""}" data-prep-item="${escapeHtml(id)}" data-prep-status="${done ? "needs_action":"completed"}" aria-pressed="${done}" ${this._config.display.read_only ? "disabled":""}><ha-icon icon="${done ? "mdi:checkbox-marked":"mdi:checkbox-blank-outline"}"></ha-icon><span>${escapeHtml(item.summary || item.item || "Ready item")}</span>${person && !personId ? `<small class="focus-ready-person">${escapeHtml(person.name)}</small>` : ""}</button>`}).join("")}</div><p class="focus-ready-count">${progress.complete} of ${progress.total} ready</p>`;
+    const shown = compact ? items.slice(0, 3) : items;
+    return `<div class="focus-checklist ${compact ? "is-compact":""}">${shown.map((item) => {const done=String(item.status).toLowerCase()==="completed";const id=item.uid || item.id || item.summary;const person=this._config.people.find((person)=>person.id===item._preparation.personId);return `<button type="button" class="focus-ready-item ${done ? "is-complete":""}" data-prep-item="${escapeHtml(id)}" data-prep-status="${done ? "needs_action":"completed"}" aria-pressed="${done}" ${this._config.display.read_only ? "disabled":""}><ha-icon icon="${done ? "mdi:checkbox-marked":"mdi:checkbox-blank-outline"}"></ha-icon><span>${escapeHtml(item.summary || item.item || "Ready item")}</span>${person && !personId ? `<small class="focus-ready-person">${escapeHtml(person.name)}</small>` : ""}</button>`}).join("")}</div><p class="focus-ready-count">${progress.complete} of ${progress.total} ready${shown.length < items.length ? ` · ${items.length - shown.length} more in the plan` : ""}</p>`;
   }
 
   _refreshMusicDock() {
@@ -3025,16 +3026,16 @@ export class FamilyHubCard extends HTMLElementBase {
     const day = formatDay(calendarEventStart(event), this._config.product.locale, this._config.product.timezone);
     const time = isAllDayCalendarEvent(event) ? "All day" : formatTime(calendarEventStart(event), this._config.product.locale, this._config.product.timezone);
     return `<aside class="focus-event-ready">
-      <span class="focus-prep-icon"><ha-icon icon="mdi:bag-personal-outline"></ha-icon></span>
+      <header class="focus-prep-heading"><span class="focus-prep-icon"><ha-icon icon="mdi:bag-personal-outline"></ha-icon></span>
       <p class="eyebrow">Get ready</p>
       <h2>${escapeHtml(event.summary || "Your next plan")}</h2>
-      <p class="supporting">${escapeHtml(day)} · ${escapeHtml(time)}</p>
-      ${event.location ? `<p class="supporting"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${escapeHtml(event.location)}</p>` : ""}
+      <p class="supporting">${escapeHtml(day)} · ${escapeHtml(time)}${event.location ? ` · ${escapeHtml(event.location)}` : ""}</p></header>
+      <div class="focus-prep-body">
       ${checklist || '<p class="planner-no-prep">No checklist linked yet.</p>'}
-      ${children.length && !this._config.display.read_only ? `<p class="focus-prep-note">Also in ${escapeHtml(children[0].name)}’s task list.</p><div class="focus-prep-add"><input data-focus-prep-input="${escapeHtml(key)}" placeholder="Add an item" aria-label="Add a preparation item"><button type="button" data-focus-add-prep="${escapeHtml(key)}" data-preparation-person="${escapeHtml(children[0].id)}" aria-label="Add checklist item"><ha-icon icon="mdi:plus"></ha-icon></button></div>` : ""}
+      </div>${children.length && !this._config.display.read_only ? `<p class="focus-prep-note">Also in ${escapeHtml(children[0].name)}’s task list.</p><div class="focus-prep-add"><input data-focus-prep-input="${escapeHtml(key)}" placeholder="Add an item" aria-label="Add a preparation item"><button type="button" data-focus-add-prep="${escapeHtml(key)}" data-preparation-person="${escapeHtml(children[0].id)}" aria-label="Add checklist item"><ha-icon icon="mdi:plus"></ha-icon></button></div>` : ""}
       <div class="focus-prep-links">
-        <button type="button" data-planner-event="${escapeHtml(key)}">Event details <ha-icon icon="mdi:arrow-top-right"></ha-icon></button>
-        ${this._config.features.family && children.length ? `<button type="button" data-focus-tasks="${escapeHtml(children[0].id)}">Tasks <ha-icon icon="mdi:arrow-right"></ha-icon></button>` : ""}
+        <button type="button" data-planner-event="${escapeHtml(key)}" aria-label="Event details" title="Event details"><span class="prep-link-label">Event details</span> <ha-icon icon="mdi:arrow-top-right"></ha-icon></button>
+        ${this._config.features.family && children.length ? `<button type="button" data-focus-tasks="${escapeHtml(children[0].id)}" data-task-target="ready" aria-label="Open Tasks" title="Open Tasks"><span class="prep-link-label">Tasks</span> <ha-icon icon="mdi:arrow-right"></ha-icon></button>` : ""}
       </div>
     </aside>`;
   }
@@ -3055,7 +3056,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const security = features.entry ? todaySecurityPresentation(states[this._config.entry?.alarm_entity], states[this._config.entry?.garage?.cover_entity], (this._config.entry?.cameras || []).flatMap((camera) => [camera.ringing_entity,camera.person_entity,camera.motion_entity]).filter(Boolean).map((id) => states[id])) : null;
     const preview = features.family && features.calendar ? todayPreparationPreview(this._preparationItems.filter((item) => !next || item?._preparation?.eventKey !== familyPlannerEventKey(next)),this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents(),this._config.people,new Date(),this._config.product.timezone,2) : {total:0,complete:0,rows:[]};
     return `<section class="today-grid focus-today" data-calendar="${features.calendar}" data-secondary-count="${[features.family, features.football, features.music].filter(Boolean).length}" aria-label="Today at a glance">
-      ${room ? `<article class="surface hero-panel today-hero focus-home-card"><div class="daily-home-art" aria-hidden="true"><img src="${HOME_ILLUSTRATION}" alt="" decoding="async"></div><div class="today-hero-copy"><h2>${escapeHtml(room.name)}</h2><p>${Number.isFinite(summary.temperature) ? `${escapeHtml(room.name)} · ${formatTemperature(summary.temperature)}` : "Your home controls"}</p></div><button type="button" class="focus-home-open" data-focus-home-room="${escapeHtml(room.id)}" aria-label="Open ${escapeHtml(room.name)} controls"><ha-icon icon="mdi:arrow-top-right"></ha-icon></button><div class="focus-home-controls"><button type="button" data-room-lights="${escapeHtml(room.id)}" data-light-service="${summary.lightsOn ? "turn_off":"turn_on"}" aria-label="Turn ${escapeHtml(room.name)} lights ${summary.lightsOn ? "off":"on"}" aria-pressed="${Boolean(summary.lightsOn)}" ${readOnly || !availableLights.length ? "disabled" : ""}><ha-icon icon="mdi:lamp-outline"></ha-icon><span><strong>${availableLights.length ? summary.lightsOn ? "Lights on":"Lights off" : "Lighting unavailable"}</strong><small>${escapeHtml(room.name)}</small></span></button><button type="button" ${room.climate ? `data-focus-home-room="${escapeHtml(room.id)}"` : 'data-home-target="heating"'}><ha-icon icon="mdi:thermometer"></ha-icon><span><strong>${Number.isFinite(summary.targetTemperature) ? formatTemperature(summary.targetTemperature):Number.isFinite(home?.averageTemperature) ? formatTemperature(home.averageTemperature):"View heating"}</strong><small>${room.climate ? "Heating target" : "Home temperature"} <ha-icon icon="mdi:chevron-right"></ha-icon></small></span></button></div></article>` : `<article class="focus-hello"><h2>${escapeHtml(greetingForTime(new Date(),this._config.product.timezone))}</h2><p>Your family’s day, together.</p></article>`}
+      ${room ? `<article class="surface hero-panel today-hero focus-home-card"><div class="daily-home-art" aria-hidden="true"><img src="${HOME_ILLUSTRATION}" alt="" decoding="async"></div><div class="today-hero-copy"><h2>${escapeHtml(room.name)}</h2><p>${Number.isFinite(summary.temperature) ? `${escapeHtml(room.name)} · ${formatTemperature(summary.temperature)}` : "Your home controls"}</p></div><button type="button" class="focus-home-open" data-focus-home-room="${escapeHtml(room.id)}" aria-label="Open ${escapeHtml(room.name)} controls"><ha-icon icon="mdi:arrow-top-right"></ha-icon></button><div class="focus-home-controls"><button type="button" data-room-lights="${escapeHtml(room.id)}" data-light-service="${summary.lightsOn ? "turn_off":"turn_on"}" aria-label="Turn ${escapeHtml(room.name)} lights ${summary.lightsOn ? "off":"on"}" aria-pressed="${Boolean(summary.lightsOn)}" ${readOnly || !availableLights.length ? "disabled" : ""}><ha-icon icon="mdi:lamp-outline"></ha-icon><span><strong>${availableLights.length ? summary.lightsOn ? "Lights on":"Lights off" : "Lighting unavailable"}</strong><small>${escapeHtml(room.name)}</small></span></button><button type="button" ${room.climate ? `data-focus-home-room="${escapeHtml(room.id)}" data-room-section-target="comfort"` : 'data-home-target="heating"'}><ha-icon icon="mdi:thermometer"></ha-icon><span><strong>${Number.isFinite(summary.targetTemperature) ? formatTemperature(summary.targetTemperature):Number.isFinite(home?.averageTemperature) ? formatTemperature(home.averageTemperature):"View heating"}</strong><small>${room.climate ? "Heating target" : "Home temperature"} <ha-icon icon="mdi:chevron-right"></ha-icon></small></span></button></div></article>` : `<article class="focus-hello"><h2>${escapeHtml(greetingForTime(new Date(),this._config.product.timezone))}</h2><p>Your family’s day, together.</p></article>`}
       <div class="focus-today-plan">${this._preparationError ? `<p class="calendar-warning" role="alert">${escapeHtml(this._preparationError)}</p>` : ""}${features.calendar ? `<article class="next-panel today-next"><p class="eyebrow">${next ? `Next, ${isAllDayCalendarEvent(next) ? "all day" : `at ${escapeHtml(formatTime(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}`}` : "Coming up"}</p><h2>${escapeHtml(next?.summary || "No plans yet")}</h2><p class="supporting">${next ? `${escapeHtml(familyPlannerPeople(next,this._config.people).filter(person => person.role !== "household").map(person => person.name).join(", ") || "Everyone")}${next.location ? ` · ${escapeHtml(next.location)}` : ""}` : "The next family event will appear here."}</p>${next ? this._renderFocusChecklist(next, { compact:true }) : ""}<button type="button" class="text-action" ${next ? `data-focus-open-plan="${escapeHtml(familyPlannerEventKey(next))}"`:'data-view="calendar"'}>See the plan <ha-icon icon="mdi:arrow-right"></ha-icon></button></article>`:""}${features.family ? `<article class="children-panel today-family"><div class="section-heading"><h2>A little left to do</h2><button type="button" data-view="family">Tasks <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="today-job-list">${this._renderTodayJobs()}</div>${this._renderTodayTaskPreview(preview)}</article>`:""}</div>
       ${football ? `<article class="football-panel today-football" data-fixture-count="${football.fixtureCount || 0}"><div class="section-heading"><h2>This week in football</h2><button type="button" data-view="football">All football <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="featured-fixtures">${football.html}</div></article>`:""}
       ${home || security || energy ? `<footer class="hero-metrics focus-home-summary">${home ? `<button type="button" data-home-target="heating"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${escapeHtml(`${heating.value} · ${heating.detail}`)}</strong><small>${escapeHtml(heating.detail)}</small></span></button><button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${escapeHtml(`${lighting.value} · ${lighting.detail}`)}</strong><small>${escapeHtml(lighting.detail)}</small></span></button>`:""}${security ? `<button type="button" data-view="entry"><ha-icon icon="${security.icon}"></ha-icon><span><strong>${escapeHtml(security.title)}</strong><small>${escapeHtml(security.detail)}</small></span></button>`:""}${energy ? `<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energy.value)}</strong><small>${escapeHtml(energy.detail)}</small></span></button>`:""}</footer>` : ""}
@@ -3150,7 +3151,7 @@ export class FamilyHubCard extends HTMLElementBase {
         </div>
         <article class="surface energy-truth-note">
           <ha-icon icon="mdi:information-outline" aria-hidden="true"></ha-icon>
-          <div><strong>Smart-meter totals, not live power</strong><span>These figures and trends use Home Assistant’s DCC readings. Fuse provides half-hourly data in its app and website, but no supplier API is configured here, so the dashboard does not scrape your account.</span></div>
+          <div><strong>Smart-meter totals, not live power</strong><span>From Home Assistant’s DCC readings. Meter updates can be delayed; your supplier account is not connected.</span></div>
         </article>
       </section>
     `;
@@ -3593,7 +3594,7 @@ export class FamilyHubCard extends HTMLElementBase {
       if (!entityId) return "";
       const options = Array.isArray(state?.attributes?.options) ? state.attributes.options : [];
       const selectDisabled = readOnly || !isEntityAvailable(state) || !options.length ? "disabled" : "";
-      return `<label><span>${escapeHtml(label)}</span><span class="select-shell"><select data-cleaning-select="${escapeHtml(entityId)}" ${selectDisabled}>${options.map((option) => `<option value="${escapeHtml(option)}" ${String(option) === String(state.state) ? "selected" : ""}>${escapeHtml(titleCase(option))}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down"></ha-icon></span></label>`;
+      return `<label><span>${escapeHtml(label)}</span><span class="select-shell"><select data-cleaning-select="${escapeHtml(entityId)}" ${selectDisabled}>${options.length ? options.map((option) => `<option value="${escapeHtml(option)}" ${String(option) === String(state.state) ? "selected" : ""}>${escapeHtml(titleCase(option))}</option>`).join("") : '<option>Unavailable</option>'}</select><ha-icon icon="mdi:chevron-down"></ha-icon></span></label>`;
     };
     const selectors = [
       [config.room_entity, "Room"], [config.mode_entity, "Cleaning mode"], [config.suction_entity, "Suction"],
@@ -3607,15 +3608,20 @@ export class FamilyHubCard extends HTMLElementBase {
       const state = states[entityId];
       return `<button type="button" data-cleaning-command="${escapeHtml(entityId)}" ${readOnly || !isCommandEntityAvailable(state) ? "disabled" : ""}><ha-icon icon="mdi:gesture-tap-button"></ha-icon>${escapeHtml(entityName(state, titleCase(entityId.split(".")[1])))}</button>`;
     }).join("");
+    const sections = [["clean", "Clean"], ["settings", "Settings"], ["care", "Care"]].filter(([id]) => id === "clean" || (id === "settings" ? selectors : commands || consumables));
+    const selectedSection = sections.some(([id]) => id === this._cleaningSection) ? this._cleaningSection : "clean";
     return `
       <section class="cleaning-experience"><article class="surface cleaning-panel">
         <div class="cleaning-hero"><span><ha-icon icon="${ICONS.vacuum}"></ha-icon></span><div><p class="eyebrow">Whole-home cleaning</p><h2>${escapeHtml(entityName(vacuum, "Robot vacuum"))}</h2><p>${escapeHtml(titleCase(vacuum?.state || "unavailable"))}</p></div></div>
-        <div class="cleaning-facts">${facts}</div>
+        <div class="segments detail-segments" role="group" aria-label="Cleaning section">${sections.map(([id, label]) => `<button type="button" class="segment ${selectedSection === id ? "is-selected" : ""}" data-cleaning-section="${id}" aria-pressed="${selectedSection === id}">${label}</button>`).join("")}</div>
+        <section class="ux-section cleaning-section" ${selectedSection === "clean" ? "" : "hidden"}><div class="cleaning-facts">${facts}</div>
         <div class="cleaning-actions"><button type="button" data-vacuum-action="start" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:play"></ha-icon>Start</button><button type="button" data-vacuum-action="pause" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:pause"></ha-icon>Pause</button><button type="button" data-vacuum-action="return_to_base" data-entity="${escapeHtml(config.vacuum_entity)}"${disabled}><ha-icon icon="mdi:home-map-marker"></ha-icon>Return home</button></div>
-        ${selectors ? `<div class="cleaning-selectors">${selectors}</div>` : ""}
+        </section><section class="ux-section cleaning-section" ${selectedSection === "settings" ? "" : "hidden"}>${selectors ? `<div class="cleaning-selectors">${selectors}</div>` : ""}</section>
+        <section class="ux-section cleaning-section" ${selectedSection === "care" ? "" : "hidden"}>
         ${commands ? `<div class="cleaning-command-grid">${commands}</div>` : ""}
         ${consumables ? `<div class="cleaning-consumables">${consumables}</div>` : ""}
-      </article><article class="surface cleaning-map-panel"><div class="section-heading"><div><p class="eyebrow">Room map</p><h2>Cleaning map</h2></div></div>${config.map_entity ? '<div id="vacuum-map-card-slot" class="child-card-slot vacuum-map-slot"></div>' : '<div class="vacuum-map-placeholder is-actionable"><ha-icon icon="mdi:map-marker-alert-outline"></ha-icon><strong>The robot integration has not exposed a map camera yet</strong><span>Your X10 Pro Omni supports a live map, but Home Assistant currently only reports the active map name. Update or reconfigure the Eufy Clean integration, then choose its camera…map entity in Admin.</span></div>'}</article></section>
+        </section>
+      </article><article class="surface cleaning-map-panel"><div class="section-heading"><div><p class="eyebrow">Room map</p><h2>Cleaning map</h2></div></div>${config.map_entity ? '<div id="vacuum-map-card-slot" class="child-card-slot vacuum-map-slot"></div>' : '<div class="vacuum-map-placeholder is-actionable"><ha-icon icon="mdi:map-marker-alert-outline"></ha-icon><strong>Cleaning map unavailable</strong><span>Connect the robot’s map camera in Admin to see its progress here.</span></div>'}</article></section>
     `;
   }
 
@@ -3748,12 +3754,13 @@ export class FamilyHubCard extends HTMLElementBase {
         : summary.availableLights < summary.totalLights
           ? `${summary.lightsOn} on · ${summary.availableLights} of ${summary.totalLights} lights reporting`
           : `${summary.lightsOn} light${summary.lightsOn === 1 ? "" : "s"} on`;
+    const sections = [["lights", "Lights", lights], ["comfort", "Comfort", climateControl + covers], ["scenes", "Scenes", scenes], ["music", "Music", media]].filter(([, , content]) => content);
+    const selectedSection = sections.some(([id]) => id === this._roomDetailSection) ? this._roomDetailSection : sections[0]?.[0];
     return `
       <div class="room-title"><span class="room-icon"><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><p class="eyebrow">${readOnly ? "Read-only room" : "Room controls"}</p><h2>${escapeHtml(room.name)}</h2><p>${escapeHtml(lightStatus)}${Number.isFinite(summary.temperature) ? ` · ${formatTemperature(summary.temperature)}` : ""}</p></div></div>
       ${readOnly ? '<p class="read-only-note"><ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon>Controls are disabled while this version is being checked.</p>' : ""}
-      <div class="room-control-list">${climateControl}${lights}${covers}</div>
-      ${scenes ? `<div class="scene-list"><p class="eyebrow">Scenes</p>${scenes}</div>` : ""}
-      ${media ? `<div class="room-media"><p class="eyebrow">Music</p>${media}</div>` : ""}
+      ${sections.length > 1 ? `<div class="segments detail-segments" role="group" aria-label="Room controls">${sections.map(([id, label]) => `<button type="button" class="segment ${selectedSection === id ? "is-selected" : ""}" data-room-section="${id}" aria-pressed="${selectedSection === id}">${label}</button>`).join("")}</div>` : ""}
+      <div class="room-section-content">${sections.map(([id, , content]) => `<section class="room-control-list ux-section" data-room-panel="${id}" ${selectedSection === id ? "" : "hidden"}>${content}</section>`).join("")}</div>
       ${!climate && !lights && !covers && !scenes && !media ? '<p class="hub-empty-state">No controls are available for this room yet.</p>' : ""}
     `;
   }
@@ -4176,7 +4183,7 @@ export class FamilyHubCard extends HTMLElementBase {
       const tabs = children.map((person) => `<button type="button" class="family-kid-tab ${selected?.id === person.id ? "is-selected" : ""}" data-family-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}" aria-pressed="${selected?.id === person.id}"><span>${escapeHtml(person.name.slice(0, 1))}</span><strong>${escapeHtml(person.name)}</strong></button>`).join("");
       return `
         <section class="family-dashboard${children.length > 1 ? " has-kid-switcher" : ""}${this._choreClaimFeedback ? " has-claim-feedback" : ""}">
-          <header class="family-dashboard-heading"><div><p class="eyebrow">To-do</p><h2>${familyTitle}</h2></div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
+          <header class="family-dashboard-heading"><div class="task-section-tabs segments" role="group" aria-label="Tasks section">${[["jobs", "Jobs"], ["ready", "Get ready"], ["rewards", "Rewards"]].map(([id, label]) => `<button type="button" class="segment ${(this._taskSection || "jobs") === id ? "is-selected" : ""}" data-task-section="${id}" aria-pressed="${(this._taskSection || "jobs") === id}">${label}</button>`).join("")}</div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
           ${children.length > 1 ? `<div class="family-kid-switcher" role="group" aria-label="Choose family member">${tabs}</div>` : ""}
           ${this._choreClaimFeedback ? `<p class="chore-claim-feedback" role="status"><ha-icon icon="mdi:check-circle"></ha-icon>${escapeHtml(this._choreClaimFeedback)}</p>` : ""}
           <div class="family-kid-stage">${selected ? this._renderFamilyPerson(selected, { kidMode: true }) : '<p class="hub-empty-state large">Add a child in Family Dashboard Admin to connect ChoreOps.</p>'}</div>
@@ -4371,11 +4378,10 @@ export class FamilyHubCard extends HTMLElementBase {
         ${kidMode && choresEnabled && chore ? `<section class="kid-mission ${completedJobs === totalJobs && totalJobs ? "is-complete" : ""}"><span class="kid-mission-orbit progress-ring" style="--progress:${missionProgress}" role="img" aria-label="${missionProgress}% of jobs complete"><span>${missionProgress}%</span></span><div><p>${completedJobs === totalJobs && totalJobs ? "Mission complete!" : "Today’s mission"}</p><strong>${completedJobs} of ${totalJobs} jobs finished</strong></div><ha-icon class="mission-symbol" icon="${completedJobs === totalJobs && totalJobs ? "mdi:trophy-outline" : "mdi:rocket-launch-outline"}" aria-hidden="true"></ha-icon></section>` : ""}
         ${factItems ? `<div class="family-facts">${factItems}</div>` : ""}
         ${choresEnabled && !chore ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps is not connected for this child.</p>' : choresEnabled && (!pointsAvailable || !choresSummaryAvailable) ? '<p class="family-connection-warning"><ha-icon icon="mdi:alert-circle-outline" aria-hidden="true"></ha-icon>ChoreOps data is currently unavailable.</p>' : ""}
-        <div class="focus-task-workspace"><section class="focus-task-jobs">
+        <div class="focus-task-workspace ${kidMode ? "is-sectioned" : ""}"><section class="focus-task-jobs ux-section" ${kidMode && (this._taskSection || "jobs") !== "jobs" ? "hidden" : ""}>
         ${choreHeading}
         ${choresEnabled && chore ? choreRows ? `<ul class="chore-list" aria-label="Today’s jobs">${choreRows}</ul>` : '<p class="hub-empty-state compact">No jobs are due yet.</p>' : ""}
-        ${this._renderPersonPreparation(person)}
-        ${classroomStatus}</section><aside class="focus-task-rewards" aria-label="Rewards and awards">${choreOpsSummary}</aside></div>
+        ${classroomStatus}${!kidMode ? this._renderPersonPreparation(person) : ""}</section><section class="focus-task-ready ux-section" ${!kidMode || this._taskSection !== "ready" ? "hidden" : ""}>${kidMode ? this._renderPersonPreparation(person) || '<p class="hub-empty-state compact">No checklists yet. Open a plan in Calendar to add one.</p>' : ""}</section><aside class="focus-task-rewards ux-section" aria-label="Rewards and awards" ${kidMode && this._taskSection !== "rewards" ? "hidden" : ""}>${choreOpsSummary}</aside></div>
       </article>
     `;
   }
@@ -4610,7 +4616,7 @@ export class FamilyHubCard extends HTMLElementBase {
       const players = starters.filter((player) => player.position === position);
       return players.length ? `<div class="fpl-pitch-row" data-position="${position}">${players.map((player) => this._renderFplPlayer(player)).join("")}</div>` : "";
     }).join("");
-    return `<div class="fpl-pitch" aria-label="Starting eleven">${rows}</div><div class="fpl-bench"><p class="eyebrow">Bench</p><div>${bench.map((player) => this._renderFplPlayer(player)).join("")}</div></div>`;
+    return `<div class="segments detail-segments squad-segments" role="group" aria-label="Squad selection"><button type="button" class="segment ${this._squadSection !== "bench" ? "is-selected" : ""}" data-squad-section="starters" aria-pressed="${this._squadSection !== "bench"}">Starting eleven</button><button type="button" class="segment ${this._squadSection === "bench" ? "is-selected" : ""}" data-squad-section="bench" aria-pressed="${this._squadSection === "bench"}">Bench · ${bench.length}</button></div><div class="fpl-pitch ux-section" aria-label="Starting eleven" ${this._squadSection === "bench" ? "hidden" : ""}>${rows}</div><div class="fpl-bench ux-section" ${this._squadSection === "bench" ? "" : "hidden"}><p class="eyebrow">Bench</p><div>${bench.map((player) => this._renderFplPlayer(player)).join("")}</div></div>`;
   }
 
   _renderFplTeams() {
@@ -4663,7 +4669,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const models = this._clubOverviewModels();
     const tabs = [["fixtures","Fixtures"],["results","Results"],["table","Table"],["fpl","FPL"]];
     const shown = this._footballTab === "results" ? events.filter(fixture => normaliseFixtureStatus(fixture) === "finished") : events;
-    return `<section class="football-experience ${this._footballTab === "fpl" ? "is-fpl" : ""}">
+    return `<section class="football-experience ${this._footballTab === "fpl" ? "is-fpl" : this._footballTab === "table" ? "is-table" : ""}">
 
       <div class="football-club-overviews">${models.map(model => this._renderClubOverview(model)).join("")}</div>
       <div class="football-layout ${this._footballTab === "fpl" ? "is-fpl" : ""}"><article class="football-main"><div class="segments football-tabs" role="group" aria-label="Football view">${tabs.map(([id,label]) => `<button type="button" class="segment ${this._footballTab === id ? "is-selected" : ""}" data-football-tab="${id}" aria-pressed="${this._footballTab === id}">${label}</button>`).join("")}</div><div class="football-toolbar"><h2>${this._footballTab === "results" ? "Results" : this._footballTab === "table" ? "Premier League" : this._footballTab === "fpl" ? "Our teams" : "Matchweek fixtures"}</h2>${this._footballTab === "fpl" ? "" : `<div class="matchweek-controls"><button type="button" data-gameweek="${Math.max(1,gameweek-1)}" ${gameweek <= 1 ? "disabled" : ""} aria-label="Previous matchweek"><ha-icon icon="mdi:chevron-left"></ha-icon></button><label><span class="sr-only">Choose matchweek</span><select data-gameweek-select>${available.map(week => `<option value="${week}" ${week === gameweek ? "selected" : ""}>Matchweek ${week}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down"></ha-icon></label><button type="button" data-gameweek="${Math.min(38,gameweek+1)}" ${gameweek >= 38 ? "disabled" : ""} aria-label="Next matchweek"><ha-icon icon="mdi:chevron-right"></ha-icon></button></div>`}</div>${this._footballTab === "fpl" ? this._renderFplTeams() : this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(shown,fixtureDataAvailable)}</article></div>
@@ -5529,6 +5535,19 @@ export class FamilyHubCard extends HTMLElementBase {
     // Navigation remains local; checklist writes use the existing bounded
     // to-do action path shared with the event editor.
     if (this._pendingConfirmation && !target.dataset.confirmAction) return;
+    for (const [key, property, allowed] of [
+      ["roomSection", "_roomDetailSection", ["lights", "comfort", "scenes", "music"]],
+      ["taskSection", "_taskSection", ["jobs", "ready", "rewards"]],
+      ["cleaningSection", "_cleaningSection", ["clean", "settings", "care"]],
+      ["squadSection", "_squadSection", ["starters", "bench"]]
+    ]) {
+      if (target.dataset[key] === undefined) continue;
+      if (allowed.includes(target.dataset[key])) {
+        this[property] = target.dataset[key];
+        this._scheduleRender(true);
+      }
+      return;
+    }
     if (target.dataset.heatingScheduleOpen) {
       this._openHeatingSchedule(target.dataset.heatingScheduleOpen);
       return;
@@ -5538,13 +5557,14 @@ export class FamilyHubCard extends HTMLElementBase {
       if (this._view === "entry") this._closeActiveCamera({ render: false, invalidate: true });
       this._view = "rooms";
       this._homeSection = "rooms";
-      this._selectRoom(target.dataset.focusHomeRoom);
+      this._selectRoom(target.dataset.focusHomeRoom, { section: target.dataset.roomSectionTarget });
       return;
     }
     if (target.dataset.focusTasks) {
       if (!this._config.features.family || !this._config.people.some((person) => person.role === "child" && person.id === target.dataset.focusTasks)) return;
       this._view = "family";
       this._familyPersonId = target.dataset.focusTasks;
+      this._taskSection = target.dataset.taskTarget === "ready" ? "ready" : "jobs";
       this._scheduleRender(true);
       return;
     }
@@ -5675,6 +5695,7 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     if (target.dataset.floor) {
       this._floor = target.dataset.floor;
+      this._roomDetailSection = "lights";
       this._room = this._config.floorplan.floors.find((floor) => floor.id === this._floor)?.room_hotspots?.[0]?.room_id || null;
       this._scheduleRender(true);
       return;
@@ -6739,10 +6760,11 @@ export class FamilyHubCard extends HTMLElementBase {
     this._removeChildCard(`camera:${cameraId}`);
   }
 
-  _selectRoom(roomId) {
+  _selectRoom(roomId, { section = "lights" } = {}) {
     const room = this._config.rooms.find((entry) => entry.id === roomId);
     if (!room) return;
     this._room = roomId;
+    this._roomDetailSection = section;
     this._floor = room.floor_id;
     this._scheduleRender(true);
   }
@@ -6780,25 +6802,25 @@ export class FamilyHubCard extends HTMLElementBase {
       .photo-frame-status[hidden] { display:none; }
       .photo-frame-clock { position:absolute; left:32px; bottom:30px; display:grid; gap:2px; filter:drop-shadow(0 2px 8px rgba(0,0,0,.48)); }
       .photo-frame-clock strong { font-size:46px; line-height:1; letter-spacing:-.04em; }
-      .photo-frame-clock span { font-size:14px; font-weight:650; }
-      .photo-frame-hint { position:absolute; right:28px; bottom:30px; min-height:40px; padding:0 14px; display:flex; align-items:center; gap:8px; border:1px solid rgba(255,255,255,.32); border-radius:14px; background:rgba(5,7,11,.38); color:rgba(255,255,255,.88); font-size:11px; font-weight:700; -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); }
+      .photo-frame-clock span { font-size:14px; font-weight:500; }
+      .photo-frame-hint { position:absolute; right:28px; bottom:30px; min-height:40px; padding:0 14px; display:flex; align-items:center; gap:8px; border:1px solid rgba(255,255,255,.32); border-radius:14px; background:rgba(5,7,11,.38); color:rgba(255,255,255,.88); font-size:11px; font-weight:500; -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); }
       .photo-frame-hint ha-icon { --mdc-icon-size:18px; }
       @keyframes photo-frame-reveal { from { opacity:.18; transform:scale(1.012); } to { opacity:1; transform:scale(1); } }
       .hub-shell { display:grid; grid-template-columns:86px minmax(0,1fr); min-height:100%; height:100%; background:radial-gradient(circle at 82% 8%,rgba(232,148,126,.72) 0,rgba(232,148,126,0) 34%),radial-gradient(circle at 34% 106%,rgba(123,104,211,.48) 0,rgba(123,104,211,0) 42%),linear-gradient(135deg,var(--hub-backdrop-start),var(--hub-backdrop-mid) 54%,var(--hub-backdrop-end)); }
       .hub-navigation { padding:14px 9px; background:linear-gradient(180deg,color-mix(in srgb,var(--hub-nav) 96%,transparent),color-mix(in srgb,var(--hub-nav) 86%,var(--hub-accent))); border-right:1px solid rgba(255,255,255,.1); display:flex; flex-direction:column; gap:14px; min-height:0; }
-      .hub-brand { width:54px; height:54px; margin:0 auto; border-radius:50%; border:1px solid rgba(255,255,255,.45); background:rgba(255,255,255,.12); color:#fff; font-size:24px; font-weight:700; cursor:pointer; }
+      .hub-brand { width:54px; height:54px; margin:0 auto; border-radius:50%; border:1px solid rgba(255,255,255,.45); background:rgba(255,255,255,.12); color:#fff; font-size:24px; font-weight:500; cursor:pointer; }
       .hub-nav-items { display:flex; min-height:0; flex:1; flex-direction:column; justify-content:center; gap:8px; }
       .hub-nav-button { min-height:64px; border:1px solid transparent; border-radius:20px; background:transparent; color:rgba(255,255,255,.72); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; cursor:pointer; }
       .hub-nav-button ha-icon { --mdc-icon-size:22px; }
-      .hub-nav-button span { font-size:10px; font-weight:600; }
+      .hub-nav-button span { font-size:10px; font-weight:500; }
       .hub-nav-button.is-active { color:#fff; background:linear-gradient(145deg,var(--hub-backdrop-end),var(--hub-accent)); border-color:rgba(255,255,255,.35); box-shadow:0 10px 24px rgba(13,18,34,.28); }
       .hub-content { min-width:0; min-height:0; padding:12px 18px 16px; display:grid; grid-template-rows:56px minmax(0,1fr); gap:10px; background:linear-gradient(135deg,rgba(17,28,51,.18),rgba(183,101,98,.12)); }
       .hub-topbar { min-width:0; display:flex; justify-content:space-between; align-items:center; color:#fff; padding:0 4px; }
-      .hub-topbar h1 { margin:2px 0 0; font-size:30px; line-height:1; font-weight:700; }
-      .eyebrow { margin:0; font-size:10px; line-height:1.2; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--hub-muted); }
+      .hub-topbar h1 { margin:2px 0 0; font-size:30px; line-height:1; font-weight:500; }
+      .eyebrow { margin:0; font-size:10px; line-height:1.2; font-weight:500; letter-spacing:.13em; text-transform:uppercase; color:var(--hub-muted); }
       .hub-topbar .eyebrow { color:rgba(255,255,255,.72); }
       .hub-header-actions { display:flex; align-items:center; gap:9px; }
-      .preview-pill { min-height:36px; padding:0 12px; border:1px solid rgba(255,255,255,.34); border-radius:14px; display:flex; align-items:center; gap:7px; background:rgba(255,255,255,.13); color:#fff; font-size:11px; font-weight:700; }
+      .preview-pill { min-height:36px; padding:0 12px; border:1px solid rgba(255,255,255,.34); border-radius:14px; display:flex; align-items:center; gap:7px; background:rgba(255,255,255,.13); color:#fff; font-size:11px; font-weight:500; }
       .preview-pill ha-icon { --mdc-icon-size:18px; }
       .hub-weather-pill { min-height:48px; padding:0 16px; border:1px solid rgba(255,255,255,.28); border-radius:18px; background:rgba(255,255,255,.14); color:#fff; display:flex; align-items:center; gap:9px; cursor:pointer; }
       .hub-view { min-height:0; min-width:0; }
@@ -6821,7 +6843,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .hero-metrics span { margin-top:4px; font-size:10px; opacity:.74; }
       .next-panel { display:flex; flex-direction:column; }
       .next-panel .text-action { margin-top:auto; }
-      .text-action,.section-heading > button { width:max-content; border:0; padding:5px 0; background:transparent; color:var(--hub-accent); font-size:12px; font-weight:700; cursor:pointer; }
+      .text-action,.section-heading > button { width:max-content; border:0; padding:5px 0; background:transparent; color:var(--hub-accent); font-size:12px; font-weight:500; cursor:pointer; }
       .children-panel { grid-row:2; display:flex; flex-direction:column; justify-content:center; }
       .football-panel { grid-row:2; display:flex; flex-direction:column; justify-content:center; }
       .now-playing-panel { grid-row:2; display:flex; flex-direction:column; justify-content:center; }
@@ -6830,10 +6852,10 @@ export class FamilyHubCard extends HTMLElementBase {
       .section-heading > span { color:var(--hub-muted); font-size:11px; }
       .person-summary-list { display:grid; gap:8px; margin-top:14px; }
       .person-summary { width:100%; border:0; background:color-mix(in srgb,var(--person-colour) 9%,var(--hub-surface)); padding:10px; border-radius:15px; display:grid; grid-template-columns:36px minmax(0,1fr) auto; align-items:center; gap:9px; text-align:left; color:var(--hub-text); cursor:pointer; }
-      .person-initial { width:34px; height:34px; display:grid; place-items:center; border-radius:50%; background:var(--person-colour); color:#fff; font-weight:700; }
+      .person-initial { width:34px; height:34px; display:grid; place-items:center; border-radius:50%; background:var(--person-colour); color:#fff; font-weight:500; }
       .person-summary strong,.person-summary small { display:block; }
       .person-summary small { margin-top:2px; color:var(--hub-muted); font-size:10px; }
-      .points { font-size:11px; font-weight:700; color:var(--person-colour); }
+      .points { font-size:11px; font-weight:500; color:var(--person-colour); }
       .today-ready-preview { min-height:0; margin-top:10px; display:grid; gap:6px; }
       .today-ready-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
       .today-ready-heading span,.today-ready-heading strong,.today-ready-heading small { display:block; }
@@ -6850,7 +6872,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .today-ready-item.is-complete { opacity:.7; }
       .today-ready-item.is-complete > span { background:#1B9A6B; color:#fff; }
       .today-ready-item.is-complete strong { text-decoration:line-through; }
-      .today-ready-more { width:max-content; min-height:28px; padding:0; display:flex; align-items:center; gap:3px; border:0; background:transparent; color:var(--hub-accent); font-size:10px; font-weight:800; cursor:pointer; }
+      .today-ready-more { width:max-content; min-height:28px; padding:0; display:flex; align-items:center; gap:3px; border:0; background:transparent; color:var(--hub-accent); font-size:10px; font-weight:500; cursor:pointer; }
       .today-ready-more ha-icon { --mdc-icon-size:14px; }
       .person-summary-list.has-ready-preview { margin-top:7px; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px; }
       .person-summary-list.has-ready-preview .person-summary { min-height:38px; padding:4px 7px; grid-template-columns:28px minmax(0,1fr); }
@@ -6860,7 +6882,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .person-summary-list.has-ready-preview .person-summary small { font-size:9px; }
       .featured-fixtures { display:grid; gap:8px; margin-top:12px; }
       .compact-fixture { position:relative; overflow:hidden; border:1px solid color-mix(in srgb,var(--hub-accent) 18%,transparent); border-radius:15px; background:var(--hub-surface); min-height:70px; padding:8px 12px; color:var(--hub-text); display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:7px; align-items:center; cursor:pointer; }
-      .compact-team { min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; font-size:10px; font-weight:750; }
+      .compact-team { min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; font-size:10px; font-weight:500; }
       .compact-team-name { min-width:0; white-space:normal; overflow-wrap:anywhere; }
       .compact-team.is-away { justify-content:flex-end; text-align:right; }
       .compact-score { min-width:52px; font-size:14px; text-align:center; }
@@ -6920,22 +6942,22 @@ export class FamilyHubCard extends HTMLElementBase {
       .heating-card-heading h3 { font-size:16px; }
       .heating-card-heading .heating-status { display:flex; align-items:center; gap:5px; font-size:11px; }
       .heating-status > span { width:6px; height:6px; border-radius:50%; background:#8d96aa; box-shadow:0 0 0 3px rgba(141,150,170,.1); }
-      .heating-power { flex:0 0 auto; min-width:58px; min-height:44px; margin-left:auto; padding:0 10px; border:1px solid rgba(255,255,255,.12); border-radius:13px; background:rgba(8,15,31,.48); color:var(--hub-muted); display:flex; align-items:center; justify-content:center; gap:5px; font-size:10px; font-weight:800; cursor:pointer; }
+      .heating-power { flex:0 0 auto; min-width:58px; min-height:44px; margin-left:auto; padding:0 10px; border:1px solid rgba(255,255,255,.12); border-radius:13px; background:rgba(8,15,31,.48); color:var(--hub-muted); display:flex; align-items:center; justify-content:center; gap:5px; font-size:10px; font-weight:500; cursor:pointer; }
       .heating-power ha-icon { --mdc-icon-size:16px; }
       .heating-power.is-on { border-color:rgba(242,184,92,.36); background:rgba(128,88,29,.25); color:#f5d493; }
       .heating-power:disabled { opacity:.5; cursor:not-allowed; }
       .heating-body { min-width:0; display:grid; grid-template-columns:minmax(72px,.72fr) minmax(150px,1.28fr); align-items:end; gap:14px; padding-top:13px; border-top:1px solid rgba(255,255,255,.1); }
       .heating-current,.heating-target-control { min-width:0; }
-      .heating-current small,.heating-target-control > small { display:block; color:var(--hub-muted); font-size:10px; font-weight:700; letter-spacing:.02em; }
+      .heating-current small,.heating-target-control > small { display:block; color:var(--hub-muted); font-size:10px; font-weight:500; letter-spacing:.02em; }
       .heating-current-value { display:block; margin-top:5px; color:var(--hub-text); font-size:30px; line-height:.95; letter-spacing:-.04em; }
       .heating-target-control { width:100%; justify-self:end; }
       .heating-stepper { min-width:0; margin-top:5px; display:grid; grid-template-columns:44px minmax(48px,1fr) 44px; align-items:center; overflow:hidden; border:1px solid rgba(255,255,255,.09); border-radius:12px; background:rgba(255,255,255,.075); }
       .heating-stepper button,.heating-target-value { min-height:44px; border:0; background:transparent; color:#c8bcff; }
-      .heating-stepper button { width:44px; height:44px; padding:0; display:grid; place-items:center; border-radius:0; font-size:18px; font-weight:800; cursor:pointer; }
+      .heating-stepper button { width:44px; height:44px; padding:0; display:grid; place-items:center; border-radius:0; font-size:18px; font-weight:500; cursor:pointer; }
       .heating-stepper button:first-child { border-radius:11px 0 0 11px; }
       .heating-stepper button:last-child { border-radius:0 11px 11px 0; }
       .heating-stepper button:disabled { cursor:not-allowed; opacity:.48; }
-      .heating-target-value { display:grid; place-items:center; border-width:0 1px; border-style:solid; border-color:rgba(255,255,255,.09); color:var(--hub-text); font-size:19px; font-weight:800; }
+      .heating-target-value { display:grid; place-items:center; border-width:0 1px; border-style:solid; border-color:rgba(255,255,255,.09); color:var(--hub-text); font-size:19px; font-weight:500; }
       .heating-card.is-heating { border-color:rgba(242,184,92,.42); background:linear-gradient(145deg,color-mix(in srgb,var(--hub-surface) 78%,rgba(128,88,29,.3)),color-mix(in srgb,var(--hub-backdrop-mid) 70%,transparent)); }
       .heating-card.is-heating .heating-icon,.heating-card.is-heating .heating-status { color:#ffd789; }
       .heating-card.is-heating .heating-status > span { background:#f2b85c; box-shadow:0 0 0 3px rgba(242,184,92,.14); }
@@ -6949,7 +6971,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .heating-card.is-unavailable .heating-icon,.heating-card.is-unavailable .heating-status,.heating-card.is-unavailable .heating-target-control { opacity:.5; }
       .cover-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:16px; }
       .cover-actions.is-single { grid-template-columns:1fr; }
-      .cover-actions button { min-width:0; min-height:42px; border:0; border-radius:12px; background:rgba(255,255,255,.08); color:#c8bcff; display:flex; align-items:center; justify-content:center; gap:4px; font-size:9px; font-weight:750; cursor:pointer; }
+      .cover-actions button { min-width:0; min-height:42px; border:0; border-radius:12px; background:rgba(255,255,255,.08); color:#c8bcff; display:flex; align-items:center; justify-content:center; gap:4px; font-size:9px; font-weight:500; cursor:pointer; }
       .cover-actions ha-icon { --mdc-icon-size:15px; }
       .cleaning-panel { height:100%; min-height:0; padding:22px; display:grid; grid-template-columns:minmax(0,.86fr) minmax(0,1.14fr); grid-template-rows:auto auto minmax(0,1fr); gap:16px 24px; overflow:hidden; }
       .cleaning-hero { display:flex; align-items:center; gap:15px; }
@@ -6963,7 +6985,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .cleaning-facts strong { font-size:14px; }
       .cleaning-facts small { margin-top:4px; color:var(--hub-muted); font-size:8px; }
       .cleaning-actions { display:flex; align-items:center; gap:8px; }
-      .cleaning-actions button { min-height:46px; padding:0 16px; border:0; border-radius:14px; background:color-mix(in srgb,var(--hub-accent) 18%,rgba(8,15,31,.72)); color:#d8d0ff; display:flex; align-items:center; gap:6px; font-weight:750; cursor:pointer; }
+      .cleaning-actions button { min-height:46px; padding:0 16px; border:0; border-radius:14px; background:color-mix(in srgb,var(--hub-accent) 18%,rgba(8,15,31,.72)); color:#d8d0ff; display:flex; align-items:center; gap:6px; font-weight:500; cursor:pointer; }
       .vacuum-map-slot,.vacuum-map-placeholder { grid-column:2; grid-row:2/4; min-height:0; overflow:hidden; border:1px solid rgba(255,255,255,.1); border-radius:18px; background:rgba(6,12,27,.54); }
       .vacuum-map-slot .embedded-card { height:100%; }
       .vacuum-map-placeholder { display:grid; place-items:center; align-content:center; gap:10px; padding:28px; color:var(--hub-muted); text-align:center; font-size:11px; }
@@ -6984,7 +7006,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .energy-meter-icon { width:48px; height:48px; display:grid; place-items:center; border-radius:15px; background:color-mix(in srgb,var(--hub-accent) 15%,rgba(8,15,31,.64)); color:#c8bcff; }
       .energy-meter-icon ha-icon { --mdc-icon-size:25px; }
       .energy-meter-heading h2 { margin:3px 0 0; font-size:20px; }
-      .energy-status { min-height:34px; padding:0 10px; display:flex; align-items:center; gap:6px; border:1px solid rgba(255,255,255,.11); border-radius:12px; color:var(--hub-muted); font-size:10px; font-weight:750; }
+      .energy-status { min-height:34px; padding:0 10px; display:flex; align-items:center; gap:6px; border:1px solid rgba(255,255,255,.11); border-radius:12px; color:var(--hub-muted); font-size:10px; font-weight:500; }
       .energy-status ha-icon { --mdc-icon-size:16px; }
       .energy-meter.is-stale .energy-status,.energy-meter.is-partial .energy-status,.energy-meter.is-unverified .energy-status { color:#ffd789; }
       .energy-primary-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
@@ -7005,7 +7027,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .floorplan-panel { min-width:0; min-height:0; padding:14px; display:grid; grid-template-rows:48px minmax(0,1fr); gap:7px; }
       .floorplan-heading { align-items:center; }
       .segments { display:flex; flex-shrink:0; align-items:center; gap:4px; padding:3px; border-radius:13px; background:color-mix(in srgb,var(--hub-muted) 10%,transparent); }
-      .segment { min-height:32px; padding:0 12px; border:0; border-radius:10px; background:transparent; color:var(--hub-muted); font-size:11px; font-weight:700; white-space:nowrap; cursor:pointer; }
+      .segment { min-height:32px; padding:0 12px; border:0; border-radius:10px; background:transparent; color:var(--hub-muted); font-size:11px; font-weight:500; white-space:nowrap; cursor:pointer; }
       .segment.is-selected { color:#fff; background:var(--hub-accent); }
       .floorplan-canvas { position:relative; min-height:0; overflow:hidden; border-radius:18px; background:radial-gradient(circle at 52% 34%,rgba(100,91,145,.38) 0,rgba(20,28,52,.88) 52%,rgba(7,13,29,.96) 100%); border:1px solid rgba(255,255,255,.14); }
       .floorplan-backdrop { position:absolute; inset:0; background:linear-gradient(145deg,rgba(255,255,255,.07),transparent 48%),radial-gradient(ellipse at 50% 80%,rgba(3,8,24,.62),transparent 55%); }
@@ -7039,7 +7061,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .climate-control strong { margin-top:2px; font-size:27px; }
       .climate-control small { color:var(--hub-muted); font-size:10px; }
       .stepper { display:flex; gap:5px; }
-      .stepper button,.cover-control button { width:36px; height:36px; border:0; border-radius:11px; background:var(--hub-surface); color:var(--hub-accent); font-weight:700; cursor:pointer; }
+      .stepper button,.cover-control button { width:36px; height:36px; border:0; border-radius:11px; background:var(--hub-surface); color:var(--hub-accent); font-weight:500; cursor:pointer; }
       .cover-control { min-height:60px; border-radius:15px; background:var(--hub-surface); padding:9px 10px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
       .cover-control > span { display:grid; grid-template-columns:25px minmax(0,1fr); grid-template-rows:auto auto; column-gap:7px; align-items:center; }
       .cover-control > span ha-icon { grid-row:1/3; }
@@ -7056,7 +7078,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-sidebar { min-height:0; display:grid; grid-template-rows:repeat(2,minmax(0,1fr)); gap:14px; }
       .family-person { padding:18px; min-height:0; overflow:auto; }
       .family-person-heading { display:flex; align-items:center; gap:10px; }
-      .family-person-heading > span { width:42px; height:42px; border-radius:50%; display:grid; place-items:center; background:var(--person-colour); color:#fff; font-weight:700; }
+      .family-person-heading > span { width:42px; height:42px; border-radius:50%; display:grid; place-items:center; background:var(--person-colour); color:#fff; font-weight:500; }
       .family-person-heading h2 { margin:3px 0 0; font-size:16px; }
       .family-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:15px; }
       .family-facts span { padding:8px; border-radius:12px; background:color-mix(in srgb,var(--person-colour) 8%,var(--hub-surface)); color:var(--hub-muted); font-size:9px; }
@@ -7064,9 +7086,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .assignment { display:flex; gap:8px; margin-top:13px; padding-top:12px; border-top:1px solid color-mix(in srgb,var(--hub-muted) 16%,transparent); }
       .assignment > div { min-width:0; }
       .assignment strong,.assignment small,.assignment a { display:block; }
-      .assignment a { color:var(--hub-accent); font-weight:800; text-decoration-thickness:1px; text-underline-offset:3px; overflow-wrap:anywhere; }
+      .assignment a { color:var(--hub-accent); font-weight:500; text-decoration-thickness:1px; text-underline-offset:3px; overflow-wrap:anywhere; }
       .assignment small { margin-top:3px; color:var(--hub-muted); font-size:9px; }
-      .classroom-health { margin-top:7px; display:flex; align-items:center; gap:5px; color:var(--hub-muted); font-size:10px; font-weight:700; line-height:1.3; }
+      .classroom-health { margin-top:7px; display:flex; align-items:center; gap:5px; color:var(--hub-muted); font-size:10px; font-weight:500; line-height:1.3; }
       .classroom-health ha-icon { flex:0 0 auto; --mdc-icon-size:15px; }
       .classroom-health.is-stale { color:#9b6400; }
       .classroom-locked { opacity:.82; }
@@ -7075,7 +7097,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .security-camera { min-height:0; padding:17px; display:grid; grid-template-rows:auto auto minmax(0,1fr); gap:11px; overflow:hidden; }
       .security-card-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
       .security-card-heading h2 { margin:4px 0 0; font-size:19px; }
-      .privacy-badge { min-height:34px; padding:0 10px; border:1px solid rgba(255,255,255,.11); border-radius:10px; background:rgba(255,255,255,.06); color:var(--hub-muted); display:flex; align-items:center; gap:5px; font-size:12px; font-weight:750; white-space:nowrap; }
+      .privacy-badge { min-height:34px; padding:0 10px; border:1px solid rgba(255,255,255,.11); border-radius:10px; background:rgba(255,255,255,.06); color:var(--hub-muted); display:flex; align-items:center; gap:5px; font-size:12px; font-weight:500; white-space:nowrap; }
       .privacy-badge ha-icon { --mdc-icon-size:14px; color:#bcaeff; }
       .security-signals { display:flex; gap:7px; }
       .security-signal { min-width:0; flex:1; display:grid; grid-template-columns:25px minmax(0,1fr); grid-template-rows:auto auto; align-items:center; column-gap:6px; padding:7px 8px; border:1px solid rgba(255,255,255,.08); border-radius:11px; background:rgba(8,15,31,.44); }
@@ -7091,7 +7113,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .camera-idle > ha-icon { --mdc-icon-size:42px; color:#a999ff; }
       .camera-idle strong,.camera-idle small { display:block; }
       .camera-idle small { margin-top:4px; max-width:330px; color:var(--hub-muted); font-size:12px; line-height:1.4; }
-      .camera-idle button,.camera-close { min-height:44px; padding:0 13px; border:0; border-radius:12px; background:var(--hub-accent); color:#fff; display:flex; align-items:center; gap:5px; font-size:12px; font-weight:800; cursor:pointer; }
+      .camera-idle button,.camera-close { min-height:44px; padding:0 13px; border:0; border-radius:12px; background:var(--hub-accent); color:#fff; display:flex; align-items:center; gap:5px; font-size:12px; font-weight:500; cursor:pointer; }
       .camera-stream { position:relative; min-height:0; overflow:hidden; border-radius:15px; background:#050a15; }
       .camera-card-slot { display:block; width:100%; height:100%; min-height:130px; border-radius:0; overflow:hidden; }
       .camera-card-slot .embedded-card { height:100%; }
@@ -7102,9 +7124,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .camera-stream-overlay strong,.camera-stream-overlay small { display:block; }
       .camera-stream-overlay strong { font-size:15px; }
       .camera-stream-overlay small { margin-top:5px; color:#bac4d7; font-size:12px; line-height:1.4; }
-      .camera-stream-overlay button { min-height:44px; margin-top:12px; padding:0 14px; border:1px solid rgba(255,255,255,.24); border-radius:12px; background:rgba(255,255,255,.1); color:#fff; display:flex; align-items:center; gap:7px; font-size:12px; font-weight:800; cursor:pointer; }
+      .camera-stream-overlay button { min-height:44px; margin-top:12px; padding:0 14px; border:1px solid rgba(255,255,255,.24); border-radius:12px; background:rgba(255,255,255,.1); color:#fff; display:flex; align-items:center; gap:7px; font-size:12px; font-weight:500; cursor:pointer; }
       .camera-stream-overlay button ha-icon { --mdc-icon-size:18px; }
-      .camera-live-indicator { position:absolute; z-index:3; top:9px; left:9px; min-height:30px; padding:0 11px; border:1px solid rgba(255,255,255,.2); border-radius:999px; background:rgba(8,15,31,.82); color:#fff; display:flex; align-items:center; gap:6px; font-size:12px; font-weight:850; letter-spacing:.04em; text-transform:uppercase; }
+      .camera-live-indicator { position:absolute; z-index:3; top:9px; left:9px; min-height:30px; padding:0 11px; border:1px solid rgba(255,255,255,.2); border-radius:999px; background:rgba(8,15,31,.82); color:#fff; display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; letter-spacing:.04em; text-transform:uppercase; }
       .camera-live-indicator > span { width:7px; height:7px; border-radius:50%; background:#ff5f64; box-shadow:0 0 0 3px rgba(255,95,100,.18); }
       .camera-close { position:absolute; z-index:4; right:9px; bottom:9px; background:rgba(8,15,31,.86); border:1px solid rgba(255,255,255,.18); }
       .camera-is-starting > ha-icon,.camera-is-stopping > ha-icon { animation:camera-spin 1.4s linear infinite; }
@@ -7116,7 +7138,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .alarm-state.is-unavailable { background:rgba(255,255,255,.06); color:#7f899d; }
       .alarm-panel > p { margin:13px 0 0; color:var(--hub-muted); font-size:9px; line-height:1.4; }
       .alarm-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:15px; }
-      .alarm-actions button { min-width:0; min-height:46px; border:0; border-radius:12px; background:rgba(123,104,211,.17); color:#c9beff; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; font-size:8px; font-weight:800; cursor:pointer; }
+      .alarm-actions button { min-width:0; min-height:46px; border:0; border-radius:12px; background:rgba(123,104,211,.17); color:#c9beff; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; font-size:8px; font-weight:500; cursor:pointer; }
       .alarm-actions button.is-danger { background:rgba(176,57,61,.22); color:#ffaaa7; }
       .alarm-actions ha-icon { --mdc-icon-size:17px; }
       .garage-heading { display:flex; align-items:center; gap:10px; }
@@ -7125,7 +7147,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .garage-motion { display:flex; align-items:center; gap:6px; margin:13px 0 0; color:var(--hub-muted); font-size:9px; }
       .garage-motion.is-active { color:#ffc06f; }
       .garage-motion.is-unavailable { color:#7f899d; }
-      .garage-action { width:100%; min-height:43px; margin-top:13px; border:1px solid rgba(255,255,255,.12); border-radius:12px; background:rgba(123,104,211,.18); color:#d7d0ff; display:flex; align-items:center; justify-content:center; gap:6px; font-size:10px; font-weight:800; cursor:pointer; }
+      .garage-action { width:100%; min-height:43px; margin-top:13px; border:1px solid rgba(255,255,255,.12); border-radius:12px; background:rgba(123,104,211,.18); color:#d7d0ff; display:flex; align-items:center; justify-content:center; gap:6px; font-size:10px; font-weight:500; cursor:pointer; }
       .security-privacy-note { display:flex; align-items:flex-start; gap:7px; margin:0; padding:10px 12px; border:1px solid rgba(255,255,255,.08); border-radius:12px; background:rgba(8,15,31,.46); color:var(--hub-muted); font-size:8px; line-height:1.35; }
       .security-privacy-note ha-icon { flex:0 0 auto; --mdc-icon-size:16px; color:#a999ff; }
       .confirmation-backdrop { position:absolute; z-index:30; inset:0; display:grid; place-items:center; padding:20px; border-radius:var(--hub-radius); background:rgba(2,7,17,.72); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); }
@@ -7135,7 +7157,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .confirmation-dialog h2 { margin:6px 0 0; font-size:22px; }
       .confirmation-dialog > p:not(.eyebrow) { margin:10px 0 0; color:#bcc4d5; font-size:11px; line-height:1.45; }
       .confirmation-dialog > div { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:20px; }
-      .confirmation-dialog button { min-height:46px; border:1px solid rgba(255,255,255,.14); border-radius:13px; background:rgba(255,255,255,.07); color:#fff; font-weight:800; cursor:pointer; }
+      .confirmation-dialog button { min-height:46px; border:1px solid rgba(255,255,255,.14); border-radius:13px; background:rgba(255,255,255,.07); color:#fff; font-weight:500; cursor:pointer; }
       .confirmation-dialog button.confirm-primary { border-color:transparent; background:var(--hub-accent); }
       .football-layout { height:100%; display:grid; grid-template-columns:minmax(0,1.7fr) minmax(260px,.62fr); gap:14px; }
       .football-main { min-height:0; padding:18px; display:grid; grid-template-rows:54px minmax(0,1fr); overflow:hidden; }
@@ -7148,14 +7170,14 @@ export class FamilyHubCard extends HTMLElementBase {
       .select-shell select { width:100%; padding-right:36px !important; appearance:none; -webkit-appearance:none; }
       .select-shell > ha-icon { position:absolute; top:50%; right:10px; translate:0 -50%; color:currentColor; pointer-events:none; --mdc-icon-size:18px; }
       .matchweek-controls .select-shell { min-width:88px; color:var(--hub-text); }
-      .matchweek-controls select { height:48px; min-width:88px; border:1px solid color-mix(in srgb,var(--hub-muted) 18%,transparent); border-radius:12px; background:var(--hub-surface); color:var(--hub-text); padding:0 10px; font-weight:750; }
+      .matchweek-controls select { height:48px; min-width:88px; border:1px solid color-mix(in srgb,var(--hub-muted) 18%,transparent); border-radius:12px; background:var(--hub-surface); color:var(--hub-text); padding:0 10px; font-weight:500; }
       .football-tabs .segment { min-height:30px; }
       .fixture-groups { min-height:0; overflow:auto; padding-right:4px; }
       .fixture-day h3 { margin:13px 0 7px; color:var(--hub-muted); font-size:10px; letter-spacing:.09em; text-transform:uppercase; }
       .fixture { position:relative; min-height:46px; display:grid; grid-template-columns:minmax(0,1fr) 82px minmax(0,1fr); align-items:center; gap:8px; padding:6px 10px; border-top:1px solid color-mix(in srgb,var(--hub-muted) 12%,transparent); overflow:hidden; }
       .fixture.is-spotlight { border-radius:12px; border:1px solid color-mix(in srgb,var(--hub-accent) 26%,transparent); background:color-mix(in srgb,var(--hub-accent) 6%,var(--hub-surface)); margin:4px 0; }
       .fixture.is-live { border-color:#d94848; }
-      .team { font-size:12px; font-weight:600; }
+      .team { font-size:12px; font-weight:500; }
       .away-team { text-align:right; }
       .fixture-score { text-align:center; font-size:14px; }
       .fixture-score small { display:block; margin-top:2px; color:var(--hub-muted); font-size:8px; }
@@ -7178,22 +7200,22 @@ export class FamilyHubCard extends HTMLElementBase {
       .calendar-view { position:relative; display:grid; grid-template-rows:58px 50px 48px minmax(0,1fr); gap:9px; background:linear-gradient(155deg,rgba(250,246,245,.94),rgba(235,230,242,.91)); }
       .calendar-toolbar { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:14px; }
       .calendar-toolbar-actions { display:flex; align-items:center; gap:9px; }
-      .calendar-add-event { min-height:48px; padding:0 12px; border:0; border-radius:11px; background:#1463E8; color:#fff; display:flex; align-items:center; gap:5px; font-size:12px; font-weight:800; cursor:pointer; }
+      .calendar-add-event { min-height:48px; padding:0 12px; border:0; border-radius:11px; background:#1463E8; color:#fff; display:flex; align-items:center; gap:5px; font-size:12px; font-weight:500; cursor:pointer; }
       .calendar-add-event ha-icon { --mdc-icon-size:16px; }
       .calendar-context { min-width:max-content; display:flex; align-items:center; gap:9px; color:#0B1830; }
       .calendar-context > ha-icon { --mdc-icon-size:22px; color:#1463E8; }
       .calendar-context > span,.calendar-context strong,.calendar-context small { display:block; }
       .calendar-context strong { font-size:15px; }
-      .calendar-context small { margin-top:2px; color:#5E6B80; font-size:12px; font-weight:650; }
+      .calendar-context small { margin-top:2px; color:#5E6B80; font-size:12px; font-weight:500; }
       .calendar-modes { flex-wrap:nowrap; }
       .calendar-card-slot { height:100%; min-height:0; overflow:hidden; border:1px solid rgba(255,255,255,.1); background:rgba(7,14,29,.62); --ha-card-background:transparent; --card-background-color:transparent; --ha-card-border-width:0; --ha-card-box-shadow:none; --primary-text-color:#f7f8fc; --secondary-text-color:#b6bdce; }
       .calendar-person-filters { min-width:0; display:flex; align-items:center; gap:7px; overflow-x:auto; scrollbar-width:none; }
       .calendar-person-filters::-webkit-scrollbar { display:none; }
-      .calendar-person-filter { flex:0 0 auto; min-height:48px; padding:4px 12px 4px 5px; border:1px solid rgba(26,45,78,.11); border-radius:999px; background:rgba(255,255,255,.7); color:#445069; display:flex; align-items:center; gap:7px; font-size:12px; font-weight:800; cursor:pointer; }
+      .calendar-person-filter { flex:0 0 auto; min-height:48px; padding:4px 12px 4px 5px; border:1px solid rgba(26,45,78,.11); border-radius:999px; background:rgba(255,255,255,.7); color:#445069; display:flex; align-items:center; gap:7px; font-size:12px; font-weight:500; cursor:pointer; }
       .calendar-person-filter > span { width:32px; height:32px; display:grid; place-items:center; border-radius:50%; background:var(--person-colour); color:#fff; }
       .calendar-person-filter.is-selected { border-color:var(--person-colour); background:color-mix(in srgb,var(--person-colour) 11%,#fff); color:#14213A; box-shadow:0 4px 12px color-mix(in srgb,var(--person-colour) 17%,transparent); }
       .calendar-navigation { min-width:0; display:grid; grid-template-columns:48px 66px minmax(0,1fr) 48px 48px; gap:7px; align-items:center; }
-      .calendar-navigation button { min-width:48px; min-height:48px; border:1px solid rgba(26,45,78,.12); border-radius:11px; background:#fff; color:#31405C; font-weight:850; cursor:pointer; }
+      .calendar-navigation button { min-width:48px; min-height:48px; border:1px solid rgba(26,45,78,.12); border-radius:11px; background:#fff; color:#31405C; font-weight:500; cursor:pointer; }
       .calendar-navigation strong { min-width:0; text-align:center; color:#24314A; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       .family-planner-slot { position:relative; min-height:0; overflow:hidden; }
       .family-planner-grid { height:100%; min-height:0; display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:7px; }
@@ -7202,18 +7224,18 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-planner-day.is-today { border-color:rgba(20,99,232,.42); background:#fff; box-shadow:0 8px 20px rgba(35,59,94,.1); }
       .family-planner-day > header { padding:7px 7px 6px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(38,50,77,.07); }
       .family-planner-day > header > div:first-child { display:flex; align-items:baseline; gap:4px; }
-      .family-planner-day > header span { color:#68748A; font-size:12px; font-weight:800; text-transform:uppercase; }
+      .family-planner-day > header span { color:#68748A; font-size:12px; font-weight:500; text-transform:uppercase; }
       .family-planner-day > header strong { color:#17233A; font-size:18px; line-height:1; }
       .family-planner-day > header small { color:#8A94A6; font-size:12px; text-transform:uppercase; }
       .day-people { display:flex; flex-direction:row-reverse; }
-      .day-people i { width:24px; height:24px; margin-left:-5px; display:grid; place-items:center; border:2px solid #fff; border-radius:50%; background:var(--person-colour); color:#fff; font-size:12px; font-style:normal; font-weight:900; }
+      .day-people i { width:24px; height:24px; margin-left:-5px; display:grid; place-items:center; border:2px solid #fff; border-radius:50%; background:var(--person-colour); color:#fff; font-size:12px; font-style:normal; font-weight:500; }
       .family-planner-events { min-height:0; padding:6px; display:flex; flex-direction:column; gap:5px; overflow:auto; }
       .family-planner-event { position:relative; width:100%; min-width:0; min-height:48px; padding:7px 6px 7px 9px; border:0; border-radius:10px; background:color-mix(in srgb,var(--calendar-colour) 13%,#fff); color:#1E2A42; display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left; cursor:pointer; overflow:hidden; }
       .family-planner-event::before { content:""; position:absolute; inset:4px auto 4px 0; width:3px; border-radius:4px; background:var(--calendar-colour); }
       .family-planner-event strong { width:100%; overflow:hidden; text-overflow:ellipsis; color:#111C33; font-size:12px; line-height:1.2; }
       .family-planner-event small,.planner-event-time { width:100%; overflow:hidden; text-overflow:ellipsis; color:#68748A; font-size:12px; white-space:nowrap; }
-      .planner-event-time { color:var(--calendar-colour); font-weight:900; }
-      .planner-ready-state { margin-top:3px; display:flex; align-items:center; gap:3px; color:#7A5720; font-size:12px; font-weight:850; }
+      .planner-event-time { color:var(--calendar-colour); font-weight:500; }
+      .planner-ready-state { margin-top:3px; display:flex; align-items:center; gap:3px; color:#7A5720; font-size:12px; font-weight:500; }
       .planner-ready-state ha-icon { --mdc-icon-size:12px; }
       .family-planner-event.is-ready .planner-ready-state { color:#167451; }
       .family-planner-event.is-compact { min-height:20px; padding:2px 4px 2px 8px; gap:0; border-radius:6px; }
@@ -7221,17 +7243,17 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-planner-event.is-compact strong { font-size:10px; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
       .family-planner-event.is-compact .planner-ready-state { display:none; }
       .family-planner-empty { margin:auto; color:#9BA4B4; font-size:12px; }
-      .day-ready { padding:6px 7px; border-top:1px solid rgba(38,50,77,.07); background:#FFF8E9; color:#7B581D; display:flex; align-items:center; gap:4px; font-size:12px; font-weight:850; }
+      .day-ready { padding:6px 7px; border-top:1px solid rgba(38,50,77,.07); background:#FFF8E9; color:#7B581D; display:flex; align-items:center; gap:4px; font-size:12px; font-weight:500; }
       .day-ready ha-icon { --mdc-icon-size:13px; }
       .day-ready.is-ready { background:#ECF9F3; color:#167451; }
-      .planner-month-headings { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:5px; margin-bottom:5px; color:#6D7890; font-size:10px; font-weight:850; text-align:center; text-transform:uppercase; }
+      .planner-month-headings { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:5px; margin-bottom:5px; color:#6D7890; font-size:10px; font-weight:500; text-align:center; text-transform:uppercase; }
       .planner-month-grid { height:calc(100% - 21px); min-height:0; display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); grid-template-rows:repeat(6,minmax(0,1fr)); gap:5px; }
       .planner-month-day { min-width:0; min-height:0; padding:5px; border:1px solid rgba(38,50,77,.09); border-radius:10px; background:rgba(255,255,255,.76); overflow:hidden; }
       .planner-month-day.is-outside { opacity:.48; }
       .planner-month-day.is-today { border-color:#1463E8; box-shadow:inset 0 0 0 1px #1463E8; }
       .planner-month-day > header { height:21px; color:#536078; font-size:11px; }
       .planner-month-day > div { display:grid; gap:3px; }
-      .planner-month-more { color:#68748A; font-size:9px; font-weight:800; }
+      .planner-month-more { color:#68748A; font-size:9px; font-weight:500; }
       .planner-agenda-list { height:100%; min-height:0; display:grid; gap:9px; overflow:auto; }
       .planner-agenda-day { display:grid; grid-template-columns:110px minmax(0,1fr); gap:10px; padding:10px; border:1px solid rgba(38,50,77,.09); border-radius:14px; background:rgba(255,255,255,.72); }
       .planner-agenda-day.is-today { border-color:#1463E8; }
@@ -7240,7 +7262,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .calendar-card-slot .embedded-card { height:100%; min-height:0; overflow:auto; }
       .calendar-fallback { position:relative; height:100%; min-height:0; padding:10px; }
       .calendar-legends { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:7px 13px; }
-      .calendar-legend { display:flex; align-items:center; gap:5px; color:#42495b; font-size:10px; font-weight:700; }
+      .calendar-legend { display:flex; align-items:center; gap:5px; color:#42495b; font-size:10px; font-weight:500; }
       .calendar-legend i { width:8px; height:8px; border-radius:50%; background:var(--calendar-colour); box-shadow:0 0 0 3px color-mix(in srgb,var(--calendar-colour) 16%,transparent); }
       .calendar-loading { position:absolute; top:14px; right:18px; z-index:2; display:flex; align-items:center; gap:7px; padding:7px 10px; border-radius:999px; background:#fff; color:#4d5568; font-size:9px; box-shadow:0 7px 20px rgba(27,34,53,.12); }
       .calendar-loading span { width:8px; height:8px; border-radius:50%; background:var(--hub-accent); animation:pulse 1.2s ease-in-out infinite; }
@@ -7250,7 +7272,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .hub-agenda-day { min-width:0; min-height:0; display:grid; grid-template-rows:58px minmax(0,1fr); border:1px solid rgba(81,78,99,.12); border-radius:17px; background:rgba(255,255,255,.62); overflow:hidden; }
       .hub-agenda-day.is-today { border-color:color-mix(in srgb,var(--hub-accent) 45%,transparent); background:color-mix(in srgb,var(--hub-accent) 8%,#fff); box-shadow:inset 0 3px 0 var(--hub-accent); }
       .hub-agenda-day > header { padding:9px 8px 7px; display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; align-items:end; border-bottom:1px solid rgba(81,78,99,.1); color:#242a3a; }
-      .hub-agenda-day > header span { align-self:start; color:#656c7f; font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+      .hub-agenda-day > header span { align-self:start; color:#656c7f; font-size:9px; font-weight:500; letter-spacing:.08em; text-transform:uppercase; }
       .hub-agenda-day > header strong { grid-row:1/3; font-size:25px; line-height:1; }
       .hub-agenda-day > header small { color:#7a8090; font-size:9px; }
       .hub-agenda-events { min-height:0; padding:7px; display:flex; flex-direction:column; gap:6px; overflow:auto; }
@@ -7264,7 +7286,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .planner-modal > header p:last-child { margin:0; color:#647087; font-size:12px; }
       .planner-modal-close { position:absolute; top:16px; right:18px; width:48px; height:48px; border:1px solid #DCE3ED; border-radius:12px; background:#fff; color:#42506A; display:grid; place-items:center; cursor:pointer; }
       .planner-modal-body { min-height:0; padding:20px 25px; overflow:auto; }
-      .planner-event-location { margin:0 0 10px; display:flex; align-items:center; gap:6px; color:#42506A; font-size:12px; font-weight:750; }
+      .planner-event-location { margin:0 0 10px; display:flex; align-items:center; gap:6px; color:#42506A; font-size:12px; font-weight:500; }
       .planner-event-description { margin:0 0 15px; color:#647087; font-size:12px; line-height:1.45; }
       .planner-checklist { display:grid; gap:7px; }
       .planner-checklist-heading { margin-bottom:3px; display:flex; justify-content:space-between; align-items:center; }
@@ -7275,7 +7297,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .planner-check-item > button:first-child { min-width:0; min-height:48px; padding:7px 10px; border:0; background:transparent; color:inherit; display:grid; grid-template-columns:27px minmax(0,1fr) auto; align-items:center; gap:8px; text-align:left; cursor:pointer; }
       .planner-check-item > button:first-child > span { width:26px; height:26px; display:grid; place-items:center; border-radius:9px; background:#EFF3F8; color:#718097; }
       .planner-check-item strong { font-size:12px; }
-      .planner-check-item small { padding:4px 7px; border-radius:999px; background:color-mix(in srgb,var(--person-colour) 12%,#fff); color:var(--person-colour); font-size:12px; font-weight:850; }
+      .planner-check-item small { padding:4px 7px; border-radius:999px; background:color-mix(in srgb,var(--person-colour) 12%,#fff); color:var(--person-colour); font-size:12px; font-weight:500; }
       .planner-remove-item { width:48px; height:48px; border:0; border-left:1px solid #E8EDF3; background:transparent; color:#8B5260; cursor:pointer; }
       .planner-check-item.is-complete { background:#F2FAF6; border-color:#CCEBDD; }
       .planner-check-item.is-complete > button:first-child > span { background:#1B9A6B; color:#fff; }
@@ -7285,33 +7307,33 @@ export class FamilyHubCard extends HTMLElementBase {
       .planner-suggestion h3 { margin:3px 0 5px; font-size:16px; }
       .planner-suggestion p:not(.eyebrow) { margin:0; color:#6D604A; font-size:12px; line-height:1.45; }
       .planner-suggestion div > div { display:flex; gap:7px; margin-top:11px; }
-      .planner-suggestion button { min-height:48px; padding:8px 11px; border:0; border-radius:10px; background:var(--person-colour); color:#fff; font-size:12px; font-weight:850; cursor:pointer; }
+      .planner-suggestion button { min-height:48px; padding:8px 11px; border:0; border-radius:10px; background:var(--person-colour); color:#fff; font-size:12px; font-weight:500; cursor:pointer; }
       .planner-no-prep { margin:0; padding:15px; border-radius:14px; background:#EFF3F8; color:#68748A; font-size:12px; }
       .planner-checklist-editor { margin-top:14px; padding-top:14px; border-top:1px solid #E1E7EF; display:grid; gap:8px; }
       .planner-editor-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:7px; }
       .planner-editor-row + .planner-editor-row { grid-template-columns:minmax(0,1fr) auto; }
       .planner-editor-row input,.planner-editor-row select { min-width:0; width:100%; height:48px; padding:0 10px; border:1px solid #D9E1EC; border-radius:10px; background:#fff; color:#152139; font:inherit; font-size:12px; }
-      .planner-editor-row button { min-height:48px; padding:0 12px; border:0; border-radius:10px; background:#1463E8; color:#fff; font-size:12px; font-weight:850; cursor:pointer; }
+      .planner-editor-row button { min-height:48px; padding:0 12px; border:0; border-radius:10px; background:#1463E8; color:#fff; font-size:12px; font-weight:500; cursor:pointer; }
       .planner-modal > footer { min-height:58px; padding:10px 25px; border-top:1px solid #E4E9F1; background:#fff; display:flex; justify-content:space-between; align-items:center; gap:10px; }
       .planner-modal > footer > span { display:flex; align-items:center; gap:5px; color:#68748A; font-size:12px; }
       .planner-add-modal { width:min(700px,94%); }
       .planner-event-form { min-height:0; padding:18px 25px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; overflow:auto; }
       .planner-event-form label { display:grid; gap:5px; }
       .planner-event-form label.is-wide { grid-column:1/-1; }
-      .planner-event-form label > span { color:#536078; font-size:12px; font-weight:850; text-transform:uppercase; letter-spacing:.04em; }
+      .planner-event-form label > span { color:#536078; font-size:12px; font-weight:500; text-transform:uppercase; letter-spacing:.04em; }
       .planner-event-form input,.planner-event-form select,.planner-event-form textarea { min-width:0; width:100%; height:48px; padding:0 11px; border:1px solid #D9E1EC; border-radius:11px; background:#fff; color:#152139; font:inherit; font-size:12px; }
       .planner-event-form textarea { height:84px; padding:10px 11px; resize:vertical; }
       .planner-event-form label > small { color:#758096; font-size:11px; }
-      .planner-form-error { grid-column:1/-1; min-height:15px; margin:0; color:#B83C4A; font-size:12px; font-weight:750; }
-      .planner-add-modal > footer button { min-width:110px; min-height:48px; border:1px solid #D9E1EC; border-radius:11px; background:#fff; color:#42506A; font-weight:850; cursor:pointer; }
+      .planner-form-error { grid-column:1/-1; min-height:15px; margin:0; color:#B83C4A; font-size:12px; font-weight:500; }
+      .planner-add-modal > footer button { min-width:110px; min-height:48px; border:1px solid #D9E1EC; border-radius:11px; background:#fff; color:#42506A; font-weight:500; cursor:pointer; }
       .planner-add-modal > footer { justify-content:flex-end; }
       .planner-add-modal > footer button.planner-save { border-color:#1463E8; background:#1463E8; color:#fff; }
-      .hub-agenda-event .event-time { display:block; color:var(--calendar-colour); font-size:8px; font-weight:850; letter-spacing:.04em; }
+      .hub-agenda-event .event-time { display:block; color:var(--calendar-colour); font-size:8px; font-weight:500; letter-spacing:.04em; }
       .hub-agenda-event strong { display:-webkit-box; margin-top:3px; overflow:hidden; color:#1d2333; font-size:10px; line-height:1.25; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
       .hub-agenda-event small { display:flex; align-items:center; gap:2px; margin-top:5px; overflow:hidden; color:#656c7f; font-size:8px; white-space:nowrap; text-overflow:ellipsis; }
       .hub-agenda-event small ha-icon { --mdc-icon-size:11px; }
       .hub-agenda-empty { margin:12px 4px; color:#8a8f9d; font-size:9px; line-height:1.4; }
-      .hub-agenda-more { margin:auto 4px 2px; color:var(--hub-accent); font-size:9px; font-weight:750; }
+      .hub-agenda-more { margin:auto 4px 2px; color:var(--hub-accent); font-size:9px; font-weight:500; }
       .family-dashboard { height:100%; min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr); gap:10px; }
       .family-dashboard.has-kid-switcher { grid-template-rows:auto auto minmax(0,1fr); }
       .family-dashboard.has-claim-feedback { grid-template-rows:auto auto minmax(0,1fr); }
@@ -7320,15 +7342,15 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-dashboard-heading h2 { margin:3px 0 0; color:var(--hub-text); font-size:22px; }
       .family-kid-switcher { display:flex; gap:9px; overflow-x:auto; padding:2px; }
       .family-kid-tab { min-width:150px; min-height:58px; padding:8px 14px; display:flex; align-items:center; gap:10px; border:2px solid transparent; border-radius:17px; background:var(--hub-surface); color:var(--hub-text); box-shadow:0 6px 18px rgba(11,24,48,.08); cursor:pointer; }
-      .family-kid-tab > span { width:36px; height:36px; display:grid; place-items:center; border-radius:50%; background:var(--person-colour); color:#fff; font-weight:900; }
+      .family-kid-tab > span { width:36px; height:36px; display:grid; place-items:center; border-radius:50%; background:var(--person-colour); color:#fff; font-weight:500; }
       .family-kid-tab strong { font-size:14px; }
       .family-kid-tab.is-selected { border-color:var(--person-colour); background:color-mix(in srgb,var(--person-colour) 8%,var(--hub-surface)); }
       .family-kid-stage { min-height:0; overflow:auto; }
       .family-kid-stage .family-person { min-height:100%; overflow:visible; }
       .family-kid-stage .family-person.is-kid-mode { padding:22px; }
-      .chore-claim-feedback { margin:0; padding:10px 14px; display:flex; align-items:center; gap:8px; border:1px solid #A9DCC1; border-radius:13px; background:#F1FAF5; color:#18794E; font-size:13px; font-weight:800; }
+      .chore-claim-feedback { margin:0; padding:10px 14px; display:flex; align-items:center; gap:8px; border:1px solid #A9DCC1; border-radius:13px; background:#F1FAF5; color:#18794E; font-size:13px; font-weight:500; }
       .chore-claim-feedback ha-icon { --mdc-icon-size:19px; }
-      .choreops-link { min-height:48px; padding:0 14px; display:inline-flex; align-items:center; justify-content:center; gap:7px; border:1px solid color-mix(in srgb,var(--hub-accent) 24%,transparent); border-radius:14px; background:color-mix(in srgb,var(--hub-accent) 8%,var(--hub-surface)); color:var(--hub-accent); font-size:12px; font-weight:800; text-decoration:none; }
+      .choreops-link { min-height:48px; padding:0 14px; display:inline-flex; align-items:center; justify-content:center; gap:7px; border:1px solid color-mix(in srgb,var(--hub-accent) 24%,transparent); border-radius:14px; background:color-mix(in srgb,var(--hub-accent) 8%,var(--hub-surface)); color:var(--hub-accent); font-size:12px; font-weight:500; text-decoration:none; }
       .choreops-link ha-icon { --mdc-icon-size:18px; }
       .family-sidebar-link { flex:0 0 auto; align-self:flex-end; }
       .family-people-grid { min-height:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
@@ -7349,7 +7371,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-prep-item.is-complete { border-color:#B7DEC9; background:#F1FAF5; }
       .family-prep-item.is-complete > span { background:#1B9A6B; color:#fff; }
       .family-prep-item.is-complete strong { color:var(--hub-muted); text-decoration:line-through; }
-      .family-prep-more { width:100%; min-height:48px; margin-top:8px; padding:7px; border:0; background:transparent; color:var(--person-colour); font-size:12px; font-weight:850; cursor:pointer; }
+      .family-prep-more { width:100%; min-height:48px; margin-top:8px; padding:7px; border:0; background:transparent; color:var(--person-colour); font-size:12px; font-weight:500; cursor:pointer; }
       .family-connection-warning { margin:13px 0 0; padding:10px 12px; display:flex; align-items:center; gap:7px; border:1px solid #e8d29d; border-radius:12px; background:#fff9e8; color:#704b0d; font-size:12px; line-height:1.35; }
       .family-connection-warning ha-icon { flex:0 0 auto; --mdc-icon-size:17px; }
       .chore-list { margin:8px 0 0; padding:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; list-style:none; }
@@ -7372,14 +7394,14 @@ export class FamilyHubCard extends HTMLElementBase {
       .chore-row.is-kid-card strong { font-size:16px; white-space:normal; }
       .chore-row.is-kid-card small { margin-top:5px; font-size:12px; white-space:normal; }
       .chore-row.is-kid-card > b { align-self:start; padding:5px 8px; border-radius:999px; background:color-mix(in srgb,var(--person-colour) 12%,#fff); font-size:12px; }
-      .chore-claim-action { grid-column:1/-1; min-height:48px; border:0; border-radius:13px; background:color-mix(in srgb,var(--person-colour) 35%,#10233D); color:#fff; font-size:13px; font-weight:900; cursor:pointer; }
+      .chore-claim-action { grid-column:1/-1; min-height:48px; border:0; border-radius:13px; background:color-mix(in srgb,var(--person-colour) 35%,#10233D); color:#fff; font-size:13px; font-weight:500; cursor:pointer; }
       .chore-claim-action:disabled { background:#E5EAF0; color:#65738A; opacity:1; }
       .family-summary-grid { min-width:0; margin-top:12px; display:grid; grid-template-columns:repeat(auto-fit,minmax(105px,1fr)); gap:7px; }
       .family-summary-item { min-width:0; min-height:72px; padding:8px; display:grid; grid-template-columns:26px minmax(0,1fr); gap:6px; align-items:center; border:1px solid color-mix(in srgb,var(--person-colour) 16%,transparent); border-radius:13px; background:color-mix(in srgb,var(--person-colour) 4%,var(--hub-surface)); }
       .family-summary-item > span { width:26px; height:26px; display:grid; place-items:center; border-radius:8px; background:color-mix(in srgb,var(--person-colour) 11%,var(--hub-surface)); color:var(--person-colour); }
       .family-summary-item ha-icon { --mdc-icon-size:17px; }
       .family-summary-item p,.family-summary-item strong,.family-summary-item small { display:block; margin:0; overflow-wrap:anywhere; }
-      .family-summary-item p { color:var(--hub-text); font-size:12px; font-weight:800; line-height:1.15; }
+      .family-summary-item p { color:var(--hub-text); font-size:12px; font-weight:500; line-height:1.15; }
       .family-summary-item strong { color:var(--hub-text); font-size:12px; line-height:1.2; }
       .family-summary-item small { margin-top:2px; color:var(--hub-muted); font-size:12px; line-height:1.2; }
       .family-summary-item.is-done > span { background:#dff3e8; color:#18794e; }
@@ -7387,7 +7409,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-summary-item.is-unavailable > span { background:color-mix(in srgb,var(--hub-muted) 10%,var(--hub-surface)); color:var(--hub-muted); }
       .family-progress { height:6px; margin-top:7px; display:block; overflow:hidden; border-radius:999px; background:color-mix(in srgb,var(--person-colour) 10%,#DCE4EE); }
       .family-progress b { height:100%; display:block; border-radius:inherit; background:var(--person-colour); }
-      .reward-claim { min-height:48px; margin-top:8px; padding:0 10px; border:0; border-radius:10px; background:color-mix(in srgb,var(--person-colour) 35%,#10233D); color:#fff; font-size:12px; font-weight:900; cursor:pointer; }
+      .reward-claim { min-height:48px; margin-top:8px; padding:0 10px; border:0; border-radius:10px; background:color-mix(in srgb,var(--person-colour) 35%,#10233D); color:#fff; font-size:12px; font-weight:500; cursor:pointer; }
       .reward-claim:disabled { background:#E5EAF0; color:#65738A; opacity:1; }
       .football-empty { min-height:0; height:100%; display:grid; grid-template-columns:90px minmax(0,1fr) auto; gap:20px; align-items:center; padding:26px; border:1px dashed color-mix(in srgb,var(--hub-accent) 32%,transparent); border-radius:18px; background:linear-gradient(145deg,color-mix(in srgb,var(--hub-accent) 7%,#fff),rgba(255,255,255,.5)); }
       .football-orbit { width:82px; height:82px; display:grid; place-items:center; border-radius:50%; background:radial-gradient(circle,#fff 34%,color-mix(in srgb,var(--hub-accent) 18%,#fff) 35% 58%,transparent 59%); color:var(--hub-accent); box-shadow:0 12px 28px rgba(31,36,57,.12); }
@@ -7395,7 +7417,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .football-empty h3 { margin:5px 0 0; color:var(--hub-text); font-size:19px; }
       .football-empty p:last-child { max-width:440px; margin:7px 0 0; color:var(--hub-muted); font-size:12px; line-height:1.45; }
       .empty-clubs { display:flex; align-items:center; gap:8px; }
-      .empty-clubs span { width:42px; height:42px; display:grid; place-items:center; border-radius:12px; background:var(--hub-nav); color:#fff; font-size:12px; font-weight:800; }
+      .empty-clubs span { width:42px; height:42px; display:grid; place-items:center; border-radius:12px; background:var(--hub-nav); color:#fff; font-size:12px; font-weight:500; }
       .empty-clubs i { width:16px; height:1px; background:color-mix(in srgb,var(--hub-muted) 32%,transparent); }
       .hub-empty-state { color:var(--hub-muted); font-size:12px; line-height:1.45; }
       .hub-empty-state.compact { margin:14px 0 0; font-size:12px; }
@@ -7506,25 +7528,25 @@ export class FamilyHubCard extends HTMLElementBase {
       .hub-navigation { padding:18px 12px; gap:18px; background:var(--daily-strong); border:0; box-shadow:12px 0 34px rgba(6,27,58,.08); }
       .hub-brand { width:68px; height:68px; margin:0 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; border:1px solid rgba(255,255,255,.16); border-radius:22px; background:rgba(255,255,255,.09); box-shadow:none; }
       .hub-brand ha-icon { --mdc-icon-size:25px; }
-      .hub-brand span { font-size:12px; font-weight:750; letter-spacing:.01em; }
+      .hub-brand span { font-size:12px; font-weight:500; letter-spacing:.01em; }
       .hub-nav-items { flex:0 0 auto; justify-content:flex-start; gap:6px; }
       .hub-nav-core { flex:1; }
       .hub-nav-utility { margin-top:auto; }
       .hub-nav-divider { display:block; height:1px; margin:2px 10px 8px; background:rgba(255,255,255,.13); }
       .hub-nav-button { min-height:58px; gap:5px; border:0; border-radius:17px; color:#A8B7CB; }
       .hub-nav-button ha-icon { --mdc-icon-size:23px; }
-      .hub-nav-button span { font-size:12px; font-weight:700; }
+      .hub-nav-button span { font-size:12px; font-weight:500; }
       .hub-nav-button.is-active { color:var(--daily-strong); background:var(--daily-surface); border:0; box-shadow:0 8px 24px rgba(0,0,0,.18); }
       .hub-content { padding:16px 26px 24px; grid-template-rows:70px minmax(0,1fr); gap:14px; background:var(--daily-background); }
       .hub-topbar { color:var(--daily-text); padding:0; }
       .hub-page-title { display:flex; align-items:baseline; gap:14px; }
-      .hub-topbar h1 { margin:0; font-size:34px; line-height:1; letter-spacing:-.035em; font-weight:800; }
-      .hub-topbar-date { order:2; margin:0; color:var(--daily-muted); font-size:14px; font-weight:650; }
+      .hub-topbar h1 { margin:0; font-size:34px; line-height:1; letter-spacing:-.035em; font-weight:500; }
+      .hub-topbar-date { order:2; margin:0; color:var(--daily-muted); font-size:14px; font-weight:500; }
       .hub-header-actions { gap:10px; }
-      .hub-weather-pill { min-height:48px; padding:0 15px; border:1px solid var(--daily-line); border-radius:16px; background:var(--daily-surface); color:var(--daily-text); box-shadow:0 5px 18px rgba(11,24,48,.05); font-size:14px; font-weight:700; }
+      .hub-weather-pill { min-height:48px; padding:0 15px; border:1px solid var(--daily-line); border-radius:16px; background:var(--daily-surface); color:var(--daily-text); box-shadow:0 5px 18px rgba(11,24,48,.05); font-size:14px; font-weight:500; }
       .hub-weather-pill ha-icon { color:#E7A93D; }
-      .hub-topbar-time { min-width:82px; color:var(--daily-text); font-size:26px; line-height:1; font-weight:800; letter-spacing:-.03em; text-align:right; }
-      .eyebrow { color:var(--daily-muted); font-size:12px; line-height:1.2; font-weight:800; letter-spacing:.1em; }
+      .hub-topbar-time { min-width:82px; color:var(--daily-text); font-size:26px; line-height:1; font-weight:500; letter-spacing:-.03em; text-align:right; }
+      .eyebrow { color:var(--daily-muted); font-size:12px; line-height:1.2; font-weight:500; letter-spacing:.1em; }
       .surface { color:var(--daily-text); border:1px solid var(--daily-line); background:var(--daily-surface); border-radius:24px; box-shadow:0 12px 32px rgba(21,43,75,.065); -webkit-backdrop-filter:none; backdrop-filter:none; }
       .surface .eyebrow { color:var(--daily-muted); }
       .surface h2,.surface h3,.surface strong { color:var(--daily-text); }
@@ -7548,7 +7570,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .today-weather { position:relative; z-index:1; align-self:center; display:grid; justify-items:end; }
       .today-weather ha-icon { --mdc-icon-size:34px; color:#FFD27B; }
       .today-weather strong { margin-top:8px; color:var(--daily-on-strong); font-size:42px; line-height:1; letter-spacing:-.05em; }
-      .today-weather span { margin-top:6px; color:var(--daily-strong-muted); font-size:13px; font-weight:650; }
+      .today-weather span { margin-top:6px; color:var(--daily-strong-muted); font-size:13px; font-weight:500; }
       .hero-metrics { position:relative; z-index:1; grid-column:1/-1; margin:0; gap:10px; }
       .hero-metrics.has-energy { grid-template-columns:repeat(4,minmax(0,1fr)); }
       .hero-metrics[data-metric-count="1"] { grid-template-columns:minmax(0,1fr); }
@@ -7700,14 +7722,14 @@ export class FamilyHubCard extends HTMLElementBase {
       .security-stage-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
       .security-stage-heading .eyebrow { color:var(--daily-strong-accent); }
       .security-stage-heading h2 { margin:3px 0 0; color:var(--daily-on-strong); font-size:24px; }
-      .stage-privacy { min-height:38px; padding:0 12px; display:flex; align-items:center; gap:6px; border:1px solid rgba(255,255,255,.15); border-radius:13px; background:rgba(255,255,255,.07); color:var(--daily-strong-muted); font-size:12px; font-weight:700; }
+      .stage-privacy { min-height:38px; padding:0 12px; display:flex; align-items:center; gap:6px; border:1px solid rgba(255,255,255,.15); border-radius:13px; background:rgba(255,255,255,.07); color:var(--daily-strong-muted); font-size:12px; font-weight:500; }
       .stage-privacy ha-icon { --mdc-icon-size:17px; color:var(--daily-strong-accent); }
       .security-stage-media { width:100%; max-width:780px; min-height:0; aspect-ratio:16/9; place-self:center; overflow:hidden; border-radius:18px; background:radial-gradient(circle at 50% 46%,#102F54,#041225 72%); }
       .camera-stage-stack { position:relative; width:100%; height:100%; min-height:0; overflow:hidden; border-radius:18px; background:#041225; }
       .camera-poster-slot { position:relative; min-width:0; min-height:0; overflow:hidden; background:radial-gradient(circle at 50% 46%,#16385f,#041225 72%); color:var(--daily-strong-muted); }
       .camera-poster-slot > .embedded-card { display:block; width:100%; height:100%; min-height:100%; border:0; }
       .camera-stage-poster-slot { position:absolute; inset:0; }
-      .camera-poster-fallback { position:absolute; inset:0; display:grid; place-items:center; align-content:center; gap:8px; color:var(--daily-strong-muted); font-size:12px; font-weight:750; }
+      .camera-poster-fallback { position:absolute; inset:0; display:grid; place-items:center; align-content:center; gap:8px; color:var(--daily-strong-muted); font-size:12px; font-weight:500; }
       .camera-poster-fallback ha-icon { --mdc-icon-size:32px; color:var(--daily-strong-accent); }
       .camera-stage-stack .camera-card-slot { position:absolute; z-index:1; inset:0; opacity:0; transition:opacity .18s ease; }
       .camera-stage-stack.is-live .camera-card-slot { opacity:1; }
@@ -7728,7 +7750,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .camera-idle button,.camera-close,.camera-select-action { min-height:48px; padding:0 16px; border-radius:14px; background:var(--daily-accent); font-size:13px; }
       .camera-stream { width:100%; height:100%; border-radius:18px; }
       .camera-card-slot,.camera-card-slot::slotted(.embedded-card) { height:100%; min-height:100%; }
-      .camera-live-chip { position:absolute; z-index:4; top:12px; left:12px; min-height:34px; padding:0 11px; display:flex; align-items:center; gap:7px; border-radius:12px; background:rgba(4,18,37,.8); color:var(--daily-on-strong); font-size:12px; font-weight:800; }
+      .camera-live-chip { position:absolute; z-index:4; top:12px; left:12px; min-height:34px; padding:0 11px; display:flex; align-items:center; gap:7px; border-radius:12px; background:rgba(4,18,37,.8); color:var(--daily-on-strong); font-size:12px; font-weight:500; }
       .camera-live-chip span { width:8px; height:8px; border-radius:50%; background:#E86E5A; box-shadow:0 0 0 4px rgba(232,110,90,.2); }
       .camera-close { right:12px; bottom:12px; background:rgba(4,18,37,.86); }
       .security-camera-picker { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
@@ -7736,7 +7758,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .camera-tile-media { position:relative; min-width:0; min-height:174px; overflow:hidden; background:var(--daily-strong); }
       .camera-tile-poster { position:absolute; inset:0; }
       .camera-poster-action { position:absolute; z-index:2; inset:0; width:100%; padding:10px; border:0; background:linear-gradient(180deg,transparent 46%,rgba(4,18,37,.82)); color:var(--daily-on-strong); display:flex; align-items:flex-end; justify-content:flex-start; text-align:left; cursor:pointer; }
-      .camera-poster-action > span { min-height:38px; padding:0 10px; border:1px solid rgba(255,255,255,.24); border-radius:11px; background:rgba(4,18,37,.78); display:flex; align-items:center; gap:6px; font-size:12px; font-weight:800; }
+      .camera-poster-action > span { min-height:38px; padding:0 10px; border:1px solid rgba(255,255,255,.24); border-radius:11px; background:rgba(4,18,37,.78); display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; }
       .camera-poster-action:disabled { cursor:default; }
       .camera-tile-details { min-width:0; padding:13px; display:grid; grid-template-rows:auto minmax(0,1fr); align-content:start; gap:9px; }
       .security-camera .security-card-heading { min-width:0; display:grid; align-content:start; justify-content:stretch; gap:7px; }
@@ -7801,7 +7823,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .family-person { border-color:var(--daily-line); background:var(--daily-surface); color:var(--daily-text); }
       .family-sidebar { display:flex; flex-direction:column; align-items:stretch; overflow-y:auto; overscroll-behavior:contain; padding-right:4px; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:var(--daily-muted) transparent; }
       .family-scroll-cue { position:sticky; top:0; z-index:3; flex:0 0 auto; min-height:38px; padding:0 8px; display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid var(--daily-line); background:rgba(244,247,250,.96); color:var(--daily-text); font-size:12px; }
-      .family-scroll-cue span { display:flex; align-items:center; gap:4px; color:var(--daily-muted); font-weight:700; }
+      .family-scroll-cue span { display:flex; align-items:center; gap:4px; color:var(--daily-muted); font-weight:500; }
       .family-scroll-cue ha-icon { --mdc-icon-size:16px; color:var(--daily-accent); }
       .family-sidebar .family-person { flex:0 0 auto; overflow:visible; }
       .family-sidebar::-webkit-scrollbar { width:7px; }
@@ -7845,7 +7867,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .media-player-panel { border:0; background:radial-gradient(circle at 85% 10%,rgba(20,99,232,.28),transparent 35%),linear-gradient(145deg,var(--daily-strong),var(--daily-strong-end)); }
       .music-heading .eyebrow { color:var(--daily-strong-accent); }
       .music-heading h2 { color:var(--daily-on-strong); }
-      .music-heading > .music-meta { min-height:34px; padding:0 10px; border:1px solid rgba(255,255,255,.14); border-radius:999px; background:#123760; color:var(--daily-strong-muted); font-size:12px; font-weight:750; }
+      .music-heading > .music-meta { min-height:34px; padding:0 10px; border:1px solid rgba(255,255,255,.14); border-radius:999px; background:#123760; color:var(--daily-strong-muted); font-size:12px; font-weight:500; }
       .media-player-stage { border-color:rgba(255,255,255,.16); background:#07182F; }
 
       .compact-fixture,.compact-fixture > span,.compact-fixture > strong { color:var(--daily-text); }
@@ -7875,9 +7897,9 @@ export class FamilyHubCard extends HTMLElementBase {
       .favourite-club-heading,.derby-heading { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; }
       .favourite-club-identity { min-width:0; display:flex; align-items:center; gap:10px; }
       .favourite-club-identity > div,.derby-heading > div { min-width:0; }
-      .favourite-club-identity small,.derby-heading small { display:block; color:color-mix(in srgb,var(--club-accent,var(--daily-strong-accent)) 78%,var(--daily-surface)); font-size:12px; font-weight:750; }
+      .favourite-club-identity small,.derby-heading small { display:block; color:color-mix(in srgb,var(--club-accent,var(--daily-strong-accent)) 78%,var(--daily-surface)); font-size:12px; font-weight:500; }
       .favourite-club-identity strong,.derby-heading strong { display:block; margin-top:2px; overflow:hidden; color:var(--daily-on-strong); font-size:18px; line-height:1.1; white-space:nowrap; text-overflow:ellipsis; }
-      .favourite-match-status { flex:0 0 auto; min-height:28px; padding:0 9px; display:flex; align-items:center; border:1px solid rgba(255,255,255,.2); border-radius:999px; background:rgba(255,255,255,.1); color:var(--daily-on-strong); font-size:12px; font-weight:850; letter-spacing:.05em; }
+      .favourite-match-status { flex:0 0 auto; min-height:28px; padding:0 9px; display:flex; align-items:center; border:1px solid rgba(255,255,255,.2); border-radius:999px; background:rgba(255,255,255,.1); color:var(--daily-on-strong); font-size:12px; font-weight:500; letter-spacing:.05em; }
       .favourite-hero-card.is-live .favourite-match-status { border-color:rgba(255,139,125,.56); background:rgba(180,40,43,.34); }
       .favourite-fixture-summary { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) 30px auto; align-items:end; gap:9px; }
       .favourite-opponent { min-width:0; }
@@ -7885,7 +7907,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .favourite-opponent strong { display:block; margin-top:3px; overflow:hidden; color:var(--daily-on-strong); font-size:15px; line-height:1.15; white-space:nowrap; text-overflow:ellipsis; }
       .favourite-result { min-width:74px; text-align:right; }
       .favourite-result strong { display:block; color:var(--daily-on-strong); font-size:22px; line-height:1; letter-spacing:-.025em; }
-      .favourite-result small { margin-top:4px; color:var(--club-accent,var(--daily-strong-accent)); font-weight:750; }
+      .favourite-result small { margin-top:4px; color:var(--club-accent,var(--daily-strong-accent)); font-weight:500; }
       .favourite-fixture-summary.is-empty { grid-template-columns:24px minmax(0,1fr); align-items:center; color:var(--daily-on-strong); }
       .favourite-fixture-summary.is-empty ha-icon { --mdc-icon-size:21px; color:var(--club-accent,var(--daily-strong-accent)); }
       .favourite-fixture-summary.is-empty strong,.favourite-fixture-summary.is-empty small { display:block; color:var(--daily-on-strong); font-size:13px; }
@@ -7945,7 +7967,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .lighting-master-copy,.heating-master-copy { min-width:0; }
       .lighting-master h2,.heating-master h2 { margin:2px 0; color:var(--daily-on-strong); font-size:22px; }
       .lighting-master-copy > span,.heating-master-copy > span { color:var(--daily-strong-muted); font-size:12px; }
-      .lighting-master button,.heating-master-actions button,.schedule-editor > button { min-height:48px; padding:0 15px; border:1px solid rgba(255,255,255,.18); border-radius:14px; background:var(--daily-accent); color:var(--daily-on-strong); font-weight:800; }
+      .lighting-master button,.heating-master-actions button,.schedule-editor > button { min-height:48px; padding:0 15px; border:1px solid rgba(255,255,255,.18); border-radius:14px; background:var(--daily-accent); color:var(--daily-on-strong); font-weight:500; }
       .lighting-master-stats { display:flex; align-items:center; gap:8px; }
       .lighting-master-stats > span { min-width:92px; padding:8px 10px; display:grid; grid-template-columns:24px auto; grid-template-rows:auto auto; align-items:center; gap:0 7px; border:1px solid rgba(255,255,255,.14); border-radius:14px; background:rgba(255,255,255,.08); }
       .lighting-master-stats ha-icon { grid-row:1/3; --mdc-icon-size:22px; color:#FFD56A; }
@@ -7954,7 +7976,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .lighting-all-off { display:flex; align-items:center; justify-content:center; gap:7px; white-space:nowrap; }
       .lighting-all-off ha-icon { --mdc-icon-size:20px; }
       .lighting-master button:disabled { opacity:.48; }
-      .room-light-master { margin-left:auto; min-height:48px; padding:0 11px; border:1px solid var(--daily-line); border-radius:13px; background:var(--daily-accent-soft); color:var(--daily-accent); display:flex; align-items:center; gap:5px; font-weight:800; }
+      .room-light-master { margin-left:auto; min-height:48px; padding:0 11px; border:1px solid var(--daily-line); border-radius:13px; background:var(--daily-accent-soft); color:var(--daily-accent); display:flex; align-items:center; gap:5px; font-weight:500; }
       .room-light-master.is-on { border-color:var(--daily-warning-line); background:var(--daily-warning-soft); color:var(--daily-warning); }
       .whole-home-card { position:relative; overflow:hidden; background:var(--daily-surface); transition:border-color .2s ease,box-shadow .2s ease; }
       .whole-home-card::before { content:""; position:absolute; inset:0 0 auto; height:4px; background:var(--daily-line); }
@@ -7974,7 +7996,7 @@ export class FamilyHubCard extends HTMLElementBase {
       .light-power-indicator ha-icon { --mdc-icon-size:17px; }
       .light-dimmer { min-height:42px; padding:0 10px 8px; display:grid; grid-template-columns:18px minmax(0,1fr) 38px; align-items:center; gap:7px; color:var(--daily-muted); }
       .light-dimmer ha-icon { --mdc-icon-size:16px; }
-      .light-dimmer output { color:var(--daily-muted); font-size:12px; font-weight:850; text-align:right; }
+      .light-dimmer output { color:var(--daily-muted); font-size:12px; font-weight:500; text-align:right; }
       .light-dimmer input { width:100%; height:28px; margin:0; appearance:none; -webkit-appearance:none; background:transparent; cursor:pointer; }
       .light-dimmer input::-webkit-slider-runnable-track { height:6px; border-radius:999px; background:linear-gradient(90deg,#F4B740 0 var(--light-level),var(--daily-line) var(--light-level) 100%); }
       .light-dimmer input::-webkit-slider-thumb { width:18px; height:18px; margin-top:-6px; appearance:none; -webkit-appearance:none; border:3px solid var(--daily-surface); border-radius:50%; background:#E5A51B; box-shadow:0 2px 6px rgba(44,59,82,.3); }
@@ -7983,11 +8005,11 @@ export class FamilyHubCard extends HTMLElementBase {
       .light-dimmer input::-moz-range-thumb { width:14px; height:14px; border:3px solid var(--daily-surface); border-radius:50%; background:#E5A51B; box-shadow:0 2px 6px rgba(44,59,82,.3); }
       .light-dimmer input:disabled { cursor:not-allowed; opacity:.48; }
       .heating-master { display:grid; grid-template-columns:minmax(185px,1fr) auto minmax(330px,auto); align-items:center; gap:14px 18px; overflow:visible; }
-      .heating-master-target { align-self:end; display:grid; gap:5px; color:var(--daily-line); font-size:12px; font-weight:800; }
+      .heating-master-target { align-self:end; display:grid; gap:5px; color:var(--daily-line); font-size:12px; font-weight:500; }
       .master-temperature-stepper { display:grid; grid-template-columns:48px 70px 48px; overflow:hidden; border:1px solid rgba(255,255,255,.2); border-radius:14px; background:rgba(255,255,255,.1); }
-      .master-temperature-stepper button { min-height:48px; border:0; background:transparent; color:var(--daily-accent-soft); font-size:20px; font-weight:900; }
+      .master-temperature-stepper button { min-height:48px; border:0; background:transparent; color:var(--daily-accent-soft); font-size:20px; font-weight:500; }
       .master-temperature-stepper label { min-width:0; display:flex; align-items:center; justify-content:center; border-inline:1px solid rgba(255,255,255,.14); }
-      .master-temperature-stepper input { width:43px; height:46px; padding:0; border:0; outline:0; background:transparent; color:var(--daily-on-strong); font-size:18px; font-weight:900; text-align:right; -moz-appearance:textfield; }
+      .master-temperature-stepper input { width:43px; height:46px; padding:0; border:0; outline:0; background:transparent; color:var(--daily-on-strong); font-size:18px; font-weight:500; text-align:right; -moz-appearance:textfield; }
       .master-temperature-stepper input::-webkit-inner-spin-button,.master-temperature-stepper input::-webkit-outer-spin-button { margin:0; -webkit-appearance:none; }
       .master-temperature-stepper b { color:var(--daily-on-strong); font-size:16px; }
       .heating-master-actions { align-self:end; display:grid; grid-template-columns:minmax(132px,1.35fr) repeat(2,minmax(92px,1fr)); gap:8px; }
@@ -8012,11 +8034,11 @@ export class FamilyHubCard extends HTMLElementBase {
       .master-schedule .schedule-periods { grid-template-columns:repeat(4,minmax(0,1fr)); }
       .schedule-period { min-width:0; margin:0; padding:9px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; border:1px solid var(--daily-line); border-radius:12px; background:var(--daily-surface); }
       .schedule-period legend { width:100%; padding:0 0 7px; display:grid; grid-template-columns:22px minmax(0,1fr); grid-template-rows:auto auto; align-items:center; gap:1px 7px; color:var(--daily-text); }
-      .schedule-period legend > span { grid-row:1/3; width:22px; height:22px; display:grid; place-items:center; border-radius:7px; background:var(--daily-accent-soft); color:var(--daily-accent); font-size:12px; font-weight:900; }
+      .schedule-period legend > span { grid-row:1/3; width:22px; height:22px; display:grid; place-items:center; border-radius:7px; background:var(--daily-accent-soft); color:var(--daily-accent); font-size:12px; font-weight:500; }
       .schedule-period legend strong { grid-column:2; font-size:12px; line-height:1.15; }
       .schedule-period legend small { grid-column:2; color:var(--daily-muted); font-size:12px; line-height:1.15; }
-      .schedule-period label { min-width:0; display:grid; gap:4px; color:var(--daily-muted); font-size:12px; font-weight:850; }
-      .schedule-period input { min-width:0; width:100%; height:38px; padding:0 8px; border:1px solid var(--daily-line); border-radius:10px; background:var(--daily-soft); color:var(--daily-text); box-sizing:border-box; font-weight:750; }
+      .schedule-period label { min-width:0; display:grid; gap:4px; color:var(--daily-muted); font-size:12px; font-weight:500; }
+      .schedule-period input { min-width:0; width:100%; height:38px; padding:0 8px; border:1px solid var(--daily-line); border-radius:10px; background:var(--daily-soft); color:var(--daily-text); box-sizing:border-box; font-weight:500; }
       .schedule-temp { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) 24px; align-items:center; overflow:hidden; border:1px solid var(--daily-line); border-radius:10px; background:var(--daily-soft); }
       .schedule-temp input { border:0; border-radius:0; background:transparent; }
       .schedule-temp b { color:var(--daily-muted); font-size:12px; }
@@ -8024,10 +8046,10 @@ export class FamilyHubCard extends HTMLElementBase {
       .cleaning-experience { height:100%; min-height:0; display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr); gap:14px; }
       .cleaning-experience .cleaning-panel { display:flex; flex-direction:column; overflow:auto; }
       .cleaning-selectors { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-      .cleaning-selectors label { display:grid; gap:5px; color:var(--daily-muted); font-size:12px; font-weight:800; }
+      .cleaning-selectors label { display:grid; gap:5px; color:var(--daily-muted); font-size:12px; font-weight:500; }
       .cleaning-selectors select { width:100%; height:46px; border:1px solid var(--daily-line); border-radius:13px; background:var(--daily-soft); color:var(--daily-text); padding:0 32px 0 10px; }
       .cleaning-command-grid { display:flex; flex-wrap:wrap; gap:8px; }
-      .cleaning-command-grid button { min-height:44px; padding:0 12px; border:1px solid var(--daily-line); border-radius:13px; background:var(--daily-soft); color:var(--daily-accent); display:flex; align-items:center; gap:6px; font-weight:800; }
+      .cleaning-command-grid button { min-height:44px; padding:0 12px; border:1px solid var(--daily-line); border-radius:13px; background:var(--daily-soft); color:var(--daily-accent); display:flex; align-items:center; gap:6px; font-weight:500; }
       .cleaning-consumables { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
       .cleaning-consumables > span { min-height:52px; padding:8px 10px; border:1px solid var(--daily-line); border-radius:13px; display:flex; align-items:center; gap:8px; }
       .cleaning-consumables strong,.cleaning-consumables small { display:block; font-size:11px; }
@@ -8045,23 +8067,23 @@ export class FamilyHubCard extends HTMLElementBase {
       .kid-mission-orbit { width:50px; height:50px; display:grid; place-items:center; border-radius:50%; background:rgba(255,255,255,.14); }
       .kid-mission-orbit ha-icon { --mdc-icon-size:28px; color:var(--daily-on-strong); }
       .kid-mission p,.kid-mission strong { display:block; margin:0; color:var(--daily-on-strong); }
-      .kid-mission p { font-size:12px; font-weight:850; letter-spacing:.08em; text-transform:uppercase; }
+      .kid-mission p { font-size:12px; font-weight:500; letter-spacing:.08em; text-transform:uppercase; }
       .kid-mission strong { margin-top:3px; font-size:16px; }
       .kid-mission i { height:7px; margin-top:9px; display:block; overflow:hidden; border-radius:999px; background:rgba(255,255,255,.18); }
       .kid-mission i b { height:100%; display:block; border-radius:inherit; background:var(--daily-surface); transition:width .35s ease; }
-      .kid-mission em { font-style:normal; font-size:22px; font-weight:900; }
+      .kid-mission em { font-style:normal; font-size:22px; font-weight:500; }
       .kid-mission.is-complete { background:linear-gradient(120deg,var(--daily-success),var(--daily-accent)); animation:mission-pop .45s ease; }
       .football-layout.is-fpl { grid-template-columns:minmax(0,1fr); }
       .football-layout.is-fpl .football-main { grid-template-rows:58px minmax(0,1fr); }
       .football-toolbar-spacer { min-width:1px; }
       .fpl-detail { min-height:0; display:grid; grid-template-rows:auto auto minmax(0,1fr); gap:10px; overflow:auto; padding-right:4px; }
       .fpl-entry-selector { display:flex; gap:8px; }
-      .fpl-entry-selector button { min-height:48px; padding:0 14px; display:flex; align-items:center; gap:7px; border:1px solid var(--daily-line); border-radius:14px; background:var(--daily-surface); color:var(--daily-text); font-weight:850; cursor:pointer; }
+      .fpl-entry-selector button { min-height:48px; padding:0 14px; display:flex; align-items:center; gap:7px; border:1px solid var(--daily-line); border-radius:14px; background:var(--daily-surface); color:var(--daily-text); font-weight:500; cursor:pointer; }
       .fpl-entry-selector button > span { width:28px; height:28px; display:grid; place-items:center; border-radius:9px; background:var(--person-colour); color:var(--daily-on-strong); }
       .fpl-entry-selector button.is-selected { border-color:var(--person-colour); background:color-mix(in srgb,var(--person-colour) 8%,var(--daily-surface)); color:var(--daily-text); }
       .fpl-team-card { min-height:0; padding:14px 16px; border-top:5px solid var(--person-colour); }
       .fpl-team-card header { display:flex; align-items:center; gap:10px; }
-      .fpl-team-card header > span { width:42px; height:42px; display:grid; place-items:center; border-radius:14px; background:var(--person-colour); color:var(--daily-on-strong); font-size:18px; font-weight:900; }
+      .fpl-team-card header > span { width:42px; height:42px; display:grid; place-items:center; border-radius:14px; background:var(--person-colour); color:var(--daily-on-strong); font-size:18px; font-weight:500; }
       .fpl-team-card header > div { flex:1; min-width:0; }
       .fpl-team-card header h3 { margin:2px 0 0; overflow:hidden; color:var(--daily-text); font-size:17px; white-space:nowrap; text-overflow:ellipsis; }
       .fpl-team-card header > ha-icon { color:#E7A93D; }
@@ -8070,13 +8092,13 @@ export class FamilyHubCard extends HTMLElementBase {
       .fpl-scoreboard strong,.fpl-scoreboard small { display:block; }
       .fpl-scoreboard strong { color:var(--daily-text); font-size:19px; }
       .fpl-scoreboard small { margin-top:2px; color:var(--daily-muted); font-size:10px; }
-      .fpl-chip { width:max-content; margin:9px 0 0; padding:5px 9px; display:flex; align-items:center; gap:5px; border-radius:999px; background:var(--daily-success-soft); color:var(--daily-accent); font-size:11px; font-weight:850; }
+      .fpl-chip { width:max-content; margin:9px 0 0; padding:5px 9px; display:flex; align-items:center; gap:5px; border-radius:999px; background:var(--daily-success-soft); color:var(--daily-accent); font-size:11px; font-weight:500; }
       .fpl-chip ha-icon { --mdc-icon-size:16px; }
       .fpl-detail-grid { min-height:0; display:grid; grid-template-columns:minmax(0,1.65fr) minmax(250px,.75fr); gap:10px; }
       .fpl-squad-panel,.fpl-league-panel { min-height:0; padding:14px; overflow:auto; }
       .fpl-squad-panel .section-heading,.fpl-league-panel .section-heading { display:flex; justify-content:space-between; align-items:center; }
       .fpl-squad-panel h3,.fpl-league-panel h3 { margin:2px 0 0; color:var(--daily-text); }
-      .fpl-squad-panel .section-heading > span,.fpl-league-panel .section-heading > span { padding:5px 8px; border-radius:999px; background:var(--daily-soft); color:var(--daily-muted); font-size:10px; font-weight:800; }
+      .fpl-squad-panel .section-heading > span,.fpl-league-panel .section-heading > span { padding:5px 8px; border-radius:999px; background:var(--daily-soft); color:var(--daily-muted); font-size:10px; font-weight:500; }
       .fpl-pitch { min-height:390px; margin-top:10px; padding:14px 10px; display:grid; align-content:space-around; gap:9px; border-radius:20px; background:linear-gradient(rgba(255,255,255,.07),rgba(255,255,255,.07)),repeating-linear-gradient(0deg,#079B4B 0,#079B4B 64px,#049246 64px,#049246 128px); box-shadow:inset 0 0 0 2px rgba(255,255,255,.72); }
       .fpl-pitch-row { display:flex; justify-content:space-evenly; gap:7px; }
       .fpl-player { position:relative; width:clamp(72px,8.5vw,104px); min-height:88px; padding:5px 4px 7px; display:grid; grid-template-columns:1fr auto; grid-template-rows:43px auto auto; place-items:center; border:1px solid rgba(255,255,255,.44); border-radius:12px; background:rgba(8,44,37,.42); color:var(--daily-on-strong); text-align:center; box-shadow:0 5px 12px rgba(0,0,0,.13); }
@@ -8085,8 +8107,8 @@ export class FamilyHubCard extends HTMLElementBase {
       .fpl-player-mark b { font-size:9px; }
       .fpl-player strong { grid-column:1/-1; max-width:100%; padding:2px 5px; overflow:hidden; border-radius:4px; background:var(--daily-surface); color:var(--daily-text); font-size:10px; white-space:nowrap; text-overflow:ellipsis; }
       .fpl-player small { color:var(--daily-success-soft); font-size:8px; }
-      .fpl-player em { min-width:24px; padding:2px 4px; border-radius:4px; background:#2E0A3C; color:var(--daily-on-strong); font-size:10px; font-style:normal; font-weight:900; }
-      .fpl-player-badge { position:absolute; left:5px; top:5px; z-index:1; width:20px; height:20px; display:grid; place-items:center; border-radius:50%; background:#2E0A3C; color:var(--daily-on-strong); font-size:10px; font-style:normal; font-weight:900; }
+      .fpl-player em { min-width:24px; padding:2px 4px; border-radius:4px; background:#2E0A3C; color:var(--daily-on-strong); font-size:10px; font-style:normal; font-weight:500; }
+      .fpl-player-badge { position:absolute; left:5px; top:5px; z-index:1; width:20px; height:20px; display:grid; place-items:center; border-radius:50%; background:#2E0A3C; color:var(--daily-on-strong); font-size:10px; font-style:normal; font-weight:500; }
       .fpl-player-warning { position:absolute; right:4px; top:4px; z-index:1; --mdc-icon-size:18px; padding:2px; border-radius:50%; background:#FFE178; color:var(--daily-warning); }
       .fpl-bench { margin-top:9px; padding:9px; border-radius:14px; background:var(--daily-success-soft); }
       .fpl-bench > div { display:flex; justify-content:space-evenly; gap:7px; }
