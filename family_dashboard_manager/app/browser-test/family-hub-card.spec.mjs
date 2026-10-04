@@ -4567,6 +4567,13 @@ test("approved Calendar inline preparation adds to the shared list and honours r
   const card=page.locator("family-hub-card");
   await card.locator('.hub-navigation [data-view="calendar"]').click();
   await card.locator('[data-focus-prep-input]').fill("Training top");
+  const weekTimes = await card.locator('.family-planner-day .focus-week-hint small').evaluateAll(times => times.map(time => {
+    const day = time.closest('.family-planner-day').getBoundingClientRect();
+    const label = time.getBoundingClientRect();
+    return {text: time.textContent, bottom: label.bottom - day.bottom};
+  }));
+  expect(weekTimes.length).toBeGreaterThan(0);
+  for (const time of weekTimes) expect(time.bottom, time.text).toBeLessThanOrEqual(-4);
   await card.locator('[data-focus-add-prep]').click();
   await expect(card.locator('.focus-event-ready .focus-ready-item')).toContainText("Training top");
   const eventKey=await card.locator("[data-focus-add-prep]").getAttribute("data-focus-add-prep");

@@ -1,6 +1,7 @@
 ## 0.17.1
 
 - Give native Music room grouping buttons enough width for full room names and wrap them into additional rows when needed. Preserve 48-pixel touch targets and playback behavior.
+- Keep Calendar week tile times fully visible by tightening the spacing between the date, event dots and event summary.
 
 ## 0.17.0
 

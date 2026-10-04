@@ -1393,7 +1393,8 @@ export const DAILY_BRIEF_STYLES = `
     .calendar-context h2.focus-calendar-title { font-size:27px; margin:0 0 2px; }
     .calendar-context strong { font-size:12px; }
     .family-planner-slot { grid-template-rows:120px minmax(0,1fr); gap:10px; }
-    .family-planner-day { padding:8px 5px; border-radius:18px; }
+    .family-planner-day { padding:8px 5px; border-radius:18px; gap:6px; }
+    .family-planner-day > header { gap:6px; }
     .family-planner-day > header small { display:none; }
     .family-planner-day > header strong { font-size:24px; }
     .focus-week-hint { font-size:12px; margin-top:4px; }
