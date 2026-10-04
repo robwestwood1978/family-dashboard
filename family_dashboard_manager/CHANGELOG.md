@@ -1,3 +1,8 @@
+## 0.17.1
+
+- Give native Music room grouping buttons enough width for full room names and wrap them into additional rows when needed. Preserve 48-pixel touch targets and playback behavior.
+- Keep Calendar week tile times fully visible by tightening the spacing between the date, event dots and event summary.
+
 ## 0.17.0
 
 - Use one neutral Security viewer with compact camera choices, selected-camera activity and a dropdown for larger camera collections. Browsing does not start video; private viewing and protected alarm/garage actions keep their existing safeguards.

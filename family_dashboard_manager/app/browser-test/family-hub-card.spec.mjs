@@ -19,7 +19,7 @@ const illustrationSource = await readFile(new URL("../frontend/assets/home-illus
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.17.0";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.17.1";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -4428,6 +4428,19 @@ test("native music player keeps playback and room controls inside both tablet or
       .filter(element=>Number.parseInt(getComputedStyle(element).fontWeight,10)>500)
       .map(element=>element.textContent.trim()));
     expect(heavyText).toEqual([]);
+    const groupChipGeometry = await player.locator('#mmpc-group-chips-controller > button').evaluateAll(buttons => buttons.map(button => {
+      const bounds = button.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(button);
+      const content = range.getBoundingClientRect();
+      return {label: button.textContent.trim(), width: bounds.width, height: bounds.height, contentLeft: content.left - bounds.left, contentRight: content.right - bounds.right};
+    }));
+    expect(groupChipGeometry.length).toBeGreaterThan(0);
+    for (const chip of groupChipGeometry) {
+      expect(chip.height, chip.label).toBeGreaterThanOrEqual(48);
+      expect(chip.contentLeft, chip.label).toBeGreaterThanOrEqual(-1);
+      expect(chip.contentRight, chip.label).toBeLessThanOrEqual(1);
+    }
     await expectNoRootOverflow(page);
     const folder=process.env.RESTORED_DESIGN_REVIEW_DIR || resolve(tmpdir(), 'restored-design-review');
     await mkdir(folder,{recursive:true});
@@ -4554,6 +4567,13 @@ test("approved Calendar inline preparation adds to the shared list and honours r
   const card=page.locator("family-hub-card");
   await card.locator('.hub-navigation [data-view="calendar"]').click();
   await card.locator('[data-focus-prep-input]').fill("Training top");
+  const weekTimes = await card.locator('.family-planner-day .focus-week-hint small').evaluateAll(times => times.map(time => {
+    const day = time.closest('.family-planner-day').getBoundingClientRect();
+    const label = time.getBoundingClientRect();
+    return {text: time.textContent, bottom: label.bottom - day.bottom};
+  }));
+  expect(weekTimes.length).toBeGreaterThan(0);
+  for (const time of weekTimes) expect(time.bottom, time.text).toBeLessThanOrEqual(-4);
   await card.locator('[data-focus-add-prep]').click();
   await expect(card.locator('.focus-event-ready .focus-ready-item')).toContainText("Training top");
   const eventKey=await card.locator("[data-focus-add-prep]").getAttribute("data-focus-add-prep");
