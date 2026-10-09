@@ -46,6 +46,11 @@ const inventory = {
 
 const config = { rooms: [{ id: "snug", area_id: "snug" }] };
 
+test("excludes disabled choices while retaining the current mapping for correction", () => {
+  const options = adminEntityOptions({ inventory: { entities: [{ entity_id: "cover.old", domain: "cover", disabled_by: "user" }] }, config, path: ["rooms", 0, "covers", 0], domain: "cover", current: "cover.old" });
+  assert.deepEqual(options, [["", "Not configured"], ["cover.old", "cover.old (currently configured)"]]);
+});
+
 test("shows an explicit unconfigured choice instead of selecting an unrelated sensor", () => {
   assert.deepEqual(adminEntityOptions({
     inventory,

@@ -13,6 +13,7 @@ function requireToken(token) {
 
 export function mergeInventory({ areas = [], devices = [], entities = [], states = [] } = {}) {
   const deviceAreas = new Map(devices.map((device) => [device.id, device.area_id]).filter(([, areaId]) => areaId));
+  const disabledDevices = new Map(devices.filter((device) => device.disabled_by).map((device) => [device.id, device.disabled_by]));
   const statesByEntity = new Map(states.map((state) => [state.entity_id, state]));
   return {
     areas: areas.map((area) => ({ id: area.area_id, name: area.name })),
@@ -27,6 +28,9 @@ export function mergeInventory({ areas = [], devices = [], entities = [], states
         device_class: entity.device_class || attributes.device_class,
         integration: entity.platform,
         platform: entity.platform,
+        disabled_by: entity.disabled_by || disabledDevices.get(entity.device_id) || undefined,
+        hidden_by: entity.hidden_by || undefined,
+        entity_category: entity.entity_category || undefined,
         supported_features: Number.isInteger(attributes.supported_features)
           ? attributes.supported_features
           : undefined
