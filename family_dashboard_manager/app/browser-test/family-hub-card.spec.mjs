@@ -19,7 +19,7 @@ const illustrationSource = await readFile(new URL("../frontend/assets/home-illus
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.19.0";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.19.1";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -928,6 +928,42 @@ async function expectNoRootOverflow(page) {
   expect(metrics.viewBottom).toBeLessThanOrEqual(metrics.cardBottom + 1);
 }
 
+test("requests compatible iPad library copies and decodes a stale HEIC label without bitmap or blob-image support", async ({page}) => {
+  await page.route("http://homeassistant.local/family-dashboard/hub", route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body></body></html>"}));
+  await page.goto("http://homeassistant.local/family-dashboard/hub");
+  const photoConfig=structuredClone(config); photoConfig.display.photo_frame.enabled=true;
+  const errors=await mount(page,photoConfig,{}, {kiosk:true});
+  const card=page.locator("family-hub-card");
+  await card.getByRole("button",{name:"Manage screensaver photos"}).click();
+  await expect(card.locator("[data-device-photo-files]")).toHaveAttribute("accept","image/jpeg,image/png");
+  await expect(card.getByRole("button",{name:"+ Add photos"})).toBeEnabled();
+  const jpeg=await page.evaluate(()=>{
+    const canvas=document.createElement("canvas"); canvas.width=600; canvas.height=400;
+    canvas.getContext("2d").fillRect(0,0,600,400);
+    const encoded=canvas.toDataURL("image/jpeg").split(",")[1];
+    const NativeImage=window.Image;
+    const source=Object.getOwnPropertyDescriptor(HTMLImageElement.prototype,"src");
+    window.createImageBitmap=async()=>{throw new Error("Bitmap decoder unavailable in fixture");};
+    window.Image=function(){
+      const image=new NativeImage();
+      Object.defineProperty(image,"src",{get(){return source.get.call(image);},set(value){
+        if(String(value).startsWith("blob:"))queueMicrotask(()=>image.onerror?.(new Event("error")));
+        else source.set.call(image,value);
+      }});
+      return image;
+    };
+    return encoded;
+  });
+  await card.locator("[data-device-photo-files]").setInputFiles({name:"IMG_0001.HEIC",mimeType:"image/heic",buffer:Buffer.from(jpeg,"base64")});
+  await expect(card.locator(".device-photo-toolbar")).toContainText("1 photo on this device");
+  await expect(card.getByRole("button",{name:"This device",exact:true})).toHaveAttribute("aria-pressed","true");
+  await card.getByRole("button",{name:"Preview screensaver"}).click();
+  await expect.poll(()=>card.locator(".photo-frame img").evaluate(image=>image.naturalWidth)).toBe(600);
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
+  expect(await page.evaluate(()=>window.__wsCalls.filter(message=>message.type==="media_source/resolve_media"))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test("keeps selected screensaver photos on the device across reloads without Home Assistant photo requests", async ({ page }) => {
   await page.route("http://homeassistant.local/family-dashboard/hub", route => route.fulfill({contentType:"text/html", body:"<!doctype html><html><body></body></html>"}));
   await page.goto("http://homeassistant.local/family-dashboard/hub");
@@ -958,7 +994,7 @@ test("keeps selected screensaver photos on the device across reloads without Hom
     {name:"broken.jpg",mimeType:"image/jpeg",buffer:Buffer.from("not an image")}
   ]);
   await expect.poll(() => card.evaluate(element => element._devicePhotoBusy)).toBe(false);
-  await expect.poll(() => card.evaluate(element => ({count:element._devicePhotoRecords.length, errors:window.__photoStoreErrors.filter(error=>error.message !== "This photo cannot be opened here. Try a JPEG copy.")}))).toEqual({count:1,errors:[]});
+  await expect.poll(() => card.evaluate(element => ({count:element._devicePhotoRecords.length, errors:window.__photoStoreErrors.filter(error=>error.message !== "This photo could not be read. Try selecting it again from Photo Library.")}))).toEqual({count:1,errors:[]});
   await expect(card.locator(".device-photo-toolbar")).toContainText("1 photo on this device");
   await expect(card.locator(".device-photo-message")).toContainText("1 could not be added");
   await expect(card.getByRole("button",{name:"This device",exact:true})).toHaveAttribute("aria-pressed","true");
