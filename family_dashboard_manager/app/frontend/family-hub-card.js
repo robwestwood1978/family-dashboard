@@ -129,7 +129,11 @@ class DevicePhotoAlbum {
   async setSource(source) { await this.transaction("preferences", "readwrite", store => store.put(source, this.key)); }
   async list() {
     const records = await this.transaction("photos", "readonly", store => store.getAll());
-    return records.filter(record => record.album === this.key).sort((a,b) => a.created - b.created);
+    return records.filter(record => record.album === this.key).sort((a,b) => a.created - b.created).map(record => {
+      const {bytes, thumbnailBytes, ...details} = record;
+      return {...details, blob:record.blob || new Blob([bytes], {type:"image/jpeg"}),
+        thumbnail:record.thumbnail || new Blob([thumbnailBytes], {type:"image/jpeg"})};
+    });
   }
   async remove(id) {
     const record = await this.transaction("photos", "readonly", store => store.get(id));
@@ -170,7 +174,10 @@ class DevicePhotoAlbum {
       throw new Error("Your collection has reached 100 MB. Remove some photos before adding more.");
     }
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    await this.transaction("photos", "readwrite", store => store.put({ id, album:this.key, created:Date.now(), name:file.name, blob, thumbnail }));
+    // Store plain bytes rather than file-backed Blobs for WebKit persistence.
+    const photoBytes = await blob.arrayBuffer();
+    const thumbnailBytes = await thumbnail.arrayBuffer();
+    await this.transaction("photos", "readwrite", store => store.put({ id, album:this.key, created:Date.now(), name:file.name, bytes:photoBytes, thumbnailBytes }));
   }
 }
 

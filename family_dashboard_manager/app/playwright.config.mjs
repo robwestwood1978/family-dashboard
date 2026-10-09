@@ -16,6 +16,7 @@ const tablet = (browserName, width, height) => ({
 export default defineConfig({
   testDir: "./browser-test",
   fullyParallel: true,
+  maxFailures: process.env.CI ? 1 : 0,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",
