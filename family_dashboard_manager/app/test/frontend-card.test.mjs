@@ -11,6 +11,7 @@ import {
   classroomAssignmentPresentation,
   createControlledMediaHass,
   deriveRoomState,
+  devicePhotoMime,
   decodeHeatingSchedule,
   energyCompactPresentation,
   energyFuelPresentation,
@@ -3524,4 +3525,14 @@ test("cache-busts a revised private floorplan without changing its approved file
     base_image: "/local/family-dashboard/private/ground-floor.svg",
     asset_revision: "v0.7.0"
   }), "/local/family-dashboard/private/ground-floor.svg?v=v0.7.0");
+});
+
+
+test("detects picker image bytes independently of HEIC filename and MIME labels", () => {
+  assert.equal(devicePhotoMime(new Uint8Array([255,216,255,224]).buffer,"image/heic"),"image/jpeg");
+  assert.equal(devicePhotoMime(new Uint8Array([137,80,78,71]).buffer,"image/heic"),"image/png");
+  assert.equal(devicePhotoMime(new TextEncoder().encode("RIFF1234WEBP").buffer,"image/heic"),"image/webp");
+  assert.equal(devicePhotoMime(new TextEncoder().encode("0000ftypheic0000").buffer,"image/jpeg"),"image/heic");
+  assert.equal(devicePhotoMime(new TextEncoder().encode("0000ftypavif0000").buffer,"image/heic"),"image/avif");
+  assert.equal(devicePhotoMime(new Uint8Array([1,2,3]).buffer,"text/html"),"application/octet-stream");
 });

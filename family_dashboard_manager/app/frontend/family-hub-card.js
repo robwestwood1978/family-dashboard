@@ -1,5 +1,5 @@
 import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.19.0";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.19.1";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -93,6 +93,57 @@ const FRESHNESS_REFRESH_MS = 60_000;
 const CLASSROOM_ASSIGNMENT_LIMIT = 20;
 const PHOTO_FRAME_MEDIA_LIMIT = 250;
 
+// Photo pickers sometimes retain the original MIME label after transcoding.
+export function devicePhotoMime(bytes, fallback = "") {
+  const data = new Uint8Array(bytes);
+  if (data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return "image/jpeg";
+  if (data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47) return "image/png";
+  const ascii = (start,end) => String.fromCharCode(...data.slice(start,end));
+  if (ascii(0,4) === "RIFF" && ascii(8,12) === "WEBP") return "image/webp";
+  if (ascii(4,8) === "ftyp") {
+    const brands = ascii(8,Math.min(data.length,64));
+    if (/avif|avis/.test(brands)) return "image/avif";
+    if (/heic|heix|hevc|hevx|mif1/.test(brands)) return "image/heic";
+  }
+  return /^image\/(jpeg|png|webp|heic|heif|avif)$/.test(fallback) ? fallback : "application/octet-stream";
+}
+
+async function decodeDevicePhoto(blob) {
+  if (typeof globalThis.createImageBitmap === "function") {
+    try {
+      const bitmap = await createImageBitmap(blob);
+      return { image:bitmap, width:bitmap.width, height:bitmap.height, dispose:() => bitmap.close() };
+    } catch { /* Try the native image decoder next. */ }
+  }
+  const image = new Image();
+  const open = source => new Promise((resolve,reject) => {
+    image.onload = resolve;
+    image.onerror = () => reject(new Error("photo decode failed"));
+    image.src = source;
+  });
+  const url = URL.createObjectURL(blob);
+  try {
+    try { await open(url); }
+    catch {
+      // Some iPad webviews cannot decode a temporary blob URL. A memory-only
+      // data URL gives the same native decoder an independent loading path.
+      const dataUrl = await new Promise((resolve,reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+      await open(dataUrl);
+    }
+    return { image, width:image.naturalWidth, height:image.naturalHeight, dispose:() => { image.src=""; } };
+  } catch {
+    image.src = "";
+    throw new Error(blob.type === "image/heic" || blob.type === "image/heif"
+      ? "The picker returned an original HEIC photo. Choose it again from Photo Library so the iPad can supply a compatible copy."
+      : "This photo could not be read. Try selecting it again from Photo Library.");
+  } finally { URL.revokeObjectURL(url); }
+}
+
 // Device-only copies: no photo data enters household config or Home Assistant.
 class DevicePhotoAlbum {
   constructor() {
@@ -149,27 +200,26 @@ class DevicePhotoAlbum {
     // Materialise one file at a time while the picker input is still attached.
     // WebKit can revoke a selected File's backing access when its input resets.
     const bytes = await file.arrayBuffer();
-    const url = URL.createObjectURL(new Blob([bytes], { type:file.type }));
-    const image = new Image();
+    if (!bytes.byteLength) throw new Error("This photo is not ready on the iPad. Open it in Photos to finish downloading, then select it again.");
+    const decoded = await decodeDevicePhoto(new Blob([bytes], {type:devicePhotoMime(bytes,file.type)}));
     let blob, thumbnail;
     try {
-      await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error("This photo cannot be opened here. Try a JPEG copy.")); image.src = url; });
       const resize = async (edge, quality) => {
-        const scale = Math.min(1, edge / Math.max(image.naturalWidth, image.naturalHeight));
+        const scale = Math.min(1, edge / Math.max(decoded.width, decoded.height));
         const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        canvas.width = Math.max(1, Math.round(decoded.width * scale));
+        canvas.height = Math.max(1, Math.round(decoded.height * scale));
         const context = canvas.getContext("2d");
         context.fillStyle = "#fff"; context.fillRect(0,0,canvas.width,canvas.height);
-        context.drawImage(image,0,0,canvas.width,canvas.height);
+        context.drawImage(decoded.image,0,0,canvas.width,canvas.height);
         const result = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", quality));
         canvas.width = canvas.height = 1;
-        if (!result) throw new Error("This photo could not be prepared. Try a JPEG copy.");
+        if (!result) throw new Error("This photo could not be prepared. Try selecting it again from Photo Library.");
         return result;
       };
       blob = await resize(2048, .86);
       thumbnail = await resize(240, .75);
-    } finally { image.src = ""; URL.revokeObjectURL(url); }
+    } finally { decoded.dispose(); }
     if (records.reduce((sum,record) => sum + record.blob.size + record.thumbnail.size, 0) + blob.size + thumbnail.size > 100 * 1024 * 1024) {
       throw new Error("Your collection has reached 100 MB. Remove some photos before adding more.");
     }
@@ -2572,7 +2622,8 @@ export class FamilyHubCard extends HTMLElementBase {
     let added = 0, failed = files.length - selected.length;
     let error = failed ? "Choose up to 250 photos at a time." : "";
     try {
-      for (const file of selected) {
+      for (const [index,file] of selected.entries()) {
+        if (status) status.textContent = `Preparing photo ${index + 1} of ${selected.length} on this device…`;
         try { await this._devicePhotoAlbum.add(file); added++; }
         catch (cause) { failed++; error = cause?.name === "QuotaExceededError" ? "This device has run out of photo storage. Remove some photos and try again." : cause.message; }
       }
@@ -2604,7 +2655,7 @@ export class FamilyHubCard extends HTMLElementBase {
     return `<div class="planner-modal-backdrop device-photos-backdrop"><section class="planner-modal device-photos-modal" role="dialog" aria-modal="true" aria-labelledby="device-photos-title">
       <header><button type="button" class="planner-modal-close" data-device-photos-close aria-label="Close photos" ${this._devicePhotoBusy ? "disabled" : ""}>×</button><p class="eyebrow">Screensaver · this device</p><h2 id="device-photos-title">Your photo collection</h2><p>Choose photos from Photos or Files. Copies stay in this browser on this device.</p></header>
       <div class="planner-modal-body"><div class="device-photo-source" role="group" aria-label="Screensaver photo source"><button type="button" data-device-photo-source="local" aria-pressed="${this._devicePhotoSource === "local"}" ${disabled}>This device</button><button type="button" data-device-photo-source="home-assistant" aria-pressed="${this._devicePhotoSource !== "local"}" ${disabled}>Home Assistant album</button></div>
-      <div class="device-photo-toolbar"><span>${this._devicePhotoRecords.length} ${this._devicePhotoRecords.length === 1 ? "photo" : "photos"} on this device</span><button type="button" data-device-photos-add ${disabled}>+ Add photos</button><input type="file" data-device-photo-files accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,.heic,.heif" multiple hidden></div>
+      <div class="device-photo-toolbar"><span>${this._devicePhotoRecords.length} ${this._devicePhotoRecords.length === 1 ? "photo" : "photos"} on this device</span><button type="button" data-device-photos-add ${disabled}>+ Add photos</button><input type="file" data-device-photo-files accept="image/jpeg,image/png" multiple hidden></div>
       <p class="device-photo-message" role="status" aria-live="polite">${escapeHtml(this._devicePhotoMessage)}</p>
       ${this._devicePhotoRecords.length ? `<div class="device-photo-grid">${this._devicePhotoRecords.map(record => {
         const url = URL.createObjectURL(record.thumbnail); this._devicePhotoUrls.push(url);

@@ -1,3 +1,8 @@
+## 0.19.1
+
+- Request compatible JPEG/PNG copies from the iPad photo-library picker instead of accepting original HEIC files. Preserve local-only storage and original library photos.
+- Detect image format from its bytes when a picker retains a stale MIME label, add native bitmap and memory-only image decoding fallbacks, and show per-photo import progress.
+
 ## 0.19.0
 
 - Add a device-only screensaver photo picker and collection manager. Selected photos are resized and stored in this browser; they are never uploaded to Home Assistant or included in household configuration.
