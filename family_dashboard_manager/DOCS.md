@@ -12,9 +12,9 @@ This release requires Home Assistant OS 2026.8.0 or newer.
 
 1. Create a Home Assistant backup.
 2. Refresh the existing `https://github.com/robwestwood1978/family-dashboard` app repository.
-3. Update the installed **Family Dashboard Manager** to v0.17.1; do not uninstall it.
+3. Update the installed **Family Dashboard Manager** to v0.18.0; do not uninstall it.
 4. Keep the existing Secure MCP Tunnel options unchanged and restart the app.
-5. Confirm the manager reconnects through the existing tunnel and reports v0.17.1.
+5. Confirm the manager reconnects through the existing tunnel and reports v0.18.0.
 
 The app exposes no host port. Home Assistant Supervisor reaches the internal ingress port and restricts the Admin panel to administrators; the MCP route retains its independent localhost host check for the existing in-container tunnel.
 
@@ -43,7 +43,7 @@ lovelace:
 Keep the existing Lovelace JavaScript module identity and refresh its version query after deployment:
 
 ```text
-/local/family-dashboard/family-hub-card.js?v=0.17.1
+/local/family-dashboard/family-hub-card.js?v=0.18.0
 ```
 
 The stock Home Assistant Overview remains available to administrators.
@@ -77,7 +77,7 @@ The schema-v7 household configuration retains the existing panel path and explic
 
 Run `validate_household_config` first. Validation is read-only and returns the exact configuration hash required by `deploy_household_config` with `confirm=true`. Deployment writes only the existing Family Dashboard configuration and fixed frontend allow-list after creating a raw, hash-verified snapshot. Private floorplans are preserved separately.
 
-Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.17.1, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
+Call `reload_dashboard` after deployment, refresh the existing Lovelace resource query to v0.18.0, then reload the tablet. To lock every control again without changing schema, redeploy with `display.read_only: true`.
 
 ## Household mappings retained from v0.9
 
@@ -151,3 +151,9 @@ Test alarm and garage actions deliberately with an adult present. Home Assistant
 Classroom stays disabled until the bundled first-party custom integration is installed at its fixed path and each child completes a separate Google read-only authorization flow. It requests exactly `classroom.courses.readonly` and `classroom.coursework.me.readonly`, polls every 15 minutes and caps assignment attributes at 20 while retaining the complete open count. No child password or OAuth token may be written to household configuration, generated YAML, snapshots or logs. See [app/docs/classroom-integration.md](./app/docs/classroom-integration.md) for hash-guarded installation, rollback and one-consent-entry-per-child setup.
 
 The browser does not call Fantasy Premier League directly. The manager provides a server-side, last-good-cache feed covering all 38 Premier League matchweeks for the two configured household favourites. Team objects include fixed-origin official Premier League crest URLs derived only from FPL's numeric club code; the UI retains the three-letter code as its fallback. The feed refreshes immediately after startup, then every three minutes around live fixtures, every 15 minutes on a fixture day and hourly between matchdays. When neither the source nor the last-good cache can provide an update, the existing football index reports a bounded stale state without replacing Manager deployment or rollback errors.
+
+## Reviewing new devices
+
+Open Family Dashboard Admin → New devices. The list refreshes from Home Assistant on opening and via Refresh devices; it never deploys changes automatically. Enabled lights, blinds/shades/curtains/shutters, heating entities, temperature sensors, scenes and media players are compared with all current mappings. Area assignments suggest a dashboard room. Choose the room and Add to draft, then Review & save to validate and deploy with a rollback snapshot. A room with existing heating or temperature mappings requires explicit editing in Rooms & devices rather than an automatic replacement. Vacuums link to Cleaning setup.
+
+Disabled, hidden and diagnostic entities are excluded from suggestions. Confirmed disabled room mappings have a Remove from draft action. A temporary outage does not remove a mapping. Cameras, alarms and garage doors retain dedicated Security setup; unsupported entity types are configured through their relevant section. Devices without a matching area need a room selection, and new rooms/floorplan hotspots remain explicit setup. Discovery uses registry metadata and never starts a stream or operates a device.

@@ -44,7 +44,8 @@ export function adminEntityOptions({ inventory, config, path, domain, current })
   if (!allDomainEntities.length) return null;
 
   const matcher = HEATING_ENTITY_MATCHERS.get(structuralPath(path));
-  const entities = matcher ? allDomainEntities.filter(matcher) : allDomainEntities;
+  const enabledEntities = allDomainEntities.filter((entity) => !entity.disabled_by && !entity.hidden_by);
+  const entities = matcher ? enabledEntities.filter(matcher) : enabledEntities;
   const room = roomForPath(config, path);
   const areaNames = new Map((inventory?.areas || []).map((area) => [area.id, area.name]));
   const options = entities

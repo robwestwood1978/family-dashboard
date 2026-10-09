@@ -15,6 +15,9 @@ const inventory = {
     { id: "hallway", name: "Hallway" }
   ],
   entities: [
+    { entity_id: "cover.stairs_new", name: "Stairs blind", area_id: "hallway", device_class: "shade", domain: "cover" },
+    { entity_id: "cover.disabled_duplicate", name: "Old blind", disabled_by: "user", device_class: "shade", domain: "cover" },
+    { entity_id: "camera.private", name: "Private camera", domain: "camera" },
     { entity_id: "sensor.app_armor_version", name: "AppArmor version", domain: "sensor" },
     { entity_id: "sensor.living_room_temperature", name: "Living room temperature", area_id: "living_room", device_class: "temperature", domain: "sensor" },
     { entity_id: "sensor.kitchen_temperature", name: "Kitchen temperature", area_id: "kitchen", device_class: "temperature", domain: "sensor" },
@@ -32,7 +35,7 @@ let baseUrl;
 test.beforeAll(async () => {
   const app = express();
   app.get("/api/admin/bootstrap", (_request, response) => response.json({
-    version: "0.17.1",
+    version: "0.18.0",
     config,
     schema,
     inventory,
@@ -109,4 +112,34 @@ test("does not present unrelated entities as empty heating mappings", async ({ p
   await expect(mode.locator('option[value="select.daddy_choreops_helper"]')).toHaveCount(0);
   await expect(refresh).toHaveValue("button.living_room_refresh_schedule");
   await expect(refresh.locator('option[value="button.blinds_identify"]')).toHaveCount(0);
+});
+
+
+test("discovers devices on opening and only stages reviewed mappings", async ({ page }) => {
+  const mutations=[];
+  page.on("request", request=>{if(request.method()==="POST")mutations.push(request.url())});
+  await page.setViewportSize({width:834,height:1112});
+  await page.goto(baseUrl);
+  await expect(page.locator("#status")).toContainText("Active configuration loaded");
+  await expect(page.getByRole("button",{name:"Review & save"})).toBeDisabled();
+  await page.getByRole("button",{name:"New devices",exact:true}).click();
+  const blind=page.locator('[data-device="cover.stairs_new"]');
+  await expect(blind).toBeVisible();
+  await expect(blind.getByRole("combobox")).toHaveValue("hallway");
+  await expect(page.locator('[data-device="cover.disabled_duplicate"]')).toHaveCount(0);
+  await expect(page.locator('[data-device="camera.private"]')).toHaveCount(0);
+  expect(mutations).toEqual([]);
+  await blind.getByRole("button",{name:"Add to draft"}).click();
+  await expect(blind).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Review & save"})).toBeEnabled();
+  expect(mutations).toEqual([]);
+  await page.getByRole("button",{name:"Rooms & devices"}).click();
+  const staged=await page.locator('select').evaluateAll(elements=>elements.filter(element=>element.value==="cover.stairs_new").length);
+  expect(staged).toBe(1);
+  await page.getByRole("button",{name:"Discard changes"}).click();
+  await page.getByRole("button",{name:"New devices",exact:true}).click();
+  await expect(page.locator('[data-device="cover.stairs_new"]')).toBeVisible();
+  expect(mutations).toEqual([]);
+  const width=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:innerWidth}));
+  expect(width.scroll).toBeLessThanOrEqual(width.width);
 });

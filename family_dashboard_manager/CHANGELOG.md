@@ -1,3 +1,9 @@
+## 0.18.0
+
+- Add a review-first New devices page in Household Admin. Opening or refreshing it discovers supported enabled room controls from Home Assistant, suggests rooms by area, and stages selected additions for the existing validated Review & save flow. No device is added automatically.
+- Show explicitly disabled room mappings for reviewed removal. Ignore hidden and diagnostic candidates, keep temporarily offline devices mapped, and preserve dedicated Security, Cleaning, floorplan and household setup.
+- Exclude disabled and hidden entities from normal mapping choices while preserving currently configured entries for correction.
+
 ## 0.17.1
 
 - Give native Music room grouping buttons enough width for full room names and wrap them into additional rows when needed. Preserve 48-pixel touch targets and playback behavior.

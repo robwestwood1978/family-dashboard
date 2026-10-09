@@ -9,6 +9,9 @@ const SAFE_ENTITY_FIELDS = [
   "device_class",
   "integration",
   "platform",
+  "disabled_by",
+  "hidden_by",
+  "entity_category",
   "supported_features"
 ];
 
