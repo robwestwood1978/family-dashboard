@@ -542,6 +542,10 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
             entity_id: event.currentTarget.dataset.mockEntity || "media_player.kitchen"
           });
         });
+        root.querySelector('[data-mock-music-tab="search"]')?.addEventListener("click", () => {
+          // Preserve the upstream chip sizing that triggered the iPad regression.
+          root.querySelector(".mock-speaker-scroll").innerHTML = '<h3>Search in Music Assistant</h3><div style="display:flex;flex-wrap:nowrap;gap:2px;overflow:auto">' + ["All","Artists","Albums","Tracks","Playlists","Radio","Audiobooks","Podcasts"].map(name => '<button style="--mmpc-chip-horizontal-margin:16px;display:flex;flex:0 1 0%;width:48px;min-width:48px;min-height:48px;white-space:nowrap"><ha-icon icon="mdi:music"></ha-icon>'+name+'</button>').join("") + '</div><p>No results found.</p>';
+        });
       }
     }
     class MockCameraStream extends HTMLElement {
@@ -4450,13 +4454,13 @@ test("native music player keeps playback and room controls inside both tablet or
 });
 
 
-test("native Music search pills fit their labels and wrap in tablet landscape and portrait", async ({page}) => {
-  test.skip(!nativeMusicSource, "Set NATIVE_MUSIC_CARD_PATH for upstream player validation");
-  const errors=await mount(page,config,{}, {nativeMusic:true});
+test("Music search pills fit their labels and wrap in tablet landscape and portrait", async ({page}) => {
+  const errors=await mount(page,config,{}, {nativeMusic:Boolean(nativeMusicSource)});
   const card=page.locator("family-hub-card");
   await card.locator('.hub-navigation [data-view="music"]').click();
-  const player=card.locator("mediocre-multi-media-player-card");
-  await player.locator('button').filter({has:page.locator('ha-icon[data-mock-glyph="mdi:magnify"]')}).click();
+  const player=card.locator(nativeMusicSource ? "mediocre-multi-media-player-card" : '[data-card-type="custom:mediocre-multi-media-player-card"]');
+  if(nativeMusicSource) await player.locator('button').filter({has:page.locator('ha-icon[data-mock-glyph="mdi:magnify"]')}).click();
+  else await player.locator('[data-mock-music-tab="search"]').click();
   await expect(player.getByRole('button',{name:'Audiobooks',exact:true})).toBeVisible();
   for(const size of [{width:1112,height:834},{width:1024,height:768},{width:834,height:1112}]) {
     await page.setViewportSize(size);
