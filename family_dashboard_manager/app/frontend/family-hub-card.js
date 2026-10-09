@@ -1,5 +1,5 @@
 import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.18.0";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.18.1";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },

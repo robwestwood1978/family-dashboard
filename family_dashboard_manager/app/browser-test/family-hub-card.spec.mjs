@@ -19,7 +19,7 @@ const illustrationSource = await readFile(new URL("../frontend/assets/home-illus
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.18.0";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.18.1";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -4449,6 +4449,39 @@ test("native music player keeps playback and room controls inside both tablet or
   expect(errors).toEqual([]);
 });
 
+
+test("native Music search pills fit their labels and wrap in tablet landscape and portrait", async ({page}) => {
+  test.skip(!nativeMusicSource, "Set NATIVE_MUSIC_CARD_PATH for upstream player validation");
+  const errors=await mount(page,config,{}, {nativeMusic:true});
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-navigation [data-view="music"]').click();
+  const player=card.locator("mediocre-multi-media-player-card");
+  await player.locator('button').filter({has:page.locator('ha-icon[data-mock-glyph="mdi:magnify"]')}).click();
+  await expect(player.getByRole('button',{name:'Audiobooks',exact:true})).toBeVisible();
+  for(const size of [{width:1112,height:834},{width:1024,height:768},{width:834,height:1112}]) {
+    await page.setViewportSize(size);
+    await page.waitForTimeout(350);
+    const chips=await player.locator('button[style*="--mmpc-chip-horizontal-margin"]').evaluateAll(buttons=>buttons.map(button=>{
+      const b=button.getBoundingClientRect(),p=button.parentElement.getBoundingClientRect();
+      const range=document.createRange();range.selectNodeContents(button);const text=range.getBoundingClientRect();
+      return {label:button.textContent.trim(),height:b.height,top:b.top,left:b.left,right:b.right,parentLeft:p.left,parentRight:p.right,textLeft:text.left,textRight:text.right};
+    }));
+    expect(chips.map(chip=>chip.label)).toEqual(['All','Artists','Albums','Tracks','Playlists','Radio','Audiobooks','Podcasts']);
+    expect(new Set(chips.map(chip=>Math.round(chip.top))).size).toBeGreaterThan(1);
+    for(const chip of chips){
+      expect(chip.height,chip.label).toBeGreaterThanOrEqual(48);
+      expect(chip.textLeft,chip.label).toBeGreaterThanOrEqual(chip.left-1);
+      expect(chip.textRight,chip.label).toBeLessThanOrEqual(chip.right+1);
+      expect(chip.left,chip.label).toBeGreaterThanOrEqual(chip.parentLeft-1);
+      expect(chip.right,chip.label).toBeLessThanOrEqual(chip.parentRight+1);
+    }
+    await player.getByRole('button',{name:'Playlists',exact:true}).click();
+    await expect(player.getByRole('button',{name:'Playlists',exact:true})).toBeVisible();
+    await expectNoRootOverflow(page);
+    await page.screenshot({path:resolve(tmpdir(), 'music-search-'+size.width+'x'+size.height+'.png')});
+  }
+  expect(errors).toEqual([]);
+});
 
 test("exports the working corrective dashboard with representative family data", async ({page}, testInfo) => {
   test.skip(!process.env.RESTORED_REVIEW_EXPORT_PATH, "Export the review only when requested");
