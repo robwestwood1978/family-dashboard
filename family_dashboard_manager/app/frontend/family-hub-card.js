@@ -142,7 +142,10 @@ class DevicePhotoAlbum {
     if (file.size > 40 * 1024 * 1024) throw new Error("This photo is too large. Choose a copy smaller than 40 MB.");
     const records = await this.list();
     if (records.length >= PHOTO_FRAME_MEDIA_LIMIT) throw new Error("Your collection is full (250 photos). Remove a photo before adding more.");
-    const url = URL.createObjectURL(file);
+    // Materialise one file at a time while the picker input is still attached.
+    // WebKit can revoke a selected File's backing access when its input resets.
+    const bytes = await file.arrayBuffer();
+    const url = URL.createObjectURL(new Blob([bytes], { type:file.type }));
     const image = new Image();
     let blob, thumbnail;
     try {
@@ -2359,7 +2362,7 @@ export class FamilyHubCard extends HTMLElementBase {
     // the shadow tree for ordinary Home Assistant state ticks would replace
     // the current image and restart its reveal animation, which presents as a
     // recurring pulse between the configured slide changes.
-    if (this._photoFrameActive && !force) return;
+    if (this._devicePhotoBusy || (this._devicePhotoModal || this._photoFrameActive) && !force) return;
     if (this._renderPending) return;
     this._renderPending = true;
     const callback = () => {
@@ -2552,10 +2555,17 @@ export class FamilyHubCard extends HTMLElementBase {
     if (this._devicePhotoBusy || this._devicePhotoUnavailable || !files.length) return;
     this._devicePhotoBusy = true;
     this._devicePhotoMessage = "Preparing photos on this device…";
-    this._scheduleRender(true);
-    let added = 0, failed = 0, error = "";
+    // Keep the native file input intact until every selected file is read.
+    const modal = this.shadowRoot.querySelector(".device-photos-modal");
+    modal?.setAttribute("aria-busy", "true");
+    for (const button of modal?.querySelectorAll("button") || []) button.disabled = true;
+    const status = modal?.querySelector(".device-photo-message");
+    if (status) status.textContent = this._devicePhotoMessage;
+    const selected = files.slice(0, PHOTO_FRAME_MEDIA_LIMIT);
+    let added = 0, failed = files.length - selected.length;
+    let error = failed ? "Choose up to 250 photos at a time." : "";
     try {
-      for (const file of files.slice(0, PHOTO_FRAME_MEDIA_LIMIT + 1)) {
+      for (const file of selected) {
         try { await this._devicePhotoAlbum.add(file); added++; }
         catch (cause) { failed++; error = cause?.name === "QuotaExceededError" ? "This device has run out of photo storage. Remove some photos and try again." : cause.message; }
       }
@@ -2925,7 +2935,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _render() {
-    if (!this._config || !this.shadowRoot) return;
+    if (!this._config || !this.shadowRoot || this._devicePhotoBusy) return;
     const renderFocus = this._captureRenderFocus();
     const scheduleFocus = this._plannerModal?.type === "heating" ? this.shadowRoot.activeElement?.dataset : null;
     const scheduleFocusSelector = scheduleFocus?.scheduleTime !== undefined ? `[data-schedule-time="${scheduleFocus.scheduleTime}"]`
@@ -5490,9 +5500,11 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _handleChange(event) {
-    if (event.target.matches?.("[data-device-photo-files]")) {
-      const files = Array.from(event.target.files || []); event.target.value = "";
-      void this._importDevicePhotos(files); return;
+    if (this._devicePhotoModal && event.target === this.shadowRoot.querySelector("[data-device-photo-files]")) {
+      const input = event.target;
+      const files = Array.from(input.files || []);
+      void this._importDevicePhotos(files).finally(() => { input.value = ""; });
+      return;
     }
     if (this._devicePhotoModal) return;
     this._armPhotoFrameIdleTimer();

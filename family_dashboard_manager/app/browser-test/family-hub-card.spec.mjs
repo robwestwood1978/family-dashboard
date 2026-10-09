@@ -4684,7 +4684,8 @@ test("keeps selected screensaver photos on the device across reloads without Hom
     {name:"synthetic-landscape.png",mimeType:"image/png",buffer:Buffer.from(png,"base64")},
     {name:"broken.jpg",mimeType:"image/jpeg",buffer:Buffer.from("not an image")}
   ]);
-  await expect(card.locator(".device-photo-toolbar")).toContainText("1 photo on this device");
+  await expect.poll(() => card.evaluate(element => element._devicePhotoBusy)).toBe(false);
+  await expect(card.locator(".device-photo-toolbar"), await card.locator(".device-photo-message").textContent()).toContainText("1 photo on this device");
   await expect(card.locator(".device-photo-message")).toContainText("1 could not be added");
   await expect(card.getByRole("button",{name:"This device",exact:true})).toHaveAttribute("aria-pressed","true");
   const remaining = await card.evaluate(element => ({idle:element._photoFrameIdleTimer, source:element._devicePhotoSource}));
@@ -4715,9 +4716,11 @@ test("keeps selected screensaver photos on the device across reloads without Hom
   await expect(card.getByRole("button",{name:"Home Assistant album",exact:true})).toHaveAttribute("aria-pressed","true");
   await expect.poll(()=>page.evaluate(()=>window.__wsCalls.filter(message=>message.type==="media_source/browse_media").length)).toBe(1);
   await page.setViewportSize({width:834,height:1112});
-  const dialogBounds=await card.getByRole("dialog").boundingBox();
-  const footerBounds=await card.getByRole("button",{name:"Done",exact:true}).boundingBox();
-  expect(footerBounds.y+footerBounds.height).toBeLessThanOrEqual(dialogBounds.y+dialogBounds.height);
+  await expect.poll(() => card.evaluate(element => {
+    const dialog = element.shadowRoot.querySelector(".device-photos-modal").getBoundingClientRect();
+    const done = element.shadowRoot.querySelector(".device-photos-modal footer button").getBoundingClientRect();
+    return done.bottom <= dialog.bottom && dialog.bottom <= innerHeight;
+  })).toBe(true);
   await card.getByRole("button",{name:"Close photos"}).press("Escape");
   await expect(card.getByRole("dialog")).toHaveCount(0);
   await expect(card.getByRole("button",{name:"Manage screensaver photos"})).toBeFocused();
