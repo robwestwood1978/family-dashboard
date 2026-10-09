@@ -1,3 +1,8 @@
+## 0.19.0
+
+- Add a device-only screensaver photo picker and collection manager. Selected photos are resized and stored in this browser; they are never uploaded to Home Assistant or included in household configuration.
+- Remember the photo source per device, preserve idle timing, clock and motion wake-up, and keep an empty local collection local. Add, remove and preview photos in a readable dialog with persistent actions.
+
 ## 0.18.1
 
 - Keep native Music search filters sized to their full labels and wrap them into additional rows on tablets. Preserve touch targets, search selection, room grouping and playback.

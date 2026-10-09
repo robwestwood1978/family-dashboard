@@ -19,7 +19,7 @@ const illustrationSource = await readFile(new URL("../frontend/assets/home-illus
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.18.1";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.19.0";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -4662,4 +4662,64 @@ test("refined sections keep controls reachable without changing household state"
   }
   expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
   expect(errors).toEqual([]);
+});
+
+
+test("keeps selected screensaver photos on the device across reloads without Home Assistant photo requests", async ({ page }) => {
+  await page.route("http://homeassistant.local/family-dashboard/hub", route => route.fulfill({contentType:"text/html", body:"<!doctype html><html><body></body></html>"}));
+  await page.goto("http://homeassistant.local/family-dashboard/hub");
+  const photoConfig = structuredClone(config);
+  photoConfig.display.photo_frame.enabled = true;
+  const errors = await mount(page, photoConfig, {}, {kiosk:true});
+  const card = page.locator("family-hub-card");
+  await card.getByRole("button", {name:"Manage screensaver photos"}).click();
+  await expect(card.getByRole("dialog")).toBeVisible();
+  await expect(card.getByRole("button", {name:"+ Add photos"})).toBeEnabled();
+  const png = await page.evaluate(() => {
+    const canvas=document.createElement("canvas"); canvas.width=3200; canvas.height=2400;
+    const context=canvas.getContext("2d"); context.fillStyle="#73a7aa"; context.fillRect(0,0,3200,2400);
+    return canvas.toDataURL("image/png").split(",")[1];
+  });
+  await card.locator("[data-device-photo-files]").setInputFiles([
+    {name:"synthetic-landscape.png",mimeType:"image/png",buffer:Buffer.from(png,"base64")},
+    {name:"broken.jpg",mimeType:"image/jpeg",buffer:Buffer.from("not an image")}
+  ]);
+  await expect(card.locator(".device-photo-toolbar")).toContainText("1 photo on this device");
+  await expect(card.locator(".device-photo-message")).toContainText("1 could not be added");
+  await expect(card.getByRole("button",{name:"This device",exact:true})).toHaveAttribute("aria-pressed","true");
+  const remaining = await card.evaluate(element => ({idle:element._photoFrameIdleTimer, source:element._devicePhotoSource}));
+  expect(remaining.idle).toBeNull(); expect(remaining.source).toBe("local");
+  await page.screenshot({path:resolve(tmpdir(),"family-hub-device-photos.png")});
+  await card.getByRole("button",{name:"Preview screensaver"}).click();
+  await expect(card.locator(".photo-frame img")).toHaveAttribute("src",/^blob:/);
+  await expect.poll(() => card.locator(".photo-frame img").evaluate(image => image.naturalWidth)).toBe(2048);
+  await card.evaluate(element => { window.__localImage=element.shadowRoot.querySelector(".photo-frame img"); });
+  await updateEntityState(card,state("weather.home","rainy",{temperature:18}));
+  expect(await card.evaluate(element => element.shadowRoot.querySelector(".photo-frame img")===window.__localImage)).toBe(true);
+  await card.locator(".photo-frame").click();
+  await page.reload();
+  const reloadErrors = await mount(page, photoConfig, {}, {kiosk:true});
+  await card.getByRole("button",{name:"Manage screensaver photos"}).click();
+  await expect(card.locator(".device-photo-toolbar")).toContainText("1 photo on this device");
+  expect(await page.evaluate(() => window.__wsCalls.filter(message=>message.type?.startsWith("media_source/")))).toEqual([]);
+  await card.getByRole("button",{name:"Remove synthetic-landscape.png"}).click();
+  await expect(card.locator(".device-photo-toolbar")).toContainText("0 photos on this device");
+  await expect(card.getByRole("button",{name:"Preview screensaver"})).toBeDisabled();
+  await card.getByRole("button",{name:"Done",exact:true}).click();
+  await card.evaluate(element=>element._activatePhotoFrame());
+  await expect(card.locator(".photo-frame-status")).toContainText("Add photos to this device");
+  expect(await page.evaluate(()=>window.__wsCalls.filter(message=>message.type?.startsWith("media_source/")))).toEqual([]);
+  await card.locator(".photo-frame").click();
+  await card.getByRole("button",{name:"Manage screensaver photos"}).click();
+  await card.getByRole("button",{name:"Home Assistant album",exact:true}).click();
+  await expect(card.getByRole("button",{name:"Home Assistant album",exact:true})).toHaveAttribute("aria-pressed","true");
+  await expect.poll(()=>page.evaluate(()=>window.__wsCalls.filter(message=>message.type==="media_source/browse_media").length)).toBe(1);
+  await page.setViewportSize({width:834,height:1112});
+  const dialogBounds=await card.getByRole("dialog").boundingBox();
+  const footerBounds=await card.getByRole("button",{name:"Done",exact:true}).boundingBox();
+  expect(footerBounds.y+footerBounds.height).toBeLessThanOrEqual(dialogBounds.y+dialogBounds.height);
+  await card.getByRole("button",{name:"Close photos"}).press("Escape");
+  await expect(card.getByRole("dialog")).toHaveCount(0);
+  await expect(card.getByRole("button",{name:"Manage screensaver photos"})).toBeFocused();
+  expect(errors).toEqual([]); expect(reloadErrors).toEqual([]);
 });

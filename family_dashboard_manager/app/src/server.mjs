@@ -15,7 +15,7 @@ import {
 } from "./admin-policy.mjs";
 
 const CONFIG_SCHEMA = z.record(z.string(), z.unknown());
-const APP_VERSION = process.env.APP_VERSION || "0.18.1";
+const APP_VERSION = process.env.APP_VERSION || "0.19.0";
 const MCP_JSON_BODY_LIMIT_BYTES = 1_500_000;
 const DEFAULT_ADMIN_DIR = fileURLToPath(new URL("../admin/", import.meta.url));
 const SUPERVISOR_INGRESS_SOURCE = [172, 30, 32, 2].join(".");

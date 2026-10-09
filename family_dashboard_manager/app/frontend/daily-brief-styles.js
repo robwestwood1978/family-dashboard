@@ -1,6 +1,27 @@
 // Shared presentation only. Service boundaries, child cards and controls stay in
 // family-hub-card. The dashboard defaults to light; an explicit appearance preference can opt in to dark or automatic mode.
 export const DAILY_BRIEF_STYLES = `
+  .hub-photos-button { border:0; border-radius:14px; min-height:44px; padding:0 14px; background:var(--daily-soft); color:var(--daily-muted); font:inherit; cursor:pointer; }
+  .device-photos-modal { width:min(720px,96%); font-weight:400; }
+  .device-photos-modal > header::before { display:none; }
+  .device-photos-modal > header { background:var(--daily-surface); }
+  .device-photo-source { display:flex; gap:6px; padding:5px; border-radius:16px; background:var(--daily-soft); }
+  .device-photo-source button,.device-photo-toolbar button,.device-photos-modal footer button { min-height:44px; border:0; border-radius:12px; padding:10px 16px; font:inherit; background:var(--daily-soft); color:var(--daily-text); cursor:pointer; }
+  .device-photo-source button { flex:1; }
+  .device-photo-source button[aria-pressed="true"] { background:var(--daily-surface); color:var(--daily-accent); box-shadow:0 2px 8px #00000008; }
+  .device-photo-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:18px; }
+  .device-photo-toolbar button,.device-photos-modal footer button:last-child { background:var(--daily-accent); color:#fff; }
+  .device-photos-modal button:disabled { opacity:.45; cursor:default; }
+  .device-photo-message,.device-photo-note { color:var(--daily-muted); font-size:13px; line-height:1.5; }
+  .device-photo-message:empty { display:none; }
+  .device-photo-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:12px; margin:18px 0; }
+  .device-photo-grid figure { position:relative; margin:0; aspect-ratio:1; border-radius:16px; overflow:hidden; background:var(--daily-soft); }
+  .device-photo-grid img { width:100%; height:100%; object-fit:cover; }
+  .device-photo-grid button { position:absolute; right:4px; top:4px; width:44px; height:44px; border:0; border-radius:50%; background:#ffffffed; color:#232526; font-size:24px; cursor:pointer; }
+  .device-photo-empty { padding:30px 15px; margin:18px 0; border-radius:20px; background:var(--daily-soft); text-align:center; }
+  .device-photo-empty h3 { font-size:22px; font-weight:500; margin:0 0 8px; }
+  .device-photo-empty p { margin:0; color:var(--daily-muted); line-height:1.5; }
+
   .hub-card {
     --daily-background:#F5F4F1; --daily-surface:#FFFFFF; --daily-sidebar:#F1F0ED;
     --daily-text:#242628; --daily-muted:#66686B; --daily-line:#E2E1DE;
