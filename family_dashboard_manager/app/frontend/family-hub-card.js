@@ -1,5 +1,5 @@
 import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.18.1";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.19.0";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -92,6 +92,95 @@ const CONFIRMATION_EXPIRY_MS = 30_000;
 const FRESHNESS_REFRESH_MS = 60_000;
 const CLASSROOM_ASSIGNMENT_LIMIT = 20;
 const PHOTO_FRAME_MEDIA_LIMIT = 250;
+
+// Device-only copies: no photo data enters household config or Home Assistant.
+class DevicePhotoAlbum {
+  constructor() {
+    this.key = globalThis.location?.pathname || "family-dashboard";
+    this.database = null;
+  }
+  async db() {
+    if (!this.database) this.database = new Promise((resolve, reject) => {
+      const request = indexedDB.open("family-dashboard-device-photos", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("photos", { keyPath: "id" });
+        request.result.createObjectStore("preferences");
+      };
+      request.onsuccess = () => {
+        request.result.onversionchange = () => { request.result.close(); this.database = null; };
+        resolve(request.result);
+      };
+      request.onerror = () => { this.database = null; reject(request.error); };
+      request.onblocked = () => reject(new Error("Close other dashboard tabs and try again."));
+    });
+    return this.database;
+  }
+  async transaction(store, mode, operation) {
+    const db = await this.db();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(store, mode);
+      const request = operation(transaction.objectStore(store));
+      transaction.oncomplete = () => resolve(request.result);
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error || new Error("Photo storage was interrupted."));
+    });
+  }
+  async source() { return await this.transaction("preferences", "readonly", store => store.get(this.key)) || "home-assistant"; }
+  async setSource(source) { await this.transaction("preferences", "readwrite", store => store.put(source, this.key)); }
+  async list() {
+    const records = await this.transaction("photos", "readonly", store => store.getAll());
+    return records.filter(record => record.album === this.key).sort((a,b) => a.created - b.created).map(record => {
+      const {bytes, thumbnailBytes, ...details} = record;
+      return {...details, blob:record.blob || new Blob([bytes], {type:"image/jpeg"}),
+        thumbnail:record.thumbnail || new Blob([thumbnailBytes], {type:"image/jpeg"})};
+    });
+  }
+  async remove(id) {
+    const record = await this.transaction("photos", "readonly", store => store.get(id));
+    if (record?.album === this.key) await this.transaction("photos", "readwrite", store => store.delete(id));
+  }
+  async add(file) {
+    if (!/\.(jpe?g|png|webp|heic|heif|avif)$/i.test(file.name) && !/^image\/(jpeg|png|webp|heic|heif|avif)$/.test(file.type)) {
+      throw new Error("Choose a photo in JPEG, PNG, WebP, HEIC or AVIF format.");
+    }
+    if (file.size > 40 * 1024 * 1024) throw new Error("This photo is too large. Choose a copy smaller than 40 MB.");
+    const records = await this.list();
+    if (records.length >= PHOTO_FRAME_MEDIA_LIMIT) throw new Error("Your collection is full (250 photos). Remove a photo before adding more.");
+    // Materialise one file at a time while the picker input is still attached.
+    // WebKit can revoke a selected File's backing access when its input resets.
+    const bytes = await file.arrayBuffer();
+    const url = URL.createObjectURL(new Blob([bytes], { type:file.type }));
+    const image = new Image();
+    let blob, thumbnail;
+    try {
+      await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error("This photo cannot be opened here. Try a JPEG copy.")); image.src = url; });
+      const resize = async (edge, quality) => {
+        const scale = Math.min(1, edge / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const context = canvas.getContext("2d");
+        context.fillStyle = "#fff"; context.fillRect(0,0,canvas.width,canvas.height);
+        context.drawImage(image,0,0,canvas.width,canvas.height);
+        const result = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", quality));
+        canvas.width = canvas.height = 1;
+        if (!result) throw new Error("This photo could not be prepared. Try a JPEG copy.");
+        return result;
+      };
+      blob = await resize(2048, .86);
+      thumbnail = await resize(240, .75);
+    } finally { image.src = ""; URL.revokeObjectURL(url); }
+    if (records.reduce((sum,record) => sum + record.blob.size + record.thumbnail.size, 0) + blob.size + thumbnail.size > 100 * 1024 * 1024) {
+      throw new Error("Your collection has reached 100 MB. Remove some photos before adding more.");
+    }
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    // Store plain bytes rather than file-backed Blobs for WebKit persistence.
+    const photoBytes = await blob.arrayBuffer();
+    const thumbnailBytes = await thumbnail.arrayBuffer();
+    await this.transaction("photos", "readwrite", store => store.put({ id, album:this.key, created:Date.now(), name:file.name, bytes:photoBytes, thumbnailBytes }));
+  }
+}
+
 const MAX_CALENDAR_RANGE_MS = 62 * 86_400_000;
 const PREPARATION_MARKER = "Family Dashboard preparation";
 const ALARM_ACTION_LABELS = {
@@ -1999,6 +2088,16 @@ export class FamilyHubCard extends HTMLElementBase {
     this._cameraStopWitnesses = new Map();
     this._cameraBlockTimer = null;
     this._freshnessTimer = null;
+    this._devicePhotoAlbum = new DevicePhotoAlbum();
+    this._devicePhotoReady = null;
+    this._devicePhotoSource = "home-assistant";
+    this._devicePhotoRecords = [];
+    this._devicePhotoModal = false;
+    this._devicePhotoBusy = false;
+    this._devicePhotoMessage = "";
+    this._devicePhotoUnavailable = false;
+    this._devicePhotoUrls = [];
+    this._deviceFrameUrl = null;
     this._photoFrameIdleTimer = null;
     this._photoFrameSlideTimer = null;
     this._photoFrameActive = false;
@@ -2125,6 +2224,9 @@ export class FamilyHubCard extends HTMLElementBase {
     this._responsiveStyleFrame = null;
     this._clearFreshnessTimer();
     this._clearPhotoFrameTimers();
+    this._releaseDevicePhotoUrls();
+    this._photoFrameActive = false;
+    this._photoFrameUrl = null;
     this._photoFrameBrowseRequest += 1;
     this._photoFrameResolveRequest += 1;
     this._preparationRequest += 1;
@@ -2147,6 +2249,8 @@ export class FamilyHubCard extends HTMLElementBase {
       ? this._cameraConfigGeneration + 1
       : 1;
     this._config = config;
+    this._releaseDevicePhotoUrls();
+    this._devicePhotoModal = false;
     this._heatingScheduleDrafts ||= new Map();
     this._heatingScheduleDrafts.clear();
     this._clearPhotoFrameTimers();
@@ -2265,7 +2369,7 @@ export class FamilyHubCard extends HTMLElementBase {
     // the shadow tree for ordinary Home Assistant state ticks would replace
     // the current image and restart its reveal animation, which presents as a
     // recurring pulse between the configured slide changes.
-    if (this._photoFrameActive && !force) return;
+    if (this._devicePhotoBusy || (this._devicePhotoModal || this._photoFrameActive) && !force) return;
     if (this._renderPending) return;
     this._renderPending = true;
     const callback = () => {
@@ -2317,7 +2421,7 @@ export class FamilyHubCard extends HTMLElementBase {
   _armPhotoFrameIdleTimer() {
     this._clearPhotoFrameIdleTimer();
     const photoFrame = this._photoFrameConfig();
-    if (!photoFrame || this._photoFrameActive || !this.isConnected
+    if (!photoFrame || this._devicePhotoModal || this._photoFrameActive || !this.isConnected
       || globalThis.document?.visibilityState === "hidden") return;
     if (photoFrame.motion_entity
       && entityStateValue(this._hass?.states?.[photoFrame.motion_entity]) === "on") return;
@@ -2349,7 +2453,7 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _activatePhotoFrame() {
     const photoFrame = this._photoFrameConfig();
-    if (!photoFrame || globalThis.document?.visibilityState === "hidden") return;
+    if (!photoFrame || this._devicePhotoModal || globalThis.document?.visibilityState === "hidden") return;
     if (photoFrame.motion_entity
       && entityStateValue(this._hass?.states?.[photoFrame.motion_entity]) === "on") {
       this._armPhotoFrameIdleTimer();
@@ -2372,6 +2476,9 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     this._photoFrameActive = false;
+    if (this._deviceFrameUrl) URL.revokeObjectURL(this._deviceFrameUrl);
+    this._deviceFrameUrl = null;
+    this._photoFrameUrl = null;
     this._photoFrameResolveRequest += 1;
     this._clearPhotoFrameSlideTimer();
     this._scheduleRender(true);
@@ -2394,9 +2501,139 @@ export class FamilyHubCard extends HTMLElementBase {
     }
   }
 
+  async _readyDevicePhotos() {
+    if (!this._devicePhotoReady) this._devicePhotoReady = (async () => {
+      if (!globalThis.indexedDB) { this._devicePhotoUnavailable = true; return; }
+      try {
+        this._devicePhotoSource = await this._devicePhotoAlbum.source();
+        this._devicePhotoRecords = await this._devicePhotoAlbum.list();
+      } catch {
+        this._devicePhotoUnavailable = true;
+        this._devicePhotoMessage = "Local photo storage is unavailable. Use a normal browser window with website storage enabled.";
+      }
+    })();
+    await this._devicePhotoReady;
+  }
+
+  _releaseDevicePhotoUrls() {
+    for (const url of this._devicePhotoUrls || []) URL.revokeObjectURL(url);
+    this._devicePhotoUrls = [];
+    if (this._deviceFrameUrl) URL.revokeObjectURL(this._deviceFrameUrl);
+    this._deviceFrameUrl = null;
+  }
+
+  async _openDevicePhotos() {
+    this._devicePhotoModal = true;
+    this._clearPhotoFrameTimers();
+    this._scheduleRender(true);
+    await this._readyDevicePhotos();
+    if (!this._devicePhotoUnavailable) {
+      try { this._devicePhotoRecords = await this._devicePhotoAlbum.list(); }
+      catch { this._devicePhotoMessage = "Your photos could not be loaded. Try opening Photos again."; }
+    }
+    if (this._devicePhotoModal && this.isConnected) this._scheduleRender(true);
+  }
+
+  _closeDevicePhotos() {
+    this._devicePhotoModal = false;
+    this._releaseDevicePhotoUrls();
+    this._scheduleRender(true);
+    this._armPhotoFrameIdleTimer();
+    requestAnimationFrame(() => this.shadowRoot.querySelector("[data-device-photos-open]")?.focus());
+  }
+
+  async _changeDevicePhotoSource(source) {
+    if (this._devicePhotoBusy || !["local", "home-assistant"].includes(source)) return;
+    try {
+      await this._devicePhotoAlbum.setSource(source);
+      this._devicePhotoSource = source;
+      this._photoFrameBrowseRequest += 1;
+      this._photoFrameResolveRequest += 1;
+      this._photoFrameMediaSourceKey = null;
+      this._photoFrameLoading = false;
+      this._photoFrameItems = [];
+      this._photoFrameUrl = null;
+      await this._loadPhotoFrameMedia({ refresh:true });
+    } catch { this._devicePhotoMessage = "The photo preference could not be saved on this device."; }
+    if (this._devicePhotoModal && this.isConnected) this._scheduleRender(true);
+  }
+
+  async _importDevicePhotos(files) {
+    if (this._devicePhotoBusy || this._devicePhotoUnavailable || !files.length) return;
+    this._devicePhotoBusy = true;
+    this._devicePhotoMessage = "Preparing photos on this device…";
+    // Keep the native file input intact until every selected file is read.
+    const modal = this.shadowRoot.querySelector(".device-photos-modal");
+    modal?.setAttribute("aria-busy", "true");
+    for (const button of modal?.querySelectorAll("button") || []) button.disabled = true;
+    const status = modal?.querySelector(".device-photo-message");
+    if (status) status.textContent = this._devicePhotoMessage;
+    const selected = files.slice(0, PHOTO_FRAME_MEDIA_LIMIT);
+    let added = 0, failed = files.length - selected.length;
+    let error = failed ? "Choose up to 250 photos at a time." : "";
+    try {
+      for (const file of selected) {
+        try { await this._devicePhotoAlbum.add(file); added++; }
+        catch (cause) { failed++; error = cause?.name === "QuotaExceededError" ? "This device has run out of photo storage. Remove some photos and try again." : cause.message; }
+      }
+      this._devicePhotoRecords = await this._devicePhotoAlbum.list();
+    } catch { error = "Photo storage is unavailable. Try again in a normal browser window."; }
+    this._devicePhotoBusy = false;
+    this._devicePhotoMessage = `${added ? `${added} ${added === 1 ? "photo" : "photos"} added. ` : ""}${failed ? `${failed} could not be added. ` : ""}${error}`.trim();
+    if (added) await this._changeDevicePhotoSource("local");
+    if (this._devicePhotoModal && this.isConnected) this._scheduleRender(true);
+  }
+
+  async _removeDevicePhoto(id) {
+    if (this._devicePhotoBusy || !this._devicePhotoRecords.some(record => record.id === id)) return;
+    try {
+      await this._devicePhotoAlbum.remove(id);
+      this._devicePhotoRecords = await this._devicePhotoAlbum.list();
+      this._devicePhotoMessage = "Removed from this collection. Your original photo is unchanged.";
+      this._photoFrameMediaSourceKey = null;
+      await this._loadPhotoFrameMedia({ refresh:true });
+    } catch { this._devicePhotoMessage = "This photo could not be removed. Try again."; }
+    if (this._devicePhotoModal && this.isConnected) this._scheduleRender(true);
+  }
+
+  _renderDevicePhotos() {
+    if (!this._devicePhotoModal) return "";
+    for (const url of this._devicePhotoUrls) URL.revokeObjectURL(url);
+    this._devicePhotoUrls = [];
+    const disabled = this._devicePhotoBusy || this._devicePhotoUnavailable || !this._devicePhotoReady ? "disabled" : "";
+    return `<div class="planner-modal-backdrop device-photos-backdrop"><section class="planner-modal device-photos-modal" role="dialog" aria-modal="true" aria-labelledby="device-photos-title">
+      <header><button type="button" class="planner-modal-close" data-device-photos-close aria-label="Close photos" ${this._devicePhotoBusy ? "disabled" : ""}>×</button><p class="eyebrow">Screensaver · this device</p><h2 id="device-photos-title">Your photo collection</h2><p>Choose photos from Photos or Files. Copies stay in this browser on this device.</p></header>
+      <div class="planner-modal-body"><div class="device-photo-source" role="group" aria-label="Screensaver photo source"><button type="button" data-device-photo-source="local" aria-pressed="${this._devicePhotoSource === "local"}" ${disabled}>This device</button><button type="button" data-device-photo-source="home-assistant" aria-pressed="${this._devicePhotoSource !== "local"}" ${disabled}>Home Assistant album</button></div>
+      <div class="device-photo-toolbar"><span>${this._devicePhotoRecords.length} ${this._devicePhotoRecords.length === 1 ? "photo" : "photos"} on this device</span><button type="button" data-device-photos-add ${disabled}>+ Add photos</button><input type="file" data-device-photo-files accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,.heic,.heif" multiple hidden></div>
+      <p class="device-photo-message" role="status" aria-live="polite">${escapeHtml(this._devicePhotoMessage)}</p>
+      ${this._devicePhotoRecords.length ? `<div class="device-photo-grid">${this._devicePhotoRecords.map(record => {
+        const url = URL.createObjectURL(record.thumbnail); this._devicePhotoUrls.push(url);
+        return `<figure><img src="${escapeHtml(url)}" alt="${escapeHtml(record.name)}"><button type="button" data-device-photo-remove="${escapeHtml(record.id)}" aria-label="Remove ${escapeHtml(record.name)}" ${disabled}>×</button></figure>`;
+      }).join("")}</div>` : `<div class="device-photo-empty"><h3>A little more you</h3><p>Add favourite moments to turn this screen into a photo frame when it’s idle.</p></div>`}
+      <p class="device-photo-note">Originals stay in your library. Add newly taken photos here when you want them included. Clearing website data can remove these copies.</p></div>
+      <footer><button type="button" data-device-photos-close ${this._devicePhotoBusy ? "disabled" : ""}>Done</button><button type="button" data-device-photos-preview ${this._devicePhotoBusy || this._devicePhotoSource === "local" && !this._devicePhotoRecords.length ? "disabled" : ""}>Preview screensaver</button></footer>
+    </section></div>`;
+  }
+
   async _loadPhotoFrameMedia({ refresh = false } = {}) {
     const photoFrame = this._photoFrameConfig();
-    if (!photoFrame || typeof this._hass?.callWS !== "function") return;
+    if (!photoFrame) return;
+    await this._readyDevicePhotos();
+    if (!this._photoFrameConfig()) return;
+    if (this._devicePhotoSource === "local") {
+      if (!refresh && this._photoFrameMediaSourceKey === "device-local") return;
+      this._photoFrameItems = this._devicePhotoRecords.map(record => ({ local:record }));
+      this._photoFrameMediaSourceKey = "device-local";
+      this._photoFrameIndex %= Math.max(1, this._photoFrameItems.length);
+      this._photoFrameLoading = false;
+      this._photoFrameError = this._photoFrameItems.length ? null : "Add photos to this device using Photos in the dashboard header.";
+      if (this._photoFrameActive) {
+        this._scheduleRender(true);
+        if (this._photoFrameItems.length) void this._resolvePhotoFrameItem();
+      }
+      return;
+    }
+    if (typeof this._hass?.callWS !== "function") return;
     if (!refresh && (this._photoFrameLoading || this._photoFrameMediaSourceKey === photoFrame.media_source)) return;
     const request = ++this._photoFrameBrowseRequest;
     this._photoFrameLoading = true;
@@ -2439,7 +2676,17 @@ export class FamilyHubCard extends HTMLElementBase {
   async _resolvePhotoFrameItem() {
     const photoFrame = this._photoFrameConfig();
     const item = this._photoFrameItems[this._photoFrameIndex];
-    if (!photoFrame || !this._photoFrameActive || !item || typeof this._hass?.callWS !== "function") return;
+    if (!photoFrame || !this._photoFrameActive || !item) return;
+    if (item.local && this._devicePhotoSource === "local") {
+      if (this._deviceFrameUrl) URL.revokeObjectURL(this._deviceFrameUrl);
+      this._deviceFrameUrl = URL.createObjectURL(item.local.blob);
+      this._photoFrameUrl = this._deviceFrameUrl;
+      this._photoFrameError = null;
+      this._syncPhotoFrameMedia();
+      this._armPhotoFrameSlideTimer();
+      return;
+    }
+    if (this._devicePhotoSource === "local" || typeof this._hass?.callWS !== "function") return;
     const request = ++this._photoFrameResolveRequest;
     try {
       const result = await this._hass.callWS({
@@ -2695,7 +2942,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _render() {
-    if (!this._config || !this.shadowRoot) return;
+    if (!this._config || !this.shadowRoot || this._devicePhotoBusy) return;
     const renderFocus = this._captureRenderFocus();
     const scheduleFocus = this._plannerModal?.type === "heating" ? this.shadowRoot.activeElement?.dataset : null;
     const scheduleFocusSelector = scheduleFocus?.scheduleTime !== undefined ? `[data-schedule-time="${scheduleFocus.scheduleTime}"]`
@@ -2707,7 +2954,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._childMountGeneration += 1;
     this._invalidateChildHass();
     const theme = this._config.theme;
-    const shellGuard = this._photoFrameActive || this._plannerModal ? ' inert aria-hidden="true"' : "";
+    const shellGuard = this._photoFrameActive || this._plannerModal || this._devicePhotoModal ? ' inert aria-hidden="true"' : "";
     this.shadowRoot.innerHTML = `
       <style data-layout="${this._responsiveViewportKey()}">${this._styles()}</style>
       <ha-card class="hub-card" data-appearance="${this._appearance()}" style="
@@ -2734,6 +2981,7 @@ export class FamilyHubCard extends HTMLElementBase {
         </div>
         <div class="focus-dock-shell"${this._pendingConfirmation ? ' inert aria-hidden="true"' : shellGuard}>${this._renderMusicDock()}</div>
         ${this._renderPhotoFrame()}
+        ${this._renderDevicePhotos()}
         ${this._renderPlannerModal()}
       </ha-card>
     `;
@@ -2748,6 +2996,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._mountChildCards();
     const confirmationFocusHandled = Boolean(this._pendingConfirmation || this._confirmationReturnFocus);
     this._syncConfirmationFocus(confirmationFocusAction);
+    if (this._devicePhotoModal) this.shadowRoot.querySelector(".device-photos-modal button:not([disabled])")?.focus();
     if (this._plannerModal) {
       const modal = this.shadowRoot.querySelector(".planner-modal");
       if (modal && !modal.contains(this.shadowRoot.activeElement)) {
@@ -2919,7 +3168,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const security = this._config.features.entry ? todaySecurityPresentation(states[this._config.entry?.alarm_entity], states[this._config.entry?.garage?.cover_entity], (this._config.entry?.cameras || []).flatMap(camera => [camera.ringing_entity,camera.person_entity,camera.motion_entity]).filter(Boolean).map(id => states[id])) : null;
     const name = this._hass?.user?.name || this._config.people.find(person => person.role !== "child" && person.role !== "household")?.name || "Family";
     const initials = name.split(/\s+/).map(part => part[0]).slice(0,2).join("");
-    return `<header class="hub-masthead"${shellGuard}><button type="button" class="hub-masthead-brand" data-view="today">${outlineIcon("rooms")}<span>${escapeHtml(this._config.product.title)}</span></button><div class="hub-masthead-status"><span class="hub-masthead-date">${escapeHtml(date)}</span>${security ? `<button type="button" class="hub-quiet-status" data-view="entry" title="${escapeHtml(security.detail)}">${outlineIcon("entry")}<span>${escapeHtml(["Protected","Quiet at home"].includes(security.title) ? "All quiet" : security.title)}</span></button>` : ""}<span class="hub-profile" aria-label="${escapeHtml(name)}">${escapeHtml(initials)}</span>${this._hass?.user?.is_admin && this._config.display.kiosk ? '<a class="hub-ha-escape" href="?disable_km" aria-label="Open Home Assistant navigation" title="Home Assistant">↗</a>' : ""}</div></header>`;
+    return `<header class="hub-masthead"${shellGuard}><button type="button" class="hub-masthead-brand" data-view="today">${outlineIcon("rooms")}<span>${escapeHtml(this._config.product.title)}</span></button><div class="hub-masthead-status"><span class="hub-masthead-date">${escapeHtml(date)}</span>${security ? `<button type="button" class="hub-quiet-status" data-view="entry" title="${escapeHtml(security.detail)}">${outlineIcon("entry")}<span>${escapeHtml(["Protected","Quiet at home"].includes(security.title) ? "All quiet" : security.title)}</span></button>` : ""}${this._photoFrameConfig() ? '<button type="button" class="hub-photos-button" data-device-photos-open aria-label="Manage screensaver photos">Photos</button>' : ""}<span class="hub-profile" aria-label="${escapeHtml(name)}">${escapeHtml(initials)}</span>${this._hass?.user?.is_admin && this._config.display.kiosk ? '<a class="hub-ha-escape" href="?disable_km" aria-label="Open Home Assistant navigation" title="Home Assistant">↗</a>' : ""}</div></header>`;
   }
 
   _renderHeader() {
@@ -5195,6 +5444,16 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     this._armPhotoFrameIdleTimer();
+    if (this._devicePhotoModal) {
+      if (event.key === "Escape" && !this._devicePhotoBusy) { event.preventDefault(); this._closeDevicePhotos(); }
+      if (event.key === "Tab") {
+        const controls = [...this.shadowRoot.querySelectorAll(".device-photos-modal button:not([disabled])")];
+        const first = controls[0], last = controls[controls.length - 1], active = this.shadowRoot.activeElement;
+        if (event.shiftKey && (active === first || !controls.includes(active))) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && (active === last || !controls.includes(active))) { event.preventDefault(); first?.focus(); }
+      }
+      return;
+    }
     if (this._plannerModal) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -5248,6 +5507,13 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _handleChange(event) {
+    if (this._devicePhotoModal && event.target === this.shadowRoot.querySelector("[data-device-photo-files]")) {
+      const input = event.target;
+      const files = Array.from(input.files || []);
+      void this._importDevicePhotos(files).finally(() => { input.value = ""; });
+      return;
+    }
+    if (this._devicePhotoModal) return;
     this._armPhotoFrameIdleTimer();
     if (this._pendingConfirmation || this._photoFrameActive) return;
     const cameraPicker = event.target.closest?.("select[data-camera-select]");
@@ -5493,6 +5759,18 @@ export class FamilyHubCard extends HTMLElementBase {
     if (this._photoFrameActive || target.dataset.photoFrameDismiss !== undefined) {
       this._deactivatePhotoFrame();
       return;
+    }
+    if (this._devicePhotoModal) {
+      if (this._devicePhotoBusy) return;
+      if (target.dataset.devicePhotosClose !== undefined) this._closeDevicePhotos();
+      else if (target.dataset.devicePhotosAdd !== undefined) this.shadowRoot.querySelector("[data-device-photo-files]")?.click();
+      else if (target.dataset.devicePhotoSource) void this._changeDevicePhotoSource(target.dataset.devicePhotoSource);
+      else if (target.dataset.devicePhotoRemove) void this._removeDevicePhoto(target.dataset.devicePhotoRemove);
+      else if (target.dataset.devicePhotosPreview !== undefined) { this._closeDevicePhotos(); this._activatePhotoFrame(); }
+      return;
+    }
+    if (target.dataset.devicePhotosOpen !== undefined && !this._pendingConfirmation && !this._plannerModal && this._photoFrameConfig()) {
+      void this._openDevicePhotos(); return;
     }
     this._armPhotoFrameIdleTimer();
     if (this._plannerModal?.type === "heating") {
