@@ -1449,6 +1449,8 @@ export const DAILY_BRIEF_STYLES = `
   .media-player-stage .embedded-card * { font-family:inherit; font-weight:400; }
   .media-player-stage .embedded-card :is(h1,h2,h3,strong,b) { font-weight:500; }
   .media-player-stage #mmpc-group-chips-controller > button { flex:0 0 auto !important; width:auto !important; max-width:100%; min-height:48px; gap:8px; padding:8px 14px; white-space:normal; overflow-wrap:anywhere; }
+  .media-player-stage .embedded-card div:has(> button[style*="--mmpc-chip-horizontal-margin"]) { flex-wrap:wrap !important; flex-shrink:0; width:100%; max-width:100%; min-width:0; gap:8px; overflow:visible !important; }
+  .media-player-stage .embedded-card button[style*="--mmpc-chip-horizontal-margin"] { flex:0 0 auto !important; width:auto !important; max-width:100%; min-height:48px; margin:0 !important; gap:8px; padding:8px 14px; white-space:normal; overflow-wrap:anywhere; }
 
   .focus-prep-add { flex:none; }
   @media (min-width:621px) {

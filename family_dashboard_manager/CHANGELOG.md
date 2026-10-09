@@ -1,3 +1,7 @@
+## 0.18.1
+
+- Keep native Music search filters sized to their full labels and wrap them into additional rows on tablets. Preserve touch targets, search selection, room grouping and playback.
+
 ## 0.18.0
 
 - Add a review-first New devices page in Household Admin. Opening or refreshing it discovers supported enabled room controls from Home Assistant, suggests rooms by area, and stages selected additions for the existing validated Review & save flow. No device is added automatically.
