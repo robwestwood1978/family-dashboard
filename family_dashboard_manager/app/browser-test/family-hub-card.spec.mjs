@@ -19,7 +19,7 @@ const illustrationSource = await readFile(new URL("../frontend/assets/home-illus
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.20.1";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.20.2";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -4787,6 +4787,41 @@ function homeworkFixture() {
   const today="2026-10-13", first=config.people.find(p=>p.role==="child");
   return {revision:1,today,children:[{id:first.id,name:first.name,year:"Year 4",reading_day:2,reading_goal:3,spelling_day:1,homework_day:1,maths_set_day:1,maths_day:4,tables_goal:3,plans:[{id:"a".repeat(32),person_id:first.id,kind:"spelling",title:"Weekly spelling",due:today,set_date:"2026-10-09",words:["cloud","solid"],notes:"Practise handwriting",links:[],source:"School sheet",marks:{}}],logs:[],routines:[{id:`${first.id}:reading:2026-10-14`,kind:"reading",due:"2026-10-14",title:"Return reading record and books",goal:3,count:0,marks:{},plan_ids:[]},{id:`${first.id}:spelling:${today}`,kind:"spelling",due:today,title:"Spelling test",goal:0,count:0,marks:{},plan_ids:["a".repeat(32)]},{id:`${first.id}:tables:${today}`,kind:"tables",due:today,title:"Tackling Tables",goal:3,count:0,marks:{},plan_ids:[]},{id:`${first.id}:assignment:${today}`,kind:"assignment",due:today,title:"Hand in weekly homework",goal:0,count:0,marks:{},plan_ids:[]},{id:`${first.id}:maths:2026-10-16`,kind:"maths",due:"2026-10-16",title:"Hand in maths homework",goal:0,count:0,marks:{},plan_ids:[]}]}]};
 }
+
+test("Today homework reminder stays above football and opens the child’s homework",async({page})=>{
+  const family=locationDisabledConfig();family.school.homework_enabled=true;
+  const errors=await mount(page,family,{}, {homeworkData:homeworkFixture()});
+  const card=page.locator("family-hub-card");
+  const reminder=card.locator(".homework-today button");
+  await expect(reminder).toBeVisible();
+  const bounds=await card.evaluate(element=>{
+    const reminder=element.shadowRoot.querySelector(".homework-today").getBoundingClientRect();
+    const panel=element.shadowRoot.querySelector(".today-family").getBoundingClientRect();
+    const football=element.shadowRoot.querySelector(".today-football").getBoundingClientRect();
+    return {reminderBottom:reminder.bottom,panelBottom:panel.bottom,footballTop:football.top};
+  });
+  expect(bounds.reminderBottom).toBeLessThanOrEqual(bounds.panelBottom+1);
+  expect(bounds.reminderBottom).toBeLessThanOrEqual(bounds.footballTop);
+  await reminder.click();
+  await expect(card.locator(".homework-workspace")).toBeVisible();
+  await expect(card.locator('[data-task-section="homework"]')).toHaveAttribute("aria-pressed","true");
+  expect(errors).toEqual([]);
+});
+
+test("Calendar school deadlines select their details and open Homework",async({page})=>{
+  const family=locationDisabledConfig();family.school.homework_enabled=true;
+  const errors=await mount(page,family,{}, {homeworkData:homeworkFixture()});
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="calendar"]').click();
+  await card.locator('[data-calendar-day]').nth(4).click();
+  const deadline=card.getByRole("button",{name:"Show Hand in maths homework checklist",exact:true});
+  await deadline.click();
+  await expect(deadline).toHaveAttribute("aria-pressed","true");
+  await expect(card.locator(".focus-event-ready")).toContainText("School deadline");
+  await card.getByRole("button",{name:"Open homework",exact:true}).click();
+  await expect(card.locator(".homework-workspace")).toBeVisible();
+  expect(errors).toEqual([]);
+});
 
 test("homework reading log saves centrally and fits the tablet",async({page},testInfo)=>{
   const family=locationDisabledConfig();family.school.homework_enabled=true;
