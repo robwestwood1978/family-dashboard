@@ -34,8 +34,17 @@ let baseUrl;
 
 test.beforeAll(async () => {
   const app = express();
+  app.use(express.json());
+  let homework={revision:0,profiles:[],plans:[],marks:{},logs:[]};
+  app.get("/api/admin/homework",(_request,response)=>response.json({data:homework,preview:{today:"2026-10-13",children:[]}}));
+  app.post("/api/admin/homework",(request,response)=>{
+    if(request.body.expected_revision!==homework.revision)return response.status(409).json({error:"Homework changed"});
+    if(request.body.operation==="profiles")homework.profiles=request.body.payload.profiles;
+    if(request.body.operation==="publish")homework.plans.push({...request.body.payload.plan,id:"a".repeat(32)});
+    homework.revision++;response.json({data:homework,preview:{today:"2026-10-13",children:[]}});
+  });
   app.get("/api/admin/bootstrap", (_request, response) => response.json({
-    version: "0.19.1",
+    version: "0.20.0",
     config,
     schema,
     inventory,
@@ -47,6 +56,21 @@ test.beforeAll(async () => {
   server = createServer(app);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
+});
+
+test("parent Homework publishes only after review and keeps operational saves separate",async({page})=>{
+  await page.goto(baseUrl);await page.getByRole("button",{name:"Homework",exact:true}).click();
+  await expect(page.getByRole("button",{name:"Save weekly rules",exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"Save weekly rules",exact:true}).click();
+  await expect(page.locator("#status")).toContainText("Homework saved");
+  await page.getByRole("textbox",{name:"Title",exact:true}).fill("Reading activity");
+  await page.getByLabel("School due date",{exact:true}).fill("2026-10-20");
+  await page.getByRole("button",{name:"Review & publish",exact:true}).click();
+  await expect(page.getByRole("dialog")).toContainText("Publish Reading activity?");
+  await expect(page.locator(".homework-admin-plans")).not.toContainText("Reading activity");
+  await page.getByRole("button",{name:"Publish to dashboard",exact:true}).click();
+  await expect(page.locator(".homework-admin-plans")).toContainText("Reading activity");
+  await expect(page.locator(".save-bar")).toBeHidden();
 });
 
 test.afterAll(async () => {

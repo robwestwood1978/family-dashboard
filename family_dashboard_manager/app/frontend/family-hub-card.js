@@ -1,5 +1,5 @@
 import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.19.1";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.20.0";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -2029,6 +2029,7 @@ export function floorplanViewBox(floor, padding = 1.5) {
 
 function relevantEntityIds(config) {
   const ids = new Set();
+  if (config.school?.homework_enabled) ids.add("sensor.family_dashboard_homework_revision");
   const add = (value) => {
     if (typeof value === "string" && /^[a-z_]+\.[a-z0-9_]+$/.test(value)) ids.add(value);
   };
@@ -2216,6 +2217,7 @@ export class FamilyHubCard extends HTMLElementBase {
       } else {
         this._scheduleRender(true);
         if (this._view === "calendar") void this._loadCalendarEvents(true);
+        void this._loadHomework(true);
         this._armFreshnessTimer();
         this._armPhotoFrameIdleTimer();
       }
@@ -2258,6 +2260,8 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   disconnectedCallback() {
+    this._homeworkGeneration = (this._homeworkGeneration || 0) + 1;
+    globalThis.speechSynthesis?.cancel();
     this._childMountGeneration += 1;
     this._invalidateChildHass();
     this.shadowRoot.removeEventListener("click", this._boundClick);
@@ -2286,6 +2290,8 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   setConfig(cardConfig) {
+    this._homeworkGeneration = (this._homeworkGeneration || 0) + 1;
+    this._homeworkData = null; this._homeworkModal = null; this._homeworkLoadedAt = 0;
     const config = typeof cardConfig?.config_json === "string"
       ? JSON.parse(cardConfig.config_json)
       : cardConfig?.family_config;
@@ -2389,6 +2395,7 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     this._loadCalendarEvents();
     void this._loadPreparationItems();
+    void this._loadHomework();
   }
 
   _appearance() {
@@ -2419,7 +2426,7 @@ export class FamilyHubCard extends HTMLElementBase {
     // the shadow tree for ordinary Home Assistant state ticks would replace
     // the current image and restart its reveal animation, which presents as a
     // recurring pulse between the configured slide changes.
-    if (this._devicePhotoBusy || (this._devicePhotoModal || this._photoFrameActive) && !force) return;
+    if (this._devicePhotoBusy || (this._devicePhotoModal || this._photoFrameActive || this._homeworkModal) && !force) return;
     if (this._renderPending) return;
     this._renderPending = true;
     const callback = () => {
@@ -2437,6 +2444,7 @@ export class FamilyHubCard extends HTMLElementBase {
       this._freshnessTimer = null;
       if (!this.isConnected || globalThis.document?.visibilityState === "hidden") return;
       this._refreshTimeSensitiveView();
+      void this._loadHomework();
       this._armFreshnessTimer();
     }, nextFreshnessRefreshDelay());
   }
@@ -3312,6 +3320,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderFocusPreparation(event) {
+    if (event._homeworkPerson) return `<aside class="focus-event-ready"><header class="focus-prep-heading"><span class="focus-prep-icon"><ha-icon icon="mdi:book-open-page-variant-outline"></ha-icon></span><p class="eyebrow">School deadline</p><h2>${escapeHtml(event.summary)}</h2><p class="supporting">${escapeHtml(formatDay(calendarEventStart(event), this._config.product.locale, this._config.product.timezone))}</p></header><div class="focus-prep-body"><p>Reading, practice and hand-in progress live together in Homework.</p><button type="button" class="homework-primary" data-homework-open="${escapeHtml(event._homeworkPerson)}">Open homework <ha-icon icon="mdi:arrow-right"></ha-icon></button></div></aside>`;
     const key = familyPlannerEventKey(event);
     const children = familyPlannerPeople(event, this._config.people).filter((person) => person.role === "child");
     const suggestion = matchPreparationTemplate(event, this._config.calendar.preparation?.templates || []);
@@ -3357,7 +3366,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const preview = features.family && features.calendar ? todayPreparationPreview(this._preparationItems.filter((item) => !next || item?._preparation?.eventKey !== familyPlannerEventKey(next)),this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents(),this._config.people,new Date(),this._config.product.timezone,2) : {total:0,complete:0,rows:[]};
     return `<section class="today-grid focus-today" data-calendar="${features.calendar}" data-secondary-count="${[features.family, features.football, features.music].filter(Boolean).length}" aria-label="Today at a glance">
       ${room ? `<article class="surface hero-panel today-hero focus-home-card"><div class="daily-home-art" aria-hidden="true"><img src="${HOME_ILLUSTRATION}" alt="" decoding="async"></div><div class="today-hero-copy"><h2>${escapeHtml(room.name)}</h2><p>${Number.isFinite(summary.temperature) ? `${escapeHtml(room.name)} · ${formatTemperature(summary.temperature)}` : "Your home controls"}</p></div><button type="button" class="focus-home-open" data-focus-home-room="${escapeHtml(room.id)}" aria-label="Open ${escapeHtml(room.name)} controls"><ha-icon icon="mdi:arrow-top-right"></ha-icon></button><div class="focus-home-controls"><button type="button" data-room-lights="${escapeHtml(room.id)}" data-light-service="${summary.lightsOn ? "turn_off":"turn_on"}" aria-label="Turn ${escapeHtml(room.name)} lights ${summary.lightsOn ? "off":"on"}" aria-pressed="${Boolean(summary.lightsOn)}" ${readOnly || !availableLights.length ? "disabled" : ""}><ha-icon icon="mdi:lamp-outline"></ha-icon><span><strong>${availableLights.length ? summary.lightsOn ? "Lights on":"Lights off" : "Lighting unavailable"}</strong><small>${escapeHtml(room.name)}</small></span></button><button type="button" ${room.climate ? `data-focus-home-room="${escapeHtml(room.id)}" data-room-section-target="comfort"` : 'data-home-target="heating"'}><ha-icon icon="mdi:thermometer"></ha-icon><span><strong>${Number.isFinite(summary.targetTemperature) ? formatTemperature(summary.targetTemperature):Number.isFinite(home?.averageTemperature) ? formatTemperature(home.averageTemperature):"View heating"}</strong><small>${room.climate ? "Heating target" : "Home temperature"} <ha-icon icon="mdi:chevron-right"></ha-icon></small></span></button></div></article>` : `<article class="focus-hello"><h2>${escapeHtml(greetingForTime(new Date(),this._config.product.timezone))}</h2><p>Your family’s day, together.</p></article>`}
-      <div class="focus-today-plan">${this._preparationError ? `<p class="calendar-warning" role="alert">${escapeHtml(this._preparationError)}</p>` : ""}${features.calendar ? `<article class="next-panel today-next"><p class="eyebrow">${next ? `Next, ${isAllDayCalendarEvent(next) ? "all day" : `at ${escapeHtml(formatTime(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}`}` : "Coming up"}</p><h2>${escapeHtml(next?.summary || "No plans yet")}</h2><p class="supporting">${next ? `${escapeHtml(familyPlannerPeople(next,this._config.people).filter(person => person.role !== "household").map(person => person.name).join(", ") || "Everyone")}${next.location ? ` · ${escapeHtml(next.location)}` : ""}` : "The next family event will appear here."}</p>${next ? this._renderFocusChecklist(next, { compact:true }) : ""}<button type="button" class="text-action" ${next ? `data-focus-open-plan="${escapeHtml(familyPlannerEventKey(next))}"`:'data-view="calendar"'}>See the plan <ha-icon icon="mdi:arrow-right"></ha-icon></button></article>`:""}${features.family ? `<article class="children-panel today-family"><div class="section-heading"><h2>A little left to do</h2><button type="button" data-view="family">Tasks <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="today-job-list">${this._renderTodayJobs()}</div>${this._renderTodayTaskPreview(preview)}</article>`:""}</div>
+      <div class="focus-today-plan">${this._preparationError ? `<p class="calendar-warning" role="alert">${escapeHtml(this._preparationError)}</p>` : ""}${features.calendar ? `<article class="next-panel today-next"><p class="eyebrow">${next ? `Next, ${isAllDayCalendarEvent(next) ? "all day" : `at ${escapeHtml(formatTime(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}`}` : "Coming up"}</p><h2>${escapeHtml(next?.summary || "No plans yet")}</h2><p class="supporting">${next ? `${escapeHtml(familyPlannerPeople(next,this._config.people).filter(person => person.role !== "household").map(person => person.name).join(", ") || "Everyone")}${next.location ? ` · ${escapeHtml(next.location)}` : ""}` : "The next family event will appear here."}</p>${next ? this._renderFocusChecklist(next, { compact:true }) : ""}<button type="button" class="text-action" ${next ? `data-focus-open-plan="${escapeHtml(familyPlannerEventKey(next))}"`:'data-view="calendar"'}>See the plan <ha-icon icon="mdi:arrow-right"></ha-icon></button></article>`:""}${features.family ? `<article class="children-panel today-family"><div class="section-heading"><h2>A little left to do</h2><button type="button" data-view="family">Tasks <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="today-job-list">${this._renderTodayJobs()}</div>${this._renderTodayTaskPreview(preview)}${this._renderHomeworkReminder()}</article>`:""}</div>
       ${football ? `<article class="football-panel today-football" data-fixture-count="${football.fixtureCount || 0}"><div class="section-heading"><h2>This week in football</h2><button type="button" data-view="football">All football <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="featured-fixtures">${football.html}</div></article>`:""}
       ${home || security || energy ? `<footer class="hero-metrics focus-home-summary">${home ? `<button type="button" data-home-target="heating"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${escapeHtml(`${heating.value} · ${heating.detail}`)}</strong><small>${escapeHtml(heating.detail)}</small></span></button><button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${escapeHtml(`${lighting.value} · ${lighting.detail}`)}</strong><small>${escapeHtml(lighting.detail)}</small></span></button>`:""}${security ? `<button type="button" data-view="entry"><ha-icon icon="${security.icon}"></ha-icon><span><strong>${escapeHtml(security.title)}</strong><small>${escapeHtml(security.detail)}</small></span></button>`:""}${energy ? `<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energy.value)}</strong><small>${escapeHtml(energy.detail)}</small></span></button>`:""}</footer>` : ""}
     </section>`;
@@ -3553,13 +3562,14 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _filteredCalendarEvents() {
-    const source = this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents();
+    const source = [...(this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents()), ...this._homeworkCalendarEvents()];
     return this._calendarPersonFilter === "all"
       ? source
       : source.filter((event) => event?._calendar?.person_ids?.includes(this._calendarPersonFilter));
   }
 
   _renderPlannerEventButton(event, compact = false) {
+    if (event._homeworkPerson) return `<button type="button" class="family-planner-event" data-homework-open="${escapeHtml(event._homeworkPerson)}"><strong>${escapeHtml(event.summary)}</strong><small>School deadline · Open homework</small></button>`;
     const calendar = event._calendar || this._config.calendar.entities[0];
     const people = familyPlannerPeople(event, this._config.people).filter((person) => person.role !== "household");
     const progress = preparationProgress(this._preparationItems, familyPlannerEventKey(event));
@@ -4416,6 +4426,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderPlannerModal() {
+    if (this._homeworkModal) return this._renderHomeworkModal();
     if (!this._plannerModal) return "";
     if (this._plannerModal.type === "heating") return this._renderHeatingScheduleModal();
     if (this._plannerModal.type === "add") return this._renderPlannerAddModal();
@@ -4474,20 +4485,167 @@ export class FamilyHubCard extends HTMLElementBase {
     </section></div>`;
   }
 
+  async _homeworkRequest(message) {
+    let timeout;
+    try { return await Promise.race([this._hass.callWS(message), new Promise((_resolve,reject)=>{timeout=setTimeout(()=>reject(new Error("Homework connection timed out")),10000);})]); }
+    finally { clearTimeout(timeout); }
+  }
+
+  async _loadHomework(force = false) {
+    if (!this._config?.school?.homework_enabled || !this._hass?.callWS || this._homeworkLoading) return;
+    const revision = this._hass.states?.["sensor.family_dashboard_homework_revision"]?.state;
+    const today = dateKey(new Date(), this._config.product.timezone);
+    if (!force && this._homeworkLoadedAt && Date.now() - this._homeworkLoadedAt < 30000 && this._homeworkRevision === revision && this._homeworkData?.today === today) return;
+    this._homeworkLoading = true;
+    const generation = this._homeworkGeneration || 0;
+    try {
+      const data = await this._homeworkRequest({type:"family_dashboard_homework/get"});
+      if (generation !== (this._homeworkGeneration || 0)) return;
+      this._homeworkData = data; this._homeworkError = "";
+      this._homeworkRevision = revision;
+    } catch { this._homeworkError = "Homework is not connected. A parent can check Homework in Family Dashboard Admin."; }
+    finally { this._homeworkLoading = false; this._homeworkLoadedAt = Date.now(); this._scheduleRender(); }
+  }
+
+  _homeworkChild(personId = this._familyPersonId) {
+    return this._homeworkData?.children?.find(child => child.id === personId);
+  }
+
+  _homeworkDate(value) {
+    if (!value) return "";
+    const today = this._homeworkData?.today || dateKey(new Date(), this._config.product.timezone);
+    if (value === today) return "Today";
+    if (value === shiftDateKey(today, 1)) return "Tomorrow";
+    return new Intl.DateTimeFormat(this._config.product.locale, {weekday:"short", day:"numeric", month:"short", timeZone:"UTC"}).format(new Date(`${value}T12:00:00Z`));
+  }
+
+  _homeworkCalendarEvents() {
+    if (!this._config.school?.homework_enabled || !this._homeworkData) return [];
+    const events = [], days = this._calendarWindow();
+    for (const child of this._homeworkData.children) {
+      const person = this._config.people.find(p => p.id === child.id);
+      for (const {key} of days) {
+        if (child.paused_until && key <= child.paused_until) continue;
+        const weekday = (new Date(`${key}T12:00:00Z`).getUTCDay() + 6) % 7;
+        for (const [field,kind,label] of [["reading_day","reading","Return reading record & books"],["spelling_day","spelling","Spelling test"],["homework_day","assignment","Hand in weekly homework"],["maths_set_day","maths_set","Maths homework set"],["maths_day","maths","Hand in maths homework"]]) {
+          if (child[field] === null || child[field] === undefined || child[field] !== weekday) continue;
+          events.push({uid:`homework:${child.id}:${kind}:${key}`, summary:label, start:{date:key}, end:{date:shiftDateKey(key,1)}, _homeworkPerson:child.id,
+            _calendar:{entity_id:"homework",label:person?.name || child.name,category:"school",person_ids:[child.id],colour:person?.colour || this._config.theme.accent,allow_create:false}});
+        }
+      }
+      for (const plan of child.plans.filter(plan => !plan.marks?.handed_in && !["spelling","maths","assignment"].includes(plan.kind))) {
+        events.push({uid:plan.id,summary:plan.title,start:{date:plan.due},end:{date:shiftDateKey(plan.due,1)},_homeworkPerson:child.id,
+          _calendar:{entity_id:"homework",label:child.name,category:"school",person_ids:[child.id],colour:person?.colour || this._config.theme.accent,allow_create:false}});
+      }
+    }
+    return events;
+  }
+
+  _renderHomeworkReminder() {
+    if (!this._config.school?.homework_enabled || !this._homeworkData) return "";
+    const today = this._homeworkData.today, tomorrow = shiftDateKey(today,1);
+    const upcoming = this._homeworkData.children.flatMap(child => child.routines.filter(r => r.due <= tomorrow && !["tables"].includes(r.kind) && !r.marks.returned && !r.marks.handed_in && !r.marks.test_done).map(r => ({child,r}))).sort((a,b)=>a.r.due.localeCompare(b.r.due));
+    return `<div class="homework-today"><button type="button" data-homework-open="${escapeHtml(upcoming[0]?.child.id || this._homeworkData.children[0]?.id || this._familyPersonId)}"><ha-icon icon="mdi:book-open-page-variant-outline"></ha-icon><span><strong>${upcoming.length ? `${upcoming[0].child.name} · ${upcoming[0].r.title}` : "Homework & reading"}</strong><small>${upcoming.length ? `${this._homeworkDate(upcoming[0].r.due)}${upcoming.length>1 ? ` · +${upcoming.length-1} school deadlines`:""}` : "A little practice, each day"}</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button></div>`;
+  }
+
+  _renderHomework(person) {
+    const child = this._homeworkChild(person.id);
+    if (!child) return `<div class="homework-empty surface"><ha-icon icon="mdi:book-open-page-variant-outline"></ha-icon><h2>${escapeHtml(person.name)}’s homework</h2><p>${escapeHtml(this._homeworkError || "A parent can add the weekly rules and work in Family Dashboard Admin.")}</p><button type="button" data-homework-refresh>Check again</button></div>`;
+    if (child.paused_until && this._homeworkData.today <= child.paused_until) return `<div class="homework-empty surface"><h2>A little break</h2><p>Homework routines are paused through ${escapeHtml(this._homeworkDate(child.paused_until))}.</p></div>`;
+    const reading=child.routines.find(r=>r.kind==="reading"), spelling=child.routines.find(r=>r.kind==="spelling"), tables=child.routines.find(r=>r.kind==="tables");
+    const words=child.plans.find(p=>p.kind==="spelling" && p.due===spelling?.due);
+    const schoolwork=child.plans.filter(p=>(p.kind!=="spelling" || p.due!==spelling?.due) && !p.marks?.handed_in).sort((a,b)=>a.due.localeCompare(b.due));
+    const missing=child.routines.filter(r=>["maths","assignment"].includes(r.kind) && !r.plan_ids.length);
+    const disabled=this._config.display.read_only ? "disabled" : "";
+    const dots=r=>`<div class="homework-progress" aria-label="${r.count} of ${r.goal} sessions">${Array.from({length:r.goal},(_,i)=>`<i class="${i<r.count?"is-done":""}"><ha-icon icon="${i<r.count?"mdi:check":"mdi:circle-outline"}"></ha-icon></i>`).join("")}<span>${r.count}/${r.goal}</span></div>`;
+    return `<section class="homework-workspace" data-homework-card-count="${2 + Number(Boolean(spelling)) + Number(Boolean(tables))}" aria-label="${escapeHtml(person.name)} homework">
+      ${this._homeworkError?`<p class="calendar-warning" role="alert">${escapeHtml(this._homeworkError)} Showing the last saved progress.</p>`:""}
+      <article class="homework-card homework-reading"><header><span class="homework-token"><ha-icon icon="mdi:book-open-page-variant-outline"></ha-icon></span><div><h2>Reading</h2><p>Books & record back ${escapeHtml(this._homeworkDate(reading?.due))}</p></div></header>${reading?dots(reading):""}<p class="homework-caption">${reading?.count>=reading?.goal ? "Your readings are logged. Check the school record is written and signed." : `Read ${reading?.goal || 3} times this week. Read aloud with an adult too.`}</p><div class="homework-actions"><button type="button" class="homework-primary" data-homework-modal="reading" ${disabled}>Log a reading</button><button type="button" data-homework-modal="record">Reading record</button></div></article>
+      ${spelling?`<article class="homework-card"><header><span class="homework-token"><ha-icon icon="mdi:alphabetical-variant"></ha-icon></span><div><h2>Spelling</h2><p>Test ${escapeHtml(this._homeworkDate(spelling.due))}</p></div></header><p class="homework-large-value">${words?.words.length ? `${words.words.length} words` : "Words needed"}</p><p class="homework-caption">${words?.words.length ? "Listen, spell, check. Then try a mock test." : "A parent needs to add this week’s word list."}</p><div class="homework-actions"><button type="button" class="homework-primary" data-homework-spell="${words?.id || ""}" ${disabled || !words?.words.length ? "disabled":""}>Practise spelling</button><button type="button" data-homework-modal="spell_record">Test & school sheet</button></div></article>`:""}
+      ${tables?`<article class="homework-card"><header><span class="homework-token"><ha-icon icon="mdi:calculator-variant-outline"></ha-icon></span><div><h2>Tackling Tables</h2><p>${tables.goal} sessions by ${escapeHtml(this._homeworkDate(tables.due))}</p></div></header>${dots(tables)}<p class="homework-caption">Use Learn, Play or Test with your school account. Log the session when you’ve finished.</p><div class="homework-actions"><a class="homework-primary" href="https://www.tacklingtables.co.uk/dashboard/login/" target="_blank" rel="noopener noreferrer">Start practice <ha-icon icon="mdi:arrow-top-right"></ha-icon></a><button type="button" data-homework-modal="tables" ${disabled}>Log a session</button></div></article>`:""}
+      <article class="homework-card homework-schoolwork"><header><span class="homework-token"><ha-icon icon="mdi:clipboard-text-outline"></ha-icon></span><div><h2>School work</h2><p>Finish at home, then hand it in</p></div></header><div class="homework-work-list">${schoolwork.map(plan=>`<button type="button" data-homework-plan="${plan.id}"><span><strong>${escapeHtml(plan.title)}</strong><small>${escapeHtml(plan.subject || (plan.kind==="maths"?"Maths":"Homework"))} · ${escapeHtml(this._homeworkDate(plan.due))}</small></span><span>${plan.marks?.finished?"Finished":"Open"}<ha-icon icon="mdi:chevron-right"></ha-icon></span></button>`).join("")}${missing.map(r=>`<div class="homework-missing"><strong>${r.kind==="maths"?"Maths sheet needed":"Weekly homework needed"}</strong><small>Due ${escapeHtml(this._homeworkDate(r.due))}${r.kind==="maths"?" · set each Tuesday":""}</small></div>`).join("")}${!schoolwork.length&&!missing.length?'<p class="homework-caption">All current work handed in. New activities will appear here.</p>':""}</div></article>
+    </section>`;
+  }
+
+  _renderHomeworkModal() {
+    const modal=this._homeworkModal, child=this._homeworkChild(modal.personId);
+    if (!child) return "";
+    const reading=child.routines.find(r=>r.kind==="reading");
+    const disabled=this._config.display.read_only || this._homeworkBusy ? "disabled":"";
+    const mark=(target,field,label,marks={})=>`<button type="button" class="homework-check ${marks[field]?"is-done":""}" data-homework-mark="${escapeHtml(target)}" data-homework-field="${field}" data-homework-value="${!marks[field]}" aria-pressed="${Boolean(marks[field])}" ${disabled}><ha-icon icon="${marks[field]?"mdi:checkbox-marked":"mdi:checkbox-blank-outline"}"></ha-icon>${label}</button>`;
+    let title="Homework", body="";
+    if (modal.type==="reading" || modal.type==="tables") {
+      title=modal.type==="reading"?"Log a reading":"Log a tables session";
+      body=`<div class="homework-form"><label>Date<input type="date" data-homework-input="date" value="${escapeHtml(modal.form?.date || this._homeworkData.today)}" min="${shiftDateKey(this._homeworkData.today,-6)}" max="${escapeHtml(this._homeworkData.today)}"></label>${modal.type==="reading"?`<label>Book title<input value="${escapeHtml(modal.form?.book || "")}" data-homework-input="book" maxlength="160" placeholder="What did you read?"></label><label>Pages / chapter (optional)<input value="${escapeHtml(modal.form?.pages || "")}" data-homework-input="pages" maxlength="60" placeholder="For example: pages 12–20"></label><label class="homework-aloud"><input type="checkbox" data-homework-input="aloud" ${modal.form?.aloud ? "checked" : ""}> I read aloud with an adult</label>`:'<label>Practice mode<select data-homework-input="mode"><option>Learn</option><option>Play</option><option>Test</option></select></label><p>This is your family log. Your teacher’s record stays in Tackling Tables.</p>'}</div><button type="button" class="homework-primary" data-homework-save-session ${disabled}>${this._homeworkBusy?"Saving…":"Save session"}</button>`;
+    } else if (modal.type==="spell_record") {
+      const routine=child.routines.find(r=>r.kind==="spelling"), plan=child.plans.find(p=>p.kind==="spelling" && p.due===routine?.due);
+      title="Spelling test & school sheet";
+      body=`<p>School test ${escapeHtml(this._homeworkDate(routine?.due))}. Practice results in the dashboard are separate.</p><div class="homework-checklist">${routine?mark(routine.id,"test_done","School spelling test completed",routine.marks):""}${plan?mark(plan.id,"handwriting","Handwriting practice finished",plan.marks)+mark(plan.id,"handed_in","Spelling sheet handed in",plan.marks):""}</div>${plan?`<div class="homework-document-links">${plan.links.map(link=>`<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)} <ha-icon icon="mdi:arrow-top-right"></ha-icon></a>`).join("")}</div>`:""}<h3>Recent spelling practice</h3><div class="homework-session-list">${child.logs.filter(log=>log.kind==="spelling").sort((a,b)=>b.date.localeCompare(a.date)).map(log=>`<div><span>${escapeHtml(this._homeworkDate(log.date))} · ${escapeHtml(log.details.mode)}</span><strong>${log.details.score}/${log.details.total}</strong></div>`).join("")||"<p>No practice results logged yet.</p>"}</div>`;
+    } else if (modal.type==="record") {
+      title="Reading record & books";
+      body=`<p>Return ${escapeHtml(this._homeworkDate(reading?.due))} · ${reading?.count || 0}/${reading?.goal || 3} readings logged.</p><p>The school reading record still needs to be written and signed by an adult.</p><div class="homework-checklist">${[["record_written","Readings written in the school record"],["adult_signed","An adult has signed the school record"],["books_ready","Books and reading record packed"],["returned","Returned to school"]].map(([key,label])=>mark(reading.id,key,label,reading.marks)).join("")}</div><h3>Recent readings</h3><div class="homework-session-list">${child.logs.filter(log=>log.kind==="reading").sort((a,b)=>b.date.localeCompare(a.date)).map(log=>`<div><span><strong>${escapeHtml(log.details.book)}</strong><small>${escapeHtml(this._homeworkDate(log.date))}${log.details.pages?` · ${escapeHtml(log.details.pages)}`:""}${log.details.aloud?" · Read aloud":""}</small></span><button type="button" data-homework-remove-log="${log.id}" aria-label="Remove reading ${escapeHtml(log.details.book)}" ${disabled}><ha-icon icon="mdi:close"></ha-icon></button></div>`).join("")||'<p>No readings logged yet.</p>'}</div>`;
+    } else if (modal.type==="plan") {
+      const plan=child.plans.find(p=>p.id===modal.planId); if(!plan)return "";
+      title=plan.title;body=`<p>${escapeHtml(plan.subject || "School work")} · due ${escapeHtml(this._homeworkDate(plan.due))}</p><p class="homework-notes">${escapeHtml(plan.notes || "Follow the school sheet.")}</p><div class="homework-document-links">${plan.links.map(link=>`<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)} <ha-icon icon="mdi:arrow-top-right"></ha-icon></a>`).join("")}</div><div class="homework-checklist">${plan.kind==="spelling"?mark(plan.id,"handwriting","Handwriting practice finished",plan.marks):mark(plan.id,"finished","Finished at home",plan.marks)}${mark(plan.id,"handed_in","Handed in at school",plan.marks)}</div><small>School source: ${escapeHtml(plan.source)}. Ticking these updates your family hub; it does not submit work online.</small>`;
+    } else if (modal.type==="spelling") {
+      const plan=child.plans.find(p=>p.id===modal.planId);if(!plan)return "";
+      title=modal.mode==="Mock test"?"Mock spelling test":"Spelling practice";
+      const result=modal.results || [], finished=result.length===plan.words.length;
+      if(finished) body=`<p class="homework-spelling-score">${result.filter(r=>r.correct).length} / ${result.length}</p><p>${modal.mode==="Mock test"?"Your practice result. The school test is separate.":"Good practice. Look at any words to try again."}</p><div class="homework-spelling-results">${result.map(r=>`<div><span>${escapeHtml(r.word)}</span><small>${r.correct?"Correct":`You wrote: ${escapeHtml(r.answer || "—")}`}</small></div>`).join("")}</div><button type="button" class="homework-primary" data-homework-save-spelling ${disabled}>Save practice result</button>`;
+      else body=`<div class="homework-spelling-mode"><button type="button" data-homework-mode="Practice" aria-pressed="${modal.mode!=="Mock test"}" ${result.length?"disabled":""}>Practice</button><button type="button" data-homework-mode="Mock test" aria-pressed="${modal.mode==="Mock test"}" ${result.length?"disabled":""}>Mock test</button></div><p class="homework-spelling-position">Word ${result.length+1} of ${plan.words.length}</p><button type="button" class="homework-speak" data-homework-hear><ha-icon icon="mdi:volume-high"></ha-icon>Hear the word</button><p class="homework-caption">If sound is unavailable, ask an adult to read the word aloud.</p>${modal.mode!=="Mock test"?`<button type="button" class="homework-peek" data-homework-peek>${modal.peek?escapeHtml(plan.words[result.length]):"Peek at this word"}</button>`:'<details><summary>Words for an adult to read aloud</summary><p>'+escapeHtml(plan.words.join(", "))+'</p></details>'}<label class="homework-spelling-answer">Your spelling<input data-homework-input="answer" value="${escapeHtml(modal.form?.answer || "")}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Your spelling"></label><button type="button" class="homework-primary" data-homework-answer>${modal.mode==="Mock test"?"Next word":"Check & next"}</button>${modal.feedback?`<p role="status">${escapeHtml(modal.feedback)}</p>`:""}`;
+    }
+    return `<div class="planner-modal-backdrop"><section class="planner-modal homework-modal" role="dialog" aria-modal="true" aria-labelledby="homework-modal-title"><header><p class="eyebrow">${escapeHtml(child.name)} · Homework</p><h2 id="homework-modal-title">${escapeHtml(title)}</h2><button type="button" class="planner-modal-close" data-homework-close aria-label="Close homework"><ha-icon icon="mdi:close"></ha-icon></button></header><div class="homework-modal-body">${modal.error?`<p role="alert" class="homework-error">${escapeHtml(modal.error)}</p>`:""}${body}</div><footer><button type="button" data-homework-close ${this._homeworkBusy?"disabled":""}>Done</button><small>Saved privately in Home Assistant</small></footer></section></div>`;
+  }
+
+  _closeHomeworkModal() { if(this._homeworkBusy)return;this._homeworkModal=null;globalThis.speechSynthesis?.cancel();this._scheduleRender(true); }
+
+  async _saveHomeworkProgress(payload, close=false) {
+    if(this._config.display.read_only || this._homeworkBusy || !this._config.school?.homework_enabled)return;
+    this._homeworkBusy=true;
+    const modal=this._homeworkModal;
+    const action={...payload,person_id:modal?.personId || this._familyPersonId};
+    const key=JSON.stringify(action);
+    if(!this._homeworkPending || this._homeworkPending.key!==key) this._homeworkPending={key,payload:{...action,request_id:globalThis.crypto?.randomUUID?.() || `homework_${Date.now()}_${Math.random().toString(36).slice(2)}`}};
+    try{this._homeworkData=await this._homeworkRequest({type:"family_dashboard_homework/progress",payload:this._homeworkPending.payload});this._homeworkPending=null;if(close)this._homeworkModal=null;else if(modal)modal.error="";}
+    catch{if(modal)modal.error="This could not be saved. Check the connection and try again. Your earlier progress is kept.";}
+    finally{this._homeworkBusy=false;this._scheduleRender(true);}
+  }
+
+  _handleHomeworkClick(target) {
+    if(target.dataset.homeworkOpen!==undefined){if(!this._config.school?.homework_enabled)return true;this._view="family";this._familyPersonId=target.dataset.homeworkOpen;this._taskSection="homework";this._scheduleRender(true);void this._loadHomework(true);return true;}
+    if(target.dataset.homeworkRefresh!==undefined){void this._loadHomework(true);return true;}
+    if(target.dataset.homeworkModal || target.dataset.homeworkPlan || target.dataset.homeworkSpell){if(!this._config.school?.homework_enabled)return true;this._homeworkModal={type:target.dataset.homeworkModal || (target.dataset.homeworkPlan?"plan":"spelling"),personId:this._familyPersonId,planId:target.dataset.homeworkPlan || target.dataset.homeworkSpell,mode:"Practice",results:[]};this._scheduleRender(true);return true;}
+    const modal=this._homeworkModal;
+    if(!modal)return false;
+    if(target.dataset.homeworkClose!==undefined){this._closeHomeworkModal();return true;}
+    if(this._homeworkBusy)return true;
+    if(target.dataset.homeworkMark){void this._saveHomeworkProgress({operation:"mark",target:target.dataset.homeworkMark,field:target.dataset.homeworkField,value:target.dataset.homeworkValue==="true"});return true;}
+    if(target.dataset.homeworkRemoveLog){void this._saveHomeworkProgress({operation:"remove_log",id:target.dataset.homeworkRemoveLog});return true;}
+    if(target.dataset.homeworkSaveSession!==undefined){const values=Object.fromEntries([...this.shadowRoot.querySelectorAll("[data-homework-input]")].map(input=>[input.dataset.homeworkInput,input.type==="checkbox"?input.checked:input.value]));if(modal.type==="reading"&&!values.book?.trim()){modal.error="Enter the book you read.";this._scheduleRender(true);return true;}void this._saveHomeworkProgress({operation:"log",kind:modal.type,date:values.date,details:values},true);return true;}
+    const plan=this._homeworkChild(modal.personId)?.plans.find(p=>p.id===modal.planId);
+    if(modal.type!=="spelling" || !plan)return true;
+    if(target.dataset.homeworkMode){modal.mode=target.dataset.homeworkMode;this._scheduleRender(true);return true;}
+    if(target.dataset.homeworkPeek!==undefined){modal.peek=!modal.peek;this._scheduleRender(true);return true;}
+    if(target.dataset.homeworkHear!==undefined){if(globalThis.speechSynthesis && globalThis.SpeechSynthesisUtterance){const utterance=new SpeechSynthesisUtterance(plan.words[modal.results.length]);utterance.lang="en-GB";utterance.rate=.8;globalThis.speechSynthesis.cancel();globalThis.speechSynthesis.speak(utterance);}else{modal.error="Sound is unavailable here. An adult can read the words aloud.";this._scheduleRender(true);}return true;}
+    if(target.dataset.homeworkAnswer!==undefined){const answer=this.shadowRoot.querySelector('[data-homework-input="answer"]')?.value.trim() || "",word=plan.words[modal.results.length];if(!answer){modal.error="Type your spelling first.";this._scheduleRender(true);return true;}const correct=answer.toLocaleLowerCase("en-GB").normalize("NFC")===word.toLocaleLowerCase("en-GB").normalize("NFC");modal.results.push({word,answer,correct});modal.feedback=modal.mode==="Mock test"?"":correct?"Correct. Ready for the next word.":`That word was ${word}. Keep practising.`;modal.peek=false;modal.error="";modal.form={};this._scheduleRender(true);return true;}
+    if(target.dataset.homeworkSaveSpelling!==undefined){void this._saveHomeworkProgress({operation:"log",kind:"spelling",details:{plan_id:plan.id,score:modal.results.filter(r=>r.correct).length,total:plan.words.length,mode:modal.mode}},true);return true;}
+    return true;
+  }
+
   _renderFamily() {
     const locationEnabled = this._config.features.location_map;
     const choresEnabled = this._config.features.chores === true;
     const familyTitle = choresEnabled ? "Tasks, jobs & rewards" : this._config.features.school ? "School & tasks" : "Tasks";
     const children = this._config.people.filter((person) => person.role === "child");
-    if (!locationEnabled) {
+    if (!locationEnabled || this._taskSection === "homework") {
       const selected = children.find((person) => person.id === this._familyPersonId) || children[0];
       const tabs = children.map((person) => `<button type="button" class="family-kid-tab ${selected?.id === person.id ? "is-selected" : ""}" data-family-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}" aria-pressed="${selected?.id === person.id}"><span>${escapeHtml(person.name.slice(0, 1))}</span><strong>${escapeHtml(person.name)}</strong></button>`).join("");
       return `
         <section class="family-dashboard${children.length > 1 ? " has-kid-switcher" : ""}${this._choreClaimFeedback ? " has-claim-feedback" : ""}">
-          <header class="family-dashboard-heading"><div class="task-section-tabs segments" role="group" aria-label="Tasks section">${[["jobs", "Jobs"], ["ready", "Get ready"], ["rewards", "Rewards"]].map(([id, label]) => `<button type="button" class="segment ${(this._taskSection || "jobs") === id ? "is-selected" : ""}" data-task-section="${id}" aria-pressed="${(this._taskSection || "jobs") === id}">${label}</button>`).join("")}</div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
+          <header class="family-dashboard-heading"><div class="task-section-tabs segments" role="group" aria-label="Tasks section">${[["jobs", "Jobs"], ["ready", "Get ready"], ...(this._config.school?.homework_enabled ? [["homework", "Homework"]] : []), ["rewards", "Rewards"]].map(([id, label]) => `<button type="button" class="segment ${(this._taskSection || "jobs") === id ? "is-selected" : ""}" data-task-section="${id}" aria-pressed="${(this._taskSection || "jobs") === id}">${label}</button>`).join("")}</div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
           ${children.length > 1 ? `<div class="family-kid-switcher" role="group" aria-label="Choose family member">${tabs}</div>` : ""}
           ${this._choreClaimFeedback ? `<p class="chore-claim-feedback" role="status"><ha-icon icon="mdi:check-circle"></ha-icon>${escapeHtml(this._choreClaimFeedback)}</p>` : ""}
-          <div class="family-kid-stage">${selected ? this._renderFamilyPerson(selected, { kidMode: true }) : '<p class="hub-empty-state large">Add a child in Family Dashboard Admin to connect ChoreOps.</p>'}</div>
+          <div class="family-kid-stage">${selected ? this._taskSection === "homework" ? this._renderHomework(selected) : this._renderFamilyPerson(selected, { kidMode: true }) : '<p class="hub-empty-state large">Add a child in Family Dashboard Admin to connect ChoreOps.</p>'}</div>
         </section>
       `;
     }
@@ -5495,6 +5653,17 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     this._armPhotoFrameIdleTimer();
+    if (this._homeworkModal) {
+      if (event.key === "Escape") { event.preventDefault(); this._closeHomeworkModal(); }
+      if (event.key === "Enter" && event.target.matches?.('[data-homework-input="answer"]')) { event.preventDefault(); this.shadowRoot.querySelector("[data-homework-answer]")?.click(); }
+      if (event.key === "Tab") {
+        const controls=[...this.shadowRoot.querySelectorAll('.homework-modal button:not([disabled]), .homework-modal input, .homework-modal select, .homework-modal a, .homework-modal summary')];
+        const first=controls[0],last=controls.at(-1),active=this.shadowRoot.activeElement;
+        if(event.shiftKey&&(active===first||!controls.includes(active))){event.preventDefault();last?.focus();}
+        else if(!event.shiftKey&&(active===last||!controls.includes(active))){event.preventDefault();first?.focus();}
+      }
+      return;
+    }
     if (this._devicePhotoModal) {
       if (event.key === "Escape" && !this._devicePhotoBusy) { event.preventDefault(); this._closeDevicePhotos(); }
       if (event.key === "Tab") {
@@ -5630,6 +5799,11 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _handleInput(event) {
+    if (this._homeworkModal && event.target.dataset?.homeworkInput) {
+      this._homeworkModal.form ||= {};
+      this._homeworkModal.form[event.target.dataset.homeworkInput] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+      return;
+    }
     const lightBrightness = event.target.closest?.("[data-light-brightness]");
     if (lightBrightness) {
       const brightnessPct = Math.max(1, Math.min(100, Math.round(Number(lightBrightness.value))));
@@ -5824,6 +5998,7 @@ export class FamilyHubCard extends HTMLElementBase {
       void this._openDevicePhotos(); return;
     }
     this._armPhotoFrameIdleTimer();
+    if (this._handleHomeworkClick(target)) return;
     if (this._plannerModal?.type === "heating") {
       if (target.dataset.plannerClose !== undefined) this._closeHeatingSchedule();
       else if (target.dataset.heatingScheduleApply) void this._saveHeatingSchedule(target.dataset.heatingScheduleApply);
@@ -5861,7 +6036,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (this._pendingConfirmation && !target.dataset.confirmAction) return;
     for (const [key, property, allowed] of [
       ["roomSection", "_roomDetailSection", ["lights", "comfort", "scenes", "music"]],
-      ["taskSection", "_taskSection", ["jobs", "ready", "rewards"]],
+      ["taskSection", "_taskSection", ["jobs", "ready", "homework", "rewards"]],
       ["cleaningSection", "_cleaningSection", ["clean", "settings", "care"]],
       ["squadSection", "_squadSection", ["starters", "bench"]]
     ]) {

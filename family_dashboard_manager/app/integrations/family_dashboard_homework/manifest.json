@@ -1,0 +1,12 @@
+{
+  "domain": "family_dashboard_homework",
+  "name": "Family Dashboard Homework",
+  "version": "1.0.0",
+  "codeowners": ["@robwestwood1978"],
+  "config_flow": true,
+  "dependencies": ["http", "websocket_api"],
+  "documentation": "https://github.com/robwestwood1978/family-dashboard",
+  "iot_class": "local_push",
+  "integration_type": "service",
+  "requirements": []
+}

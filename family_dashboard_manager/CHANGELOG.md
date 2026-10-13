@@ -1,3 +1,10 @@
+## 0.20.0
+
+- Add a private, shared Homework area in Tasks with reading logs, school-record readiness, weekly spelling practice and mock tests, Tackling Tables session logging, and dated homework with separate completion and hand-in states.
+- Add parent Homework management to Admin: per-child weekly deadlines and goals, holiday pauses, separate maths sheets, DOCX extraction for review, document links, explicit publishing and archiving.
+- Surface school deadlines in Today and Calendar. Weekly routines continue without a Classroom connection; dated word lists and assignments never roll forward automatically.
+- Bundle an authenticated local Home Assistant integration with atomic storage, guarded parent edits, bounded progress actions and idempotent retries. Install its fixed files from Admin, restart Home Assistant and add the integration once.
+
 ## 0.19.1
 
 - Request compatible JPEG/PNG copies from the iPad photo-library picker instead of accepting original HEIC files. Preserve local-only storage and original library photos.
