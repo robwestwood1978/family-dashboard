@@ -1,7 +1,7 @@
 {
   "domain": "family_dashboard_homework",
   "name": "Family Dashboard Homework",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "codeowners": ["@robwestwood1978"],
   "config_flow": true,
   "dependencies": ["http", "websocket_api"],

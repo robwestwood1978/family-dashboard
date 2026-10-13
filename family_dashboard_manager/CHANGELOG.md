@@ -1,3 +1,8 @@
+## 0.20.1
+
+- Accept the chunked requests used by the Home Assistant Supervisor proxy when parents save homework. Enforce the upload limit on streamed bytes, even without a Content-Length header.
+- Add the shared homework component updater in Admin so a Manager app update can be applied to the local integration without removing its configuration or saved data.
+
 ## 0.20.0
 
 - Add a private, shared Homework area in Tasks with reading logs, school-record readiness, weekly spelling practice and mock tests, Tackling Tables session logging, and dated homework with separate completion and hand-in states.
