@@ -19,7 +19,7 @@ const illustrationSource = await readFile(new URL("../frontend/assets/home-illus
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.19.1";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.20.0";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -826,6 +826,16 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       },
       async callWS(message) {
         window.__wsCalls.push(message);
+        if (message?.type === "family_dashboard_homework/get") return runtimeOptions.homeworkData;
+        if (message?.type === "family_dashboard_homework/progress") {
+          if (runtimeOptions.homeworkReject) throw new Error("simulated storage failure");
+          const child=runtimeOptions.homeworkData.children.find(c=>c.id===message.payload.person_id);
+          if(message.payload.operation==="log") {
+            child.logs.push({id:`log-${window.__wsCalls.length}`,person_id:child.id,kind:message.payload.kind,date:message.payload.date||runtimeOptions.homeworkData.today,details:message.payload.details});
+            const routine=child.routines.find(r=>r.kind===message.payload.kind);if(routine)routine.count++;
+          }
+          return runtimeOptions.homeworkData;
+        }
         if (message?.type === "calendar/events") return [{ summary: "Protocol event" }];
         if (message?.type === "call_service" && message?.domain === "todo" && message?.service === "get_items") {
           return { response: { [message.target?.entity_id]: { items: runtimeOptions.preparationItems || [] } } };
@@ -4771,4 +4781,73 @@ test("refined sections keep controls reachable without changing household state"
   }
   expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
   expect(errors).toEqual([]);
+});
+
+function homeworkFixture() {
+  const today="2026-10-13", first=config.people.find(p=>p.role==="child");
+  return {revision:1,today,children:[{id:first.id,name:first.name,year:"Year 4",reading_day:2,reading_goal:3,spelling_day:1,homework_day:1,maths_set_day:1,maths_day:4,tables_goal:3,plans:[{id:"a".repeat(32),person_id:first.id,kind:"spelling",title:"Weekly spelling",due:today,set_date:"2026-10-09",words:["cloud","solid"],notes:"Practise handwriting",links:[],source:"School sheet",marks:{}}],logs:[],routines:[{id:`${first.id}:reading:2026-10-14`,kind:"reading",due:"2026-10-14",title:"Return reading record and books",goal:3,count:0,marks:{},plan_ids:[]},{id:`${first.id}:spelling:${today}`,kind:"spelling",due:today,title:"Spelling test",goal:0,count:0,marks:{},plan_ids:["a".repeat(32)]},{id:`${first.id}:tables:${today}`,kind:"tables",due:today,title:"Tackling Tables",goal:3,count:0,marks:{},plan_ids:[]},{id:`${first.id}:assignment:${today}`,kind:"assignment",due:today,title:"Hand in weekly homework",goal:0,count:0,marks:{},plan_ids:[]},{id:`${first.id}:maths:2026-10-16`,kind:"maths",due:"2026-10-16",title:"Hand in maths homework",goal:0,count:0,marks:{},plan_ids:[]}]}]};
+}
+
+test("homework reading log saves centrally and fits the tablet",async({page},testInfo)=>{
+  const family=locationDisabledConfig();family.school.homework_enabled=true;
+  const errors=await mount(page,family,{}, {homeworkData:homeworkFixture()});
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="family"]').click();
+  await card.locator('[data-task-section="homework"]').click();
+  await expect(card.locator(".homework-workspace")).toBeVisible();
+  await expect(card.locator(".homework-reading")).toContainText("0/3");
+  const bounds=await card.locator(".homework-workspace").evaluate(node=>({width:node.clientWidth,scrollWidth:node.scrollWidth,height:node.clientHeight,scrollHeight:node.scrollHeight}));
+  expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.width+1);
+  expect(bounds.scrollHeight).toBeLessThanOrEqual(bounds.height+2);
+  await page.screenshot({path:`/private/tmp/homework-${testInfo.project.name}.png`});
+  await card.getByRole("button",{name:"Log a reading",exact:true}).click();
+  await card.locator('[data-homework-input="book"]').fill("The little robot");
+  await card.getByRole("button",{name:"Save session",exact:true}).click();
+  await expect(card.locator(".homework-modal")).toHaveCount(0);
+  await expect(card.locator(".homework-reading")).toContainText("1/3");
+  await card.getByRole("button",{name:"Reading record",exact:true}).click();
+  await expect(card.locator(".homework-modal")).toContainText("The little robot");
+  expect(errors).toEqual([]);
+});
+
+test("homework mock spelling hides answers until the end and saves the result",async({page})=>{
+  const family=locationDisabledConfig();family.school.homework_enabled=true;
+  await mount(page,family,{}, {homeworkData:homeworkFixture()});
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="family"]').click();await card.locator('[data-task-section="homework"]').click();
+  await card.getByRole("button",{name:"Practise spelling",exact:true}).click();
+  await card.getByRole("button",{name:"Mock test",exact:true}).click();
+  await expect(card.locator("[data-homework-peek]")).toHaveCount(0);
+  await card.getByRole("textbox",{name:"Your spelling",exact:true}).fill("cloud");
+  await card.getByRole("textbox",{name:"Your spelling",exact:true}).press("Enter");
+  await expect(card.locator(".homework-modal-body")).not.toContainText("Correct.");
+  await card.getByRole("textbox",{name:"Your spelling",exact:true}).fill("solidd");
+  await card.getByRole("button",{name:"Next word",exact:true}).click();
+  await expect(card.locator(".homework-spelling-score")).toHaveText("1 / 2");
+  await card.getByRole("button",{name:"Save practice result",exact:true}).click();
+  const saved=await page.evaluate(()=>window.__wsCalls.filter(c=>c.type==="family_dashboard_homework/progress").at(-1));
+  expect(saved.payload.details).toEqual({plan_id:"a".repeat(32),score:1,total:2,mode:"Mock test"});
+});
+
+test("homework failed save retains progress and read-only cannot write",async({page})=>{
+  const family=locationDisabledConfig();family.school.homework_enabled=true;
+  await mount(page,family,{}, {homeworkData:homeworkFixture(),homeworkReject:true});
+  const card=page.locator("family-hub-card");await card.locator('.hub-nav-button[data-view="family"]').click();await card.locator('[data-task-section="homework"]').click();
+  await card.getByRole("button",{name:"Log a reading",exact:true}).click();await card.locator('[data-homework-input="book"]').fill("Book");await card.getByRole("button",{name:"Save session",exact:true}).click();
+  await expect(card.getByRole("alert")).toContainText("could not be saved");
+  await expect(card.locator(".homework-reading")).toContainText("0/3");
+  await card.getByRole("button",{name:"Done",exact:true}).click();
+  await card.evaluate(node=>{node._config.display.read_only=true;node._scheduleRender(true);});
+  await expect(card.getByRole("button",{name:"Log a reading",exact:true})).toBeDisabled();
+});
+
+
+test("homework portrait keeps all primary buttons visible",async({page})=>{
+  await page.setViewportSize({width:834,height:1112});
+  const family=locationDisabledConfig();family.school.homework_enabled=true;
+  await mount(page,family,{}, {homeworkData:homeworkFixture()});
+  const card=page.locator("family-hub-card");await card.locator('.hub-nav-button[data-view="family"]').click();await card.locator('[data-task-section="homework"]').click();
+  const bounds=await card.locator(".homework-workspace").evaluate(node=>({width:node.clientWidth,scrollWidth:node.scrollWidth,height:node.clientHeight,scrollHeight:node.scrollHeight}));
+  expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.width+1);expect(bounds.scrollHeight).toBeLessThanOrEqual(bounds.height+2);
+  await expect(card.getByRole("button",{name:"Log a session",exact:true})).toBeVisible();
 });

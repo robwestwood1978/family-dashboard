@@ -10,6 +10,18 @@ import { ClassroomIntegrationStore } from "../src/classroom-integration-store.mj
 import { DashboardStore } from "../src/manager-store.mjs";
 import { createManagerApp } from "../src/server.mjs";
 
+test("homework operational routes require ingress and mutation header", async (context) => {
+  let mutations=0;
+  const app=createManagerApp({authorizeAdmin:request=>request.get("X-Test-Admin")==="yes",homeworkAdmin:async(body)=>{if(body)mutations++;return {data:{revision:3},preview:{children:[]}};}});
+  const listener=app.listen(0,"127.0.0.1");await once(listener,"listening");context.after(()=>listener.close());
+  const url=`http://127.0.0.1:${listener.address().port}/api/admin/homework`;
+  assert.equal((await fetch(url)).status,403);
+  assert.equal((await fetch(url,{headers:{"X-Test-Admin":"yes"}})).status,200);
+  assert.equal((await fetch(url,{method:"POST",headers:{"X-Test-Admin":"yes","Content-Type":"application/json"},body:"{}"})).status,403);
+  const updated=await fetch(url,{method:"POST",headers:{"X-Test-Admin":"yes","X-Family-Dashboard-Admin":"1","Content-Type":"application/json"},body:JSON.stringify({operation:"profiles",expected_revision:3,payload:{profiles:[]}})});
+  assert.equal(updated.status,200);assert.equal(mutations,1);
+});
+
 test("serves health and the bounded MCP tool surface", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "family-dashboard-server-"));
   const store = new DashboardStore({
@@ -37,7 +49,7 @@ test("serves health and the bounded MCP tool surface", async (context) => {
 
   const health = await fetch(`http://127.0.0.1:${port}/healthz`);
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: "ok", version: "0.19.1" });
+  assert.deepEqual(await health.json(), { status: "ok", version: "0.20.0" });
   const blockedAdmin = await fetch(`http://127.0.0.1:${port}/`);
   assert.equal(blockedAdmin.status, 403);
 

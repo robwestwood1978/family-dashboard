@@ -552,6 +552,7 @@
       "additionalProperties": false,
       "required": ["classroom_students", "calendar_entities", "scopay_calendar_entities"],
       "properties": {
+        "homework_enabled": { "type": "boolean", "description": "Show shared homework, spelling practice and reading logs in Tasks. Requires the local Family Dashboard Homework integration." },
         "source": {
           "enum": ["classroom", "calendar"],
           "description": "Classroom uses the read-only API sensors. Calendar is the admin-independent fallback and uses the configured school calendars."

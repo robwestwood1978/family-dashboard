@@ -5,6 +5,9 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { localhostHostValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import * as z from "zod/v4";
 import { ClassroomIntegrationStore } from "./classroom-integration-store.mjs";
+import { HomeworkIntegrationStore } from "./homework-integration-store.mjs";
+import { homeworkAdmin } from "./homework-client.mjs";
+import { extractHomework } from "./homework-import.mjs";
 import { startFootballPolling } from "./football-provider.mjs";
 import { DashboardStore } from "./manager-store.mjs";
 import { getSanitisedHomeAssistantInventory } from "./ha-client.mjs";
@@ -15,7 +18,7 @@ import {
 } from "./admin-policy.mjs";
 
 const CONFIG_SCHEMA = z.record(z.string(), z.unknown());
-const APP_VERSION = process.env.APP_VERSION || "0.19.1";
+const APP_VERSION = process.env.APP_VERSION || "0.20.0";
 const MCP_JSON_BODY_LIMIT_BYTES = 1_500_000;
 const DEFAULT_ADMIN_DIR = fileURLToPath(new URL("../admin/", import.meta.url));
 const SUPERVISOR_INGRESS_SOURCE = [172, 30, 32, 2].join(".");
@@ -265,6 +268,8 @@ export function createManagerApp(dependencies = {}) {
   const store = dependencies.store || new DashboardStore();
   const inventory = dependencies.inventory || getSanitisedHomeAssistantInventory;
   const adminDir = dependencies.adminDir || DEFAULT_ADMIN_DIR;
+  const homeworkStore = dependencies.homeworkStore || new HomeworkIntegrationStore();
+  const homework = dependencies.homeworkAdmin || homeworkAdmin;
   const authorizeAdmin = dependencies.authorizeAdmin || ((request) => {
     const remote = String(request.socket?.remoteAddress || "").replace(/^::ffff:/, "");
     return remote === SUPERVISOR_INGRESS_SOURCE
@@ -336,6 +341,26 @@ export function createManagerApp(dependencies = {}) {
     } catch (error) {
       await sendAdminError("admin_bootstrap", error, response);
     }
+  });
+  app.get("/api/admin/homework", adminOnly, async (_request, response) => {
+    try { response.json(await homework()); }
+    catch (error) { response.status(503).json({ error: error.message }); }
+  });
+  app.get("/api/admin/homework/integration", adminOnly, async (_request, response) => {
+    try { response.json(await homeworkStore.getStatus()); }
+    catch (error) { await sendAdminError("homework_integration_status", error, response); }
+  });
+  app.post("/api/admin/homework/integration", adminOnly, requireMutationHeader, async (request, response) => {
+    try { response.json(await homeworkStore.install({ expectedBundleHash: request.body?.expected_bundle_hash, expectedActiveHash: request.body?.expected_active_hash, confirm: request.body?.confirm })); }
+    catch (error) { await sendAdminError("homework_integration_install", error, response); }
+  });
+  app.post("/api/admin/homework", adminOnly, requireMutationHeader, async (request, response) => {
+    try { response.json(await homework(request.body)); }
+    catch (error) { response.status(400).json({ error: error.message }); }
+  });
+  app.post("/api/admin/homework/import", adminOnly, requireMutationHeader, (request, response) => {
+    try { response.json(extractHomework(request.body || {})); }
+    catch (error) { response.status(400).json({ error: error.message }); }
   });
   app.post("/api/admin/preview", adminOnly, requireMutationHeader, async (request, response) => {
     try {

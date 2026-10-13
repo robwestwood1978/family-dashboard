@@ -3,3 +3,18 @@
 .device-list{display:grid;gap:12px;margin:18px 0 28px}.device-item{display:flex;align-items:center;gap:18px;padding:20px;border:1px solid #dce3ed;border-radius:16px;background:white}.device-item>div{flex:1;min-width:0}.device-item h3{margin:0 0 6px;font-size:17px;font-weight:500}.device-item p{margin:0 0 6px;color:#66758b;font-size:14px}.device-item small{overflow-wrap:anywhere;color:#718096}.device-item .field{width:200px}.device-item button{font-weight:500;white-space:nowrap}.device-help,.device-empty{color:#66758b;line-height:1.6;font-size:14px}.device-item select{min-height:44px}button:focus-visible,select:focus-visible{outline:3px solid #8abaff;outline-offset:3px}@media(max-width:900px){.device-item{flex-wrap:wrap}.device-item>div{flex-basis:100%}.device-item .field{flex:1;width:auto;min-width:160px}.section-heading{flex-wrap:wrap}}
 
 .admin-sidebar,.admin-sidebar nav{min-width:0;max-width:100%}@media(max-width:900px){.admin-shell{grid-template-columns:minmax(0,1fr)}}
+/* Weekly content is operational data, separate from household deployment. */
+.homework-admin-stats,.homework-admin-actions { display:flex;flex-wrap:wrap;gap:12px;margin:18px 0;align-items:center; }
+.homework-admin-stats article { padding:18px;background:#f4f6fb;border-radius:18px;display:grid;gap:8px;min-width:220px; }
+.homework-admin-stats span,.homework-admin-plans span,.homework-admin-plans small { display:block;color:#666b75;margin-top:6px; }
+.homework-admin-rules,.homework-admin-import { padding:20px;border:1px solid #e2e4e9;border-radius:18px;margin:18px 0; }
+.homework-admin-rules summary,.homework-admin-import summary { cursor:pointer;font-weight:500;min-height:32px; }
+.homework-admin-work { margin:28px 0; }
+.homework-admin-wide { display:grid;gap:10px;margin:16px 0; }
+.homework-admin-wide textarea,[data-import-text] { font:inherit;width:100%;padding:14px;background:#f5f6f9;border:1px solid #dfe1e7;border-radius:12px; }
+.homework-admin-plans article { display:flex;gap:12px;align-items:center;padding:20px;border-bottom:1px solid #e1e3e8; }
+.homework-admin-plans article>div { flex:1; }
+.homework-publish-dialog { max-width:640px;width:calc(100% - 40px);padding:28px;border:0;border-radius:24px; }
+.homework-publish-dialog::backdrop { background:rgba(25,30,40,.38); }
+.homework-review-notes { white-space:pre-wrap;max-height:35vh;overflow:auto; }
+[hidden] { display:none!important; }
