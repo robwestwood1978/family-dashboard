@@ -4799,7 +4799,7 @@ test("homework reading log saves centrally and fits the tablet",async({page},tes
   const bounds=await card.locator(".homework-workspace").evaluate(node=>({width:node.clientWidth,scrollWidth:node.scrollWidth,height:node.clientHeight,scrollHeight:node.scrollHeight}));
   expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.width+1);
   expect(bounds.scrollHeight).toBeLessThanOrEqual(bounds.height+2);
-  await page.screenshot({path:`/private/tmp/homework-${testInfo.project.name}.png`});
+  await page.screenshot({path:resolve(tmpdir(),`homework-${testInfo.project.name}.png`)});
   await card.getByRole("button",{name:"Log a reading",exact:true}).click();
   await card.locator('[data-homework-input="book"]').fill("The little robot");
   await card.getByRole("button",{name:"Save session",exact:true}).click();
