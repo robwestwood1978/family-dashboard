@@ -4808,6 +4808,21 @@ test("Today homework reminder stays above football and opens the child’s homew
   expect(errors).toEqual([]);
 });
 
+test("Calendar school deadlines select their details and open Homework",async({page})=>{
+  const family=locationDisabledConfig();family.school.homework_enabled=true;
+  const errors=await mount(page,family,{}, {homeworkData:homeworkFixture()});
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="calendar"]').click();
+  await card.locator('[data-calendar-day]').nth(4).click();
+  const deadline=card.getByRole("button",{name:"Show Hand in maths homework checklist",exact:true});
+  await deadline.click();
+  await expect(deadline).toHaveAttribute("aria-pressed","true");
+  await expect(card.locator(".focus-event-ready")).toContainText("School deadline");
+  await card.getByRole("button",{name:"Open homework",exact:true}).click();
+  await expect(card.locator(".homework-workspace")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test("homework reading log saves centrally and fits the tablet",async({page},testInfo)=>{
   const family=locationDisabledConfig();family.school.homework_enabled=true;
   const errors=await mount(page,family,{}, {homeworkData:homeworkFixture()});

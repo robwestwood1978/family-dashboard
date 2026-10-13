@@ -3583,7 +3583,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _plannerEventByKey(eventKey) {
-    const events = this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents();
+    const events = [...(this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents()), ...this._homeworkCalendarEvents()];
     return events.find((event) => familyPlannerEventKey(event) === eventKey) || null;
   }
 

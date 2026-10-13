@@ -2,6 +2,7 @@
 
 - Reserve space for the Today homework reminder so school deadlines remain visible and tappable above football on landscape tablets.
 - Add a browser check for reminder placement and navigation.
+- Make recurring Calendar school deadlines selectable and open their Homework details.
 - Show a clear empty state when no school activities have been set.
 
 ## 0.20.1
