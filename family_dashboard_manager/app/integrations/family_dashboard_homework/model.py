@@ -129,7 +129,7 @@ def client_data(data, today):
         child["routines"] = routines(profile, today, data)
         child["plans"] = [dict(deepcopy(p), marks=deepcopy(data["marks"].get(p["id"], {}))) for p in data["plans"]
                           if p["person_id"] == profile["id"] and not p["archived"] and p["set_date"] <= today.isoformat()
-                          and p["due"] >= (today - timedelta(days=14)).isoformat()]
+                          and (p["due"] >= (today - timedelta(days=14)).isoformat() or not data["marks"].get(p["id"], {}).get("handed_in"))]
         child["logs"] = [deepcopy(log) for log in data["logs"] if log["person_id"] == profile["id"] and log["date"] >= (today - timedelta(days=14)).isoformat()]
         children.append(child)
     return {"revision": data["revision"], "today": today.isoformat(), "children": children}

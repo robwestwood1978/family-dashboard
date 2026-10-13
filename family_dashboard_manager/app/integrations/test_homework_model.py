@@ -79,4 +79,9 @@ class HomeworkModelTest(unittest.TestCase):
         self.data=model.apply_admin(self.data,"publish",{"plan":plan})
         with self.assertRaises(ValueError): model.apply_admin(self.data,"publish",{"plan":plan})
 
+    def test_unfinished_homework_stays_visible_when_overdue(self):
+        self.data=model.apply_admin(self.data,"publish",{"plan":{"person_id":"child_one","kind":"assignment","title":"School sheet","set_date":"2026-09-01","due":"2026-09-08"}})
+        child=model.client_data(self.data,self.today)["children"][0]
+        self.assertEqual(child["plans"][0]["title"],"School sheet")
+
 if __name__ == "__main__": unittest.main()
