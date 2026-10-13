@@ -2,11 +2,25 @@
 from copy import deepcopy
 from datetime import date, timedelta
 import re
+import json
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 DAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 KINDS = ("assignment", "spelling", "maths", "activity")
+
+
+async def read_admin_payload(chunks, limit=128 * 1024):
+    """Accept chunked Supervisor requests while enforcing a strict byte cap."""
+    buffer = bytearray()
+    async for chunk in chunks:
+        if len(buffer) + len(chunk) > limit:
+            raise ValueError("Homework update is too large")
+        buffer.extend(chunk)
+    payload = json.loads(buffer)
+    if not isinstance(payload, dict):
+        raise ValueError("Homework update must be an object")
+    return payload
 
 
 def text(value, limit=400, required=False):

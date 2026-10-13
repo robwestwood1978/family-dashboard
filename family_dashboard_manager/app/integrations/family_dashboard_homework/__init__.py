@@ -11,7 +11,7 @@ from homeassistant.auth.permissions.const import POLICY_READ, POLICY_CONTROL
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .model import apply_admin, apply_progress, client_data, empty_data
+from .model import apply_admin, apply_progress, client_data, empty_data, read_admin_payload
 
 DOMAIN = "family_dashboard_homework"
 ENTITY = "sensor.family_dashboard_homework_revision"
@@ -108,9 +108,9 @@ class HomeworkAdminView(HomeAssistantView):
         if runtime is None:
             return self.json({"error": "Homework integration is not set up"}, status_code=503)
         try:
-            if request.content_length is None or request.content_length > 128 * 1024:
+            if request.content_length is not None and request.content_length > 128 * 1024:
                 raise ValueError("Homework update is too large")
-            body = await request.json()
+            body = await read_admin_payload(request.content.iter_chunked(16384))
             async with runtime.lock:
                 if body.get("expected_revision") != runtime.data["revision"]:
                     return self.json({"error": "Homework changed on another device. Reload this page before saving"}, status_code=409)

@@ -84,4 +84,20 @@ class HomeworkModelTest(unittest.TestCase):
         child=model.client_data(self.data,self.today)["children"][0]
         self.assertEqual(child["plans"][0]["title"],"School sheet")
 
+class HomeworkProxyTest(unittest.IsolatedAsyncioTestCase):
+    async def chunks(self, *parts):
+        for part in parts:
+            yield part
+
+    async def test_accepts_chunked_request_without_content_length(self):
+        body=await model.read_admin_payload(self.chunks(b'{"operation":',b'"profiles","payload":{}}'))
+        self.assertEqual(body,{"operation":"profiles","payload":{}})
+
+    async def test_rejects_oversized_chunked_or_non_object_body(self):
+        with self.assertRaisesRegex(ValueError,"too large"):
+            await model.read_admin_payload(self.chunks(b"a"*8,b"b"*8),limit=10)
+        with self.assertRaisesRegex(ValueError,"object"):
+            await model.read_admin_payload(self.chunks(b"[]"))
+
+
 if __name__ == "__main__": unittest.main()
