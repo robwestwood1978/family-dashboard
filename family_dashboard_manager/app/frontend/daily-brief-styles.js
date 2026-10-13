@@ -1543,6 +1543,10 @@ export const DAILY_BRIEF_STYLES = `
     .hub-content:has(.calendar-view) { grid-template-rows:0 minmax(0,1fr); gap:0; }
     .today-grid.focus-today,.today-grid.focus-today:has(.today-football) { grid-template-rows:minmax(0,1fr) 170px 48px; gap:8px 24px; }
     .focus-today-plan { grid-template-rows:minmax(0,1fr) 144px; }
+    .focus-today-plan:has(.homework-today) { grid-template-rows:minmax(0,1fr) max-content; }
+    .focus-today .today-family:has(.homework-today) { min-height:max-content; }
+    .focus-today .today-family:has(.homework-today) > * { flex:none; }
+    .focus-today .homework-today { margin-top:4px; padding-top:4px; }
     .focus-today .today-next > :is(h2,p) { flex:none; }
     .club-overview.is-compact > header .team-mark { width:22px; height:22px; min-width:22px; }
     .club-overview.is-compact > header { min-height:22px; }

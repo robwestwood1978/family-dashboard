@@ -1,3 +1,9 @@
+## 0.20.2
+
+- Reserve space for the Today homework reminder so school deadlines remain visible and tappable above football on landscape tablets.
+- Add a browser check for reminder placement and navigation.
+- Show a clear empty state when no school activities have been set.
+
 ## 0.20.1
 
 - Accept the chunked requests used by the Home Assistant Supervisor proxy when parents save homework. Enforce the upload limit on streamed bytes, even without a Content-Length header.
