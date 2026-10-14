@@ -1,3 +1,10 @@
+## 0.21.0
+
+- Add one family viewing picker across Today, Calendar, Tasks and Homework, remembering each person’s calendar position and task section on this device. Selecting a parent keeps child jobs in a clear overview and never changes Home Assistant identity or control permissions.
+- Bring school returns forward in the morning, homework and spelling after school, and reading in the evening. Keep overdue work visible, respect holiday pauses and completed hand-ins, and limit Today to two direct actions. After-school and evening hours are editable in Parent Admin.
+- Add discreet weather and a shared family/school reminder to both device-local and Home Assistant photo albums. Update the context without replacing the photo, and return to Today on tap or configured camera motion. Personal-calendar content stays off the photo frame.
+- Preserve the approved light surfaces, restrained typography, local-photo storage and protected camera/alarm/garage controls.
+
 ## 0.20.2
 
 - Reserve space for the Today homework reminder so school deadlines remain visible and tappable above football on landscape tablets.

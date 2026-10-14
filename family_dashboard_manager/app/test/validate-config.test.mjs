@@ -453,3 +453,13 @@ test("allows an explicit dashboard appearance without requiring it in existing h
   invalid.display.appearance = "sepia";
   assert.throws(() => validateConfig(invalid), /appearance/);
 });
+
+test("allows configurable day rhythm and ambient details without changing existing households", () => {
+  const config = structuredClone(example);
+  config.display.day_rhythm={after_school_hour:16,evening_hour:20};
+  config.display.photo_frame.show_weather=true;
+  config.display.photo_frame.show_reminder=false;
+  assert.equal(validateConfig(config).display.day_rhythm.evening_hour,20);
+  config.display.day_rhythm={after_school_hour:18,evening_hour:18};
+  assert.throws(()=>validateConfig(config),/must be later/);
+});

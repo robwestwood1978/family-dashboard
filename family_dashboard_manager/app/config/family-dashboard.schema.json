@@ -63,6 +63,15 @@
         "panel_path": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
         "target_width": { "type": "integer", "minimum": 768, "maximum": 2560 },
         "target_height": { "type": "integer", "minimum": 600, "maximum": 1600 },
+        "day_rhythm": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Choose when Today brings school work and evening reading forward. Times use your household timezone.",
+          "properties": {
+            "after_school_hour": { "type": "integer", "minimum": 12, "maximum": 18, "default": 15, "description": "After-school view starts at this hour: 15 means 3 pm." },
+            "evening_hour": { "type": "integer", "minimum": 18, "maximum": 23, "default": 19, "description": "Evening reading and tomorrow's preparation start at this hour: 19 means 7 pm." }
+          }
+        },
         "photo_frame": {
           "type": "object",
           "additionalProperties": false,
@@ -76,7 +85,9 @@
               "pattern": "^media-source://media_source/local/family-dashboard(?:/[A-Za-z0-9._-]+)*$"
             },
             "motion_entity": { "$ref": "#/$defs/binarySensorEntityId" },
-            "show_clock": { "type": "boolean" }
+            "show_clock": { "type": "boolean" },
+            "show_weather": { "type": "boolean", "default": true, "description": "Show current weather over the family photos." },
+            "show_reminder": { "type": "boolean", "default": true, "description": "Show the next school deadline, or the next shared family plan. Personal calendar entries stay out of the photo screen." }
           }
         }
       }

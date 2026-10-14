@@ -1,6 +1,51 @@
 // Shared presentation only. Service boundaries, child cards and controls stay in
 // family-hub-card. The dashboard defaults to light; an explicit appearance preference can opt in to dark or automatic mode.
 export const DAILY_BRIEF_STYLES = `
+  .family-view-button { display:flex;align-items:center;gap:8px;min-height:44px;border:0;border-radius:22px;padding:4px 10px 4px 4px;background:var(--daily-soft);color:var(--daily-text);font:inherit;font-size:13px;font-weight:400;cursor:pointer; }
+  .family-view-token { flex:none;display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:color-mix(in srgb,var(--person-colour,var(--daily-accent)) 12%,var(--daily-surface));color:var(--daily-text);font-size:13px;font-weight:500; }
+  .family-view-token .hub-outline-icon { width:18px;height:18px; }
+  .family-view-button>ha-icon { --mdc-icon-size:17px; }
+  .family-view-button>span:not(.family-view-token) { max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .family-picker-backdrop { position:absolute;inset:0;z-index:120;display:flex;align-items:flex-start;justify-content:flex-end;padding:64px 20px 20px;background:#17243b33; }
+  .family-picker-dismiss { position:absolute;inset:0;border:0;background:transparent; }
+  .family-picker-modal { position:relative;z-index:1;width:min(380px,100%);max-height:100%;overflow:auto;padding:24px;border-radius:24px;background:var(--daily-surface);color:var(--daily-text);box-shadow:0 12px 60px #10204024; }
+  .family-picker-modal header { display:flex;justify-content:space-between;align-items:flex-start;gap:12px; }
+  .family-picker-modal header p { margin:0 0 6px;font-size:11px;letter-spacing:.12em;color:var(--daily-muted); }
+  .family-picker-modal h2 { font-size:26px;font-weight:500;letter-spacing:-.035em;margin:0; }
+  .family-picker-modal header button { flex:none;width:44px;height:44px;border:0;border-radius:50%;background:var(--daily-soft);color:var(--daily-text);font-size:24px;cursor:pointer; }
+  .family-picker-modal>p,.family-picker-modal>small { display:block;color:var(--daily-muted);font-size:13px;line-height:1.5; }
+  .family-picker-options { display:grid;gap:8px;margin:20px 0; }
+  .family-picker-options>button { display:flex;align-items:center;gap:12px;min-height:52px;padding:8px 12px;border:0;border-radius:14px;background:var(--daily-soft);color:var(--daily-text);text-align:left;cursor:pointer; }
+  .family-picker-options strong { flex:1;min-width:0;overflow-wrap:anywhere;font-size:15px;font-weight:500; }
+  .family-picker-options ha-icon { --mdc-icon-size:19px;color:var(--daily-muted); }
+  .family-picker-options [aria-pressed=true] { background:var(--daily-accent-soft);color:var(--daily-accent); }
+  .family-picker-options [aria-pressed=true] ha-icon { color:var(--daily-accent); }
+  .family-parent-overview { display:flex;flex-direction:column;gap:20px; }
+  .family-parent-overview>header h2 { margin:4px 0 8px;font-weight:500;font-size:28px;letter-spacing:-.035em; }
+  .family-parent-overview>header p { color:var(--daily-muted);margin:0; }
+  .family-overview-cards { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px; }
+  .family-overview-cards article { border-radius:24px;padding:24px;background:var(--daily-surface);color:var(--daily-text); }
+  .family-overview-cards h2 { font-weight:500;font-size:24px;margin:12px 0; }
+  .family-overview-cards p,.family-overview-cards small { color:var(--daily-muted);font-size:14px; }
+  .family-overview-cards article>div { display:flex;flex-wrap:wrap;gap:10px;margin-top:24px; }
+  .family-overview-cards button { min-height:48px;padding:10px 16px;border:0;border-radius:14px;background:var(--daily-accent-soft);color:var(--daily-accent);font-size:14px;cursor:pointer; }
+  .today-focus-action { display:grid;grid-template-columns:36px minmax(0,1fr) 24px;gap:12px;align-items:center;width:100%;min-height:48px;border:0;padding:4px 0;background:transparent;color:var(--daily-text);text-align:left;cursor:pointer; }
+  .today-focus-action .today-person-token { width:32px;height:32px;border-radius:12px; }
+  .today-focus-action strong { display:block;font-size:14px;font-weight:500;line-height:1.3; }
+  .today-focus-action small { display:block;font-size:12px;color:var(--daily-muted);margin-top:4px;line-height:1.3; }
+  .today-focus-action>ha-icon { --mdc-icon-size:20px;color:var(--daily-accent); }
+  .photo-frame .photo-frame-clock { bottom:76px; }
+  .photo-frame .photo-frame-clock strong { font-weight:500; }
+  .photo-frame-weather { position:absolute;left:32px;bottom:30px;display:flex;align-items:center;gap:8px;color:#fff;font-size:16px;filter:drop-shadow(0 1px 6px #0008); }
+  .photo-frame-weather ha-icon { --mdc-icon-size:22px; }
+  .photo-frame-reminder { position:absolute;right:32px;bottom:76px;display:grid;gap:8px;width:min(400px,43%);padding:20px 24px;border-radius:24px;background:rgba(12,22,35,.56);color:#fff;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px); }
+  .photo-frame-reminder small { font-size:11px;letter-spacing:.14em;color:#fff;opacity:.9; }
+  .photo-frame-reminder strong { font-size:24px;line-height:1.2;font-weight:500;letter-spacing:-.025em;overflow-wrap:anywhere; }
+  .photo-frame-reminder>span { font-size:15px;line-height:1.4; }
+  .photo-frame .photo-frame-hint { right:32px;bottom:26px;background:transparent;border:0;padding:0;font-size:12px;color:#fff; }
+  .photo-frame-weather[hidden],.photo-frame-reminder[hidden] { display:none; }
+  @media (max-width:1000px) { .hub-masthead-date { display:none; } }
+  @media (max-width:620px) { .family-picker-backdrop { padding:60px 12px 12px; }.family-overview-cards { grid-template-columns:1fr; }.family-view-button { font-size:12px;gap:5px; }.family-view-button .family-view-token { width:28px;height:28px; }.photo-frame-reminder { right:20px;left:20px;bottom:172px;width:auto;padding:16px 20px; }.photo-frame-reminder strong { font-size:22px; }.photo-frame .photo-frame-clock { left:20px;bottom:76px; }.photo-frame-weather { left:20px;bottom:32px;font-size:14px; }.photo-frame .photo-frame-hint { right:20px;bottom:32px;font-size:11px; } }
   .homework-workspace { height:100%;min-height:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:16px; }
   .homework-card { min-width:0;min-height:0;padding:20px;border-radius:24px;background:var(--daily-surface);display:flex;flex-direction:column;gap:12px; }
   .homework-card header { display:flex;gap:14px;align-items:center; }
