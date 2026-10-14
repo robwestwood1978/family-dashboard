@@ -4,7 +4,7 @@ The first version lives under Tasks → Homework and uses the same child switche
 
 ## One-time setup
 
-1. Update Manager to 0.20.2.
+1. Update Manager to 0.21.0.
 2. Open Admin → Homework and install its fixed local integration bundle.
 3. Restart Home Assistant and add Family Dashboard Homework under Devices & services.
 4. Save each child’s regular school deadlines and practice goals in Admin → Homework.

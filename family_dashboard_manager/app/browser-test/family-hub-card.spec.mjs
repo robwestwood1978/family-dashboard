@@ -19,7 +19,7 @@ const illustrationSource = await readFile(new URL("../frontend/assets/home-illus
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.20.2";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.21.0";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -3392,6 +3392,10 @@ async function updateEntityStates(card, nextStates) {
 
 async function expectApprovalQuality(page, { hotspots = false, securityLabels = false } = {}) {
   const card = page.locator("family-hub-card");
+  // Resize refreshes the stylesheet on the next frame while retaining native
+  // players. Audit the settled breakpoint, rather than an intermediate frame.
+  await expect.poll(()=>card.evaluate(element=>element.shadowRoot.querySelector("style[data-layout]")?.dataset.layout===element._responsiveViewportKey())).toBe(true);
+  await card.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   await expectNoRootOverflow(page);
   await expect(card).not.toContainText(/Controlled live|mapped(?:\s+rooms|\s+jobs)?|fixtures loaded|provider publishes/i);
   const audit = await card.evaluate((element, options) => {
@@ -3488,6 +3492,8 @@ async function expectApprovalQuality(page, { hotspots = false, securityLabels = 
             const childBounds = child.getBoundingClientRect();
             return {
               text: child.textContent.trim(),
+              cardBounds: {left:bounds.left,right:bounds.right,top:bounds.top,bottom:bounds.bottom},
+              childBounds: {left:childBounds.left,right:childBounds.right,top:childBounds.top,bottom:childBounds.bottom},
               outsideCard: childBounds.left < bounds.left - 1
                 || childBounds.right > bounds.right + 1
                 || childBounds.top < bounds.top - 1
@@ -4787,6 +4793,127 @@ function homeworkFixture() {
   const today="2026-10-13", first=config.people.find(p=>p.role==="child");
   return {revision:1,today,children:[{id:first.id,name:first.name,year:"Year 4",reading_day:2,reading_goal:3,spelling_day:1,homework_day:1,maths_set_day:1,maths_day:4,tables_goal:3,plans:[{id:"a".repeat(32),person_id:first.id,kind:"spelling",title:"Weekly spelling",due:today,set_date:"2026-10-09",words:["cloud","solid"],notes:"Practise handwriting",links:[],source:"School sheet",marks:{}}],logs:[],routines:[{id:`${first.id}:reading:2026-10-14`,kind:"reading",due:"2026-10-14",title:"Return reading record and books",goal:3,count:0,marks:{},plan_ids:[]},{id:`${first.id}:spelling:${today}`,kind:"spelling",due:today,title:"Spelling test",goal:0,count:0,marks:{},plan_ids:["a".repeat(32)]},{id:`${first.id}:tables:${today}`,kind:"tables",due:today,title:"Tackling Tables",goal:3,count:0,marks:{},plan_ids:[]},{id:`${first.id}:assignment:${today}`,kind:"assignment",due:today,title:"Hand in weekly homework",goal:0,count:0,marks:{},plan_ids:[]},{id:`${first.id}:maths:2026-10-16`,kind:"maths",due:"2026-10-16",title:"Hand in maths homework",goal:0,count:0,marks:{},plan_ids:[]}]}]};
 }
+
+function familyDayFixture() {
+  const data=homeworkFixture(), second=config.people.find(p=>p.role==="child" && p.id!==data.children[0].id);
+  data.today="2026-10-14";
+  data.children[0].plans.push({id:"b".repeat(32),person_id:data.children[0].id,kind:"assignment",title:"States of matter",subject:"Science",due:"2026-10-13",set_date:"2026-10-09",notes:"Explain solids and liquids",links:[],marks:{}});
+  data.children.push({id:second.id,name:second.name,reading_day:0,reading_goal:3,tables_goal:0,plans:[],logs:[],routines:[{id:`${second.id}:reading:2026-10-19`,kind:"reading",due:"2026-10-19",title:"Return reading record and books",goal:3,count:0,marks:{},plan_ids:[]}]});
+  return data;
+}
+
+test("Family day picker carries the child across Calendar, Tasks and Homework and remembers each position",async({page})=>{
+  await page.route("http://homeassistant.local/family-dashboard/hub",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body></body></html>"}));
+  await page.goto("http://homeassistant.local/family-dashboard/hub");
+  const family=locationDisabledConfig();family.school.homework_enabled=true;
+  const data=familyDayFixture(),first=data.children[0],second=data.children[1];
+  const errors=await mount(page,family,{}, {homeworkData:data,fixedNow:"2026-10-14T14:30:00Z",kiosk:true});
+  const card=page.locator("family-hub-card");
+  await card.locator("[data-family-picker-open]").click();
+  await expect(card.getByRole("dialog",{name:"Whose day?"})).toBeVisible();
+  await expect(card.locator(".hub-shell")).toHaveAttribute("inert","");
+  await card.locator(`[data-family-view="${first.id}"]`).click();
+  await expect(card.locator("[data-family-picker-open]")).toHaveAccessibleName(`Family view: ${first.name}`);
+  await card.locator('.hub-nav-button[data-view="calendar"]').click();
+  await expect(card.locator(`[data-calendar-person="${first.id}"]`)).toHaveAttribute("aria-pressed","true");
+  await card.locator('[data-calendar-mode="month"]').click();
+  await card.locator('.hub-nav-button[data-view="family"]').click();
+  await expect(card.locator(`[data-family-person="${first.id}"]`)).toHaveAttribute("aria-pressed","true");
+  await card.locator('[data-task-section="homework"]').click();
+  await expect(card.locator(".homework-workspace")).toContainText("States of matter");
+  await card.locator(`[data-family-person="${second.id}"]`).click();
+  await expect(card.locator("[data-family-picker-open]")).toHaveAccessibleName(`Family view: ${second.name}`);
+  await card.locator('[data-task-section="homework"]').click();
+  await expect(card.locator(".homework-workspace")).not.toContainText("States of matter");
+  await card.locator('.hub-nav-button[data-view="calendar"]').click();
+  await expect(card.locator('[data-calendar-mode="week"]')).toHaveAttribute("aria-pressed","true");
+  await card.locator("[data-family-picker-open]").click();
+  await card.locator(`[data-family-view="${first.id}"]`).click();
+  await expect(card.locator('[data-calendar-mode="month"]')).toHaveAttribute("aria-pressed","true");
+  await card.locator('.hub-nav-button[data-view="family"]').click();
+  await expect(card.locator('[data-task-section="homework"]')).toHaveAttribute("aria-pressed","true");
+  await page.reload();
+  const reloadErrors=await mount(page,family,{}, {homeworkData:data,fixedNow:"2026-10-14T14:30:00Z",kiosk:true});
+  await expect(card.locator("[data-family-picker-open]")).toHaveAccessibleName(`Family view: ${first.name}`);
+  await card.locator('.hub-nav-button[data-view="family"]').click();
+  await expect(card.locator('[data-task-section="homework"]')).toHaveAttribute("aria-pressed","true");
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
+  expect([...errors,...reloadErrors]).toEqual([]);
+});
+
+test("Family day parent view offers children and the picker traps focus without changing authority",async({page})=>{
+  await page.setViewportSize({width:834,height:1112});
+  const family=locationDisabledConfig();family.school.homework_enabled=true;
+  family.people.find(person=>person.role==="parent").name="A very long family member display name";
+  const errors=await mount(page,family,{}, {homeworkData:familyDayFixture(),kiosk:true});
+  const card=page.locator("family-hub-card"),parent=family.people.find(p=>p.role==="parent");
+  await card.evaluate(element=>{element.hass={...element._hass,user:{name:"Child account",is_admin:false}};});
+  await card.locator("[data-family-picker-open]").click();
+  const pickerBounds=await card.locator(".family-picker-modal").evaluate(node=>({width:node.clientWidth,scrollWidth:node.scrollWidth,bottom:node.getBoundingClientRect().bottom}));
+  expect(pickerBounds.scrollWidth).toBeLessThanOrEqual(pickerBounds.width+1);
+  expect(pickerBounds.bottom).toBeLessThanOrEqual(1112);
+  await card.locator(`[data-family-view="${parent.id}"]`).click();
+  await card.locator('.hub-nav-button[data-view="family"]').click();
+  await expect(card.locator(".family-parent-overview")).toContainText("Choose a child");
+  await expect(card.locator(".family-overview-cards article")).toHaveCount(2);
+  await expect(card.locator(".family-overview-cards")).not.toContainText(`${parent.name}’s jobs`);
+  await card.locator("[data-family-picker-open]").click();
+  const last=card.locator(".family-picker-options button").last();
+  await last.focus();await last.press("Tab");
+  await expect(card.locator(".family-picker-modal header button")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(card.getByRole("dialog",{name:"Whose day?"})).toHaveCount(0);
+  await expect(card.locator("[data-family-picker-open]")).toBeFocused();
+  expect(await card.evaluate(element=>element._hass.user.is_admin)).toBe(false);
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+for (const [phase,time,kind,title] of [["morning","08:00","record","Reading record & books"],["afternoon","14:30","plan","States of matter"],["evening","18:30","reading","Read together"]]) {
+  test(`Family day ${phase} prioritises a direct school action without overlapping football`,async({page})=>{
+    const family=locationDisabledConfig();family.school.homework_enabled=true;
+    const errors=await mount(page,family,{}, {homeworkData:familyDayFixture(),fixedNow:`2026-10-14T${time}:00Z`,kiosk:true});
+    const card=page.locator("family-hub-card"),action=card.locator(".today-focus-action").first();
+    await expect(card.locator(".today-family")).toHaveAttribute("data-day-phase",phase);
+    await expect(action).toContainText(title);
+    await expect(action).toHaveAttribute("data-today-homework",kind);
+    const bounds=await card.evaluate(element=>({actionsBottom:element.shadowRoot.querySelector(".today-job-list").getBoundingClientRect().bottom,footballTop:element.shadowRoot.querySelector(".today-football").getBoundingClientRect().top}));
+    expect(bounds.actionsBottom).toBeLessThanOrEqual(bounds.footballTop);
+    await action.click();
+    await expect(card.locator(".homework-modal")).toBeVisible();
+    await expect(card.locator("[data-family-picker-open]")).toHaveAccessibleName(`Family view: ${familyDayFixture().children[0].name}`);
+    expect(await page.evaluate(()=>window.__wsCalls.filter(call=>call.type==="family_dashboard_homework/progress"))).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+}
+
+test("Family day ambient photos retain the image while updating weather and shared reminders and wake to Today",async({page},testInfo)=>{
+  const family=locationDisabledConfig();family.school.homework_enabled=true;family.display.photo_frame.enabled=true;
+  const source=family.display.photo_frame.media_source;
+  const errors=await mount(page,family,{}, {homeworkData:familyDayFixture(),fixedNow:"2026-10-14T14:30:00Z",kiosk:true,photoMediaChildren:[{media_class:"image",media_content_id:`${source}/photo-001.jpg`}]});
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="football"]').click();
+  await card.evaluate(element=>element._activatePhotoFrame());
+  await expect(card.locator(".photo-frame img")).toBeVisible();
+  await expect(card.locator(".photo-frame-reminder")).toContainText("Return reading record and books");
+  await expect(card.locator(".photo-frame-reminder")).toContainText("Today");
+  await card.evaluate(element=>{window.__ambientImage=element.shadowRoot.querySelector(".photo-frame img");});
+  await updateEntityState(card,state("weather.home","rainy",{temperature:18.5}));
+  await expect(card.locator(".photo-frame-weather")).toContainText("18.5°");
+  expect(await card.evaluate(element=>element.shadowRoot.querySelector(".photo-frame img")===window.__ambientImage)).toBe(true);
+  const bounds=await card.evaluate(element=>{
+    const clock=element.shadowRoot.querySelector(".photo-frame-clock").getBoundingClientRect(),weather=element.shadowRoot.querySelector(".photo-frame-weather").getBoundingClientRect(),reminder=element.shadowRoot.querySelector(".photo-frame-reminder").getBoundingClientRect(),hint=element.shadowRoot.querySelector(".photo-frame-hint").getBoundingClientRect();
+    return {clockBottom:clock.bottom,weatherTop:weather.top,reminderBottom:reminder.bottom,hintTop:hint.top};
+  });
+  expect(bounds.clockBottom).toBeLessThanOrEqual(bounds.weatherTop);
+  expect(bounds.reminderBottom).toBeLessThanOrEqual(bounds.hintTop);
+  await page.screenshot({path:resolve(tmpdir(),`family-day-ambient-${testInfo.project.name}.png`)});
+  await updateEntityState(card,state("binary_sensor.example_ipad_camera_motion","on"));
+  await expect(card.locator(".photo-frame")).toHaveCount(0);
+  await expect(card.locator('.hub-brand[data-view="today"]')).toHaveAttribute("aria-current","page");
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
+  expect(errors).toEqual([]);
+});
 
 test("Today homework reminder stays above football and opens the child’s homework",async({page})=>{
   const family=locationDisabledConfig();family.school.homework_enabled=true;

@@ -176,6 +176,10 @@ export function validateConfig(config) {
   }
   requireInteger(display.target_width, "config.display.target_width", 768, 2560);
   requireInteger(display.target_height, "config.display.target_height", 600, 1600);
+  if (display.day_rhythm !== undefined) {
+    const rhythm = requireObject(display.day_rhythm, "config.display.day_rhythm");
+    if ((rhythm.evening_hour ?? 19) <= (rhythm.after_school_hour ?? 15)) fail("config.display.day_rhythm.evening_hour", "must be later than the after-school hour");
+  }
   if (display.photo_frame !== undefined) {
     const photoFrame = requireObject(display.photo_frame, "config.display.photo_frame");
     requireBoolean(photoFrame.enabled, "config.display.photo_frame.enabled");

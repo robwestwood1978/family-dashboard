@@ -22,6 +22,10 @@ import {
   familyPlannerEventKey,
   familyPlannerPeople,
   FamilyHubCard,
+  normaliseFamilyViewPreferences,
+  familyDayPhase,
+  familyHomeworkActions,
+  familyAmbientReminder,
   floorplanImageSource,
   floorplanViewBox,
   favouriteDerbyFixture,
@@ -3535,4 +3539,67 @@ test("detects picker image bytes independently of HEIC filename and MIME labels"
   assert.equal(devicePhotoMime(new TextEncoder().encode("0000ftypheic0000").buffer,"image/jpeg"),"image/heic");
   assert.equal(devicePhotoMime(new TextEncoder().encode("0000ftypavif0000").buffer,"image/heic"),"image/avif");
   assert.equal(devicePhotoMime(new Uint8Array([1,2,3]).buffer,"text/html"),"application/octet-stream");
+});
+
+test("family view preferences discard removed people and invalid page positions", () => {
+  const people=[{id:"ernie",role:"child"},{id:"rob",role:"parent"},{id:"family",role:"household"}];
+  const saved=normaliseFamilyViewPreferences({selected:"removed",contexts:{removed:{taskSection:"homework"},family:{taskSection:"jobs"},ernie:{taskSection:"homework",calendarMode:"month",calendarAnchor:"2026-02-31",calendarSelected:"2026-10-14",token:"never retain"},rob:{taskSection:"admin",calendarMode:"wrong"}}},people);
+  assert.equal(saved.selected,"all");
+  assert.deepEqual(Object.keys(saved.contexts),["ernie","rob"]);
+  assert.equal(saved.contexts.ernie.calendarAnchor,undefined);
+  assert.equal(saved.contexts.ernie.calendarSelected,"2026-10-14");
+  assert.equal(saved.contexts.ernie.token,undefined);
+  assert.equal(saved.contexts.rob.taskSection,"jobs");
+  assert.equal(saved.contexts.rob.calendarMode,"week");
+});
+
+test("the family day follows household time, configurable hours and weekends", () => {
+  assert.equal(familyDayPhase(new Date("2026-10-14T08:00:00Z")).id,"morning");
+  assert.equal(familyDayPhase(new Date("2026-10-14T13:00:00Z")).id,"midday");
+  assert.equal(familyDayPhase(new Date("2026-10-14T14:00:00Z")).label,"After school");
+  assert.equal(familyDayPhase(new Date("2026-10-14T18:00:00Z")).id,"evening");
+  assert.equal(familyDayPhase(new Date("2026-10-17T14:00:00Z")).label,"This afternoon");
+  assert.equal(familyDayPhase(new Date("2026-10-14T14:00:00Z"),"Europe/London",{after_school_hour:16,evening_hour:20}).id,"midday");
+  assert.equal(familyDayPhase(new Date("2026-10-14T18:00:00Z"),"Europe/London",{after_school_hour:16,evening_hour:20}).id,"afternoon");
+});
+
+const dayExperienceChildren=()=>[
+  {id:"ernie",name:"Ernie",routines:[{kind:"reading",due:"2026-10-14",title:"Return reading record & books",goal:3,count:1,marks:{}},{kind:"tables",due:"2026-10-20",title:"Tackling Tables",goal:3,count:0,marks:{}}],plans:[{id:"science",title:"States of matter",kind:"assignment",subject:"Science",due:"2026-10-13",marks:{}}]},
+  {id:"orson",name:"Orson",routines:[{kind:"reading",due:"2026-10-19",title:"Return reading record & books",goal:3,count:0,marks:{}}],plans:[]}
+];
+
+test("morning prioritises returning books, afternoon keeps overdue work, evening prioritises reading", () => {
+  const children=dayExperienceChildren();
+  assert.deepEqual(familyHomeworkActions(children,"morning","2026-10-14").map(a=>a.kind),["record","plan"]);
+  const afternoon=familyHomeworkActions(children,"afternoon","2026-10-14");
+  assert.equal(afternoon[0].planId,"science");
+  assert.equal(afternoon[0].detail,"Overdue");
+  assert.deepEqual(familyHomeworkActions(children,"evening","2026-10-14").map(a=>a.kind),["reading","reading"]);
+  children[0].plans[0].marks.handed_in=true;
+  children[0].routines[0].count=3;
+  children[0].routines[0].marks.returned=true;
+  assert.equal(familyHomeworkActions(children,"afternoon","2026-10-14").some(a=>a.planId==="science"||a.kind==="record"),false);
+  assert.equal(familyHomeworkActions(children,"evening","2026-10-14").filter(a=>a.kind==="reading").length,1);
+});
+
+test("holiday pauses and completed returns leave the ambient reminder", () => {
+  const children=dayExperienceChildren();
+  assert.equal(familyAmbientReminder(children,"2026-10-14").personId,"ernie");
+  children[0].routines[0].marks.returned=true;
+  assert.equal(familyAmbientReminder(children,"2026-10-14").personId,"orson");
+  children[1].paused_until="2026-10-19";
+  assert.equal(familyAmbientReminder(children,"2026-10-14"),null);
+  assert.equal(familyHomeworkActions(children,"evening","2026-10-14").some(a=>a.personId==="orson"),false);
+});
+
+test("ambient view includes shared family plans but excludes personal calendar content", () => {
+  const card=Object.create(FamilyHubCard.prototype);
+  card._config={product:{locale:"en-GB",timezone:"Europe/London"},display:{photo_frame:{enabled:true,media_source:"media-source://media_source/local/family-dashboard/photos"}},features:{weather:false},calendar:{entities:[]}};
+  card._homeworkData={children:[]};
+  card._calendarEvents=[{summary:"Private appointment",start:{dateTime:"2026-10-14T18:00:00Z"},_calendar:{category:"personal"}}];
+  assert.equal(card._ambientPhotoContext(new Date("2026-10-14T09:00:00Z")).title,"");
+  card._calendarEvents.push({summary:"Family dinner",start:{dateTime:"2026-10-14T19:00:00Z"},_calendar:{category:"family"}});
+  assert.equal(card._ambientPhotoContext(new Date("2026-10-14T09:00:00Z")).title,"Family dinner");
+  card._config.display.photo_frame.show_reminder=false;
+  assert.equal(card._ambientPhotoContext(new Date("2026-10-14T09:00:00Z")).title,"");
 });

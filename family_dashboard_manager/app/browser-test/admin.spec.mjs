@@ -44,7 +44,7 @@ test.beforeAll(async () => {
     homework.revision++;response.json({data:homework,preview:{today:"2026-10-13",children:[]}});
   });
   app.get("/api/admin/bootstrap", (_request, response) => response.json({
-    version: "0.20.2",
+    version: "0.21.0",
     config,
     schema,
     inventory,
@@ -116,6 +116,22 @@ test("keeps Admin readable in iPad portrait and offers configured rooms", async 
     };
   });
   expect(groupWidths.nested / groupWidths.root).toBeGreaterThan(0.85);
+});
+
+test("family day settings show runtime defaults and remain staged until reviewed",async({page})=>{
+  const writes=[];page.on("request",request=>{if(request.method()==="POST")writes.push(request.url());});
+  await page.goto(baseUrl);
+  await expect(page.locator("#status")).toContainText("Active configuration loaded");
+  await page.getByRole("button",{name:"Kiosk & photos"}).click();
+  await expect(page.locator('[data-path="%5B%22display%22%2C%22day_rhythm%22%2C%22after_school_hour%22%5D"]')).toHaveValue("15");
+  await expect(page.locator('[data-path="%5B%22display%22%2C%22day_rhythm%22%2C%22evening_hour%22%5D"]')).toHaveValue("19");
+  await expect(page.locator('[data-path="%5B%22display%22%2C%22photo_frame%22%2C%22show_weather%22%5D"]')).toBeChecked();
+  await expect(page.locator('[data-path="%5B%22display%22%2C%22photo_frame%22%2C%22show_reminder%22%5D"]')).toBeChecked();
+  await expect(page.getByRole("button",{name:"Review & save"})).toBeDisabled();
+  await page.locator('[data-path="%5B%22display%22%2C%22day_rhythm%22%2C%22after_school_hour%22%5D"]').fill("16");
+  await page.locator('[data-path="%5B%22display%22%2C%22photo_frame%22%2C%22show_reminder%22%5D"]').uncheck();
+  await expect(page.getByRole("button",{name:"Review & save"})).toBeEnabled();
+  expect(writes).toEqual([]);
 });
 
 test("does not present unrelated entities as empty heating mappings", async ({ page }) => {
