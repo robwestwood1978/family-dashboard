@@ -5067,3 +5067,12 @@ test("School mornings hides parent controls from child and read-only displays an
   await card.getByRole("button",{name:"Cancel",exact:true}).click();
   await expect(card.locator("[data-departure-edit]")).toBeFocused();
 });
+
+
+test("School mornings speaker failure remains readable without crowding the smaller tablet",async({page})=>{
+  const departure=schoolDepartureFixture();departure.attributes.last_announcement={status:"failed",at:"2026-10-20T06:15:00Z"};
+  await mount(page,locationDisabledConfig(),{"sensor.family_dashboard_departure":departure},{fixedNow:"2026-10-20T06:15:00Z",kiosk:true,departureAdmin:true});
+  const panel=page.locator("family-hub-card .departure-panel");
+  await expect(panel).toContainText("The last announcement could not play");
+  const bounds=await panel.evaluate(e=>({height:e.clientHeight,scroll:e.scrollHeight}));expect(bounds.scroll).toBeLessThanOrEqual(bounds.height+1);
+});
