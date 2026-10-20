@@ -44,7 +44,7 @@ test.beforeAll(async () => {
     homework.revision++;response.json({data:homework,preview:{today:"2026-10-13",children:[]}});
   });
   app.get("/api/admin/bootstrap", (_request, response) => response.json({
-    version: "0.21.0",
+    version: "0.22.0",
     config,
     schema,
     inventory,
@@ -182,4 +182,35 @@ test("discovers devices on opening and only stages reviewed mappings", async ({ 
   expect(mutations).toEqual([]);
   const width=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:innerWidth}));
   expect(width.scroll).toBeLessThanOrEqual(width.width);
+});
+
+
+test("School mornings Admin reviews settings, limits speakers to Sonos and changes today separately",async({page})=>{
+  let data={revision:0,settings:{enabled:false,times:[null,null,null,null,null,null,null],speakers:[],tts_entity:"",volume:20,reminders:[20,10,5,0],show_before_minutes:60,paused_until:null,default_mode:"drive"}};
+  let view={today:"2026-10-20",time:"07:35",mode:"drive",status:"off",muted:false};
+  const writes=[];
+  await page.route("**/api/admin/bootstrap",async route=>{
+    const response=await route.fetch(),body=await response.json();
+    body.inventory.entities.push({entity_id:"media_player.kitchen",name:"Kitchen",domain:"media_player",integration:"sonos"},{entity_id:"media_player.kitchen_ma",name:"Kitchen MA",domain:"media_player",integration:"music_assistant"},{entity_id:"tts.google_translate_en_com",name:"Google Translate",domain:"tts"});await route.fulfill({json:body});
+  });
+  await page.route("**/api/admin/departures",async route=>{
+    if(route.request().method()==="POST"){const body=route.request().postDataJSON();writes.push(body);if(body.operation==="settings")data.settings=body.payload;if(body.operation==="today")view={...view,time:body.payload.time,mode:body.payload.mode,overridden:true};data.revision++;}await route.fulfill({json:{data,view}});
+  });
+  await page.goto(baseUrl);await page.getByRole("button",{name:"School mornings",exact:true}).click();
+  await page.getByLabel("Enable school departure reminders").check();
+  for(const [day,time]of [["Monday","08:15"],["Tuesday","07:35"],["Wednesday","08:15"],["Thursday","08:15"],["Friday","08:15"]])await page.getByLabel(day,{exact:true}).fill(time);
+  await page.getByLabel("Kitchen",{exact:true}).check();
+  await expect(page.getByLabel("Kitchen MA",{exact:true})).toHaveCount(0);
+  await page.getByLabel("Speech provider",{exact:true}).selectOption("tts.google_translate_en_com");
+  await page.getByRole("button",{name:"Review school mornings",exact:true}).click();
+  await expect(page.getByRole("dialog")).toContainText("Tuesday: 07:35");expect(writes).toEqual([]);
+  await page.getByRole("button",{name:"Save school mornings",exact:true}).click();
+  await expect(page.locator("#status")).toContainText("School mornings saved");
+  expect(writes[0].payload.times).toEqual(["08:15","07:35","08:15","08:15","08:15",null,null]);
+  await page.getByLabel("Today’s departure time",{exact:true}).fill("07:20");
+  await page.getByLabel("Today’s travel method",{exact:true}).selectOption("cycle");
+  await page.getByRole("button",{name:"Change today only",exact:true}).click();
+  await expect(page.locator("#status")).toContainText("usual week is unchanged");
+  expect(writes[1]).toEqual({operation:"today",expected_revision:1,payload:{operation:"override",date:"2026-10-20",time:"07:20",mode:"cycle"}});
+  expect(data.settings.times[1]).toBe("07:35");
 });

@@ -1,0 +1,1 @@
+{"config":{"step":{"user":{"title":"School mornings","description":"Keep a shared school departure clock in Home Assistant. Set weekday leave times, Sonos speakers, volume and holiday pauses in Family Dashboard Admin. Announcements start only after you enable them there."}},"abort":{"already_configured":"School mornings are already configured."}}}

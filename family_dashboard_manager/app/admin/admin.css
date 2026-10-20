@@ -18,3 +18,11 @@
 .homework-publish-dialog::backdrop { background:rgba(25,30,40,.38); }
 .homework-review-notes { white-space:pre-wrap;max-height:35vh;overflow:auto; }
 [hidden] { display:none!important; }
+
+.departure-week { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px; }
+.departure-speakers { display:flex;flex-wrap:wrap;gap:16px;margin:20px 0; }
+.departure-admin-actions { display:flex;gap:12px;flex-wrap:wrap;margin:24px 0; }
+.departure-review { width:min(600px,90vw);max-height:85vh;overflow:auto;padding:28px;border:1px solid #dce3ed;border-radius:24px;color:#20242a;background:#fff; }
+.departure-review::backdrop { background:#14243c66; }
+.departure-review footer { display:flex;justify-content:flex-end;gap:12px;margin-top:24px; }
+.departures-admin .homework-admin-card { margin-bottom:24px;padding:24px;border:1px solid #e2e4e9;border-radius:20px;background:#fff; }.departures-admin p { color:#66758b;font-size:14px;line-height:1.5; }

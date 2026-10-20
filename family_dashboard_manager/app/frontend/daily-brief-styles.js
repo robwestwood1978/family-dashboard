@@ -1,6 +1,23 @@
 // Shared presentation only. Service boundaries, child cards and controls stay in
 // family-hub-card. The dashboard defaults to light; an explicit appearance preference can opt in to dark or automatic mode.
 export const DAILY_BRIEF_STYLES = `
+  .departure-panel h2 { font-size:clamp(28px,3vw,40px);font-weight:500;line-height:1.12;letter-spacing:-.045em;margin:10px 0; }
+  .departure-panel .supporting { font-size:16px; }
+  .departure-guidance { color:var(--daily-muted);font-size:13px;line-height:1.45;margin:12px 0; }
+  .departure-actions { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:14px 0 10px; }
+  .departure-actions button { display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:10px;border:0;border-radius:14px;background:var(--daily-soft);color:var(--daily-accent);font-size:13px;font-weight:400;cursor:pointer; }
+  .departure-actions .departure-primary { background:var(--daily-accent);color:#fff; }
+  .departure-actions button:disabled { opacity:.55;cursor:wait; }
+  .departure-panel>small { display:block;font-size:12px;color:var(--daily-muted);line-height:1.4; }
+  .departure-warning { font-size:13px;line-height:1.4;color:var(--daily-text);background:var(--daily-warning-soft);border-radius:12px;padding:10px; }
+  .departure-modal { max-width:560px; }
+  .departure-modal .planner-modal-body { display:grid;gap:20px; }
+  .departure-modal label { display:grid;gap:8px;font-size:14px;color:var(--daily-muted); }
+  .departure-modal input,.departure-modal select { width:100%;min-height:50px;padding:12px 14px;border:1px solid var(--daily-line);border-radius:14px;background:var(--daily-soft);color:var(--daily-text);font:inherit;font-size:18px; }
+  .departure-modal .planner-modal-body>p { font-size:14px;line-height:1.5;color:var(--daily-muted);margin:0; }
+  .departure-modal footer button { min-height:48px;font-weight:400; }
+  @media (max-height:850px) and (min-width:851px) { .departure-panel h2 { font-size:30px; }.departure-panel .departure-guidance { margin:8px 0;font-size:12px; }.departure-panel .departure-actions { margin:8px 0;gap:6px; }.departure-panel .departure-actions button { padding:8px; } }
+
   .family-view-button { display:flex;align-items:center;gap:8px;min-height:44px;border:0;border-radius:22px;padding:4px 10px 4px 4px;background:var(--daily-soft);color:var(--daily-text);font:inherit;font-size:13px;font-weight:400;cursor:pointer; }
   .family-view-token { flex:none;display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:color-mix(in srgb,var(--person-colour,var(--daily-accent)) 12%,var(--daily-surface));color:var(--daily-text);font-size:13px;font-weight:500; }
   .family-view-token .hub-outline-icon { width:18px;height:18px; }
@@ -1681,5 +1698,15 @@ export const DAILY_BRIEF_STYLES = `
     .security-stage { min-height:420px; }
     .security-stage-heading { flex-wrap:wrap; }
     .security-stage { grid-template-rows:auto minmax(0,1fr) auto; }
+  }
+
+  @media (max-height:850px) and (min-width:851px) {
+    .focus-today .today-next.departure-panel .departure-guidance { display:none; }
+    .focus-today .today-next.departure-panel h2 { font-size:28px;margin:4px 0; }
+    .focus-today .today-next.departure-panel>.supporting { font-size:14px;margin:0; }
+    .focus-today .departure-panel .departure-actions { grid-template-columns:repeat(4,minmax(0,1fr));margin:8px 0;gap:6px;flex:none; }
+    .focus-today .departure-panel .departure-actions button { min-height:44px;padding:6px 4px;font-size:12px;line-height:1.2; }
+    .focus-today .departure-panel .departure-actions ha-icon { display:none; }
+    .focus-today .departure-panel>small { font-size:11px;margin:0;flex:none; }
   }
 `;
