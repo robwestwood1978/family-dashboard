@@ -1,3 +1,9 @@
+## 0.22.0
+
+- Add shared school morning departure times, a calm Today countdown and Sonos announcements at 20, 10, 5 minutes and departure. Scheduling runs in Home Assistant while the iPad sleeps.
+- Let parents set weekday times, Sonos speakers, speech provider, volume and holiday pauses in Admin. Change today’s time and drive/walk/cycle/scoot choice without changing the usual week; mute, skip or mark the school run as left.
+- Persist each announcement before playing so restarts, reloads and one-off changes cannot repeat the same warning. Missed warnings do not play as a backlog. Keep mutations parent-only and read-only displays locked.
+
 ## 0.21.0
 
 - Add one family viewing picker across Today, Calendar, Tasks and Homework, remembering each person’s calendar position and task section on this device. Selecting a parent keeps child jobs in a clear overview and never changes Home Assistant identity or control permissions.

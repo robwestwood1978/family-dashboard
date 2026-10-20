@@ -2,7 +2,7 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.21.0 provides:
+Version 0.22.0 provides:
 
 - [a shared family view, time-sensitive Today and ambient family photos](docs/family-day-experience.md), with device-local viewing preferences and administrator-editable day hours;
 

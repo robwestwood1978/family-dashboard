@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  departurePresentation,
   binarySignalPresentation,
   buildFavouriteClubModels,
   buildControlPolicy,
@@ -3602,4 +3603,16 @@ test("ambient view includes shared family plans but excludes personal calendar c
   assert.equal(card._ambientPhotoContext(new Date("2026-10-14T09:00:00Z")).title,"Family dinner");
   card._config.display.photo_frame.show_reminder=false;
   assert.equal(card._ambientPhotoContext(new Date("2026-10-14T09:00:00Z")).title,"");
+});
+
+
+test("school departure countdown respects its window, today-only mode and finished state",()=>{
+  const view={enabled:true,departure_at:"2026-10-20T07:35:00+01:00",time:"07:35",mode:"drive",show_before_minutes:60};
+  assert.equal(departurePresentation(view,new Date("2026-10-20T06:00:00+01:00")).visible,false);
+  assert.equal(departurePresentation(view,new Date("2026-10-20T07:15:00+01:00")).heading,"Leave in 20 minutes");
+  assert.equal(departurePresentation(view,new Date("2026-10-20T07:35:00+01:00")).heading,"Time to leave");
+  assert.equal(departurePresentation(view,new Date("2026-10-20T08:06:00+01:00")).visible,false);
+  assert.equal(departurePresentation({...view,status:"left"},new Date(view.departure_at)).heading,"Have a lovely day");
+  assert.match(departurePresentation({...view,mode:"walk",overridden:true},new Date(view.departure_at)).caption,/Walking.*Today only/);
+  assert.equal(departurePresentation({...view,enabled:false},new Date(view.departure_at)).visible,false);
 });

@@ -49,7 +49,7 @@ test("serves health and the bounded MCP tool surface", async (context) => {
 
   const health = await fetch(`http://127.0.0.1:${port}/healthz`);
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: "ok", version: "0.21.0" });
+  assert.deepEqual(await health.json(), { status: "ok", version: "0.22.0" });
   const blockedAdmin = await fetch(`http://127.0.0.1:${port}/`);
   assert.equal(blockedAdmin.status, 403);
 
@@ -148,4 +148,19 @@ test("serves Admin only through an authorised ingress boundary and protects muta
   });
   assert.equal(mutation.status, 403);
   assert.deepEqual(await mutation.json(), { error: "Admin mutation header required" });
+});
+
+
+test("school mornings routes require parent ingress and a mutation header",async(context)=>{
+  let writes=0,installs=0;
+  const app=createManagerApp({authorizeAdmin:r=>r.get("X-Test-Admin")==="yes",departuresAdmin:async body=>{if(body)writes++;return {data:{revision:1}};},departuresStore:{getStatus:async()=>({installed_state:"not_installed"}),install:async()=>{installs++;return {};}}});
+  const listener=app.listen(0,"127.0.0.1");await once(listener,"listening");context.after(()=>listener.close());
+  for(const path of ["departures","departures/integration"]){
+    const url=`http://127.0.0.1:${listener.address().port}/api/admin/${path}`;
+    assert.equal((await fetch(url)).status,403);
+    assert.equal((await fetch(url,{headers:{"X-Test-Admin":"yes"}})).status,200);
+    assert.equal((await fetch(url,{method:"POST",headers:{"X-Test-Admin":"yes","Content-Type":"application/json"},body:"{}"})).status,403);
+    assert.equal((await fetch(url,{method:"POST",headers:{"X-Test-Admin":"yes","X-Family-Dashboard-Admin":"1","Content-Type":"application/json"},body:"{}"})).status,200);
+  }
+  assert.equal(writes,1);assert.equal(installs,1);
 });

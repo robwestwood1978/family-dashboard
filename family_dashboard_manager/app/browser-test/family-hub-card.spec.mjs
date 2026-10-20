@@ -19,7 +19,7 @@ const illustrationSource = await readFile(new URL("../frontend/assets/home-illus
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.21.0";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.22.0";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -771,6 +771,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     window.__cameraPlayerLoadDelayMs = runtimeOptions.cameraPlayerLoadDelayMs ?? 0;
     window.__serviceBehaviors = runtimeOptions.serviceBehaviors || {};
     card.hass = {
+      user: {is_admin:Boolean(runtimeOptions.departureAdmin)},
       services: {},
       entities: {},
       devices: {},
@@ -826,6 +827,16 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       },
       async callWS(message) {
         window.__wsCalls.push(message);
+        if(message?.type==="family_dashboard_departures/today"){
+          if(runtimeOptions.departureReject)throw new Error("Could not save departure");
+          const view=states["sensor.family_dashboard_departure"].attributes;
+          if(message.expected_revision!==view.revision)throw new Error("School mornings changed");
+          const p=message.payload;view.revision++;
+          if(p.operation==="override"){view.time=p.time;view.mode=p.mode;view.overridden=true;view.departure_at=`${view.today}T${p.time}:00+01:00`;}
+          if(p.operation==="mute")view.muted=p.muted;
+          if(["left","skip"].includes(p.operation))view.status=p.operation==="left"?"left":"skipped";
+          return {...view};
+        }
         if (message?.type === "family_dashboard_homework/get") return runtimeOptions.homeworkData;
         if (message?.type === "family_dashboard_homework/progress") {
           if (runtimeOptions.homeworkReject) throw new Error("simulated storage failure");
@@ -5012,4 +5023,47 @@ test("homework portrait keeps all primary buttons visible",async({page})=>{
   const bounds=await card.locator(".homework-workspace").evaluate(node=>({width:node.clientWidth,scrollWidth:node.scrollWidth,height:node.clientHeight,scrollHeight:node.scrollHeight}));
   expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.width+1);expect(bounds.scrollHeight).toBeLessThanOrEqual(bounds.height+2);
   await expect(card.getByRole("button",{name:"Log a session",exact:true})).toBeVisible();
+});
+
+function schoolDepartureFixture(){return state("sensor.family_dashboard_departure","countdown",{enabled:true,revision:2,today:"2026-10-20",time:"07:35",usual_time:"07:35",departure_at:"2026-10-20T07:35:00+01:00",show_before_minutes:60,mode:"drive",status:"countdown",muted:false});}
+
+test("School mornings countdown fits Today and saves a one-off walking departure",async({page},testInfo)=>{
+  const errors=await mount(page,locationDisabledConfig(),{"sensor.family_dashboard_departure":schoolDepartureFixture()},{fixedNow:"2026-10-20T06:15:00Z",kiosk:true,departureAdmin:true});
+  const card=page.locator("family-hub-card"),panel=card.locator(".departure-panel");
+  await expect(panel).toContainText("Leave in 20 minutes");
+  const bounds=await panel.evaluate(e=>({bottom:e.getBoundingClientRect().bottom,height:e.clientHeight,scroll:e.scrollHeight}));
+  expect(bounds.scroll).toBeLessThanOrEqual(bounds.height+1);
+  await page.screenshot({path:resolve(tmpdir(),`school-mornings-${testInfo.project.name}.png`)});
+  await panel.getByRole("button",{name:"Change today",exact:true}).click();
+  await card.getByLabel("Departure time",{exact:true}).fill("07:25");
+  await card.getByLabel("Travel method",{exact:true}).selectOption("walk");
+  await card.getByRole("button",{name:"Save today’s departure",exact:true}).click();
+  await expect(card.locator(".departure-modal")).toHaveCount(0);
+  await expect(panel).toContainText("Walking · Leave at 07:25 · Today only");
+  expect(await page.evaluate(()=>window.__wsCalls.filter(c=>c.type==="family_dashboard_departures/today"))).toEqual([{type:"family_dashboard_departures/today",expected_revision:2,payload:{operation:"override",date:"2026-10-20",time:"07:25",mode:"walk"}}]);
+  expect(await card.evaluate(e=>e._departureView().usual_time)).toBe("07:35");
+  await panel.getByRole("button",{name:"Mute today",exact:true}).click();
+  await expect(panel).toContainText("Announcements muted for today");
+  await panel.getByRole("button",{name:"We’ve left",exact:false}).click();
+  await expect(panel).toContainText("Have a lovely day");
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("School mornings hides parent controls from child and read-only displays and retains failed edits",async({page})=>{
+  const family=locationDisabledConfig();family.display.read_only=true;
+  await mount(page,family,{"sensor.family_dashboard_departure":schoolDepartureFixture()},{fixedNow:"2026-10-20T06:15:00Z",kiosk:true,departureAdmin:true});
+  const card=page.locator("family-hub-card");
+  await expect(card.locator(".departure-panel")).toContainText("Leave in 20 minutes");
+  await expect(card.locator("[data-departure-edit]")).toHaveCount(0);
+  await mount(page,locationDisabledConfig(),{"sensor.family_dashboard_departure":schoolDepartureFixture()},{fixedNow:"2026-10-20T06:15:00Z",kiosk:true});
+  await expect(card.locator("[data-departure-edit]")).toHaveCount(0);
+  await mount(page,locationDisabledConfig(),{"sensor.family_dashboard_departure":schoolDepartureFixture()},{fixedNow:"2026-10-20T06:15:00Z",kiosk:true,departureAdmin:true,departureReject:true});
+  await card.locator("[data-departure-edit]").click();
+  await card.getByLabel("Departure time",{exact:true}).fill("07:20");
+  await card.getByRole("button",{name:"Save today’s departure",exact:true}).click();
+  await expect(card.locator(".departure-modal [role=alert]")).toContainText("Could not save departure");
+  await expect(card.getByLabel("Departure time",{exact:true})).toHaveValue("07:20");
+  await card.getByRole("button",{name:"Cancel",exact:true}).click();
+  await expect(card.locator("[data-departure-edit]")).toBeFocused();
 });
