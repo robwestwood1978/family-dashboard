@@ -39,14 +39,11 @@ if (!/^profile family_dashboard_manager\b/m.test(appArmor)) {
 if (!/\/config\/www\/family-dashboard\/\*\*\s+rwk,/.test(appArmor)) {
   failures.push("AppArmor is missing the dedicated Family Hub frontend write rule");
 }
-for (const classroomPath of [
-  "family_dashboard_classroom",
-  ".family_dashboard_classroom-staging",
-  ".family_dashboard_classroom-previous"
-]) {
-  if (!appArmor.includes(`/config/custom_components/${classroomPath}/** rwk,`)) {
-    failures.push(`AppArmor is missing the fixed Classroom path rule for ${classroomPath}`);
+for (const domain of ["family_dashboard_classroom", "family_dashboard_homework", "family_dashboard_departures"]) {
+  for (const componentPath of [domain, `.${domain}-staging`, `.${domain}-previous`]) {
+    if (!appArmor.includes(`/config/custom_components/${componentPath}/** rwk,`)) failures.push(`AppArmor is missing the fixed integration path rule for ${componentPath}`);
   }
+  if (!dockerfile.includes(`COPY app/integrations/${domain} ./integrations/${domain}`)) failures.push(`Dockerfile does not package the fixed integration ${domain}`);
 }
 if (/\/config\/\.storage(?:\/|\\s)/.test(appArmor)) {
   failures.push("AppArmor must not grant Manager access to Home Assistant OAuth storage");
