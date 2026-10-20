@@ -37,7 +37,7 @@ profile family_dashboard_manager flags=(attach_disconnected,mediate_deleted) {
   /config/www/family-dashboard/ rw,
   /config/www/family-dashboard/** rwk,
 
-  # Only the fixed Classroom integration and its bounded staging/recovery paths
+  # Only the fixed first-party integrations and their staging/recovery paths
   # are writable. OAuth config entries and tokens remain in Home Assistant's
   # protected .storage directory; this profile grants Manager no access to it.
   /config/custom_components/ rw,
@@ -53,4 +53,10 @@ profile family_dashboard_manager flags=(attach_disconnected,mediate_deleted) {
   /config/custom_components/.family_dashboard_homework-staging/** rwk,
   /config/custom_components/.family_dashboard_homework-previous/ rw,
   /config/custom_components/.family_dashboard_homework-previous/** rwk,
+  /config/custom_components/family_dashboard_departures/ rw,
+  /config/custom_components/family_dashboard_departures/** rwk,
+  /config/custom_components/.family_dashboard_departures-staging/ rw,
+  /config/custom_components/.family_dashboard_departures-staging/** rwk,
+  /config/custom_components/.family_dashboard_departures-previous/ rw,
+  /config/custom_components/.family_dashboard_departures-previous/** rwk,
 }

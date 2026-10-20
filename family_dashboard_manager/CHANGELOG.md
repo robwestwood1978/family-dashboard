@@ -1,3 +1,8 @@
+## 0.22.1
+
+- Include the School Mornings integration in the published app image and allow the installer to manage only its fixed component, staging and recovery paths.
+- Check every bundled first-party integration and its specific installation paths during runtime validation to catch packaging omissions before release.
+
 ## 0.22.0
 
 - Add shared school morning departure times, a calm Today countdown and Sonos announcements at 20, 10, 5 minutes and departure. Scheduling runs in Home Assistant while the iPad sleeps.
