@@ -2137,7 +2137,7 @@ export function normaliseFamilyViewPreferences(value, people = [], initialMode =
     if (!ids.has(id) || !entry || typeof entry !== "object") continue;
     const validDate = date => typeof date === "string" && /^20\d{2}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(`${date}T12:00:00Z`)) && new Date(`${date}T12:00:00Z`).toISOString().slice(0,10) === date;
     contexts[id] = {
-      taskSection: ["jobs","ready","homework","rewards"].includes(entry.taskSection) ? entry.taskSection : "jobs",
+      taskSection: ["jobs","ready","homework","lunch","rewards"].includes(entry.taskSection) ? entry.taskSection : "jobs",
       calendarMode: ["day","week","month","agenda"].includes(entry.calendarMode) ? entry.calendarMode : initialMode,
       ...(validDate(entry.calendarAnchor) ? {calendarAnchor:entry.calendarAnchor} : {}),
       ...(validDate(entry.calendarSelected) ? {calendarSelected:entry.calendarSelected} : {})
@@ -3204,6 +3204,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarPersonFilter = this._familyViewId || "all";
     this._taskSection = context?.taskSection || "jobs";
     if (this._taskSection === "homework" && !this._config.school?.homework_enabled) this._taskSection = "jobs";
+    if (this._taskSection === "lunch" && !this._config.school?.lunch_menus?.length) this._taskSection = "jobs";
     this._calendarMode = context?.calendarMode || this._config.calendar?.initial_view || "week";
     this._calendarAnchorKey = context?.calendarAnchor || today;
     this._calendarSelectedKey = context?.calendarSelected || today;
@@ -6495,7 +6496,9 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     if (target.dataset.familyPerson) {
       if (this._config.people.some((person) => person.id === target.dataset.familyPerson && person.role === "child")) {
+        const keepLunch = this._taskSection === "lunch";
         this._selectFamilyView(target.dataset.familyPerson);
+        if (keepLunch) { this._taskSection = "lunch"; this._persistFamilyViewPreferences(); }
         this._choreClaimFeedback = null;
         this._scheduleRender(true);
       }

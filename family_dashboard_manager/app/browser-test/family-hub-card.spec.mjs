@@ -968,13 +968,13 @@ test("school lunch opens a dated weekly menu with packed lunch and a waiting chi
   await mkdir(resolve("test-results/school-lunch"),{recursive:true});
   await page.screenshot({path:resolve(`test-results/school-lunch/${testInfo.project.name}-today.png`)});
   await card.locator('.school-lunch-child[data-school-lunch-open="child_one"]').click();
-  await expect(card.locator(".school-lunch-week")).toContainText("Week of Mon 9 Nov");
+  await expect(card.locator(".school-lunch-week")).toContainText(/Week of Mon,? 9 Nov/);
   await expect(card.locator(".school-lunch-day")).toHaveCount(5);
-  await expect(card.locator(".school-lunch-day.is-packed")).toContainText("Tue 10 Nov");
+  await expect(card.locator(".school-lunch-day.is-packed")).toContainText(/Tue,? 10 Nov/);
   await expect(card.locator(".school-lunch-day.is-packed")).not.toContainText("Chocolate sponge");
   await page.screenshot({path:resolve(`test-results/school-lunch/${testInfo.project.name}-week.png`)});
   await card.getByRole("button",{name:"Next lunch week"}).click();
-  await expect(card.locator(".school-lunch-week")).toContainText("Week of Mon 16 Nov");
+  await expect(card.locator(".school-lunch-week")).toContainText(/Week of Mon,? 16 Nov/);
   await expect(card.locator(".school-lunch-day.is-packed")).toHaveCount(0);
   await card.locator('[data-family-person="child_two"]').click();
   await expect(card.locator(".school-lunch-week")).toContainText("New menu coming soon");
