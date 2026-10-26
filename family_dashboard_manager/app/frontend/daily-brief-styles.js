@@ -1,6 +1,36 @@
 // Shared presentation only. Service boundaries, child cards and controls stay in
 // family-hub-card. The dashboard defaults to light; an explicit appearance preference can opt in to dark or automatic mode.
 export const DAILY_BRIEF_STYLES = `
+  .today-grid.focus-today:has(.school-lunch-today) { grid-template-rows:minmax(180px,1fr) auto auto auto; }
+  .focus-today .school-lunch-today { grid-column:1/-1;grid-row:2;border-top:1px solid var(--daily-line);padding-top:8px; }
+  .focus-today:has(.school-lunch-today) .today-football { grid-row:3; }
+  .focus-today:has(.school-lunch-today) .focus-home-summary { grid-row:4; }
+  .school-lunch-today .section-heading { min-height:36px; }
+  .school-lunch-today .section-heading h2 { font-size:16px; }
+  .school-lunch-today .section-heading button { min-height:44px;font-size:12px; }
+  .school-lunch-children { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px; }
+  .school-lunch-child { display:flex;gap:10px;align-items:center;text-align:left;padding:10px 12px;border:0;border-radius:16px;background:var(--daily-surface);color:var(--daily-text);cursor:pointer;min-width:0; }
+  .school-lunch-child>span:last-child { display:grid;gap:3px;min-width:0; }
+  .school-lunch-child strong { font-size:14px;font-weight:500;line-height:1.3; }
+  .school-lunch-child small { color:var(--daily-muted);font-size:12px; }
+  .school-lunch-child .family-view-token { flex:none;width:32px;height:32px;font-size:14px; }
+  .school-lunch-child.is-packed,.school-lunch-day.is-packed { background:var(--daily-accent-soft);border:1px solid var(--daily-accent); }
+  .school-lunch-week { height:100%;overflow:auto;padding:4px 4px 24px;color:var(--daily-text);box-sizing:border-box; }
+  .school-lunch-week>header { display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:16px; }
+  .school-lunch-week h2 { font-size:25px;font-weight:500;margin:4px 0; }
+  .school-lunch-week p { color:var(--daily-muted);line-height:1.5;margin:6px 0; }
+  .school-lunch-nav { display:flex;gap:8px; }
+  .school-lunch-nav button { min-width:48px;min-height:48px;border:1px solid var(--daily-line);border-radius:14px;background:var(--daily-surface);color:var(--daily-text);font-size:26px;cursor:pointer; }
+  .school-lunch-nav button:disabled { opacity:.35;cursor:default; }
+  .school-lunch-days { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; }
+  .school-lunch-day { padding:18px;border:1px solid var(--daily-line);border-radius:20px;background:var(--daily-surface);min-width:0;overflow-wrap:anywhere; }
+  .school-lunch-day[aria-current=date] { box-shadow:inset 4px 0 var(--daily-accent); }
+  .school-lunch-day header { display:flex;justify-content:space-between;gap:10px;font-size:13px; }
+  .school-lunch-day header span { color:var(--daily-muted); }
+  .school-lunch-day h3 { font-size:18px;line-height:1.35;font-weight:500;margin:12px 0 8px; }
+  .school-lunch-day p,.school-lunch-day details { font-size:13px;line-height:1.5; }
+  .school-lunch-day summary { min-height:44px;display:list-item;align-content:center;cursor:pointer;color:var(--daily-accent); }
+  .school-lunch-day ul { padding-left:20px;color:var(--daily-muted); }
   .departure-panel h2 { font-size:clamp(28px,3vw,40px);font-weight:500;line-height:1.12;letter-spacing:-.045em;margin:10px 0; }
   .departure-panel .supporting { font-size:16px; }
   .departure-guidance { color:var(--daily-muted);font-size:13px;line-height:1.45;margin:12px 0; }

@@ -1,3 +1,9 @@
+## 0.23.0
+
+- Show each child’s school lunch on Today and browse dated weekly menus in Tasks → Lunch.
+- Configure rotating main meals, sides and desserts, packed-lunch days, closure dates and term boundaries in School settings.
+- Unpublished menus have a clear waiting state. Lunch menus work independently of Classroom.
+
 ## 0.22.1
 
 - Include the School Mornings integration in the published app image and allow the installer to manage only its fixed component, staging and recovery paths.

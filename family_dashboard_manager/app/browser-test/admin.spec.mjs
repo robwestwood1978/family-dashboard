@@ -44,7 +44,7 @@ test.beforeAll(async () => {
     homework.revision++;response.json({data:homework,preview:{today:"2026-10-13",children:[]}});
   });
   app.get("/api/admin/bootstrap", (_request, response) => response.json({
-    version: "0.22.1",
+    version: "0.23.0",
     config,
     schema,
     inventory,
