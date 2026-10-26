@@ -617,6 +617,30 @@ export function validateConfig(config) {
   if (!["classroom", "calendar"].includes(schoolSource)) {
     fail("config.school.source", "must be classroom or calendar");
   }
+  if (school.lunch_menus !== undefined) {
+    const menus = requireArray(school.lunch_menus, "config.school.lunch_menus");
+    validateUnique(menus.map(menu => menu.person_id), "config.school.lunch_menus[].person_id");
+    menus.forEach((menu,index) => {
+      const path = `config.school.lunch_menus[${index}]`;
+      if (personRoles.get(menu.person_id) !== "child") fail(`${path}.person_id`, "must reference a child");
+      if (menu.status !== "published") return;
+      for (const key of ["start_date","end_date","week_one_date"]) {
+        const value = menu[key];
+        const date = new Date(`${value}T12:00:00Z`);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0,10) !== value) fail(`${path}.${key}`, "must be a real calendar date");
+      }
+      if (menu.end_date < menu.start_date) fail(`${path}.end_date`, "must not precede the start date");
+      if (new Date(`${menu.week_one_date}T12:00:00Z`).getUTCDay() !== 1) fail(`${path}.week_one_date`, "must be a Monday");
+      if (menu.week_one_date > menu.start_date) fail(`${path}.week_one_date`, "must be on or before the start date");
+      for (const day of menu.closed_dates || []) {
+        const date = new Date(`${day}T12:00:00Z`);
+        if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0,10) !== day || day < menu.start_date || day > menu.end_date) fail(`${path}.closed_dates`, "must contain real dates within the menu term");
+      }
+      const rules = menu.packed_lunch_days || [];
+      validateUnique(rules.map(rule => `${rule.week}:${rule.weekday}`), `${path}.packed_lunch_days`);
+      for (const rule of rules) if (rule.week > (menu.weeks?.length || 0)) fail(`${path}.packed_lunch_days`, "week must exist in the rotation");
+    });
+  }
   const classroomStudents = requireArray(school.classroom_students, "config.school.classroom_students");
   const classroomPersonIds = [];
   const classroomAssignmentEntities = [];

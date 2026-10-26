@@ -1,5 +1,5 @@
 import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.22.1";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.23.0";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -1433,6 +1433,22 @@ function mondayForDateKey(value) {
   return shiftDateKey(value, 1 - weekday);
 }
 
+// Rotation uses calendar dates, rather than elapsed local hours, across DST.
+export function schoolLunchForDate(config, personId, value = new Date()) {
+  const menu = config.school?.lunch_menus?.find(entry => entry.person_id === personId);
+  const day = dateKey(value, config.product?.timezone || "Europe/London");
+  if (!menu || menu.status === "pending") return { status: "pending", day, title: "New menu coming soon" };
+  if (day < menu.start_date) return { status: "upcoming", day, title: "Menu starts soon", start: menu.start_date };
+  if (day > menu.end_date) return { status: "ended", day, title: "Term menu finished" };
+  const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
+  if (weekday === 0 || weekday === 6 || menu.closed_dates?.includes(day)) return { status: "closed", day, title: "No school lunch today" };
+  const elapsed = Math.round((Date.parse(`${mondayForDateKey(day)}T12:00:00Z`) - Date.parse(`${menu.week_one_date}T12:00:00Z`)) / 604800000);
+  const week = ((elapsed % menu.weeks.length) + menu.weeks.length) % menu.weeks.length + 1;
+  if (menu.packed_lunch_days?.some(rule => rule.week === week && rule.weekday === weekday)) return { status: "packed", day, week, title: "Packed lunch today" };
+  const meal = menu.weeks[week - 1][weekday - 1];
+  return { status: "meal", day, week, title: meal.mains[0], alternatives: meal.mains.slice(1), sides: meal.sides || [], dessert: meal.dessert || "" };
+}
+
 function monthGridStart(value) {
   const [year, month] = String(value || "").split("-").map(Number);
   if (!year || !month) return value;
@@ -2121,7 +2137,7 @@ export function normaliseFamilyViewPreferences(value, people = [], initialMode =
     if (!ids.has(id) || !entry || typeof entry !== "object") continue;
     const validDate = date => typeof date === "string" && /^20\d{2}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(`${date}T12:00:00Z`)) && new Date(`${date}T12:00:00Z`).toISOString().slice(0,10) === date;
     contexts[id] = {
-      taskSection: ["jobs","ready","homework","rewards"].includes(entry.taskSection) ? entry.taskSection : "jobs",
+      taskSection: ["jobs","ready","homework","lunch","rewards"].includes(entry.taskSection) ? entry.taskSection : "jobs",
       calendarMode: ["day","week","month","agenda"].includes(entry.calendarMode) ? entry.calendarMode : initialMode,
       ...(validDate(entry.calendarAnchor) ? {calendarAnchor:entry.calendarAnchor} : {}),
       ...(validDate(entry.calendarSelected) ? {calendarSelected:entry.calendarSelected} : {})
@@ -3188,6 +3204,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarPersonFilter = this._familyViewId || "all";
     this._taskSection = context?.taskSection || "jobs";
     if (this._taskSection === "homework" && !this._config.school?.homework_enabled) this._taskSection = "jobs";
+    if (this._taskSection === "lunch" && !this._config.school?.lunch_menus?.length) this._taskSection = "jobs";
     this._calendarMode = context?.calendarMode || this._config.calendar?.initial_view || "week";
     this._calendarAnchorKey = context?.calendarAnchor || today;
     this._calendarSelectedKey = context?.calendarSelected || today;
@@ -3606,6 +3623,32 @@ export class FamilyHubCard extends HTMLElementBase {
     </aside>`;
   }
 
+  _renderSchoolLunchToday() {
+    if (!this._config.school?.lunch_menus?.length) return "";
+    const children = this._config.people.filter(person => person.role === "child" && (this._familyViewPerson()?.role !== "child" || person.id === this._familyViewId));
+    if (!children.length) return "";
+    return `<article class="school-lunch-today"><div class="section-heading"><h2>Today’s school lunch</h2><button type="button" data-school-lunch-open="${escapeHtml(children[0].id)}">Weekly menu <ha-icon icon="mdi:chevron-right"></ha-icon></button></div><div class="school-lunch-children">${children.map(person => {
+      const lunch = schoolLunchForDate(this._config, person.id);
+      const detail = lunch.status === "meal" ? lunch.sides.join(" · ") : lunch.status === "packed" ? "Remember your lunch box" : lunch.status === "upcoming" ? `From ${formatDay(`${lunch.start}T12:00:00Z`,this._config.product.locale,"UTC")}` : "";
+      return `<button type="button" class="school-lunch-child ${lunch.status === "packed" ? "is-packed" : ""}" data-school-lunch-open="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}"><span class="family-view-token">${escapeHtml(person.name.slice(0,1))}</span><span><small>${escapeHtml(person.name)}${lunch.week ? ` · Week ${lunch.week}` : ""}</small><strong>${escapeHtml(lunch.title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</span></button>`;
+    }).join("")}</div></article>`;
+  }
+
+  _renderSchoolLunch(person) {
+    const menu = this._config.school.lunch_menus.find(entry => entry.person_id === person.id);
+    if (!menu || menu.status === "pending") return `<section class="school-lunch-week"><p class="eyebrow">${escapeHtml(person.name)}’s school lunch</p><h2>New menu coming soon</h2><p>We’ll add the meals here when the school publishes the new menu.</p></section>`;
+    const today = dateKey(new Date(),this._config.product.timezone);
+    const first = mondayForDateKey(menu.start_date), last = mondayForDateKey(menu.end_date);
+    const anchor = this._lunchWeekKey || mondayForDateKey(today);
+    const monday = anchor < first ? first : anchor > last ? last : anchor;
+    this._lunchWeekKey = monday;
+    const dateLabel = day => new Intl.DateTimeFormat(this._config.product.locale,{weekday:"short",day:"numeric",month:"short",timeZone:"UTC"}).format(new Date(`${day}T12:00:00Z`));
+    return `<section class="school-lunch-week" aria-label="${escapeHtml(person.name)}’s weekly lunch menu"><header><div><p class="eyebrow">${escapeHtml(person.name)}’s school lunch</p><h2>Week of ${escapeHtml(dateLabel(monday))}</h2><p>${today > menu.end_date ? "Term menu finished · showing the final week" : "Main meals, sides & something sweet"}</p></div><div class="school-lunch-nav"><button type="button" data-lunch-week="${shiftDateKey(monday,-7)}" aria-label="Previous lunch week" ${monday <= first ? "disabled" : ""}>‹</button><button type="button" data-lunch-week="${shiftDateKey(monday,7)}" aria-label="Next lunch week" ${monday >= last ? "disabled" : ""}>›</button></div></header><div class="school-lunch-days">${Array.from({length:5},(_,index) => {
+      const day = shiftDateKey(monday,index), lunch = schoolLunchForDate(this._config,person.id,day);
+      return `<article class="school-lunch-day ${lunch.status === "packed" ? "is-packed" : ""}" ${day === today ? 'aria-current="date"' : ""}><header><strong>${escapeHtml(dateLabel(day))}</strong><span>${day === today ? "Today · " : ""}${lunch.week ? `Week ${lunch.week}` : ""}</span></header><h3>${escapeHtml(lunch.title)}</h3>${lunch.status === "meal" ? `<p>${escapeHtml(lunch.sides.join(" · "))}</p>${lunch.dessert ? `<p class="school-lunch-dessert"><strong>Dessert</strong> ${escapeHtml(lunch.dessert)}</p>` : ""}${lunch.alternatives.length ? `<details><summary>Other main meals</summary><ul>${lunch.alternatives.map(meal => `<li>${escapeHtml(meal)}</li>`).join("")}</ul></details>` : ""}` : lunch.status === "packed" ? '<p>Bring your lunch box from home.</p>' : ""}</article>`;
+    }).join("")}</div></section>`;
+  }
+
   _renderToday() {
     const states = this._hass?.states || {};
     const features = this._config.features;
@@ -3627,6 +3670,7 @@ export class FamilyHubCard extends HTMLElementBase {
     return `<section class="today-grid focus-today" data-calendar="${features.calendar}" data-secondary-count="${[features.family, features.football, features.music].filter(Boolean).length}" aria-label="Today at a glance">
       ${room ? `<article class="surface hero-panel today-hero focus-home-card"><div class="daily-home-art" aria-hidden="true"><img src="${HOME_ILLUSTRATION}" alt="" decoding="async"></div><div class="today-hero-copy"><h2>${escapeHtml(room.name)}</h2><p>${Number.isFinite(summary.temperature) ? `${escapeHtml(room.name)} · ${formatTemperature(summary.temperature)}` : "Your home controls"}</p></div><button type="button" class="focus-home-open" data-focus-home-room="${escapeHtml(room.id)}" aria-label="Open ${escapeHtml(room.name)} controls"><ha-icon icon="mdi:arrow-top-right"></ha-icon></button><div class="focus-home-controls"><button type="button" data-room-lights="${escapeHtml(room.id)}" data-light-service="${summary.lightsOn ? "turn_off":"turn_on"}" aria-label="Turn ${escapeHtml(room.name)} lights ${summary.lightsOn ? "off":"on"}" aria-pressed="${Boolean(summary.lightsOn)}" ${readOnly || !availableLights.length ? "disabled" : ""}><ha-icon icon="mdi:lamp-outline"></ha-icon><span><strong>${availableLights.length ? summary.lightsOn ? "Lights on":"Lights off" : "Lighting unavailable"}</strong><small>${escapeHtml(room.name)}</small></span></button><button type="button" ${room.climate ? `data-focus-home-room="${escapeHtml(room.id)}" data-room-section-target="comfort"` : 'data-home-target="heating"'}><ha-icon icon="mdi:thermometer"></ha-icon><span><strong>${Number.isFinite(summary.targetTemperature) ? formatTemperature(summary.targetTemperature):Number.isFinite(home?.averageTemperature) ? formatTemperature(home.averageTemperature):"View heating"}</strong><small>${room.climate ? "Heating target" : "Home temperature"} <ha-icon icon="mdi:chevron-right"></ha-icon></small></span></button></div></article>` : `<article class="focus-hello"><h2>${escapeHtml(greetingForTime(new Date(),this._config.product.timezone))}</h2><p>Your family’s day, together.</p></article>`}
       <div class="focus-today-plan">${this._preparationError ? `<p class="calendar-warning" role="alert">${escapeHtml(this._preparationError)}</p>` : ""}${departure || (features.calendar ? `<article class="next-panel today-next"><p class="eyebrow">${next ? `Next, ${isAllDayCalendarEvent(next) ? "all day" : `at ${escapeHtml(formatTime(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}`}` : "Coming up"}</p><h2>${escapeHtml(next?.summary || "No plans yet")}</h2><p class="supporting">${next ? `${escapeHtml(familyPlannerPeople(next,this._config.people).filter(person => person.role !== "household").map(person => person.name).join(", ") || "Everyone")}${next.location ? ` · ${escapeHtml(next.location)}` : ""}` : "The next family event will appear here."}</p>${next ? this._renderFocusChecklist(next, { compact:true }) : ""}<button type="button" class="text-action" ${next ? `data-focus-open-plan="${escapeHtml(familyPlannerEventKey(next))}"`:'data-view="calendar"'}>See the plan <ha-icon icon="mdi:arrow-right"></ha-icon></button></article>`:"")}${features.family ? `<article class="children-panel today-family" data-day-phase="${phase.id}"><div class="section-heading"><h2>${homeworkActions?escapeHtml(phase.label):"A little left to do"}</h2><button type="button" data-view="family">Tasks <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="today-job-list">${homeworkActions || this._renderTodayJobs()}</div>${this._renderTodayTaskPreview(preview)}${this._renderHomeworkReminder()}</article>`:""}</div>
+      ${this._renderSchoolLunchToday()}
       ${football ? `<article class="football-panel today-football" data-fixture-count="${football.fixtureCount || 0}"><div class="section-heading"><h2>This week in football</h2><button type="button" data-view="football">All football <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="featured-fixtures">${football.html}</div></article>`:""}
       ${home || security || energy ? `<footer class="hero-metrics focus-home-summary">${home ? `<button type="button" data-home-target="heating"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${escapeHtml(`${heating.value} · ${heating.detail}`)}</strong><small>${escapeHtml(heating.detail)}</small></span></button><button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${escapeHtml(`${lighting.value} · ${lighting.detail}`)}</strong><small>${escapeHtml(lighting.detail)}</small></span></button>`:""}${security ? `<button type="button" data-view="entry"><ha-icon icon="${security.icon}"></ha-icon><span><strong>${escapeHtml(security.title)}</strong><small>${escapeHtml(security.detail)}</small></span></button>`:""}${energy ? `<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energy.value)}</strong><small>${escapeHtml(energy.detail)}</small></span></button>`:""}</footer>` : ""}
     </section>`;
@@ -4899,16 +4943,16 @@ export class FamilyHubCard extends HTMLElementBase {
     const choresEnabled = this._config.features.chores === true;
     const familyTitle = choresEnabled ? "Tasks, jobs & rewards" : this._config.features.school ? "School & tasks" : "Tasks";
     const children = this._config.people.filter((person) => person.role === "child");
-    if (this._familyViewPerson()?.role === "parent") return this._renderFamilyOverview(children);
-    if (!locationEnabled || this._taskSection === "homework") {
+    if (this._familyViewPerson()?.role === "parent" && this._taskSection !== "lunch") return this._renderFamilyOverview(children);
+    if (!locationEnabled || ["homework","lunch"].includes(this._taskSection)) {
       const selected = children.find((person) => person.id === this._familyPersonId) || children[0];
       const tabs = children.map((person) => `<button type="button" class="family-kid-tab ${selected?.id === person.id ? "is-selected" : ""}" data-family-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}" aria-pressed="${selected?.id === person.id}"><span>${escapeHtml(person.name.slice(0, 1))}</span><strong>${escapeHtml(person.name)}</strong></button>`).join("");
       return `
         <section class="family-dashboard${children.length > 1 ? " has-kid-switcher" : ""}${this._choreClaimFeedback ? " has-claim-feedback" : ""}">
-          <header class="family-dashboard-heading"><div class="task-section-tabs segments" role="group" aria-label="Tasks section">${[["jobs", "Jobs"], ["ready", "Get ready"], ...(this._config.school?.homework_enabled ? [["homework", "Homework"]] : []), ["rewards", "Rewards"]].map(([id, label]) => `<button type="button" class="segment ${(this._taskSection || "jobs") === id ? "is-selected" : ""}" data-task-section="${id}" aria-pressed="${(this._taskSection || "jobs") === id}">${label}</button>`).join("")}</div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
+          <header class="family-dashboard-heading"><div class="task-section-tabs segments" role="group" aria-label="Tasks section">${[["jobs", "Jobs"], ["ready", "Get ready"], ...(this._config.school?.homework_enabled ? [["homework", "Homework"]] : []), ...(this._config.school?.lunch_menus?.length ? [["lunch", "Lunch"]] : []), ["rewards", "Rewards"]].map(([id, label]) => `<button type="button" class="segment ${(this._taskSection || "jobs") === id ? "is-selected" : ""}" data-task-section="${id}" aria-pressed="${(this._taskSection || "jobs") === id}">${label}</button>`).join("")}</div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
           ${children.length > 1 ? `<div class="family-kid-switcher" role="group" aria-label="Choose family member">${tabs}</div>` : ""}
           ${this._choreClaimFeedback ? `<p class="chore-claim-feedback" role="status"><ha-icon icon="mdi:check-circle"></ha-icon>${escapeHtml(this._choreClaimFeedback)}</p>` : ""}
-          <div class="family-kid-stage">${selected ? this._taskSection === "homework" ? this._renderHomework(selected) : this._renderFamilyPerson(selected, { kidMode: true }) : '<p class="hub-empty-state large">Add a child in Family Dashboard Admin to connect ChoreOps.</p>'}</div>
+          <div class="family-kid-stage">${selected ? this._taskSection === "lunch" ? this._renderSchoolLunch(selected) : this._taskSection === "homework" ? this._renderHomework(selected) : this._renderFamilyPerson(selected, { kidMode: true }) : '<p class="hub-empty-state large">Add a child in Family Dashboard Admin to connect ChoreOps.</p>'}</div>
         </section>
       `;
     }
@@ -6332,12 +6376,25 @@ export class FamilyHubCard extends HTMLElementBase {
       }
       return;
     }
+    if (target.dataset.schoolLunchOpen && this._config.school?.lunch_menus?.length && this._config.people.some(person => person.role === "child" && person.id === target.dataset.schoolLunchOpen)) {
+      this._selectFamilyView(target.dataset.schoolLunchOpen);
+      this._view = "family";
+      this._taskSection = "lunch";
+      this._lunchWeekKey = null;
+      this._scheduleRender(true);
+      return;
+    }
+    if (target.dataset.lunchWeek && /^\d{4}-\d{2}-\d{2}$/.test(target.dataset.lunchWeek)) {
+      this._lunchWeekKey = target.dataset.lunchWeek;
+      this._scheduleRender(true);
+      return;
+    }
     // Navigation remains local; checklist writes use the existing bounded
     // to-do action path shared with the event editor.
     if (this._pendingConfirmation && !target.dataset.confirmAction) return;
     for (const [key, property, allowed] of [
       ["roomSection", "_roomDetailSection", ["lights", "comfort", "scenes", "music"]],
-      ["taskSection", "_taskSection", ["jobs", "ready", "homework", "rewards"]],
+      ["taskSection", "_taskSection", ["jobs", "ready", "homework", "lunch", "rewards"]],
       ["cleaningSection", "_cleaningSection", ["clean", "settings", "care"]],
       ["squadSection", "_squadSection", ["starters", "bench"]]
     ]) {
@@ -6439,7 +6496,9 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     if (target.dataset.familyPerson) {
       if (this._config.people.some((person) => person.id === target.dataset.familyPerson && person.role === "child")) {
+        const keepLunch = this._taskSection === "lunch";
         this._selectFamilyView(target.dataset.familyPerson);
+        if (keepLunch) { this._taskSection = "lunch"; this._persistFamilyViewPreferences(); }
         this._choreClaimFeedback = null;
         this._scheduleRender(true);
       }

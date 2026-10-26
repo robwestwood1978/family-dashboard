@@ -19,7 +19,7 @@ const illustrationSource = await readFile(new URL("../frontend/assets/home-illus
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.22.1";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.23.0";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -948,6 +948,43 @@ async function expectNoRootOverflow(page) {
   expect(metrics.topbarTop + metrics.mainScrollTop).toBeGreaterThanOrEqual(metrics.headerBottom - 1);
   expect(metrics.viewBottom).toBeLessThanOrEqual(metrics.cardBottom + 1);
 }
+
+test("school lunch opens a dated weekly menu with packed lunch and a waiting child", async ({page}, testInfo) => {
+  const family=locationDisabledConfig();
+  family.features.school=false;
+  family.school.lunch_menus=[{person_id:"child_one",status:"published",start_date:"2026-11-02",end_date:"2026-12-19",week_one_date:"2026-11-02",
+    weeks:Array.from({length:3},()=>Array.from({length:5},()=>({mains:["Roast chicken with potatoes & gravy","Vegetarian main","Jacket potato with beans"],sides:["Carrots","Seasonal greens"],dessert:"Chocolate sponge"}))),packed_lunch_days:[{week:2,weekday:2}]},{person_id:"child_two",status:"pending"}];
+  const errors=await mount(page,family,{}, {fixedNow:"2026-11-10T07:30:00Z",kiosk:true});
+  const card=page.locator("family-hub-card");
+  await expect(card.locator(".school-lunch-today")).toContainText("Packed lunch today");
+  await expect(card.locator(".school-lunch-today")).toContainText("New menu coming soon");
+  await expectNoRootOverflow(page);
+  const bounds=await card.evaluate(element=>{
+    const root=element.shadowRoot,lunch=root.querySelector(".school-lunch-today").getBoundingClientRect(),football=root.querySelector(".today-football")?.getBoundingClientRect(),view=root.querySelector(".hub-view").getBoundingClientRect();
+    const next=root.querySelector(".today-next"),tasks=root.querySelector(".today-family");
+    return {lunchBottom:lunch.bottom,footballTop:football?.top ?? lunch.bottom,viewBottom:view.bottom,nextBottom:next.getBoundingClientRect().bottom,tasksTop:tasks.getBoundingClientRect().top,nextOverflow:getComputedStyle(next).overflowY,tasksOverflow:getComputedStyle(tasks).overflowY};
+  });
+  expect(bounds.lunchBottom).toBeLessThanOrEqual(bounds.footballTop+1);
+  expect(bounds.lunchBottom).toBeLessThanOrEqual(bounds.viewBottom+1);
+  expect(bounds.nextBottom).toBeLessThanOrEqual(bounds.tasksTop);
+  expect(bounds.nextOverflow).toBe("auto");
+  expect(bounds.tasksOverflow).toBe("auto");
+  await mkdir(resolve("test-results/school-lunch"),{recursive:true});
+  await page.screenshot({path:resolve(`test-results/school-lunch/${testInfo.project.name}-today.png`)});
+  await card.locator('.school-lunch-child[data-school-lunch-open="child_one"]').click();
+  await expect(card.locator(".school-lunch-week")).toContainText(/Week of Mon,? 9 Nov/);
+  await expect(card.locator(".school-lunch-day")).toHaveCount(5);
+  await expect(card.locator(".school-lunch-day.is-packed")).toContainText(/Tue,? 10 Nov/);
+  await expect(card.locator(".school-lunch-day.is-packed")).not.toContainText("Chocolate sponge");
+  await page.screenshot({path:resolve(`test-results/school-lunch/${testInfo.project.name}-week.png`)});
+  await card.getByRole("button",{name:"Next lunch week"}).click();
+  await expect(card.locator(".school-lunch-week")).toContainText(/Week of Mon,? 16 Nov/);
+  await expect(card.locator(".school-lunch-day.is-packed")).toHaveCount(0);
+  await card.locator('[data-family-person="child_two"]').click();
+  await expect(card.locator(".school-lunch-week")).toContainText("New menu coming soon");
+  await expectNoRootOverflow(page);
+  expect(errors).toEqual([]);
+});
 
 test("requests compatible iPad library copies and decodes a stale HEIC label without bitmap or blob-image support", async ({page}) => {
   await page.route("http://homeassistant.local/family-dashboard/hub", route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body></body></html>"}));
