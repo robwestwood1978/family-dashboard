@@ -961,10 +961,14 @@ test("school lunch opens a dated weekly menu with packed lunch and a waiting chi
   await expectNoRootOverflow(page);
   const bounds=await card.evaluate(element=>{
     const root=element.shadowRoot,lunch=root.querySelector(".school-lunch-today").getBoundingClientRect(),football=root.querySelector(".today-football")?.getBoundingClientRect(),view=root.querySelector(".hub-view").getBoundingClientRect();
-    return {lunchBottom:lunch.bottom,footballTop:football?.top ?? lunch.bottom,viewBottom:view.bottom};
+    const next=root.querySelector(".today-next"),tasks=root.querySelector(".today-family");
+    return {lunchBottom:lunch.bottom,footballTop:football?.top ?? lunch.bottom,viewBottom:view.bottom,nextBottom:next.getBoundingClientRect().bottom,tasksTop:tasks.getBoundingClientRect().top,nextOverflow:getComputedStyle(next).overflowY,tasksOverflow:getComputedStyle(tasks).overflowY};
   });
   expect(bounds.lunchBottom).toBeLessThanOrEqual(bounds.footballTop+1);
   expect(bounds.lunchBottom).toBeLessThanOrEqual(bounds.viewBottom+1);
+  expect(bounds.nextBottom).toBeLessThanOrEqual(bounds.tasksTop);
+  expect(bounds.nextOverflow).toBe("auto");
+  expect(bounds.tasksOverflow).toBe("auto");
   await mkdir(resolve("test-results/school-lunch"),{recursive:true});
   await page.screenshot({path:resolve(`test-results/school-lunch/${testInfo.project.name}-today.png`)});
   await card.locator('.school-lunch-child[data-school-lunch-open="child_one"]').click();

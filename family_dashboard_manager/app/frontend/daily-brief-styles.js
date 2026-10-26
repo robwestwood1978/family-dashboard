@@ -1710,6 +1710,8 @@ export const DAILY_BRIEF_STYLES = `
     .focus-today .departure-panel>small { font-size:11px;margin:0;flex:none; }
   }
   .today-grid.focus-today:has(.school-lunch-today) { grid-template-rows:minmax(180px,1fr) auto auto auto; }
+  .focus-today:has(.school-lunch-today) .focus-today-plan { grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:8px;overflow:hidden; }
+  .focus-today:has(.school-lunch-today) :is(.today-next,.today-family) { overflow:auto;min-height:0; }
   .focus-today .school-lunch-today { grid-column:1/-1;grid-row:2;border-top:1px solid var(--daily-line);padding-top:8px; }
   .focus-today:has(.school-lunch-today) .today-football { grid-row:3; }
   .focus-today:has(.school-lunch-today) .focus-home-summary { grid-row:4; }
