@@ -2,7 +2,9 @@
 // family-hub-card. The dashboard defaults to light; an explicit appearance preference can opt in to dark or automatic mode.
 export const DAILY_BRIEF_STYLES = `
   .readiness-panel { display:flex;flex-direction:column;gap:0;padding:26px;background:var(--daily-surface);color:var(--daily-text);border-radius:24px;min-width:0;min-height:0;overflow:hidden; }
-  .readiness-panel>h2 { font-size:clamp(26px,2.7vw,36px);font-weight:500;letter-spacing:-.04em;line-height:1.15;margin:6px 0 10px; }
+  .readiness-panel>h2 { color:var(--daily-text);font-size:clamp(26px,2.7vw,36px);font-weight:500;letter-spacing:-.04em;line-height:1.15;margin:6px 0 10px; }
+  .readiness-panel .eyebrow { color:var(--daily-muted); }
+  .readiness-panel::after { display:none; }
   .readiness-date { color:var(--daily-muted);font-size:14px;margin:0 0 8px; }
   .readiness-progress { font-size:13px;color:var(--daily-muted);margin:0 0 12px; }
   .readiness-warning { color:var(--daily-text);background:var(--daily-warning-soft);border-radius:12px;padding:8px;font-size:12px;line-height:1.4;margin:0 0 8px; }

@@ -5155,6 +5155,11 @@ test("shared preparation carries evening completion and ownership into the morni
   expect(bounds.scroll).toBeLessThanOrEqual(bounds.height+1);
   const footballBounds=await card.evaluate(el=>({football:el.shadowRoot.querySelector(".today-football").getBoundingClientRect().bottom,summary:el.shadowRoot.querySelector(".focus-home-summary").getBoundingClientRect().top}));
   expect(footballBounds.football).toBeLessThanOrEqual(footballBounds.summary+1);
+  const originalViewport=page.viewportSize();
+  await page.setViewportSize({width:834,height:1112});
+  await expect.poll(()=>panel.evaluate(el=>getComputedStyle(el.querySelector("h2")).color===getComputedStyle(el).color)).toBe(true);
+  await expectNoRootOverflow(page);
+  await page.setViewportSize(originalViewport);
   await mkdir(resolve("test-results/readiness"),{recursive:true});
   await page.screenshot({path:resolve(`test-results/readiness/${testInfo.project.name}-morning.png`)});
   const calls=await page.evaluate(()=>window.__serviceCalls.filter(call=>call.domain==="todo"&&call.service==="update_item"));
