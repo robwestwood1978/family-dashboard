@@ -1,7 +1,7 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.24.0";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.25.0";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
 import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.24.0";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.0";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -13,6 +13,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
+const DASHBOARD_VERSION = "0.25.0";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
@@ -1249,10 +1250,11 @@ export function preparationProgress(items = [], eventKey, personIds = []) {
   return { total: relevant.length, complete, ready: relevant.length > 0 && complete === relevant.length };
 }
 
-export function familyReadiness(config, items = [], events = [], children = [], now = new Date(), selected = "all") {
+export function familyReadiness(config, items = [], events = [], children = [], now = new Date(), selected = "all", targetDay = null) {
   const today = dateKey(now,config.product.timezone);
-  const evening = familyDayPhase(now,config.product.timezone,config.display.day_rhythm).id === "evening";
-  const day = evening ? shiftDateKey(today,1) : today;
+  const tomorrow=shiftDateKey(today,1);
+  const day = [today,tomorrow].includes(targetDay) ? targetDay : familyDayPhase(now,config.product.timezone,config.display.day_rhythm).id === "evening" ? tomorrow : today;
+  const evening = day === tomorrow;
   const chosen = config.people.find(person=>person.id === selected);
   const people = new Map(config.people.filter(person=>person.role !== "household" && (chosen?.role !== "child" || person.id === chosen.id)).map(person=>[person.id,person]));
   const lunches = config.calendar.preparation?.automatic_lunch ? packedLunchEvents(config,[day]) : [];
@@ -2102,15 +2104,12 @@ export function normaliseFamilyViewPreferences(value, people = [], initialMode =
   const contexts = Object.create(null);
   for (const [id, entry] of Object.entries(value?.contexts || {})) {
     if (!ids.has(id) || !entry || typeof entry !== "object") continue;
-    const validDate = date => typeof date === "string" && /^20\d{2}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(`${date}T12:00:00Z`)) && new Date(`${date}T12:00:00Z`).toISOString().slice(0,10) === date;
     contexts[id] = {
       taskSection: ["jobs","ready","homework","lunch","rewards"].includes(entry.taskSection) ? entry.taskSection : "jobs",
-      calendarMode: ["day","week","month","agenda"].includes(entry.calendarMode) ? entry.calendarMode : initialMode,
-      ...(validDate(entry.calendarAnchor) ? {calendarAnchor:entry.calendarAnchor} : {}),
-      ...(validDate(entry.calendarSelected) ? {calendarSelected:entry.calendarSelected} : {})
+      calendarMode: ["day","week","month","agenda"].includes(entry.calendarMode) ? entry.calendarMode : initialMode
     };
   }
-  return {version:1, selected:ids.has(value?.selected) ? value.selected : "all", contexts};
+  return {version:2, selected:ids.has(value?.selected) ? value.selected : "all", contexts};
 }
 
 export function familyDayPhase(now = new Date(), timeZone = "Europe/London", rhythm = {}) {
@@ -2173,6 +2172,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._config = null;
     this._hass = null;
     this._view = "today";
+    this._simpleView = false;
     this._homeSection = "rooms";
     this._calendarMode = "week";
     this._calendarSelectedKey = null;
@@ -2236,6 +2236,13 @@ export class FamilyHubCard extends HTMLElementBase {
     this._controlPolicy = buildControlPolicy();
     this._signature = "";
     this._renderPending = false;
+    this._lastScrollAt = -Infinity;
+    this._scrollRenderTimer = null;
+    this._boundScroll = event => {
+      const target = event.target;
+      if (target === globalThis.document || this.shadowRoot?.contains(target) || target?.contains?.(this)) this._lastScrollAt = performance.now();
+    };
+    this._boundFocusOut = () => { if(this._renderAfterInput){this._renderAfterInput=false;queueMicrotask(()=>this._scheduleRender());} };
     this._childCards = new Map();
     this._calendarEvents = [];
     this._calendarLoading = false;
@@ -2279,6 +2286,7 @@ export class FamilyHubCard extends HTMLElementBase {
         this._photoFrameActive = false;
         this._closeActiveCamera({ render: false, invalidate: true });
       } else {
+        if (this._view === "calendar") this._resetCalendarToday();
         this._scheduleRender(true);
         void this._loadCalendarEvents(true);
         void this._loadPreparationItems(true);
@@ -2310,6 +2318,9 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.addEventListener("input", this._boundInput);
     this.shadowRoot.addEventListener("keydown", this._boundKeydown);
     this.shadowRoot.addEventListener("pointerdown", this._boundPointerActivity, { passive: true });
+    this.shadowRoot.addEventListener("scroll", this._boundScroll, { passive: true, capture: true });
+    this.shadowRoot.addEventListener("focusout", this._boundFocusOut);
+    globalThis.document?.addEventListener?.("scroll", this._boundScroll, { passive: true, capture: true });
     globalThis.document?.addEventListener?.("visibilitychange", this._boundVisibilityChange);
     globalThis.addEventListener?.("pagehide", this._boundPageHide);
     globalThis.addEventListener?.("resize", this._boundResize, { passive: true });
@@ -2334,6 +2345,11 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.removeEventListener("input", this._boundInput);
     this.shadowRoot.removeEventListener("keydown", this._boundKeydown);
     this.shadowRoot.removeEventListener("pointerdown", this._boundPointerActivity);
+    this.shadowRoot.removeEventListener("scroll", this._boundScroll, true);
+    this.shadowRoot.removeEventListener("focusout", this._boundFocusOut);
+    globalThis.document?.removeEventListener?.("scroll", this._boundScroll, true);
+    if (this._scrollRenderTimer) clearTimeout(this._scrollRenderTimer);
+    this._scrollRenderTimer = null;
     globalThis.document?.removeEventListener?.("visibilitychange", this._boundVisibilityChange);
     globalThis.removeEventListener?.("pagehide", this._boundPageHide);
     globalThis.removeEventListener?.("resize", this._boundResize);
@@ -2389,6 +2405,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._photoFrameResolveRequest += 1;
     this._view = config.display.default_view || "today";
     this._homeSection = config.home.default_section || "rooms";
+    this._simpleView = config.display.default_experience === "simple" && config.features.family && config.people.some(person=>person.role === "child");
+    if (this._simpleView) this._view = "today";
     this._calendarMode = config.calendar.initial_view || "week";
     this._calendarAnchorKey = dateKey(new Date(), config.product?.timezone || "Europe/London");
     this._calendarLastLoadedAt = 0;
@@ -2498,6 +2516,13 @@ export class FamilyHubCard extends HTMLElementBase {
     // the current image and restart its reveal animation, which presents as a
     // recurring pulse between the configured slide changes.
     if (this._devicePhotoBusy || (this._devicePhotoModal || this._photoFrameActive || this._homeworkModal) && !force) return;
+    if (!force && this.shadowRoot?.activeElement?.matches?.('input:not([type="range"]),textarea')) { this._renderAfterInput=true; return; }
+    if (!force && performance.now() - this._lastScrollAt < 220) {
+      if (this._scrollRenderTimer) clearTimeout(this._scrollRenderTimer);
+      this._scrollRenderTimer = setTimeout(() => { this._scrollRenderTimer = null; this._scheduleRender(); }, 230);
+      return;
+    }
+    if (force && this._scrollRenderTimer) { clearTimeout(this._scrollRenderTimer); this._scrollRenderTimer = null; }
     if (this._config) this._persistFamilyViewPreferences();
     if (this._renderPending) return;
     this._renderPending = true;
@@ -2910,6 +2935,10 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     if (this._view === "calendar") {
+      if (this._calendarSessionDay !== dateKey(now,this._config.product.timezone)) {
+        this._resetCalendarToday(now);
+        this._scheduleRender();
+      }
       void this._loadCalendarEvents();
       void this._loadPreparationItems();
       return;
@@ -2918,7 +2947,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _enabledViews() {
-    return VIEW_DEFINITIONS.filter((view) => !view.feature || this._config.features[view.feature]);
+    return VIEW_DEFINITIONS.filter((view) => (!view.feature || this._config.features[view.feature]) && (!this._simpleView || ["today","calendar","family"].includes(view.id)));
   }
 
   _calendarWindow() {
@@ -2978,6 +3007,25 @@ export class FamilyHubCard extends HTMLElementBase {
     this._calendarSelectedKey = this._calendarAnchorKey;
     this._calendarFocusEvent = null;
     this._calendarRequestKey = "";
+    this._scheduleRender(true);
+    void this._loadCalendarEvents(true);
+  }
+
+  _resetCalendarToday(now = new Date()) {
+    const today = dateKey(now,this._config.product.timezone);
+    this._calendarAnchorKey = today;
+    this._calendarSelectedKey = today;
+    this._calendarSessionDay = today;
+    this._calendarFocusEvent = null;
+    this._calendarRequestKey = "";
+  }
+
+  _jumpCalendarTo(value) {
+    if (!/^20\d{2}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T12:00:00Z`)) || new Date(`${value}T12:00:00Z`).toISOString().slice(0,10)!==value) return;
+    this._calendarAnchorKey=value;
+    this._calendarSelectedKey=value;
+    this._calendarFocusEvent=null;
+    this._calendarRequestKey="";
     this._scheduleRender(true);
     void this._loadCalendarEvents(true);
   }
@@ -3083,6 +3131,8 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _render() {
     if (!this._config || !this.shadowRoot || this._devicePhotoBusy) return;
+    const scrollState = this._captureViewScroll();
+    const scrollKey = this._viewScrollKey();
     const renderFocus = this._captureRenderFocus();
     const departureFocus=this._plannerModal?.type==="departure"?this.shadowRoot.activeElement?.dataset?.departureField:null;
     const departureFocusSelector=["time","mode"].includes(departureFocus)?`[data-departure-field="${departureFocus}"]`:null;
@@ -3099,7 +3149,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const shellGuard = this._photoFrameActive || this._plannerModal || this._devicePhotoModal || this._familyPickerOpen ? ' inert aria-hidden="true"' : "";
     this.shadowRoot.innerHTML = `
       <style data-layout="${this._responsiveViewportKey()}">${this._styles()}</style>
-      <ha-card class="hub-card" data-appearance="${this._appearance()}" style="
+      <ha-card class="hub-card" data-appearance="${this._appearance()}" data-dashboard-version="${DASHBOARD_VERSION}" data-experience="${this._simpleView ? "simple" : "full"}" style="
         --hub-accent:${escapeHtml(theme.accent)};
         --hub-background:${escapeHtml(theme.background)};
         --hub-surface:${escapeHtml(theme.surface)};
@@ -3164,6 +3214,48 @@ export class FamilyHubCard extends HTMLElementBase {
     if(this._departureReturnFocus){(this.shadowRoot.querySelector("[data-departure-edit]")||this.shadowRoot.querySelector("[data-departure-action]"))?.focus();this._departureReturnFocus=false;}
     this._restoreEmbeddedRenderState(embeddedRenderState);
     this._syncViewportHeight();
+    if (scrollState?.key === scrollKey) this._restoreViewScroll(scrollState);
+    this._renderedScrollKey = scrollKey;
+  }
+
+  _viewScrollKey() {
+    return [this._view,this._simpleView,this._familyViewId,this._taskSection,this._room,this._homeSection,this._floor,this._footballTab,this._calendarMode,this._calendarAnchorKey,this._calendarSelectedKey,this._calendarFocusEvent].join("|");
+  }
+
+  _scrollIdentity(element) {
+    const classes = [...element.classList].filter(name=>!name.startsWith("is-") && !name.startsWith("has-")).sort();
+    const dialog = element.closest?.('[role="dialog"]');
+    return {tag:element.tagName,classes,dialog:dialog?.getAttribute("aria-labelledby") || ""};
+  }
+
+  _scrollMatches(identity) {
+    return [...this.shadowRoot.querySelectorAll(identity.tag)].filter(node=>identity.classes.every(name=>node.classList.contains(name)) && (node.closest?.('[role="dialog"]')?.getAttribute("aria-labelledby") || "") === identity.dialog);
+  }
+
+  _captureViewScroll() {
+    const positions = [...this.shadowRoot.querySelectorAll("*")].filter(node=>node.scrollTop || node.scrollLeft).map(node=>{
+      const identity = this._scrollIdentity(node);
+      return {...identity,index:this._scrollMatches(identity).indexOf(node),top:node.scrollTop,left:node.scrollLeft};
+    });
+    const disclosures = [...this.shadowRoot.querySelectorAll("details")].map(node=>{
+      const identity=this._scrollIdentity(node);
+      return {...identity,index:this._scrollMatches(identity).indexOf(node),open:node.open};
+    });
+    const ancestors=[];
+    let node=this;
+    while (node) {
+      if (node.scrollTop || node.scrollLeft) ancestors.push({node,top:node.scrollTop,left:node.scrollLeft});
+      node=node.parentElement || node.getRootNode?.()?.host;
+    }
+    const page=globalThis.document?.scrollingElement;
+    if (page && !ancestors.some(entry=>entry.node===page) && (page.scrollTop || page.scrollLeft)) ancestors.push({node:page,top:page.scrollTop,left:page.scrollLeft});
+    return {key:this._renderedScrollKey,positions,disclosures,ancestors};
+  }
+
+  _restoreViewScroll(snapshot) {
+    for (const entry of snapshot.disclosures) { const node=this._scrollMatches(entry)[entry.index]; if(node)node.open=entry.open; }
+    for (const entry of snapshot.positions) { const node=this._scrollMatches(entry)[entry.index]; if(node){node.scrollTop=entry.top;node.scrollLeft=entry.left;} }
+    for (const entry of snapshot.ancestors) if(entry.node.isConnected){entry.node.scrollTop=entry.top;entry.node.scrollLeft=entry.left;}
   }
 
   _familyViewPerson() {
@@ -3178,11 +3270,11 @@ export class FamilyHubCard extends HTMLElementBase {
     let saved;
     try { saved = JSON.parse(globalThis.localStorage?.getItem(this._familyPreferenceKey()) || "null"); } catch {}
     const preferences = normaliseFamilyViewPreferences(saved,this._config.people,this._config.calendar?.initial_view || "week");
-    this._familyViewId = preferences.selected;
+    this._familyViewId = this._simpleView && this._config.people.find(person=>person.id===preferences.selected)?.role === "parent" ? "all" : preferences.selected;
     this._familyViewContexts = preferences.contexts;
     this._familyPickerOpen = false;
     this._familyViewStoredValue = null;
-    this._applyFamilyViewContext(preferences.contexts[preferences.selected]);
+    this._applyFamilyViewContext(preferences.contexts[this._familyViewId]);
   }
 
   _applyFamilyViewContext(context = {}) {
@@ -3192,15 +3284,16 @@ export class FamilyHubCard extends HTMLElementBase {
     if (this._taskSection === "homework" && !this._config.school?.homework_enabled) this._taskSection = "jobs";
     if (this._taskSection === "lunch" && !this._config.school?.lunch_menus?.length) this._taskSection = "jobs";
     this._calendarMode = context?.calendarMode || this._config.calendar?.initial_view || "week";
-    this._calendarAnchorKey = context?.calendarAnchor || today;
-    this._calendarSelectedKey = context?.calendarSelected || today;
+    this._calendarAnchorKey = today;
+    this._calendarSelectedKey = today;
+    this._calendarSessionDay = today;
     this._calendarFocusEvent = null;
     if (this._familyViewPerson()?.role === "child") this._familyPersonId = this._familyViewId;
   }
 
   _persistFamilyViewPreferences() {
     this._familyViewContexts ||= Object.create(null);
-    this._familyViewContexts[this._familyViewId || "all"] = {taskSection:this._taskSection || "jobs",calendarMode:this._calendarMode,calendarAnchor:this._calendarAnchorKey,calendarSelected:this._calendarSelectedKey};
+    this._familyViewContexts[this._familyViewId || "all"] = {taskSection:this._taskSection || "jobs",calendarMode:this._calendarMode};
     const preferences = normaliseFamilyViewPreferences({selected:this._familyViewId,contexts:this._familyViewContexts},this._config.people,this._config.calendar?.initial_view || "week");
     const value = JSON.stringify(preferences);
     if (value === this._familyViewStoredValue) return;
@@ -3232,7 +3325,7 @@ export class FamilyHubCard extends HTMLElementBase {
   _renderFamilyPicker() {
     if (!this._familyPickerOpen) return "";
     const people = [{id:"all",name:"Everyone",colour:this._config.theme.accent},...this._config.people.filter(person=>person.role!=="household")];
-    return `<div class="family-picker-backdrop"><button type="button" class="family-picker-dismiss" data-family-picker-close aria-label="Close family picker"></button><section class="family-picker-modal" role="dialog" aria-modal="true" aria-labelledby="family-picker-title"><header><div><p>FAMILY VIEW</p><h2 id="family-picker-title">Whose day?</h2></div><button type="button" data-family-picker-close aria-label="Close family picker">×</button></header><p>Choose whose plans and school work you want to see.</p><div class="family-picker-options">${people.map(person=>`<button type="button" data-family-view="${escapeHtml(person.id)}" aria-pressed="${(this._familyViewId||"all")===person.id}" style="--person-colour:${escapeHtml(person.colour)}"><span class="family-view-token">${person.id==="all"?outlineIcon("rooms"):escapeHtml(person.name.slice(0,1))}</span><strong>${escapeHtml(person.name)}</strong><ha-icon icon="${(this._familyViewId||"all")===person.id?"mdi:check":"mdi:chevron-right"}"></ha-icon></button>`).join("")}</div><small>This changes the view on this device. Parent controls still use your Home Assistant account.</small></section></div>`;
+    return `<div class="family-picker-backdrop"><button type="button" class="family-picker-dismiss" data-family-picker-close aria-label="Close family picker"></button><section class="family-picker-modal" role="dialog" aria-modal="true" aria-labelledby="family-picker-title"><header><div><p>FAMILY VIEW</p><h2 id="family-picker-title">Whose day?</h2></div><button type="button" data-family-picker-close aria-label="Close family picker">×</button></header><p>Choose whose plans and school work you want to see.</p><div class="family-picker-options">${people.map(person=>`<button type="button" data-family-view="${escapeHtml(person.id)}" aria-pressed="${(this._familyViewId||"all")===person.id}" style="--person-colour:${escapeHtml(person.colour)}"><span class="family-view-token">${person.id==="all"?outlineIcon("rooms"):escapeHtml(person.name.slice(0,1))}</span><strong>${escapeHtml(person.name)}</strong><ha-icon icon="${(this._familyViewId||"all")===person.id?"mdi:check":"mdi:chevron-right"}"></ha-icon></button>`).join("")}</div>${this._config.features.family && this._config.people.some(person=>person.role === "child") ? '<button type="button" class="experience-switch" data-experience="simple">Try simple view <ha-icon icon="mdi:arrow-right"></ha-icon></button>' : ""}<small>This changes the view on this device. Parent controls still use your Home Assistant account.</small><small class="dashboard-version">Dashboard v${DASHBOARD_VERSION}</small></section></div>`;
   }
 
   _ambientPhotoContext(now = new Date()) {
@@ -3269,10 +3362,10 @@ export class FamilyHubCard extends HTMLElementBase {
     return `<section class="family-dashboard family-parent-overview"><header><p class="eyebrow">FAMILY TASKS</p><h2>Choose a child</h2><p>Jobs, reading and homework are organised for each child.</p></header><div class="family-overview-cards">${children.map(person=>{const child=this._homeworkChild(person.id), reading=child?.routines.find(r=>r.kind==="reading"), pending=(child?.plans||[]).filter(plan=>!plan.marks?.handed_in).length;return `<article style="--person-colour:${escapeHtml(person.colour)}"><span class="family-view-token">${escapeHtml(person.name.slice(0,1))}</span><h2>${escapeHtml(person.name)}</h2><p>${reading?`${reading.count}/${reading.goal} readings this week`:"Open jobs and rewards"}</p>${child?`<small>${pending} school task${pending===1?"":"s"} waiting</small>`:""}<div><button type="button" data-focus-tasks="${escapeHtml(person.id)}">Open jobs</button>${this._config.school?.homework_enabled?`<button type="button" data-homework-open="${escapeHtml(person.id)}">Open homework</button>`:""}</div></article>`;}).join("")}</div></section>`;
   }
 
-  _renderTodayHomeworkActions(phase) {
+  _renderTodayHomeworkActions(phase, children = this._familyViewHomeworkChildren(), limit = 2) {
     if (!this._config.school?.homework_enabled) return "";
     const today = this._homeworkData?.today || dateKey(new Date(),this._config.product.timezone);
-    const actions = familyHomeworkActions(this._familyViewHomeworkChildren(),phase.id,today);
+    const actions = familyHomeworkActions(children,phase.id,today,limit);
     return actions.map(action=>{const person=this._config.people.find(person=>person.id===action.personId);return `<button type="button" class="today-focus-action" data-today-homework="${escapeHtml(action.kind)}" data-person-id="${escapeHtml(action.personId)}" data-plan-id="${escapeHtml(action.planId)}" style="--person-colour:${escapeHtml(person?.colour || this._config.theme.accent)}"><span class="today-person-token">${escapeHtml(action.name.slice(0,1))}</span><span><strong>${escapeHtml(action.title)}</strong><small>${escapeHtml(action.name)} · ${escapeHtml(action.detail)}</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`;}).join("");
   }
 
@@ -3285,7 +3378,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _canManageDeparture() {
-    return Boolean(this._hass?.user?.is_admin && !this._config.display.read_only);
+    return Boolean(!this._simpleView && this._hass?.user?.is_admin && !this._config.display.read_only);
   }
 
   _renderDeparture() {
@@ -3396,7 +3489,7 @@ export class FamilyHubCard extends HTMLElementBase {
   _captureRenderFocus() {
     if (this._pendingConfirmation) return null;
     const active = this.shadowRoot?.activeElement;
-    if (!active?.matches?.('button, select, a[href], [role="button"][tabindex]')
+    if (!active?.matches?.('button, select, input[type="date"], a[href], [role="button"][tabindex]')
       || active.closest?.(".confirmation-dialog")) return null;
     const currentView = active.closest?.(".hub-view")?.dataset?.currentView || null;
     const scope = active.closest?.(".hub-navigation")
@@ -3434,7 +3527,7 @@ export class FamilyHubCard extends HTMLElementBase {
         .find((view) => view.dataset.currentView === descriptor.currentView);
     }
     if (!scope) return;
-    const control = [...scope.querySelectorAll('button, select, a[href], [role="button"][tabindex]')]
+    const control = [...scope.querySelectorAll('button, select, input[type="date"], a[href], [role="button"][tabindex]')]
       .find((candidate) => (
         candidate.tagName === descriptor.tagName
         && (!descriptor.markerClass || candidate.classList.contains(descriptor.markerClass))
@@ -3485,6 +3578,7 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _renderMasthead(shellGuard = "") {
     const date = new Intl.DateTimeFormat(this._config.product.locale, {weekday:"long",day:"numeric",month:"long",timeZone:this._config.product.timezone}).format(new Date());
+    if (this._simpleView) return `<header class="hub-masthead"${shellGuard}><button type="button" class="hub-masthead-brand" data-view="today">${outlineIcon("today")}<span>Family day</span></button><div class="hub-masthead-status"><span class="hub-masthead-date">${escapeHtml(date)}</span><button type="button" class="parent-view-button" data-experience="full"><ha-icon icon="mdi:arrow-top-right"></ha-icon>Parent view</button></div></header>`;
     const states = this._hass?.states || {};
     const security = this._config.features.entry ? todaySecurityPresentation(states[this._config.entry?.alarm_entity], states[this._config.entry?.garage?.cover_entity], (this._config.entry?.cameras || []).flatMap(camera => [camera.ringing_entity,camera.person_entity,camera.motion_entity]).filter(Boolean).map(id => states[id])) : null;
     return `<header class="hub-masthead"${shellGuard}><button type="button" class="hub-masthead-brand" data-view="today">${outlineIcon("rooms")}<span>${escapeHtml(this._config.product.title)}</span></button><div class="hub-masthead-status"><span class="hub-masthead-date">${escapeHtml(date)}</span>${security ? `<button type="button" class="hub-quiet-status" data-view="entry" title="${escapeHtml(security.detail)}">${outlineIcon("entry")}<span>${escapeHtml(["Protected","Quiet at home"].includes(security.title) ? "All quiet" : security.title)}</span></button>` : ""}${this._photoFrameConfig() ? '<button type="button" class="hub-photos-button" data-device-photos-open aria-label="Manage screensaver photos">Photos</button>' : ""}<button class="family-view-button" type="button" data-family-picker-open aria-haspopup="dialog" aria-expanded="${Boolean(this._familyPickerOpen)}" aria-label="Family view: ${escapeHtml(this._familyViewPerson()?.name || "Everyone")}" style="--person-colour:${escapeHtml(this._familyViewPerson()?.colour || this._config.theme.accent)}"><span class="family-view-token">${this._familyViewPerson()?escapeHtml(this._familyViewPerson().name.slice(0,1)):outlineIcon("rooms")}</span><span>${escapeHtml(this._familyViewPerson()?.name || "Family")}</span><ha-icon icon="mdi:chevron-down"></ha-icon></button>${this._hass?.user?.is_admin && this._config.display.kiosk ? '<a class="hub-ha-escape" href="?disable_km" aria-label="Open Home Assistant navigation" title="Home Assistant">↗</a>' : ""}</div></header>`;
@@ -3504,7 +3598,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const football = this._view === "football" ? this._footballState() : null;
     const freshness = football ? (!isEntityAvailable(football.gameweekState) && isEntityAvailable(football.index) ? {status:"waiting",title:"Waiting for fixtures",detail:"The selected matchweek has not arrived yet."} : footballFreshness(football.index)) : null;
     const guard = this._pendingConfirmation ? ' inert aria-hidden="true"' : "";
-    return `<header class="hub-topbar ${this._view === "calendar" ? "is-calendar-header" : ""}"${guard}><div class="hub-page-title"><h1>${escapeHtml(title)}</h1><p class="hub-topbar-date">${escapeHtml(this._view === "today" ? `${date} · ${time}` : subtitles[this._view] || date)}</p></div><div class="hub-header-actions">${freshness ? `<span class="football-freshness is-${escapeHtml(freshness.status)}" title="${escapeHtml(freshness.detail)}"><strong>${escapeHtml(freshness.title)}</strong></span>` : ""}${weather && this._view === "today" ? `<button class="hub-weather-pill" type="button" data-more-info="${escapeHtml(this._config.weather.entity_id)}" aria-label="${escapeHtml(weatherStateLabel(weather.state))}, ${formatTemperature(weather.attributes?.temperature)}"><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon><span>${formatTemperature(weather.attributes?.temperature)}</span></button>` : ""}</div></header>`;
+    return `<header class="hub-topbar ${this._view === "calendar" ? "is-calendar-header" : ""}"${guard}><div class="hub-page-title"><h1>${escapeHtml(title)}</h1><p class="hub-topbar-date">${escapeHtml(this._view === "today" ? `${date} · ${time}` : subtitles[this._view] || date)}</p></div><div class="hub-header-actions">${this._view === "today" && this._config.calendar.preparation?.enabled ? '<button type="button" class="header-preparation" data-readiness-open><ha-icon icon="mdi:bag-personal-outline"></ha-icon>Preparation</button>' : ""}${freshness ? `<span class="football-freshness is-${escapeHtml(freshness.status)}" title="${escapeHtml(freshness.detail)}"><strong>${escapeHtml(freshness.title)}</strong></span>` : ""}${weather && this._view === "today" ? `<button class="hub-weather-pill" type="button" data-more-info="${escapeHtml(this._config.weather.entity_id)}" aria-label="${escapeHtml(weatherStateLabel(weather.state))}, ${formatTemperature(weather.attributes?.temperature)}"><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon><span>${formatTemperature(weather.attributes?.temperature)}</span></button>` : ""}</div></header>`;
   }
 
   _renderView() {
@@ -3544,7 +3638,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderMusicDock() {
-    if (!this._config.features.music) return "";
+    if (this._simpleView || !this._config.features.music) return "";
     const players=this._config.media.players;
     const playing=firstPlayingPlayer(this._config,this._hass?.states || {});
     const player=players.find((entry)=>entry.entity_id===this._dockPlayerId) || playing?.player || players[0];
@@ -3609,17 +3703,18 @@ export class FamilyHubCard extends HTMLElementBase {
     </aside>`;
   }
 
-  _readiness() {
-    return familyReadiness(this._config,this._preparationItems,this._calendarEvents,this._config.school?.homework_enabled ? this._homeworkData?.children || [] : [],new Date(),this._familyViewId);
+  _readiness(choice = null) {
+    const now=new Date(), today=dateKey(now,this._config.product.timezone);
+    return familyReadiness(this._config,this._preparationItems,this._calendarEvents,this._config.school?.homework_enabled ? this._homeworkData?.children || [] : [],now,this._familyViewId,choice === "tomorrow" ? shiftDateKey(today,1) : choice === "today" ? today : null);
   }
 
   _renderReadiness(full = false) {
-    const model = this._readiness();
+    const model = this._readiness(full ? this._readinessDay : null);
     const warning = this._preparationError || this._calendarError || (this._config.school?.homework_enabled ? this._homeworkError : "");
     const title = model.evening ? "Ready for tomorrow?" : "Ready for today?";
     const date = formatDay(`${model.day}T12:00:00Z`,this._config.product.locale,"UTC");
     const rows = full ? model.rows : model.rows.slice(0,3);
-    const parents = this._config.people.filter(person=>person.role === "parent");
+    const parents = this._simpleView ? [] : this._config.people.filter(person=>person.role === "parent");
     const readOnly = this._config.display.read_only;
     const list = rows.map(row=>{
       const disabled = readOnly || this._preparationLoading || this._pendingPreparation?.has(row.id);
@@ -3628,7 +3723,7 @@ export class FamilyHubCard extends HTMLElementBase {
       return `<div class="readiness-row ${row.completed ? "is-complete" : ""}" style="--person-colour:${escapeHtml(row.person.colour)}"><button type="button" class="readiness-task" ${action} aria-label="${escapeHtml(`${row.kind === "prep" ? row.completed ? "Mark not ready" : "Mark ready" : row.kind === "waiting" ? "Waiting for shared list" : "Open homework"}: ${row.title} for ${row.person.name}`)}"><ha-icon icon="${row.completed ? "mdi:check-circle-outline" : row.kind === "waiting" ? "mdi:clock-outline" : row.kind === "prep" ? "mdi:circle-outline" : "mdi:book-open-page-variant-outline"}"></ha-icon><span><strong>${escapeHtml(row.title)}</strong><small>${escapeHtml(`${row.person.name} · ${row.source}`)}</small>${row.kind === "waiting" ? '<small>Waiting for shared preparation</small>' : ""}</span></button>${row.kind === "prep" && parents.length ? `<select data-prep-owner="${escapeHtml(row.id)}" aria-label="Who is handling ${escapeHtml(row.title)} for ${escapeHtml(row.person.name)}" ${disabled ? "disabled" : ""}><option value="">Who’s doing it?</option>${parents.map(parent=>`<option value="${escapeHtml(parent.id)}" ${row.ownerId === parent.id ? "selected" : ""}>${escapeHtml(parent.name)}</option>`).join("")}</select>` : ""}</div>`;
     }).join("");
     const details = `<p class="readiness-date">${escapeHtml(date)}</p><p class="readiness-progress" role="status">${warning ? "Some preparation information is unavailable" : this._preparationLoading ? "Checking the shared list…" : `${model.complete} of ${model.total} listed items ready`}</p>${warning ? '<p class="readiness-warning" role="alert">Check the shared list before relying on this summary.</p>' : ""}<div class="readiness-list">${list || '<p>No preparation is listed for this day.</p>'}</div>`;
-    if (full) return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal readiness-modal" role="dialog" aria-modal="true" aria-labelledby="readiness-title"><header><button type="button" class="planner-modal-close" data-planner-close aria-label="Close preparation"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">FAMILY PREPARATION</p><h2 id="readiness-title">${title}</h2></header><div class="planner-modal-body">${details}</div><footer><button type="button" data-readiness-refresh>Refresh</button><button type="button" data-planner-close>Done</button></footer></section></div>`;
+    if (full) return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal readiness-modal" role="dialog" aria-modal="true" aria-labelledby="readiness-title"><header><button type="button" class="planner-modal-close" data-planner-close aria-label="Close preparation"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">FAMILY PREPARATION</p><h2 id="readiness-title">${title}</h2></header><div class="planner-modal-body"><div class="readiness-days" role="group" aria-label="Preparation day"><button type="button" data-readiness-day="today" aria-pressed="${!model.evening}">Today</button><button type="button" data-readiness-day="tomorrow" aria-pressed="${model.evening}">Tomorrow</button></div>${details}</div><footer><button type="button" data-readiness-refresh>Refresh</button><button type="button" data-planner-close>Done</button></footer></section></div>`;
     return `<article class="today-hero readiness-panel" aria-label="${title}"><p class="eyebrow">FAMILY PREPARATION</p><h2>${title}</h2>${details}<button type="button" class="readiness-open" data-readiness-open>${model.total > 3 ? `See all ${model.total} items` : "Open preparation"} <ha-icon icon="mdi:arrow-right"></ha-icon></button><small class="readiness-shared">Shared progress carries into the morning</small></article>`;
   }
 
@@ -3659,6 +3754,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderToday() {
+    if(this._simpleView) return this._renderSimpleToday();
     const states = this._hass?.states || {};
     const features = this._config.features;
     const home = features.rooms ? homeSummaryPresentation(this._config, states) : null;
@@ -3687,14 +3783,46 @@ export class FamilyHubCard extends HTMLElementBase {
     </section>`;
   }
 
-  _renderTodayJobs() {
+  _setSimpleView(simple) {
+    if(simple && (!this._config.features.family || !this._config.people.some(person=>person.role === "child"))) return;
+    if (this._view === "entry") this._closeActiveCamera({render:false,invalidate:true});
+    this._simpleView=simple;
+    this._familyPickerOpen=false;
+    this._plannerModal=null;
+    this._homeworkModal=null;
+    this._selectFamilyView("all");
+    this._view="today";
+    this._childMountGeneration+=1;
+    this._pruneInactiveChildCards();
+    this._scheduleRender(true);
+    void this._loadCalendarEvents(true);
+  }
+
+  _renderSimpleToday() {
+    const now=new Date(), today=dateKey(now,this._config.product.timezone);
+    const phase=familyDayPhase(now,this._config.product.timezone,this._config.display.day_rhythm);
+    const children=this._config.people.filter(person=>person.role === "child");
+    const selected=children.filter(person=>this._familyViewPerson()?.role !== "child" || person.id === this._familyViewId);
+    const profiles=[{id:"all",name:"Everyone",colour:this._config.theme.accent},...children];
+    const departure=departurePresentation(this._departureView(),now);
+    const next=this._familyViewCalendarEvents().filter(event=>isCurrentOrFutureCalendarEvent(event,now,this._config.product.timezone)).sort((a,b)=>new Date(calendarEventStart(a))-new Date(calendarEventStart(b)))[0];
+    return `<section class="simple-family-page" aria-label="Simple family day"><div class="simple-person-picker" role="group" aria-label="Whose day"><span>Your day</span>${profiles.map(person=>`<button type="button" data-simple-person="${escapeHtml(person.id)}" aria-pressed="${this._familyViewId===person.id}" style="--person-colour:${escapeHtml(person.colour)}">${escapeHtml(person.name)}</button>`).join("")}</div><div class="simple-day-top">${departure.visible ? `<article class="simple-next simple-departure"><span class="simple-departure-icon"><ha-icon icon="mdi:clock-outline"></ha-icon></span><div><p class="eyebrow">THE SCHOOL RUN</p><h2>${escapeHtml(departure.heading)}</h2></div><p>${escapeHtml(departure.caption)}</p></article>` : `<article class="simple-next"><p class="eyebrow">COMING UP</p><h2>${escapeHtml(next?.summary || "Your family day")}</h2><p>${next ? `${escapeHtml(formatDay(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))} · ${isAllDayCalendarEvent(next) ? "All day" : escapeHtml(formatTime(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}` : "School work, jobs and lunch are together below."}</p>${next ? `<button type="button" data-focus-open-plan="${escapeHtml(familyPlannerEventKey(next))}">See the plan <ha-icon icon="mdi:arrow-right"></ha-icon></button>` : ""}</article>`}</div><div class="simple-child-grid">${selected.map(person=>{
+      const child=this._homeworkChild(person.id);
+      const lunch=schoolLunchForDate(this._config,person.id,today);
+      const prep=familyReadiness(this._config,this._preparationItems,this._calendarEvents,[],now,person.id,today).rows.filter(row=>row.kind === "prep" || row.kind === "waiting").slice(0,2);
+      const homework=child ? this._renderTodayHomeworkActions(phase,[child],1) : "";
+      return `<article class="simple-child-card" style="--person-colour:${escapeHtml(person.colour)}"><header><span class="simple-avatar">${escapeHtml(person.name.slice(0,1))}</span><div><p>YOUR DAY</p><h2>${escapeHtml(person.name)}</h2></div><button type="button" data-focus-tasks="${escapeHtml(person.id)}" aria-label="Open ${escapeHtml(person.name)} tasks"><ha-icon icon="mdi:arrow-right"></ha-icon></button></header><section class="simple-child-jobs"><h3>Your next job</h3>${this._renderTodayJobs([person])}</section>${prep.length ? `<section class="simple-child-prep"><h3>Get ready</h3>${prep.map(row=>`<button type="button" class="simple-prep-task" ${row.kind === "prep" ? `data-prep-item="${escapeHtml(row.id)}" data-prep-status="${row.completed ? "needs_action" : "completed"}" aria-pressed="${row.completed}"` : "disabled"} ${this._config.display.read_only || this._pendingPreparation?.has(row.id) ? "disabled" : ""}><ha-icon icon="${row.completed ? "mdi:check-circle-outline" : "mdi:circle-outline"}"></ha-icon><span>${escapeHtml(row.title)}</span></button>`).join("")}</section>` : ""}${homework ? `<section class="simple-child-work"><h3>School work</h3>${homework}</section>` : ""}${this._config.school?.lunch_menus?.some(menu=>menu.person_id===person.id) ? `<button type="button" class="simple-lunch" data-school-lunch-open="${escapeHtml(person.id)}"><ha-icon icon="mdi:food-apple-outline"></ha-icon><span><small>School lunch</small><strong>${escapeHtml(lunch.title)}</strong>${lunch.start ? `<small>From ${escapeHtml(formatDay(`${lunch.start}T12:00:00Z`,this._config.product.locale,"UTC"))}</small>` : ""}</span><ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}<footer><button type="button" data-focus-tasks="${escapeHtml(person.id)}">Jobs & rewards</button>${this._config.school?.homework_enabled ? `<button type="button" data-homework-open="${escapeHtml(person.id)}">Homework</button>` : ""}</footer></article>`;
+    }).join("")}</div><button type="button" class="simple-prepare" data-readiness-open><ha-icon icon="mdi:bag-personal-outline"></ha-icon>Get ready for today or tomorrow <ha-icon icon="mdi:arrow-right"></ha-icon></button></section>`;
+  }
+
+  _renderTodayJobs(people = this._config.people.filter(person => person.role === "child" && (this._familyViewPerson()?.role !== "child" || person.id === this._familyViewId))) {
     const states = this._hass?.states || {};
-    return this._config.people.filter(person => person.role === "child" && (this._familyViewPerson()?.role !== "child" || person.id === this._familyViewId)).map(person => {
+    return people.map(person => {
       const user = this._config.features.chores ? this._config.chores.users.find(user => user.person_id === person.id) : null;
       const job = (user?.status_entities || []).map(entity => ({entity,presentation:normaliseChoreStatus(states[entity],entity)})).find(job => job.presentation.tone !== "done");
       const claim = job ? choreClaimEntityId(job.entity) : "";
       const available = job && ["pending","due","overdue","missed"].includes(job.presentation.status) && isCommandEntityAvailable(states[claim]) && !this._config.display.read_only && !this._pendingChoreClaims.has(claim);
-      return `<div class="today-job" style="--person-colour:${escapeHtml(person.colour)}"><span class="today-person-token">${escapeHtml(person.name.slice(0,1))}</span><div><strong>${escapeHtml(person.name)} · ${escapeHtml(job?.presentation.name || "Your tasks")}</strong><small>${job ? `${Number.isFinite(job.presentation.points) ? `${job.presentation.points} points · ` : ""}${escapeHtml(job.presentation.label)}` : "See jobs and rewards"}</small></div><button type="button" class="today-job-action" ${available ? `data-chore-claim="${escapeHtml(claim)}" data-chore-status="${escapeHtml(job.entity)}" data-person-id="${escapeHtml(person.id)}" aria-label="Mark ${escapeHtml(job.presentation.name)} as done for ${escapeHtml(person.name)}"` : `data-focus-tasks="${escapeHtml(person.id)}" aria-label="Open ${escapeHtml(person.name)} tasks"`}><ha-icon icon="${available ? "mdi:circle-outline" : "mdi:arrow-top-right"}"></ha-icon></button></div>`;
+      return `<div class="today-job" style="--person-colour:${escapeHtml(person.colour)}"><span class="today-person-token">${escapeHtml(person.name.slice(0,1))}</span><div><strong>${this._simpleView ? "" : `${escapeHtml(person.name)} · `}${escapeHtml(job?.presentation.name || "Your tasks")}</strong><small>${job ? `${Number.isFinite(job.presentation.points) ? `${job.presentation.points} points · ` : ""}${escapeHtml(job.presentation.label)}` : "See jobs and rewards"}</small></div><button type="button" class="today-job-action" ${available ? `data-chore-claim="${escapeHtml(claim)}" data-chore-status="${escapeHtml(job.entity)}" data-person-id="${escapeHtml(person.id)}" aria-label="Mark ${escapeHtml(job.presentation.name)} as done for ${escapeHtml(person.name)}"` : `data-focus-tasks="${escapeHtml(person.id)}" aria-label="Open ${escapeHtml(person.name)} tasks"`}><ha-icon icon="${available ? "mdi:circle-outline" : "mdi:arrow-top-right"}"></ha-icon></button></div>`;
     }).join("");
   }
 
@@ -3846,7 +3974,7 @@ export class FamilyHubCard extends HTMLElementBase {
       { id: "agenda", label: "Agenda", icon: "mdi:format-list-bulleted" }
     ];
     const modeButtons = modes.map((mode) => `<button type="button" class="segment ${mode.id === this._calendarMode ? "is-selected" : ""}" data-calendar-mode="${mode.id}" aria-pressed="${mode.id === this._calendarMode}">${mode.label}</button>`).join("");
-    const canCreate = !this._config.display.read_only
+    const canCreate = !this._simpleView && !this._config.display.read_only
       && this._config.calendar.entities.some((entry) => entry.allow_create === true);
     const personFilters = [
       { id: "all", name: "Everyone", colour: this._config.theme.accent },
@@ -3855,15 +3983,16 @@ export class FamilyHubCard extends HTMLElementBase {
     return `
       <section class="single-surface surface calendar-view" data-planner-mode="${this._calendarMode}">
         <div class="calendar-toolbar">
-          <div class="calendar-context"><span><h2 class="focus-calendar-title">${escapeHtml(new Intl.DateTimeFormat(this._config.product.locale,{month:"long",year:"numeric",timeZone:"UTC"}).format(new Date(`${this._calendarAnchorKey || dateKey(new Date(),this._config.product.timezone)}T12:00:00Z`)))}</h2><strong>Family calendar</strong></span></div>
+          <div class="calendar-context"><span><h2 class="focus-calendar-title">${escapeHtml(new Intl.DateTimeFormat(this._config.product.locale,{month:"long",year:"numeric",timeZone:"UTC"}).format(new Date(`${this._calendarAnchorKey || dateKey(new Date(),this._config.product.timezone)}T12:00:00Z`)))}</h2><strong>${this._calendarMode === "month" ? "Family calendar" : escapeHtml(this._calendarRangeLabel())}</strong></span></div>
           <div class="calendar-toolbar-actions">${canCreate ? '<button type="button" class="calendar-add-event" data-planner-add-event><ha-icon icon="mdi:plus"></ha-icon>Add event</button>' : ""}</div>
         </div>
         <div class="calendar-controls"><div class="segments calendar-modes" role="group" aria-label="Choose calendar view">${modeButtons}</div><div class="calendar-navigation">
-          <button type="button" data-calendar-nav="previous" aria-label="Previous period"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+          <button type="button" data-calendar-nav="previous" aria-label="Previous period" title="Previous ${this._calendarMode === "agenda" ? "week" : this._calendarMode}"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
           <button type="button" data-calendar-nav="today">Today</button>
+          <button type="button" data-calendar-nav="next" aria-label="Next period" title="Next ${this._calendarMode === "agenda" ? "week" : this._calendarMode}"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+          <label class="calendar-jump"><span>Go to date</span><input type="date" data-calendar-jump aria-label="Go to date" min="2000-01-01" max="2099-12-31" value="${escapeHtml(this._calendarSelectedKey || this._calendarAnchorKey)}"></label>
           <strong data-calendar-range>${escapeHtml(this._calendarRangeLabel())}</strong>
           <button type="button" data-calendar-refresh aria-label="Refresh calendars"><ha-icon icon="mdi:refresh"></ha-icon></button>
-          <button type="button" data-calendar-nav="next" aria-label="Next period"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
         </div></div>
         <div class="calendar-person-filters" role="group" aria-label="Filter by family member">${personFilters}</div>
         ${this._preparationError ? `<p class="calendar-warning" role="alert">${escapeHtml(this._preparationError)}</p>` : ""}
@@ -6067,6 +6196,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (this._devicePhotoModal) return;
     this._armPhotoFrameIdleTimer();
     if (this._pendingConfirmation || this._photoFrameActive) return;
+    if(event.target.dataset?.calendarJump!==undefined && this._view==="calendar" && !this._plannerModal){this._jumpCalendarTo(event.target.value);return;}
     const owner = event.target.closest?.("[data-prep-owner]");
     if (owner && (!this._plannerModal || this._plannerModal.type === "readiness")) { void this._assignPreparationOwner(owner.dataset.prepOwner,owner.value); return; }
     const cameraPicker = event.target.closest?.("select[data-camera-select]");
@@ -6355,6 +6485,12 @@ export class FamilyHubCard extends HTMLElementBase {
       else if (target.dataset.devicePhotosPreview !== undefined) { this._closeDevicePhotos(); this._activatePhotoFrame(); }
       return;
     }
+    if (target.dataset.experience && ["simple","full"].includes(target.dataset.experience) && !this._pendingConfirmation && !this._homeworkModal && !this._plannerModal) {
+      this._setSimpleView(target.dataset.experience === "simple");return;
+    }
+    if (target.dataset.simplePerson && this._simpleView && !this._plannerModal && !this._homeworkModal) {
+      if(target.dataset.simplePerson === "all" || this._config.people.some(person=>person.role === "child" && person.id===target.dataset.simplePerson)){this._selectFamilyView(target.dataset.simplePerson);this._scheduleRender(true);}return;
+    }
     if(this._plannerModal?.type==="departure") {
       if(target.dataset.departureClose!==undefined && !this._departureBusy){this._plannerModal=null;this._departureReturnFocus=true;this._scheduleRender(true);}
       else if(target.dataset.departureSave!==undefined)void this._updateDepartureToday("override");
@@ -6376,6 +6512,7 @@ export class FamilyHubCard extends HTMLElementBase {
       this._scheduleRender(true); return;
     }
     if (this._plannerModal?.type === "readiness") {
+      if (target.dataset.readinessDay && ["today","tomorrow"].includes(target.dataset.readinessDay)) { this._readinessDay=target.dataset.readinessDay;this._scheduleRender(true);return; }
       if (target.dataset.plannerClose !== undefined) { this._plannerModal = null; this._readinessReturnFocus = true; this._scheduleRender(true); }
       else if (target.dataset.prepItem) void this._togglePreparationItem(target.dataset.prepItem,target.dataset.prepStatus);
       else if (target.dataset.todayHomework) { this._plannerModal = null; }
@@ -6383,7 +6520,7 @@ export class FamilyHubCard extends HTMLElementBase {
       else return;
       if (!target.dataset.todayHomework) return;
     }
-    if (target.dataset.readinessOpen !== undefined && !this._pendingConfirmation && !this._plannerModal && !this._homeworkModal) { this._plannerModal = {type:"readiness"}; this._scheduleRender(true); return; }
+    if (target.dataset.readinessOpen !== undefined && !this._pendingConfirmation && !this._plannerModal && !this._homeworkModal) { this._readinessDay=this._readiness().evening ? "tomorrow" : "today";this._plannerModal = {type:"readiness"}; this._scheduleRender(true); return; }
     if (target.dataset.todayHomework && !this._pendingConfirmation && !this._plannerModal && !this._homeworkModal) {
       if (!this._config.school?.homework_enabled || !this._config.people.some(person=>person.role==="child" && person.id===target.dataset.personId)) return;
       this._selectFamilyView(target.dataset.personId); this._view="family"; this._taskSection="homework";
@@ -6570,7 +6707,7 @@ export class FamilyHubCard extends HTMLElementBase {
       if (this._view === "entry" && target.dataset.view !== "entry") this._closeActiveCamera({ render: false, invalidate: true });
       this._view = target.dataset.view;
       if (this._view === "calendar") {
-        this._calendarAnchorKey = this._calendarAnchorKey || dateKey(new Date(), this._config.product.timezone);
+        this._resetCalendarToday();
         this._calendarRequestKey = "";
         void this._loadCalendarEvents(true);
       }

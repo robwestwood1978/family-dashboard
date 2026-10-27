@@ -1,6 +1,58 @@
 // Shared presentation only. Service boundaries, child cards and controls stay in
 // family-hub-card. The dashboard defaults to light; an explicit appearance preference can opt in to dark or automatic mode.
 export const DAILY_BRIEF_STYLES = `
+  .header-preparation,.parent-view-button,.experience-switch { display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:8px 14px;border:0;border-radius:14px;background:var(--daily-accent-soft);color:var(--daily-accent);font:inherit;font-size:13px;font-weight:500;cursor:pointer; }
+  .header-preparation ha-icon,.parent-view-button ha-icon { --mdc-icon-size:18px; }
+  .family-picker-modal .experience-switch { width:100%;margin:0 0 16px; }
+  .family-picker-modal .dashboard-version { margin-top:12px;font-size:11px; }
+  .readiness-days { display:flex;gap:8px;margin-bottom:18px; }
+  .readiness-days button { min-height:44px;padding:10px 20px;border:0;border-radius:12px;background:var(--daily-soft);color:var(--daily-text);font:inherit;font-size:14px;cursor:pointer; }
+  .readiness-days button[aria-pressed=true] { background:var(--daily-accent);color:var(--daily-on-accent); }
+  .calendar-jump { display:flex;align-items:center;gap:8px;font-size:12px;color:var(--daily-muted); }
+  .calendar-jump input { width:145px;min-height:44px;padding:7px 10px;border:1px solid var(--daily-line);border-radius:12px;background:var(--daily-surface);color:var(--daily-text);font:inherit;font-size:14px;box-sizing:border-box; }
+  .simple-family-page { display:flex;flex-direction:column;gap:16px;padding-bottom:20px; }
+  .simple-person-picker { display:flex;align-items:center;gap:10px;flex-wrap:wrap; }
+  .simple-person-picker>span { color:var(--daily-muted);font-size:14px;margin-right:6px; }
+  .simple-person-picker button { min-height:46px;padding:10px 20px;border:1px solid var(--daily-line);border-radius:24px;background:var(--daily-surface);color:var(--daily-text);font:inherit;font-size:15px;cursor:pointer; }
+  .simple-person-picker button[aria-pressed=true] { background:var(--daily-accent);color:var(--daily-on-accent);border-color:var(--daily-accent); }
+  .simple-day-top { flex:none;border-bottom:1px solid var(--daily-line);padding-bottom:18px; }
+  .simple-next { display:flex;align-items:center;gap:16px;flex-wrap:wrap; }
+  .simple-next .eyebrow { color:var(--daily-muted);margin:0; }
+  .simple-next h2 { font-size:23px;font-weight:500;letter-spacing:-.035em;margin:0; }
+  .simple-next p:not(.eyebrow) { color:var(--daily-muted);font-size:14px;margin:0; }
+  .simple-next button { display:flex;align-items:center;gap:8px;min-height:44px;border:0;background:transparent;color:var(--daily-accent);font:inherit;font-size:14px;cursor:pointer; }
+  .simple-departure { padding:4px 0;gap:14px; }
+  .simple-departure>div { flex:1;min-width:180px; }
+  .simple-departure h2 { margin-top:4px; }
+  .simple-departure-icon { display:grid;place-items:center;width:44px;height:44px;flex:none;border-radius:14px;background:var(--daily-accent-soft);color:var(--daily-accent); }
+  .simple-child-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px; }
+  .simple-child-card { display:flex;flex-direction:column;gap:14px;min-width:0;padding:20px;border-radius:24px;background:var(--daily-surface); }
+  .simple-child-card>header { display:flex;align-items:center;gap:12px; }
+  .simple-avatar { display:grid;place-items:center;flex:none;width:54px;height:54px;border-radius:18px;background:color-mix(in srgb,var(--person-colour) 12%,var(--daily-surface));color:var(--person-colour);font-size:25px;font-weight:500; }
+  .simple-child-card header>div { flex:1; }
+  .simple-child-card header p { color:var(--daily-muted);font-size:11px;letter-spacing:.1em;margin:0 0 4px; }
+  .simple-child-card h2 { font-size:27px;letter-spacing:-.04em;font-weight:500;margin:0; }
+  .simple-child-card header>button { width:44px;height:44px;flex:none;border:0;border-radius:50%;background:var(--daily-soft);color:var(--daily-accent);cursor:pointer; }
+  .simple-child-card h3 { font-size:14px;font-weight:500;margin:0 0 10px;color:var(--daily-muted); }
+  .simple-child-card .today-job { min-height:52px;padding:0; }
+  .simple-child-card .today-job>.today-person-token { display:none; }
+  .hub-card .simple-child-card .today-job { grid-template-columns:minmax(0,1fr) 44px;gap:8px; }
+  .simple-child-card .today-job>div { min-width:0; }
+  .simple-child-card .today-job strong { font-size:15px;line-height:1.35; }
+  .simple-child-card .today-job small { font-size:12px; }
+  .simple-child-card .today-focus-action { grid-template-columns:28px minmax(0,1fr) 18px;gap:8px;min-height:48px; }
+  .simple-child-card .today-focus-action .today-person-token { width:26px;height:26px; }
+  .simple-prep-task { display:flex;align-items:center;gap:10px;min-height:44px;width:100%;padding:6px 0;border:0;background:transparent;color:var(--daily-text);text-align:left;font:inherit;font-size:14px;cursor:pointer; }
+  .simple-prep-task ha-icon { color:var(--person-colour);--mdc-icon-size:22px;flex:none; }
+  .simple-prep-task[aria-pressed=true] span { color:var(--daily-muted);text-decoration:line-through; }
+  .simple-lunch { display:grid;grid-template-columns:24px minmax(0,1fr) 18px;align-items:center;gap:10px;width:100%;min-height:70px;padding:14px;border:0;border-radius:16px;background:var(--daily-soft);color:var(--daily-text);text-align:left;cursor:pointer; }
+  .simple-lunch strong,.simple-lunch small { display:block; }
+  .simple-lunch strong { font-size:14px;line-height:1.4;font-weight:500; }
+  .simple-lunch small { color:var(--daily-muted);font-size:12px;margin:2px 0; }
+  .simple-child-card>footer { display:flex;gap:10px;flex-wrap:wrap;margin-top:auto;padding-top:4px; }
+  .simple-child-card>footer button { min-height:44px;padding:8px 12px;border:0;border-radius:12px;background:var(--daily-accent-soft);color:var(--daily-accent);font:inherit;font-size:13px;cursor:pointer; }
+  .simple-prepare { display:flex;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:12px;border:1px solid var(--daily-line);border-radius:16px;background:var(--daily-surface);color:var(--daily-accent);font:inherit;font-size:14px;cursor:pointer; }
+  @media(max-width:650px) { .simple-child-grid {grid-template-columns:1fr}.simple-child-card{padding:18px}.simple-person-picker{gap:6px}.simple-person-picker button{padding:8px 14px}.simple-person-picker>span{display:none}.calendar-jump>span{display:none}.header-preparation{font-size:12px;padding:8px 10px}.simple-next{gap:8px}.simple-next h2{font-size:21px} }
   .readiness-panel { display:flex;flex-direction:column;gap:0;padding:26px;background:var(--daily-surface);color:var(--daily-text);border-radius:24px;min-width:0;min-height:0;overflow:hidden; }
   .readiness-panel>h2 { color:var(--daily-text);font-size:clamp(26px,2.7vw,36px);font-weight:500;letter-spacing:-.04em;line-height:1.15;margin:6px 0 10px; }
   .readiness-panel .eyebrow { color:var(--daily-muted); }
@@ -1803,4 +1855,13 @@ export const DAILY_BRIEF_STYLES = `
     .readiness-panel .readiness-row:nth-child(n+3) { display:none; }
     .readiness-panel .readiness-shared,.readiness-panel .eyebrow { display:none; }
   }
+
+  .hub-card[data-experience=simple] { grid-template-rows:56px minmax(0,1fr); }
+  .hub-card[data-experience=simple] .focus-dock-shell { display:none; }
+  .hub-card[data-experience=simple] .hub-view { overflow-y:auto;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch; }
+  .hub-card[data-experience=simple] .choreops-link { display:none; }
+  .calendar-navigation { align-items:center; }
+  .calendar-view .calendar-controls { gap:10px; }
+  .calendar-view .calendar-navigation { gap:4px; }
+  @media(max-width:850px) { .calendar-view .calendar-controls { flex-wrap:wrap; }.calendar-view .calendar-navigation {flex-wrap:wrap;width:100%}.calendar-view {grid-template-rows:auto auto auto minmax(0,1fr)}.calendar-view .calendar-jump>span {display:none} }
 `;

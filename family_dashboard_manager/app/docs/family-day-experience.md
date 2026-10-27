@@ -4,7 +4,7 @@ Version 0.21.0 adds three features to the existing dashboard. No extra integrati
 
 ## Whose day?
 
-Use the Family button in the header to choose Everyone or a family member. Today, Calendar, Tasks and Homework use that selection together. The existing calendar filters and child tabs also update it. Each person's calendar mode, selected date and task section are remembered in this browser. Clearing website data clears those viewing preferences.
+Use the Family button in the header to choose Everyone or a family member. Today, Calendar, Tasks and Homework use that selection together. The existing calendar filters and child tabs also update it. Each person's calendar mode and task section are remembered in this browser. Calendar opens on today; browsing dates applies only while it stays open. Returning to Calendar, waking the page or crossing midnight resets it to today. Clearing website data clears those viewing preferences.
 
 Choosing a parent shows the children's task overview. This is a viewing preference: it does not sign into another Home Assistant account or grant parent permissions. Device controls, protected confirmations and parent administration continue to use the existing account and configuration.
 
@@ -27,3 +27,13 @@ The photo frame supports the existing iPad-local album and private Home Assistan
 Parent Admin → Kiosk & photos → Photo frame has independent Show clock, Show weather and Show reminder switches. Weather and reminders default on for existing configurations. A tap, key press or motion from the already-configured motion entity returns to Today. This does not enable cameras, facial recognition or new device permissions.
 
 Photos selected on the iPad remain in that browser's local album. This release does not upload them, change the original photo library or share the local album with other devices.
+
+## Optional simple view
+
+The Family picker has a **Try simple view** button. It opens a shared day with a child selector, the school-run countdown, each child's next job, shared preparation, school work and lunch. Navigation keeps Today, Calendar and Tasks. The **Parent view** button stays visible in the masthead and returns to the full dashboard.
+
+Full remains the default. To choose the simpler starting screen explicitly, set `display.default_experience` to `simple`; the default value is `full`. A simple starting screen opens Today and ignores a previously selected parent profile. This is a presentation preference, not an access restriction; the Home Assistant account still determines permissions.
+
+Today always has a **Preparation** button. Its Today and Tomorrow controls make the shared list available even when the automatic summary has no items to show. The profile picker footer shows the loaded dashboard version so an older cached resource is easier to identify.
+
+Background entity and clock updates preserve internal and surrounding-page scroll positions and open menu details. Updates wait until active scrolling and text/date entry have finished. Explicit page or profile navigation starts the newly selected view normally.
