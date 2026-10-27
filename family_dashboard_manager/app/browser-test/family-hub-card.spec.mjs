@@ -12,14 +12,17 @@ import {
   APPROVAL_ZOOM_PROJECTS,
   APPROVAL_ZOOM_VIEW_NAMES
 } from "./v090-approval-manifest.mjs";
-import { preparationDescription } from "../frontend/family-hub-card.js";
+import { preparationDescription, packedLunchEvents } from "../frontend/family-hub-card.js";
 
 const config = JSON.parse(await readFile(new URL("../config/example.json", import.meta.url), "utf8"));
 const illustrationSource = await readFile(new URL("../frontend/assets/home-illustration.js", import.meta.url), "utf8");
+const readinessSource = await readFile(new URL("../frontend/readiness.js", import.meta.url), "utf8");
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.23.0";', dailyBriefSource);
+  .replace(/import \{ schoolLunchForDate[^\n]+from "\.\/readiness\.js[^";]+";/, `const {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents} = (()=>{${readinessSource.replace(/export /g, "")}return {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents};})();`)
+  .replace(/export \{ schoolLunchForDate[^\n]+;/, "")
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.24.0";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -803,7 +806,8 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
         }
         if (domain === "todo" && service === "update_item") {
           const item = (runtimeOptions.preparationItems || []).find((item) => item.uid === boundedData.item);
-          if (item) item.status = boundedData.status;
+          if (item && boundedData.status !== undefined) item.status = boundedData.status;
+          if (item && boundedData.description !== undefined) item.description = boundedData.description;
         }
         return Promise.resolve();
       },
@@ -2124,6 +2128,8 @@ test("browses three cameras without waking video and scales to a camera collecti
     await expectApprovalQuality(page, {securityLabels:true});
     const bounds = await card.locator(".security-layout").evaluate((element) => ({height:element.clientHeight,scroll:element.scrollHeight}));
     expect(bounds.scroll).toBeLessThanOrEqual(bounds.height+1);
+  const footballBounds=await card.evaluate(el=>({football:el.shadowRoot.querySelector(".today-football").getBoundingClientRect().bottom,summary:el.shadowRoot.querySelector(".focus-home-summary").getBoundingClientRect().top}));
+  expect(footballBounds.football).toBeLessThanOrEqual(footballBounds.summary+1);
     const garageControl = await card.locator(".garage-action").evaluate((button) => {
       const panel=button.closest(".garage-panel").getBoundingClientRect();
       const control=button.getBoundingClientRect();
@@ -5070,6 +5076,8 @@ test("School mornings countdown fits Today and saves a one-off walking departure
   await expect(panel).toContainText("Leave in 20 minutes");
   const bounds=await panel.evaluate(e=>({bottom:e.getBoundingClientRect().bottom,height:e.clientHeight,scroll:e.scrollHeight}));
   expect(bounds.scroll).toBeLessThanOrEqual(bounds.height+1);
+  const footballBounds=await card.evaluate(el=>({football:el.shadowRoot.querySelector(".today-football").getBoundingClientRect().bottom,summary:el.shadowRoot.querySelector(".focus-home-summary").getBoundingClientRect().top}));
+  expect(footballBounds.football).toBeLessThanOrEqual(footballBounds.summary+1);
   await page.screenshot({path:resolve(tmpdir(),`school-mornings-${testInfo.project.name}.png`)});
   await panel.getByRole("button",{name:"Change today",exact:true}).click();
   await card.getByLabel("Departure time",{exact:true}).fill("07:25");
@@ -5112,4 +5120,67 @@ test("School mornings speaker failure remains readable without crowding the smal
   const panel=page.locator("family-hub-card .departure-panel");
   await expect(panel).toContainText("The last announcement could not play");
   const bounds=await panel.evaluate(e=>({height:e.clientHeight,scroll:e.scrollHeight}));expect(bounds.scroll).toBeLessThanOrEqual(bounds.height+1);
+});
+
+function readinessFixture() {
+  const family=locationDisabledConfig();
+  family.calendar.preparation.automatic_lunch=true;
+  family.school.lunch_menus=[{person_id:"child_one",status:"published",start_date:"2026-11-02",end_date:"2026-12-19",week_one_date:"2026-11-02",weeks:Array.from({length:3},()=>Array.from({length:5},()=>({mains:["School main meal"],sides:[]}))),packed_lunch_days:[{week:2,weekday:2}]}];
+  const lunch=packedLunchEvents(family,["2026-11-10"])[0];
+  const event={summary:"Swimming lesson",start:{dateTime:"2026-11-10T16:00:00Z"},end:{dateTime:"2026-11-10T17:00:00Z"},_calendar:family.calendar.entities.find(entry=>entry.entity_id==="calendar.child_one")};
+  const preparationItems=[{uid:"packed-lunch",summary:"Pack lunch box",status:"needs_action",due:"2026-11-10",description:preparationDescription(lunch,"child_one","packed_lunch",{source:"packed_lunch",dueDate:"2026-11-10"})},...["Swimming kit","Goggles","Towel","Water bottle"].map((summary,index)=>({uid:`swim-${index}`,summary,status:"needs_action",due:"2026-11-10",description:preparationDescription(event,"child_one","swimming")}))];
+  const calendarEventsByEntity=Object.fromEntries(family.calendar.entities.map(entry=>[entry.entity_id,entry.entity_id==="calendar.child_one"?[event]:[]]));
+  return {family,preparationItems,calendarEventsByEntity};
+}
+
+test("shared preparation carries evening completion and ownership into the morning",async({page},testInfo)=>{
+  const {family,preparationItems,calendarEventsByEntity}=readinessFixture();
+  const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-09T19:30:00Z",kiosk:true});
+  const card=page.locator("family-hub-card"),panel=card.locator(".readiness-panel");
+  await expect(panel).toContainText("Ready for tomorrow?");
+  await expect(panel.locator(".readiness-row")).toHaveCount(3);
+  await panel.locator('[data-prep-owner="packed-lunch"]').selectOption("parent");
+  await expect(panel.locator('[data-prep-owner="packed-lunch"]')).toHaveValue("parent");
+  await panel.locator('[data-prep-item="packed-lunch"]').click();
+  await expect(panel).toContainText("1 of 5 listed items ready");
+  await panel.getByRole("button",{name:"See all 5 items"}).click();
+  await expect(card.locator(".readiness-modal .readiness-row")).toHaveCount(5);
+  await expect(card.locator('.readiness-modal [data-prep-item="packed-lunch"]')).toHaveAttribute("aria-pressed","true");
+  await card.locator('.readiness-modal [data-planner-close]').first().click();
+  await page.evaluate(installApprovalClock,{fixedNow:"2026-11-10T07:15:00Z"});
+  await card.evaluate(el=>el._scheduleRender(true));
+  await expect(panel).toContainText("Ready for today?");
+  await expect(panel).toContainText("1 of 5 listed items ready");
+  await panel.locator('[data-readiness-open]').click();
+  await expect(card.locator('.readiness-modal [data-prep-owner="packed-lunch"]')).toHaveValue("parent");
+  await card.locator('.readiness-modal [data-planner-close]').first().click();
+  await expectNoRootOverflow(page);
+  const bounds=await panel.evaluate(el=>({scroll:el.scrollHeight,height:el.clientHeight}));
+  expect(bounds.scroll).toBeLessThanOrEqual(bounds.height+1);
+  const footballBounds=await card.evaluate(el=>({football:el.shadowRoot.querySelector(".today-football").getBoundingClientRect().bottom,summary:el.shadowRoot.querySelector(".focus-home-summary").getBoundingClientRect().top}));
+  expect(footballBounds.football).toBeLessThanOrEqual(footballBounds.summary+1);
+  await mkdir(resolve("test-results/readiness"),{recursive:true});
+  await page.screenshot({path:resolve(`test-results/readiness/${testInfo.project.name}-morning.png`)});
+  const calls=await page.evaluate(()=>window.__serviceCalls.filter(call=>call.domain==="todo"&&call.service==="update_item"));
+  expect(calls).toHaveLength(2);
+  expect(calls[0].data.description).toContain("Owner: parent");
+  expect(calls[0].data.status).toBeUndefined();
+  expect(calls[1].data.description).toBeUndefined();
+  expect(errors).toEqual([]);
+});
+
+test("preparation respects child selection, read-only displays and unavailable shared data",async({page})=>{
+  const {family,preparationItems,calendarEventsByEntity}=readinessFixture();
+  family.display.read_only=true;
+  const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-09T19:30:00Z",kiosk:true});
+  const card=page.locator("family-hub-card");
+  await expect(card.locator('.readiness-panel [data-prep-item="packed-lunch"]')).toBeDisabled();
+  await expect(card.locator('.readiness-panel [data-prep-owner="packed-lunch"]')).toBeDisabled();
+  await card.evaluate(async el=>{el._hass.callWS=async()=>{throw new Error("List unavailable")};await el._loadPreparationItems(true)});
+  await expect(card.locator(".readiness-panel")).toContainText("Some preparation information is unavailable");
+  await expect(card.locator(".readiness-panel")).not.toContainText("0 of 5 listed items ready");
+  await card.evaluate(el=>{el._selectFamilyView("child_two");el._scheduleRender(true)});
+  await expect(card.locator(".readiness-panel")).toHaveCount(0);
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
+  expect(errors).toEqual([]);
 });

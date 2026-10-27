@@ -14,7 +14,7 @@ The manager validates a non-secret household configuration, compiles a dedicated
 
 - Supports `aarch64` and `amd64` Home Assistant OS installations.
 - Dashboard deployment writes only `/config/family-dashboard`, a fixed frontend allow-list below `/config/www/family-dashboard`, and the app's own `/data` directory. A separate confirmed Classroom installer may manage only `/config/custom_components/family_dashboard_classroom` through a hash-verified staged replacement with snapshot recovery.
-- Uses Home Assistant's internal API only for sanitised inventory and bounded Premier League state sensors.
+- Uses Home Assistant's internal API for sanitised inventory, bounded Premier League state sensors, and explicitly enabled menu-derived tasks in the configured preparation list. Preparation polling has no externally callable service bridge.
 - Does not expose a host port, general shell, arbitrary filesystem access or arbitrary service calls.
 - Can run OpenAI Secure MCP Tunnel as an optional, disabled-by-default second service in the same app container.
 
