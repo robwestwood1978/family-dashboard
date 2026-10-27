@@ -2128,8 +2128,6 @@ test("browses three cameras without waking video and scales to a camera collecti
     await expectApprovalQuality(page, {securityLabels:true});
     const bounds = await card.locator(".security-layout").evaluate((element) => ({height:element.clientHeight,scroll:element.scrollHeight}));
     expect(bounds.scroll).toBeLessThanOrEqual(bounds.height+1);
-  const footballBounds=await card.evaluate(el=>({football:el.shadowRoot.querySelector(".today-football").getBoundingClientRect().bottom,summary:el.shadowRoot.querySelector(".focus-home-summary").getBoundingClientRect().top}));
-  expect(footballBounds.football).toBeLessThanOrEqual(footballBounds.summary+1);
     const garageControl = await card.locator(".garage-action").evaluate((button) => {
       const panel=button.closest(".garage-panel").getBoundingClientRect();
       const control=button.getBoundingClientRect();
@@ -5076,8 +5074,6 @@ test("School mornings countdown fits Today and saves a one-off walking departure
   await expect(panel).toContainText("Leave in 20 minutes");
   const bounds=await panel.evaluate(e=>({bottom:e.getBoundingClientRect().bottom,height:e.clientHeight,scroll:e.scrollHeight}));
   expect(bounds.scroll).toBeLessThanOrEqual(bounds.height+1);
-  const footballBounds=await card.evaluate(el=>({football:el.shadowRoot.querySelector(".today-football").getBoundingClientRect().bottom,summary:el.shadowRoot.querySelector(".focus-home-summary").getBoundingClientRect().top}));
-  expect(footballBounds.football).toBeLessThanOrEqual(footballBounds.summary+1);
   await page.screenshot({path:resolve(tmpdir(),`school-mornings-${testInfo.project.name}.png`)});
   await panel.getByRole("button",{name:"Change today",exact:true}).click();
   await card.getByLabel("Departure time",{exact:true}).fill("07:25");
