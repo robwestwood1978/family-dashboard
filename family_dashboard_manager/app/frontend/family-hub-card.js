@@ -3362,7 +3362,7 @@ export class FamilyHubCard extends HTMLElementBase {
     return `<section class="family-dashboard family-parent-overview"><header><p class="eyebrow">FAMILY TASKS</p><h2>Choose a child</h2><p>Jobs, reading and homework are organised for each child.</p></header><div class="family-overview-cards">${children.map(person=>{const child=this._homeworkChild(person.id), reading=child?.routines.find(r=>r.kind==="reading"), pending=(child?.plans||[]).filter(plan=>!plan.marks?.handed_in).length;return `<article style="--person-colour:${escapeHtml(person.colour)}"><span class="family-view-token">${escapeHtml(person.name.slice(0,1))}</span><h2>${escapeHtml(person.name)}</h2><p>${reading?`${reading.count}/${reading.goal} readings this week`:"Open jobs and rewards"}</p>${child?`<small>${pending} school task${pending===1?"":"s"} waiting</small>`:""}<div><button type="button" data-focus-tasks="${escapeHtml(person.id)}">Open jobs</button>${this._config.school?.homework_enabled?`<button type="button" data-homework-open="${escapeHtml(person.id)}">Open homework</button>`:""}</div></article>`;}).join("")}</div></section>`;
   }
 
-  _renderTodayHomeworkActions(phase, children = this._familyViewHomeworkChildren(), limit = 4) {
+  _renderTodayHomeworkActions(phase, children = this._familyViewHomeworkChildren(), limit = 2) {
     if (!this._config.school?.homework_enabled) return "";
     const today = this._homeworkData?.today || dateKey(new Date(),this._config.product.timezone);
     const actions = familyHomeworkActions(children,phase.id,today,limit);
