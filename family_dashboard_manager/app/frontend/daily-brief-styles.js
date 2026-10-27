@@ -1774,7 +1774,19 @@ export const DAILY_BRIEF_STYLES = `
     .focus-today .readiness-panel>* { flex:none; }
     .focus-today .readiness-panel>h2 { color:var(--daily-text); }
     .focus-today .readiness-panel .eyebrow { color:var(--daily-muted); }
-    .focus-today:has(.readiness-panel) .focus-today-plan { grid-column:2;grid-row:1;grid-template-rows:auto minmax(0,1fr);gap:8px;overflow:hidden; }
+    .focus-today:has(.readiness-panel) .focus-today-plan { grid-column:2;grid-row:1;grid-template-rows:minmax(0,1fr) 48px;gap:8px;overflow:hidden; }
+    .focus-today:has(.readiness-panel) .today-family { min-height:44px;overflow:visible; }
+    .focus-today:has(.readiness-panel) .today-family .section-heading,.focus-today:has(.readiness-panel) .today-family .homework-today { display:none; }
+    .focus-today:has(.readiness-panel) .today-job-list { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;flex:none; }
+    .focus-today:has(.readiness-panel) .today-job { grid-template-columns:minmax(0,1fr) 44px;gap:4px;min-height:44px;padding:0; }
+    .focus-today:has(.readiness-panel) .today-job .today-person-token,.focus-today:has(.readiness-panel) .today-job small { display:none; }
+    .focus-today:has(.readiness-panel) .today-job strong { font-size:12px;line-height:1.3; }
+    .focus-today:has(.readiness-panel) .today-focus-action { grid-template-columns:24px minmax(0,1fr) 16px;gap:6px;min-height:44px;padding:0; }
+    .focus-today:has(.readiness-panel) .today-focus-action .today-person-token { width:24px;height:24px; }
+    .focus-today:has(.readiness-panel) .today-focus-action small { display:none; }
+    .focus-today:has(.readiness-panel) .today-focus-action strong { font-size:12px;line-height:1.3; }
+    .focus-today:has(.readiness-panel) .departure-panel .eyebrow { display:none; }
+    .focus-today:has(.readiness-panel) .departure-panel .departure-actions { margin:4px 0; }
     .focus-today:has(.readiness-panel) .today-next .text-action { margin:0;align-self:flex-start; }
     .focus-today:has(.readiness-panel) .school-lunch-today { grid-column:2;grid-row:2;padding-top:4px; }
     .focus-today:has(.readiness-panel) .school-lunch-today .section-heading h2 { font-size:14px; }

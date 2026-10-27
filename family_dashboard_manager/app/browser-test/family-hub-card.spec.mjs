@@ -5185,3 +5185,25 @@ test("preparation respects child selection, read-only displays and unavailable s
   expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
   expect(errors).toEqual([]);
 });
+
+test("preparation, school countdown and both children's jobs fit together",async({page},testInfo)=>{
+  const {family,preparationItems,calendarEventsByEntity}=readinessFixture();
+  const departure=schoolDepartureFixture();
+  departure.attributes.today="2026-11-10";
+  departure.attributes.departure_at="2026-11-10T07:35:00Z";
+  const errors=await mount(page,family,{"sensor.family_dashboard_departure":departure},{preparationItems,calendarEventsByEntity,fixedNow:"2026-11-10T07:15:00Z",kiosk:true,departureAdmin:true});
+  const card=page.locator("family-hub-card");
+  await expect(card.locator(".departure-panel")).toContainText("Leave in 20 minutes");
+  await expect(card.locator(".readiness-panel")).toContainText("Pack lunch box");
+  const bounds=await card.evaluate(el=>{
+    const root=el.shadowRoot,next=root.querySelector(".departure-panel"),jobs=root.querySelector(".today-family"),lunch=root.querySelector(".school-lunch-today");
+    return {nextHeight:next.clientHeight,nextScroll:next.scrollHeight,jobsHeight:jobs.clientHeight,jobsScroll:jobs.scrollHeight,jobsBottom:jobs.getBoundingClientRect().bottom,lunchTop:lunch.getBoundingClientRect().top};
+  });
+  expect(bounds.nextScroll).toBeLessThanOrEqual(bounds.nextHeight+1);
+  expect(bounds.jobsScroll).toBeLessThanOrEqual(bounds.jobsHeight+1);
+  expect(bounds.jobsBottom).toBeLessThanOrEqual(bounds.lunchTop+1);
+  await expectNoRootOverflow(page);
+  await mkdir(resolve("test-results/readiness"),{recursive:true});
+  await page.screenshot({path:resolve(`test-results/readiness/${testInfo.project.name}-countdown.png`)});
+  expect(errors).toEqual([]);
+});
