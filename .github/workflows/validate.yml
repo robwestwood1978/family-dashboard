@@ -40,6 +40,18 @@ jobs:
           cache-dependency-path: family_dashboard_manager/app/package-lock.json
       - run: npm ci
         working-directory: family_dashboard_manager/app
+      - name: Use primary Ubuntu package archive
+        run: |
+          sudo python3 - <<'PY'
+          from pathlib import Path
+          sources = [Path("/etc/apt/sources.list"), *Path("/etc/apt/sources.list.d").glob("*.sources"), *Path("/etc/apt/sources.list.d").glob("*.list")]
+          for source in sources:
+              if source.is_file():
+                  original = source.read_text()
+                  updated = original.replace("http://azure.archive.ubuntu.com", "https://archive.ubuntu.com").replace("https://azure.archive.ubuntu.com", "https://archive.ubuntu.com")
+                  if updated != original:
+                      source.write_text(updated)
+          PY
       - name: Install tablet browsers
         timeout-minutes: 10
         run: npx playwright install --with-deps chromium webkit
