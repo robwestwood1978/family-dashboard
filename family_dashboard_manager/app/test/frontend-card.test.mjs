@@ -778,7 +778,7 @@ test("restores full-render focus by control identity rather than a changing matc
   const active = {
     dataset: { gameweek: "2" },
     tagName: "BUTTON",
-    matches: (selector) => selector === 'button, select, a[href], [role="button"][tabindex]'
+    matches: (selector) => selector.includes('button, select,') && selector.includes('a[href]')
       || selector === "button[data-gameweek]",
     closest: (selector) => selector === ".hub-view" ? oldView : null,
     getAttribute: (name) => name === "aria-label" ? "Next matchweek" : null,
@@ -822,7 +822,7 @@ test("restores first-party ChoreOps and Classroom link focus after a state rende
     const active = {
       dataset,
       tagName: "A",
-      matches: (selector) => selector === 'button, select, a[href], [role="button"][tabindex]',
+      matches: (selector) => selector.includes('button, select,') && selector.includes('a[href]'),
       closest: (selector) => selector === ".hub-view" ? oldView : null,
       getAttribute: () => null,
       classList: { contains: (className) => className === markerClass }
@@ -3548,7 +3548,7 @@ test("family view preferences discard removed people and invalid page positions"
   assert.equal(saved.selected,"all");
   assert.deepEqual(Object.keys(saved.contexts),["ernie","rob"]);
   assert.equal(saved.contexts.ernie.calendarAnchor,undefined);
-  assert.equal(saved.contexts.ernie.calendarSelected,"2026-10-14");
+  assert.equal(saved.contexts.ernie.calendarSelected,undefined);
   assert.equal(saved.contexts.ernie.token,undefined);
   assert.equal(saved.contexts.rob.taskSection,"jobs");
   assert.equal(saved.contexts.rob.calendarMode,"week");

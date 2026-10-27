@@ -1,3 +1,10 @@
+## 0.25.0
+
+- Preserve iPad scroll positions and open details across background state and clock updates; defer rebuilding during active scrolling or text/date entry.
+- Open Calendar on today, reset on return, foreground and household day changes, and stop saving browsed dates. Add a direct date picker alongside Previous, Today and Next.
+- Always expose Preparation on Today, with Today/Tomorrow controls and a visible loaded dashboard version in the Family picker.
+- Add an optional simple family day with child profiles, next jobs, preparation, school work and lunch. Parent view always returns to the full dashboard; full remains the default.
+
 ## 0.24.0
 
 - Bring tomorrow's saved preparation, packed-lunch exceptions and school returns together on Today in the evening, then carry the same progress into the morning. Show a short priority list with a full preparation view.

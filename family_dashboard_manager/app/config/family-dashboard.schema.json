@@ -60,6 +60,7 @@
         "default_view": {
           "enum": ["today", "calendar", "rooms", "family", "entry", "music", "energy", "football"]
         },
+        "default_experience": { "enum": ["full", "simple"], "default": "full", "description": "Start with the full dashboard or the simple family view. Parent view remains available. This changes presentation, not Home Assistant permissions." },
         "panel_path": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
         "target_width": { "type": "integer", "minimum": 768, "maximum": 2560 },
         "target_height": { "type": "integer", "minimum": 600, "maximum": 1600 },
