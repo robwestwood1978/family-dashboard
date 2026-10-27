@@ -5262,8 +5262,10 @@ test("iPad scrolling and open menu details survive background entity and clock u
   const card=page.locator("family-hub-card");
   await card.locator('.school-lunch-child[data-school-lunch-open="child_one"]').click();
   const menu=card.locator(".school-lunch-week");
+  await expect(menu.locator("details")).toHaveCount(4);
   await menu.locator("details").evaluateAll(nodes=>nodes.forEach(node=>node.open=true));
-  const position=await menu.evaluate(node=>{node.scrollTop=Math.min(120,(node.scrollHeight-node.clientHeight)/2);window.__oldMenu=node;return node.scrollTop;});
+  await expect(menu.locator("details[open]")).toHaveCount(4);
+  const position=await menu.evaluate(node=>{node.scrollTop=Math.min(120,(node.scrollHeight-node.clientHeight)/2);node.dispatchEvent(new Event("scroll"));window.__oldMenu=node;return node.scrollTop;});
   expect(position).toBeGreaterThan(20);
   await updateEntityState(card,state("sensor.child_one_choreops_points","99"));
   await expect.poll(()=>page.evaluate(()=>window.__oldMenu.isConnected)).toBe(false);

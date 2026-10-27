@@ -2236,11 +2236,11 @@ export class FamilyHubCard extends HTMLElementBase {
     this._controlPolicy = buildControlPolicy();
     this._signature = "";
     this._renderPending = false;
-    this._lastScrollAt = 0;
+    this._lastScrollAt = -Infinity;
     this._scrollRenderTimer = null;
     this._boundScroll = event => {
       const target = event.target;
-      if (target === globalThis.document || this.shadowRoot?.contains(target) || target?.contains?.(this)) this._lastScrollAt = Date.now();
+      if (target === globalThis.document || this.shadowRoot?.contains(target) || target?.contains?.(this)) this._lastScrollAt = performance.now();
     };
     this._boundFocusOut = () => { if(this._renderAfterInput){this._renderAfterInput=false;queueMicrotask(()=>this._scheduleRender());} };
     this._childCards = new Map();
@@ -2517,7 +2517,7 @@ export class FamilyHubCard extends HTMLElementBase {
     // recurring pulse between the configured slide changes.
     if (this._devicePhotoBusy || (this._devicePhotoModal || this._photoFrameActive || this._homeworkModal) && !force) return;
     if (!force && this.shadowRoot?.activeElement?.matches?.('input:not([type="range"]),textarea')) { this._renderAfterInput=true; return; }
-    if (!force && Date.now() - (this._lastScrollAt || 0) < 220) {
+    if (!force && performance.now() - this._lastScrollAt < 220) {
       if (this._scrollRenderTimer) clearTimeout(this._scrollRenderTimer);
       this._scrollRenderTimer = setTimeout(() => { this._scrollRenderTimer = null; this._scheduleRender(); }, 230);
       return;
