@@ -1,6 +1,29 @@
 // Shared presentation only. Service boundaries, child cards and controls stay in
 // family-hub-card. The dashboard defaults to light; an explicit appearance preference can opt in to dark or automatic mode.
 export const DAILY_BRIEF_STYLES = `
+  .readiness-panel { display:flex;flex-direction:column;gap:0;padding:26px;background:var(--daily-surface);color:var(--daily-text);border-radius:24px;min-width:0;min-height:0;overflow:hidden; }
+  .readiness-panel>h2 { color:var(--daily-text);font-size:clamp(26px,2.7vw,36px);font-weight:500;letter-spacing:-.04em;line-height:1.15;margin:6px 0 10px; }
+  .readiness-panel .eyebrow { color:var(--daily-muted); }
+  .readiness-panel::after { display:none; }
+  .readiness-date { color:var(--daily-muted);font-size:14px;margin:0 0 8px; }
+  .readiness-progress { font-size:13px;color:var(--daily-muted);margin:0 0 12px; }
+  .readiness-warning { color:var(--daily-text);background:var(--daily-warning-soft);border-radius:12px;padding:8px;font-size:12px;line-height:1.4;margin:0 0 8px; }
+  .readiness-list { display:grid;min-height:0; }
+  .readiness-row { display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;border-bottom:1px solid var(--daily-line);min-width:0; }
+  .readiness-task { display:flex;gap:10px;align-items:center;min-height:66px;min-width:0;width:100%;padding:10px 0;border:0;background:transparent;color:var(--daily-text);text-align:left;cursor:pointer; }
+  .readiness-task>ha-icon { flex:none;--mdc-icon-size:23px;color:var(--person-colour,var(--daily-accent)); }
+  .readiness-task>span { min-width:0; }
+  .readiness-task strong { display:block;font-size:14px;font-weight:500;line-height:1.3;overflow-wrap:anywhere; }
+  .readiness-task small { display:block;color:var(--daily-muted);font-size:12px;line-height:1.3;margin-top:4px;overflow-wrap:anywhere; }
+  .readiness-task:disabled { cursor:default; }
+  .readiness-row.is-complete .readiness-task strong { color:var(--daily-muted);text-decoration:line-through; }
+  .readiness-row select { width:122px;max-width:100%;min-height:44px;padding:6px 8px;font:inherit;font-size:12px;border:0;border-radius:12px;background:var(--daily-soft);color:var(--daily-text); }
+  .readiness-row select:disabled { opacity:.65; }
+  .readiness-open { display:flex;align-items:center;gap:8px;align-self:flex-start;min-height:44px;border:0;background:transparent;color:var(--daily-accent);font-size:13px;padding:8px 0;margin-top:auto;cursor:pointer; }
+  .readiness-shared { display:block;color:var(--daily-muted);font-size:12px;line-height:1.3; }
+  .readiness-modal .planner-modal-body { padding-top:8px; }
+  @media(max-height:850px) and (min-width:851px) { .readiness-panel { padding:18px 20px; }.readiness-panel>h2{font-size:27px;margin:4px 0 6px}.readiness-panel .eyebrow{margin:0}.readiness-panel .readiness-date{font-size:12px;margin-bottom:4px}.readiness-panel .readiness-progress{margin-bottom:4px}.readiness-panel .readiness-task{min-height:56px;padding:7px 0}.readiness-panel .readiness-task strong{font-size:13px}.readiness-panel .readiness-shared{font-size:11px}.readiness-panel .readiness-row select{width:112px}.readiness-panel .readiness-open{margin-top:4px} }
+  @media(max-width:550px) { .readiness-panel{padding:20px}.readiness-row{grid-template-columns:minmax(0,1fr)}.readiness-row select{margin:0 0 10px 33px}.readiness-panel .readiness-list{flex:none} }
   .departure-panel h2 { font-size:clamp(28px,3vw,40px);font-weight:500;line-height:1.12;letter-spacing:-.045em;margin:10px 0; }
   .departure-panel .supporting { font-size:16px; }
   .departure-guidance { color:var(--daily-muted);font-size:13px;line-height:1.45;margin:12px 0; }
@@ -1741,4 +1764,43 @@ export const DAILY_BRIEF_STYLES = `
   .school-lunch-day p,.school-lunch-day details { font-size:13px;line-height:1.5; }
   .school-lunch-day summary { min-height:44px;display:list-item;align-content:center;cursor:pointer;color:var(--daily-accent); }
   .school-lunch-day ul { padding-left:20px;color:var(--daily-muted); }
+
+  /* Preparation owns the left column across the two upper rows. Lunch stays
+     visible on the right; football and house status retain their lower rows. */
+  @media(min-width:851px) and (orientation:landscape) {
+    .today-grid.focus-today:has(.readiness-panel) { grid-template-rows:minmax(190px,1fr) auto 170px 48px;gap:8px 24px; }
+    .focus-today .readiness-panel { grid-column:1;grid-row:1/3;position:relative;overflow:hidden; }
+    .focus-today .readiness-panel::after { display:none; }
+    .focus-today .readiness-panel>* { flex:none; }
+    .focus-today .readiness-panel>h2 { color:var(--daily-text); }
+    .focus-today .readiness-panel .eyebrow { color:var(--daily-muted); }
+    .focus-today:has(.readiness-panel) .focus-today-plan { grid-column:2;grid-row:1;grid-template-rows:minmax(0,1fr) 48px;gap:8px;overflow:hidden; }
+    .focus-today:has(.readiness-panel) .today-family { min-height:44px;overflow:visible; }
+    .focus-today:has(.readiness-panel) .today-family .section-heading,.focus-today:has(.readiness-panel) .today-family .homework-today { display:none; }
+    .focus-today:has(.readiness-panel) .today-job-list { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;flex:none; }
+    .focus-today:has(.readiness-panel) .today-job { grid-template-columns:minmax(0,1fr) 44px;gap:4px;min-height:44px;padding:0; }
+    .focus-today:has(.readiness-panel) .today-job .today-person-token,.focus-today:has(.readiness-panel) .today-job small { display:none; }
+    .focus-today:has(.readiness-panel) .today-job strong { font-size:12px;line-height:1.3; }
+    .focus-today:has(.readiness-panel) .today-focus-action { grid-template-columns:24px minmax(0,1fr) 16px;gap:6px;min-height:44px;padding:0; }
+    .focus-today:has(.readiness-panel) .today-focus-action .today-person-token { width:24px;height:24px; }
+    .focus-today:has(.readiness-panel) .today-focus-action small { display:none; }
+    .focus-today:has(.readiness-panel) .today-focus-action strong { font-size:12px;line-height:1.3; }
+    .focus-today:has(.readiness-panel) .departure-panel .eyebrow { display:none; }
+    .focus-today:has(.readiness-panel) .departure-panel .departure-actions { margin:4px 0; }
+    .focus-today:has(.readiness-panel) .today-next .text-action { margin:0;align-self:flex-start; }
+    .focus-today:has(.readiness-panel) .school-lunch-today { grid-column:2;grid-row:2;padding-top:4px; }
+    .focus-today:has(.readiness-panel) .school-lunch-today .section-heading h2 { font-size:14px; }
+    .focus-today:has(.readiness-panel) .school-lunch-children { gap:6px; }
+    .focus-today:has(.readiness-panel) .school-lunch-child { padding:8px;gap:6px;border-radius:12px; }
+    .focus-today:has(.readiness-panel) .school-lunch-child strong { font-size:12px; }
+    .focus-today:has(.readiness-panel) .school-lunch-child small { font-size:11px; }
+    .focus-today:has(.readiness-panel) .school-lunch-child small:last-child:not(:first-child) { display:none; }
+    .focus-today:has(.readiness-panel) .school-lunch-child .family-view-token { width:24px;height:24px;font-size:12px; }
+    .focus-today:has(.readiness-panel) .today-football { grid-row:3; }
+    .focus-today:has(.readiness-panel) .focus-home-summary { grid-row:4; }
+  }
+  @media(min-width:851px) and (max-height:850px) and (orientation:landscape) {
+    .readiness-panel .readiness-row:nth-child(n+3) { display:none; }
+    .readiness-panel .readiness-shared,.readiness-panel .eyebrow { display:none; }
+  }
 `;

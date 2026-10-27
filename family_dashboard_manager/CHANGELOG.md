@@ -1,3 +1,10 @@
+## 0.24.0
+
+- Bring tomorrow's saved preparation, packed-lunch exceptions and school returns together on Today in the evening, then carry the same progress into the morning. Show a short priority list with a full preparation view.
+- Assign a configured parent to shared preparation tasks. Ownership and completion live in the existing Home Assistant preparation list; viewing preferences do not change who is responsible.
+- Optionally create dated packed-lunch tasks from published menus in one serial Manager process. Respect term dates, closures, read-only mode and completed tasks; withdraw only current automatic tasks after a menu correction.
+- Keep school reading and homework actions linked to their existing progress records. Report unavailable data without claiming the family is ready.
+
 ## 0.23.0
 
 - Show each child’s school lunch on Today and browse dated weekly menus in Tasks → Lunch.

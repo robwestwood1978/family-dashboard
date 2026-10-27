@@ -10,6 +10,7 @@ import { DeparturesIntegrationStore } from "./departures-integration-store.mjs";
 import { homeworkAdmin, integrationAdmin } from "./homework-client.mjs";
 import { extractHomework } from "./homework-import.mjs";
 import { startFootballPolling } from "./football-provider.mjs";
+import { startPreparationPolling } from "./preparation-provider.mjs";
 import { DashboardStore } from "./manager-store.mjs";
 import { getSanitisedHomeAssistantInventory } from "./ha-client.mjs";
 import {
@@ -19,7 +20,7 @@ import {
 } from "./admin-policy.mjs";
 
 const CONFIG_SCHEMA = z.record(z.string(), z.unknown());
-const APP_VERSION = process.env.APP_VERSION || "0.23.0";
+const APP_VERSION = process.env.APP_VERSION || "0.24.0";
 const MCP_JSON_BODY_LIMIT_BYTES = 1_500_000;
 const DEFAULT_ADMIN_DIR = fileURLToPath(new URL("../admin/", import.meta.url));
 const SUPERVISOR_INGRESS_SOURCE = [172, 30, 32, 2].join(".");
@@ -430,13 +431,16 @@ export function createManagerApp(dependencies = {}) {
 export function startManagerServer({
   port = Number(process.env.MANAGER_PORT || 8099),
   store = new DashboardStore(),
-  startPolling = startFootballPolling
+  startPolling = startFootballPolling,
+  startPreparation = startPreparationPolling
 } = {}) {
   const app = createManagerApp({ store });
   const stopFootballPolling = startPolling({ store });
+  const stopPreparationPolling = startPreparation({ store });
   const listener = app.listen(port, process.env.MANAGER_HOST || "0.0.0.0", (error) => {
     if (error) {
       stopFootballPolling();
+      stopPreparationPolling();
       console.error("Family Dashboard Manager failed to start", error);
       process.exitCode = 1;
       return;
@@ -444,6 +448,7 @@ export function startManagerServer({
     console.log(`Family Dashboard Manager listening on ${process.env.MANAGER_HOST || "0.0.0.0"}:${port}`);
   });
   listener.once("close", stopFootballPolling);
+  listener.once("close", stopPreparationPolling);
   return listener;
 }
 

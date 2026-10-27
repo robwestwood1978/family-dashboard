@@ -211,6 +211,7 @@
           "additionalProperties": false,
           "required": ["enabled", "todo_entity", "lookahead_days", "templates"],
           "properties": {
+            "automatic_lunch": { "type": "boolean", "default": false, "description": "Create one shared packed-lunch preparation task per child and school date from the published menu. Uses only this preparation list; respects term dates and closed dates." },
             "enabled": { "type": "boolean" },
             "todo_entity": { "$ref": "#/$defs/todoEntityId" },
             "lookahead_days": { "type": "integer", "minimum": 1, "maximum": 31 },
