@@ -3142,10 +3142,19 @@ export class FamilyHubCard extends HTMLElementBase {
     if (this._devicePhotoModal) this.shadowRoot.querySelector(".device-photos-modal button:not([disabled])")?.focus();
     if (this._plannerModal) {
       const modal = this.shadowRoot.querySelector(".planner-modal");
+      if (this._plannerModal.type === "readiness" && modal) {
+        const identity = renderFocus?.dataset;
+        const control = [...modal.querySelectorAll("button,select")].find(node=>identity?.prepOwner ? node.dataset.prepOwner === identity.prepOwner : identity?.prepItem ? node.dataset.prepItem === identity.prepItem : false);
+        control?.focus();
+      }
       if (modal && !modal.contains(this.shadowRoot.activeElement)) {
         ((scheduleFocusSelector || departureFocusSelector) && modal.querySelector(scheduleFocusSelector || departureFocusSelector) || modal.querySelector('[data-planner-field="summary"]') || modal.querySelector("button:not([disabled])"))?.focus();
       }
     } else if (!confirmationFocusHandled) this._restoreRenderFocus(renderFocus);
+    if (this._readinessReturnFocus && !this._plannerModal) {
+      this.shadowRoot.querySelector("[data-readiness-open]")?.focus();
+      this._readinessReturnFocus = false;
+    }
     if (this._heatingScheduleReturnScope) {
       [...this.shadowRoot.querySelectorAll("[data-heating-schedule-open]")].find((button) => button.dataset.heatingScheduleOpen === this._heatingScheduleReturnScope)?.focus();
       this._heatingScheduleReturnScope = null;
@@ -5999,7 +6008,7 @@ export class FamilyHubCard extends HTMLElementBase {
       if (event.key === "Escape") {
         event.preventDefault();
         if (this._plannerModal.type === "heating") this._closeHeatingSchedule();
-        else { if(this._plannerModal.type==="departure")this._departureReturnFocus=true;this._plannerModal = null; this._scheduleRender(true); }
+        else { if(this._plannerModal.type==="departure")this._departureReturnFocus=true;if(this._plannerModal.type==="readiness")this._readinessReturnFocus=true;this._plannerModal = null; this._scheduleRender(true); }
         return;
       }
       if (event.key === "Tab") {
@@ -6367,7 +6376,7 @@ export class FamilyHubCard extends HTMLElementBase {
       this._scheduleRender(true); return;
     }
     if (this._plannerModal?.type === "readiness") {
-      if (target.dataset.plannerClose !== undefined) { this._plannerModal = null; this._scheduleRender(true); }
+      if (target.dataset.plannerClose !== undefined) { this._plannerModal = null; this._readinessReturnFocus = true; this._scheduleRender(true); }
       else if (target.dataset.prepItem) void this._togglePreparationItem(target.dataset.prepItem,target.dataset.prepStatus);
       else if (target.dataset.todayHomework) { this._plannerModal = null; }
       else if (target.dataset.readinessRefresh !== undefined) { void this._loadPreparationItems(true); void this._loadCalendarEvents(true); void this._loadHomework(true); }
