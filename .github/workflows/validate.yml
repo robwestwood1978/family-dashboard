@@ -28,6 +28,17 @@ jobs:
       - name: Ensure generated examples are current
         run: git diff --exit-code -- family_dashboard_manager/app/generated/example-dashboard.yaml family_dashboard_manager/app/preview/family-dashboard-preview.svg family_dashboard_manager/app/preview/family-dashboard-rooms-preview.svg
 
+  container-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check packaged date formatting under AppArmor
+        run: bash scripts/check-container-runtime.sh
+
   tablet-browser:
     runs-on: ubuntu-latest
     timeout-minutes: 20

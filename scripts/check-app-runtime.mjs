@@ -27,7 +27,9 @@ const requiredProfileRules = [
   /\/run\/\{s6,s6-rc\*,service\}\/\*\*\s+rix,/,
   /\/etc\/services\.d\/\*\*\s+rwix,/,
   /\/etc\/cont-init\.d\/\*\*\s+rwix,/,
-  /\/etc\/cont-finish\.d\/\*\*\s+rwix,/
+  /\/etc\/cont-finish\.d\/\*\*\s+rwix,/,
+  /\/usr\/share\/icu\/\{,\*\*\}\s+r,/,
+  /\/usr\/share\/zoneinfo\/\{,\*\*\}\s+r,/
 ];
 
 for (const rule of requiredProfileRules) {

@@ -20,6 +20,11 @@ profile family_dashboard_manager flags=(attach_disconnected,mediate_deleted) {
   /etc/cont-finish.d/** rwix,
   /run/{,**} rwk,
 
+  # Node/ICU opens locale data when the preparation provider formats dates.
+  # These are read-only runtime data, independent of private HA configuration.
+  /usr/share/icu/{,**} r,
+  /usr/share/zoneinfo/{,**} r,
+
   /usr/lib/** mr,
   /lib/** mr,
   /lib64/** mr,

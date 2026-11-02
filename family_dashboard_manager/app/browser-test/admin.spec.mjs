@@ -214,3 +214,17 @@ test("School mornings Admin reviews settings, limits speakers to Sonos and chang
   expect(writes[1]).toEqual({operation:"today",expected_revision:1,payload:{operation:"override",date:"2026-10-20",time:"07:20",mode:"cycle"}});
   expect(data.settings.times[1]).toBe("07:35");
 });
+
+test("Admin save instructions use the installed resource version", async ({page})=>{
+  await page.route("**/api/admin/bootstrap",route=>route.fulfill({json:{version:"9.8.7",config,schema,inventory,active_config_hash:"a".repeat(64),private_assets:{},user:{id:"admin",name:"Household owner"}}}));
+  await page.route("**/api/admin/preview",route=>route.fulfill({json:{config_hash:"b".repeat(64),change_count:1,requires_protected_acknowledgement:false,changes:[{path:"display.default_experience",before:null,after:"full"}]}}));
+  await page.route("**/api/admin/deploy",route=>route.fulfill({json:{resulting_config_hash:"b".repeat(64),rollback_snapshot:"sample-snapshot"}}));
+  await page.goto(baseUrl);
+  await expect(page.locator("#status")).toContainText("Active configuration loaded");
+  await page.getByRole("button",{name:"Kiosk & photos",exact:true}).click();
+  await page.locator("label.field").filter({hasText:"Default Experience"}).locator("select").selectOption("full");
+  await page.locator("#review").click();
+  await expect(page.locator("#review-dialog")).toBeVisible();
+  await page.locator("#deploy").click();
+  await expect(page.locator("#status")).toContainText("resource to v9.8.7");
+});
