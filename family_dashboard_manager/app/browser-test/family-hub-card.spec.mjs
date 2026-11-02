@@ -5315,11 +5315,13 @@ test("wheel scrolling at the end of a lunch menu survives repeated live updates"
   await menu.hover();
   await page.mouse.wheel(0,600);
   await expect.poll(()=>menu.evaluate(n=>n.scrollTop)).toBeGreaterThan(100);
+  // WebKit delivers wheel scrolling across frames; measure after reaching the end.
+  await expect.poll(()=>menu.evaluate(n=>n.scrollHeight-n.clientHeight-n.scrollTop)).toBeLessThanOrEqual(1);
   const position=await menu.evaluate(n=>n.scrollTop);
   for(let i=0;i<10;i++){
     await updateEntityState(card,state("sensor.child_one_choreops_points",String(100+i)));
     await page.waitForTimeout(100);
-    await expect(menu).toHaveJSProperty("scrollTop",position);
+    await expect.poll(()=>menu.evaluate((n,top)=>Math.abs(n.scrollTop-top),position)).toBeLessThanOrEqual(1);
     await expect(menu.locator("details[open]")).toHaveCount(2);
   }
   expect(errors).toEqual([]);
