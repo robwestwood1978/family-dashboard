@@ -249,6 +249,7 @@ test("reserves a separate Tasks row for the child switcher", () => {
 
 test("does not schedule incidental renders while the kiosk photo frame owns the surface", () => {
   const card = Object.create(FamilyHubCard.prototype);
+  card._activePointers = new Set();
   Object.defineProperty(card, "isConnected", { value: true });
   card._photoFrameActive = true;
   card._renderPending = false;
@@ -2658,6 +2659,7 @@ test("does not mint a child facade when an async card mount finishes after disco
   globalThis.loadCardHelpers = () => new Promise((resolve) => { resolveHelpers = resolve; });
   const slot = { replaceChildren() {} };
   const card = Object.create(FamilyHubCard.prototype);
+  card._activePointers = new Set();
   Object.defineProperty(card, "isConnected", { configurable: true, writable: true, value: true });
   card.shadowRoot = {
     getElementById: () => slot,
