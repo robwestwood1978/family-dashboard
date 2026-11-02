@@ -1,7 +1,7 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.25.1";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.25.2";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
 import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.1";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.2";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -13,7 +13,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
-const DASHBOARD_VERSION = "0.25.1";
+const DASHBOARD_VERSION = "0.25.2";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
@@ -3214,7 +3214,16 @@ export class FamilyHubCard extends HTMLElementBase {
     if(this._departureReturnFocus){(this.shadowRoot.querySelector("[data-departure-edit]")||this.shadowRoot.querySelector("[data-departure-action]"))?.focus();this._departureReturnFocus=false;}
     this._restoreEmbeddedRenderState(embeddedRenderState);
     this._syncViewportHeight();
-    if (scrollState?.key === scrollKey) this._restoreViewScroll(scrollState);
+    if (scrollState?.key === scrollKey) {
+      this._restoreViewScroll(scrollState);
+      // HA's Lit card does not project its children until its first update.
+      // Before that slot exists the browser clamps descendant scrollTop to 0.
+      const surface = this.shadowRoot.querySelector(".hub-card");
+      const ready = surface?.updateComplete;
+      if (typeof ready?.then === "function") ready.then(() => {
+        if (this.isConnected && this.shadowRoot.querySelector(".hub-card") === surface && this._viewScrollKey() === scrollKey) this._restoreViewScroll(scrollState);
+      }, () => {});
+    }
     this._renderedScrollKey = scrollKey;
   }
 

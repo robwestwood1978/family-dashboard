@@ -1,3 +1,8 @@
+## 0.25.2
+
+- Restore scroll positions after Home Assistant’s asynchronous card layout is ready, so background updates cannot reset the iPad view to the top.
+- Reproduce the real card lifecycle in a browser regression test, including expanded lunch details and repeated updates while scrolled to the bottom.
+
 ## 0.25.1
 
 - Permit read-only access to packaged ICU and timezone data so server-side date formatting can start under the production AppArmor profile. This fixes the immediate Manager restart loop when automatic preparation is enabled.
