@@ -2236,6 +2236,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._controlPolicy = buildControlPolicy();
     this._signature = "";
     this._renderPending = false;
+    this._activePointers = new Set();
+    this._renderAfterPointer = false;
     this._lastScrollAt = -Infinity;
     this._scrollRenderTimer = null;
     this._boundScroll = event => {
@@ -2278,9 +2280,18 @@ export class FamilyHubCard extends HTMLElementBase {
     this._boundChange = (event) => this._handleChange(event);
     this._boundInput = (event) => this._handleInput(event);
     this._boundKeydown = (event) => this._handleKeydown(event);
-    this._boundPointerActivity = () => this._handlePhotoFrameActivity();
+    this._boundPointerActivity = event => { this._activePointers.add(event.pointerId); this._handlePhotoFrameActivity(); };
+    this._boundPointerEnd = event => {
+      this._activePointers.delete(event.pointerId);
+      // Let the release's click reach its original control before rebuilding.
+      if (!this._activePointers.size && this._renderAfterPointer) setTimeout(() => {
+        if (!this._activePointers.size && this._renderAfterPointer) { this._renderAfterPointer=false; this._scheduleRender(); }
+      }, 0);
+    };
     this._boundVisibilityChange = () => {
       if (globalThis.document?.visibilityState === "hidden") {
+        this._activePointers.clear();
+        this._renderAfterPointer = false;
         this._clearFreshnessTimer();
         this._clearPhotoFrameTimers();
         this._photoFrameActive = false;
@@ -2321,6 +2332,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.addEventListener("scroll", this._boundScroll, { passive: true, capture: true });
     this.shadowRoot.addEventListener("focusout", this._boundFocusOut);
     globalThis.document?.addEventListener?.("scroll", this._boundScroll, { passive: true, capture: true });
+    globalThis.document?.addEventListener?.("pointerup", this._boundPointerEnd, { passive: true, capture: true });
+    globalThis.document?.addEventListener?.("pointercancel", this._boundPointerEnd, { passive: true, capture: true });
     globalThis.document?.addEventListener?.("visibilitychange", this._boundVisibilityChange);
     globalThis.addEventListener?.("pagehide", this._boundPageHide);
     globalThis.addEventListener?.("resize", this._boundResize, { passive: true });
@@ -2348,6 +2361,10 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.removeEventListener("scroll", this._boundScroll, true);
     this.shadowRoot.removeEventListener("focusout", this._boundFocusOut);
     globalThis.document?.removeEventListener?.("scroll", this._boundScroll, true);
+    globalThis.document?.removeEventListener?.("pointerup", this._boundPointerEnd, true);
+    globalThis.document?.removeEventListener?.("pointercancel", this._boundPointerEnd, true);
+    this._activePointers.clear();
+    this._renderAfterPointer = false;
     if (this._scrollRenderTimer) clearTimeout(this._scrollRenderTimer);
     this._scrollRenderTimer = null;
     globalThis.document?.removeEventListener?.("visibilitychange", this._boundVisibilityChange);
@@ -2511,6 +2528,8 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _scheduleRender(force = false) {
     if (!this.isConnected && !force) return;
+    if (!force && this._activePointers.size) { this._renderAfterPointer=true; return; }
+    if (force) this._renderAfterPointer=false;
     // The photo frame owns the visible surface while it is active. Rebuilding
     // the shadow tree for ordinary Home Assistant state ticks would replace
     // the current image and restart its reveal animation, which presents as a

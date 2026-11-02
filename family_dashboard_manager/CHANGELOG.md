@@ -1,6 +1,7 @@
 ## 0.25.2
 
 - Restore scroll positions after Home Assistant’s asynchronous card layout is ready, so background updates cannot reset the iPad view to the top.
+- Wait for an active tap or drag to finish before applying a background rebuild, preserving clicks when leaving an edited field.
 - Reproduce the real card lifecycle in a browser regression test, including expanded lunch details and repeated updates while scrolled to the bottom.
 
 ## 0.25.1

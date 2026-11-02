@@ -1865,6 +1865,25 @@ test("opens heating schedules in a readable dialog, preserves drafts and saves o
   expect(pageErrors).toEqual([]);
 });
 
+test("finishes a tap after editing before applying a background refresh",async({page})=>{
+  const errors=await mount(page);
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
+  await card.locator('[data-home-section="heating"]').click();
+  await card.locator('[data-heating-schedule-open="living_room"]').click();
+  const schedule=card.locator('.heating-schedule-modal');
+  await schedule.locator('[data-schedule-temperature="0"]').fill("40");
+  await updateEntityState(card,state("climate.kitchen","heat",{current_temperature:19.3,temperature:20,hvac_action:"idle"}));
+  const save=await schedule.locator('[data-heating-schedule-apply]').boundingBox();
+  await page.mouse.move(save.x+save.width/2,save.y+save.height/2);
+  await page.mouse.down();
+  await page.waitForTimeout(100);
+  await page.mouse.up();
+  await expect(schedule.locator('[role="alert"]')).toBeVisible();
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test("disables unavailable Home toggles and exposes switch state to assistive technology", async ({ page }) => {
   const pageErrors = await mount(page, config, {
     "light.living_room": state("light.living_room", "unavailable", { friendly_name: "Living room light" }),
