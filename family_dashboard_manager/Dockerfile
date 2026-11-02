@@ -10,6 +10,7 @@ ARG TUNNEL_CLIENT_SHA256_AARCH64=d8bba47b2a723799a372b0b87d7e4d69304093d3a288372
 
 RUN set -eux; \
     apk add --no-cache nodejs npm; \
+    node -e 'new Intl.DateTimeFormat("en-GB", {timeZone:"Europe/London"}).format(new Date())'; \
     apk add --no-cache --virtual .tunnel-fetch curl unzip; \
     case "${BUILD_ARCH}" in \
       amd64) tunnel_arch=amd64; tunnel_sha256="${TUNNEL_CLIENT_SHA256_AMD64}" ;; \
@@ -47,7 +48,7 @@ RUN chmod a+x \
     /etc/services.d/family-dashboard-manager/run \
     /etc/services.d/family-dashboard-tunnel/run
 
-ENV APP_VERSION=0.25.0 \
+ENV APP_VERSION=0.25.1 \
     MANAGER_HOST=0.0.0.0 \
     MANAGER_PORT=8099 \
     MANAGER_CONFIG_DIR=/config/family-dashboard \

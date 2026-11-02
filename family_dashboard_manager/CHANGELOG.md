@@ -1,3 +1,9 @@
+## 0.25.1
+
+- Permit read-only access to packaged ICU and timezone data so server-side date formatting can start under the production AppArmor profile. This fixes the immediate Manager restart loop when automatic preparation is enabled.
+- Check packaged date formatting inside the app image and under AppArmor, including UK daylight-saving date boundaries.
+- Show the current installed version in the Admin resource-refresh instructions.
+
 ## 0.25.0
 
 - Preserve iPad scroll positions and open details across background state and clock updates; defer rebuilding during active scrolling or text/date entry.

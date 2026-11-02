@@ -1,7 +1,7 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.25.0";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.25.1";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
 import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.0";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.1";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -13,7 +13,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
-const DASHBOARD_VERSION = "0.25.0";
+const DASHBOARD_VERSION = "0.25.1";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
