@@ -70,6 +70,9 @@ import {
   schoolDataSource,
   selectFavouriteFixture,
   selectHomeFootballFixtures,
+  spellingVoiceKey,
+  spellingVoices,
+  selectSpellingVoice,
   teamCrest,
   todaySecurityPresentation,
   weatherStateLabel
@@ -77,6 +80,21 @@ import {
 
 test("escapes state-derived text before rendering it into the card", () => {
   assert.equal(escapeHtml('<img src=x onerror="alert(1)">'), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+});
+
+test("spelling prefers exposed British voices and honours a saved device choice", () => {
+  const british = {voiceURI:"gb", name:"Daniel", lang:"en-GB"};
+  const enhanced = {voiceURI:"gb-enhanced", name:"Serena (Enhanced)", lang:"en-GB"};
+  const siri = {voiceURI:"gb-siri", name:"Siri Voice 2", lang:"en-GB"};
+  const american = {voiceURI:"us", name:"Siri Voice 1", lang:"en-US", default:true};
+  const french = {voiceURI:"fr", name:"French voice", lang:"fr-FR"};
+  const voices = [american, french, british, enhanced, siri, siri];
+  assert.deepEqual(spellingVoices(voices), [siri, enhanced, british, american]);
+  assert.equal(selectSpellingVoice(voices), siri);
+  assert.equal(selectSpellingVoice(voices, spellingVoiceKey(american)), american);
+  assert.equal(selectSpellingVoice([french, british, enhanced], spellingVoiceKey(siri)), enhanced);
+  assert.equal(selectSpellingVoice([french]), null);
+  assert.equal(selectSpellingVoice([]), null);
 });
 
 test("maps family planner events to people and stable preparation records", () => {

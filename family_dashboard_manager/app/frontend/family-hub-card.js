@@ -1,7 +1,7 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.25.3";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.25.4";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
 import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.3";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.4";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -13,7 +13,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
-const DASHBOARD_VERSION = "0.25.3";
+const DASHBOARD_VERSION = "0.25.4";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
@@ -54,6 +54,31 @@ const htmlEscapeMap = {
 
 export function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => htmlEscapeMap[character]);
+}
+
+const SPELLING_VOICE_STORAGE_KEY = "family-dashboard:spelling-voice:v1";
+
+export function spellingVoiceKey(voice) {
+  return JSON.stringify([voice.voiceURI || "", voice.name || "", voice.lang || ""]);
+}
+
+export function spellingVoices(voices = []) {
+  const seen = new Set();
+  const score = voice => (/^en[-_]GB$/i.test(voice.lang) ? 1000 : 0)
+    + (/siri/i.test(voice.name) ? 300 : /premium/i.test(voice.name) ? 200 : /enhanced|natural|neural/i.test(voice.name) ? 100 : 0)
+    + (voice.default ? 10 : 0);
+  return Array.from(voices).filter(voice => {
+    if (!/^en(?:[-_]|$)/i.test(voice.lang || "")) return false;
+    const key = spellingVoiceKey(voice);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).sort((a, b) => score(b) - score(a) || String(a.name).localeCompare(String(b.name)));
+}
+
+export function selectSpellingVoice(voices, preference = "") {
+  const available = spellingVoices(voices);
+  return available.find(voice => spellingVoiceKey(voice) === preference) || available[0] || null;
 }
 
 export function isControlAction(dataset = {}) {
@@ -2245,6 +2270,7 @@ export class FamilyHubCard extends HTMLElementBase {
       if (target === globalThis.document || this.shadowRoot?.contains(target) || target?.contains?.(this)) this._lastScrollAt = performance.now();
     };
     this._boundFocusOut = () => { if(this._renderAfterInput){this._renderAfterInput=false;queueMicrotask(()=>this._scheduleRender());} };
+    this._boundSpellingVoicesChanged = () => { if (this._homeworkModal?.type === "spelling") this._scheduleRender(true); };
     this._childCards = new Map();
     this._calendarEvents = [];
     this._calendarLoading = false;
@@ -2324,6 +2350,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   connectedCallback() {
+    globalThis.speechSynthesis?.addEventListener?.("voiceschanged", this._boundSpellingVoicesChanged);
     this.shadowRoot.addEventListener("click", this._boundClick);
     this.shadowRoot.addEventListener("change", this._boundChange);
     this.shadowRoot.addEventListener("input", this._boundInput);
@@ -2350,7 +2377,8 @@ export class FamilyHubCard extends HTMLElementBase {
 
   disconnectedCallback() {
     this._homeworkGeneration = (this._homeworkGeneration || 0) + 1;
-    globalThis.speechSynthesis?.cancel();
+    this._stopSpellingSpeech();
+    globalThis.speechSynthesis?.removeEventListener?.("voiceschanged", this._boundSpellingVoicesChanged);
     this._childMountGeneration += 1;
     this._invalidateChildHass();
     this.shadowRoot.removeEventListener("click", this._boundClick);
@@ -5042,6 +5070,59 @@ export class FamilyHubCard extends HTMLElementBase {
     </section>`;
   }
 
+  _spellingVoiceOptions() {
+    try { return spellingVoices(globalThis.speechSynthesis?.getVoices?.() || []); } catch { return []; }
+  }
+
+  _spellingVoiceChoice() {
+    if (this._spellingVoicePreference === undefined) {
+      try { this._spellingVoicePreference = globalThis.localStorage?.getItem(SPELLING_VOICE_STORAGE_KEY) || ""; }
+      catch { this._spellingVoicePreference = ""; }
+    }
+    return this._spellingVoicePreference;
+  }
+
+  _renderSpellingVoiceChoice() {
+    if (!globalThis.speechSynthesis || !globalThis.SpeechSynthesisUtterance) return "";
+    const voices = this._spellingVoiceOptions(), preference = this._spellingVoiceChoice();
+    const selected = selectSpellingVoice(voices, preference);
+    const savedAvailable = voices.some(voice => spellingVoiceKey(voice) === preference);
+    return `<details class="homework-voice"><summary>Voice: ${escapeHtml(selected?.name || "Device default")}</summary><label>Spelling voice<select data-homework-voice ${voices.length ? "" : "disabled"}><option value="" ${!savedAvailable ? "selected" : ""}>Automatic · British English</option>${voices.map(voice => `<option value="${escapeHtml(spellingVoiceKey(voice))}" ${spellingVoiceKey(voice) === preference ? "selected" : ""}>${escapeHtml(voice.name)} (${escapeHtml(voice.lang)})</option>`).join("")}</select></label><p class="homework-caption">Saved on this device. Only voices available to the dashboard are listed. Siri may be available in iPad settings without appearing here.</p></details>`;
+  }
+
+  _stopSpellingSpeech() {
+    this._spellingUtterance = null;
+    globalThis.speechSynthesis?.cancel();
+  }
+
+  _speakSpellingWord(word) {
+    const modal = this._homeworkModal;
+    this._stopSpellingSpeech();
+    const unavailable = () => {
+      if (this._homeworkModal !== modal) return;
+      modal.error = "Sound is unavailable here. An adult can read the words aloud.";
+      this._scheduleRender(true);
+    };
+    if (!globalThis.speechSynthesis || !globalThis.SpeechSynthesisUtterance) { unavailable(); return; }
+    try {
+      const utterance = new SpeechSynthesisUtterance(word);
+      const voice = selectSpellingVoice(this._spellingVoiceOptions(), this._spellingVoiceChoice());
+      if (voice) utterance.voice = voice;
+      utterance.lang = voice?.lang || "en-GB";
+      utterance.rate = .8;
+      // Keep Safari's utterance alive until completion; never replay a word when voices load later.
+      this._spellingUtterance = utterance;
+      utterance.onend = () => { if (this._spellingUtterance === utterance) this._spellingUtterance = null; };
+      utterance.onerror = event => {
+        if (this._spellingUtterance !== utterance) return;
+        this._spellingUtterance = null;
+        if (!["canceled", "interrupted"].includes(event.error)) unavailable();
+      };
+      if (modal.error) { modal.error = ""; this._scheduleRender(true); }
+      globalThis.speechSynthesis.speak(utterance);
+    } catch { this._spellingUtterance = null; unavailable(); }
+  }
+
   _renderHomeworkModal() {
     const modal=this._homeworkModal, child=this._homeworkChild(modal.personId);
     if (!child) return "";
@@ -5067,12 +5148,12 @@ export class FamilyHubCard extends HTMLElementBase {
       title=modal.mode==="Mock test"?"Mock spelling test":"Spelling practice";
       const result=modal.results || [], finished=result.length===plan.words.length;
       if(finished) body=`<p class="homework-spelling-score">${result.filter(r=>r.correct).length} / ${result.length}</p><p>${modal.mode==="Mock test"?"Your practice result. The school test is separate.":"Good practice. Look at any words to try again."}</p><div class="homework-spelling-results">${result.map(r=>`<div><span>${escapeHtml(r.word)}</span><small>${r.correct?"Correct":`You wrote: ${escapeHtml(r.answer || "—")}`}</small></div>`).join("")}</div><button type="button" class="homework-primary" data-homework-save-spelling ${disabled}>Save practice result</button>`;
-      else body=`<div class="homework-spelling-mode"><button type="button" data-homework-mode="Practice" aria-pressed="${modal.mode!=="Mock test"}" ${result.length?"disabled":""}>Practice</button><button type="button" data-homework-mode="Mock test" aria-pressed="${modal.mode==="Mock test"}" ${result.length?"disabled":""}>Mock test</button></div><p class="homework-spelling-position">Word ${result.length+1} of ${plan.words.length}</p><button type="button" class="homework-speak" data-homework-hear><ha-icon icon="mdi:volume-high"></ha-icon>Hear the word</button><p class="homework-caption">If sound is unavailable, ask an adult to read the word aloud.</p>${modal.mode!=="Mock test"?`<button type="button" class="homework-peek" data-homework-peek>${modal.peek?escapeHtml(plan.words[result.length]):"Peek at this word"}</button>`:'<details><summary>Words for an adult to read aloud</summary><p>'+escapeHtml(plan.words.join(", "))+'</p></details>'}<label class="homework-spelling-answer">Your spelling<input data-homework-input="answer" value="${escapeHtml(modal.form?.answer || "")}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Your spelling"></label><button type="button" class="homework-primary" data-homework-answer>${modal.mode==="Mock test"?"Next word":"Check & next"}</button>${modal.feedback?`<p role="status">${escapeHtml(modal.feedback)}</p>`:""}`;
+      else body=`<div class="homework-spelling-mode"><button type="button" data-homework-mode="Practice" aria-pressed="${modal.mode!=="Mock test"}" ${result.length?"disabled":""}>Practice</button><button type="button" data-homework-mode="Mock test" aria-pressed="${modal.mode==="Mock test"}" ${result.length?"disabled":""}>Mock test</button></div><p class="homework-spelling-position">Word ${result.length+1} of ${plan.words.length}</p><button type="button" class="homework-speak" data-homework-hear><ha-icon icon="mdi:volume-high"></ha-icon>Hear the word</button>${this._renderSpellingVoiceChoice()}<p class="homework-caption">If sound is unavailable, ask an adult to read the word aloud.</p>${modal.mode!=="Mock test"?`<button type="button" class="homework-peek" data-homework-peek>${modal.peek?escapeHtml(plan.words[result.length]):"Peek at this word"}</button>`:'<details><summary>Words for an adult to read aloud</summary><p>'+escapeHtml(plan.words.join(", "))+'</p></details>'}<label class="homework-spelling-answer">Your spelling<input data-homework-input="answer" value="${escapeHtml(modal.form?.answer || "")}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Your spelling"></label><button type="button" class="homework-primary" data-homework-answer>${modal.mode==="Mock test"?"Next word":"Check & next"}</button>${modal.feedback?`<p role="status">${escapeHtml(modal.feedback)}</p>`:""}`;
     }
     return `<div class="planner-modal-backdrop"><section class="planner-modal homework-modal" role="dialog" aria-modal="true" aria-labelledby="homework-modal-title"><header><p class="eyebrow">${escapeHtml(child.name)} · Homework</p><h2 id="homework-modal-title">${escapeHtml(title)}</h2><button type="button" class="planner-modal-close" data-homework-close aria-label="Close homework"><ha-icon icon="mdi:close"></ha-icon></button></header><div class="homework-modal-body">${modal.error?`<p role="alert" class="homework-error">${escapeHtml(modal.error)}</p>`:""}${body}</div><footer><button type="button" data-homework-close ${this._homeworkBusy?"disabled":""}>Done</button><small>Saved privately in Home Assistant</small></footer></section></div>`;
   }
 
-  _closeHomeworkModal() { if(this._homeworkBusy)return;this._homeworkModal=null;globalThis.speechSynthesis?.cancel();this._scheduleRender(true); }
+  _closeHomeworkModal() { if(this._homeworkBusy)return;this._homeworkModal=null;this._stopSpellingSpeech();this._scheduleRender(true); }
 
   async _saveHomeworkProgress(payload, close=false) {
     if(this._config.display.read_only || this._homeworkBusy || !this._config.school?.homework_enabled)return;
@@ -5099,10 +5180,10 @@ export class FamilyHubCard extends HTMLElementBase {
     if(target.dataset.homeworkSaveSession!==undefined){const values=Object.fromEntries([...this.shadowRoot.querySelectorAll("[data-homework-input]")].map(input=>[input.dataset.homeworkInput,input.type==="checkbox"?input.checked:input.value]));if(modal.type==="reading"&&!values.book?.trim()){modal.error="Enter the book you read.";this._scheduleRender(true);return true;}void this._saveHomeworkProgress({operation:"log",kind:modal.type,date:values.date,details:values},true);return true;}
     const plan=this._homeworkChild(modal.personId)?.plans.find(p=>p.id===modal.planId);
     if(modal.type!=="spelling" || !plan)return true;
-    if(target.dataset.homeworkMode){modal.mode=target.dataset.homeworkMode;this._scheduleRender(true);return true;}
+    if(target.dataset.homeworkMode){this._stopSpellingSpeech();modal.mode=target.dataset.homeworkMode;this._scheduleRender(true);return true;}
     if(target.dataset.homeworkPeek!==undefined){modal.peek=!modal.peek;this._scheduleRender(true);return true;}
-    if(target.dataset.homeworkHear!==undefined){if(globalThis.speechSynthesis && globalThis.SpeechSynthesisUtterance){const utterance=new SpeechSynthesisUtterance(plan.words[modal.results.length]);utterance.lang="en-GB";utterance.rate=.8;globalThis.speechSynthesis.cancel();globalThis.speechSynthesis.speak(utterance);}else{modal.error="Sound is unavailable here. An adult can read the words aloud.";this._scheduleRender(true);}return true;}
-    if(target.dataset.homeworkAnswer!==undefined){const answer=this.shadowRoot.querySelector('[data-homework-input="answer"]')?.value.trim() || "",word=plan.words[modal.results.length];if(!answer){modal.error="Type your spelling first.";this._scheduleRender(true);return true;}const correct=answer.toLocaleLowerCase("en-GB").normalize("NFC")===word.toLocaleLowerCase("en-GB").normalize("NFC");modal.results.push({word,answer,correct});modal.feedback=modal.mode==="Mock test"?"":correct?"Correct. Ready for the next word.":`That word was ${word}. Keep practising.`;modal.peek=false;modal.error="";modal.form={};this._scheduleRender(true);return true;}
+    if(target.dataset.homeworkHear!==undefined){this._speakSpellingWord(plan.words[modal.results.length]);return true;}
+    if(target.dataset.homeworkAnswer!==undefined){this._stopSpellingSpeech();const answer=this.shadowRoot.querySelector('[data-homework-input="answer"]')?.value.trim() || "",word=plan.words[modal.results.length];if(!answer){modal.error="Type your spelling first.";this._scheduleRender(true);return true;}const correct=answer.toLocaleLowerCase("en-GB").normalize("NFC")===word.toLocaleLowerCase("en-GB").normalize("NFC");modal.results.push({word,answer,correct});modal.feedback=modal.mode==="Mock test"?"":correct?"Correct. Ready for the next word.":`That word was ${word}. Keep practising.`;modal.peek=false;modal.error="";modal.form={};this._scheduleRender(true);return true;}
     if(target.dataset.homeworkSaveSpelling!==undefined){void this._saveHomeworkProgress({operation:"log",kind:"spelling",details:{plan_id:plan.id,score:modal.results.filter(r=>r.correct).length,total:plan.words.length,mode:modal.mode}},true);return true;}
     return true;
   }
@@ -6214,6 +6295,15 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _handleChange(event) {
+    if (event.target.dataset?.homeworkVoice !== undefined && this._homeworkModal?.type === "spelling") {
+      const preference = event.target.value;
+      if (preference && !this._spellingVoiceOptions().some(voice => spellingVoiceKey(voice) === preference)) return;
+      this._spellingVoicePreference = preference;
+      try { globalThis.localStorage?.setItem(SPELLING_VOICE_STORAGE_KEY, preference); } catch {}
+      this._stopSpellingSpeech();
+      this._scheduleRender(true);
+      return;
+    }
     if(this._plannerModal?.type==="departure" && event.target.dataset?.departureField){this._plannerModal[event.target.dataset.departureField]=event.target.value;return;}
     if (this._devicePhotoModal && event.target === this.shadowRoot.querySelector("[data-device-photo-files]")) {
       const input = event.target;

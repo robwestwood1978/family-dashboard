@@ -172,8 +172,8 @@ export const DAILY_BRIEF_STYLES = `
   .homework-modal-body { padding:24px;min-height:0;overflow:auto;color:var(--daily-text);line-height:1.55; }
   .homework-modal footer small { color:var(--daily-muted);font-size:12px; }
   .homework-form { display:grid;gap:18px;margin-bottom:22px; }
-  .homework-form label,.homework-spelling-answer { display:grid;gap:8px;font-size:14px;color:var(--daily-muted); }
-  .homework-form input:not([type=checkbox]),.homework-form select,.homework-spelling-answer input { width:100%;min-height:48px;padding:12px 14px;border:1px solid var(--daily-line);border-radius:14px;background:var(--daily-soft);color:var(--daily-text);font:inherit; }
+  .homework-form label,.homework-spelling-answer,.homework-voice label { display:grid;gap:8px;font-size:14px;color:var(--daily-muted); }
+  .homework-form input:not([type=checkbox]),.homework-form select,.homework-spelling-answer input,.homework-voice select { width:100%;min-height:48px;padding:12px 14px;border:1px solid var(--daily-line);border-radius:14px;background:var(--daily-soft);color:var(--daily-text);font:inherit; }
   .homework-form .homework-aloud { display:flex;gap:10px;align-items:center;color:var(--daily-text); }
   .homework-aloud input { width:22px;height:22px;accent-color:var(--daily-accent); }
   .homework-checklist { display:grid;gap:8px;margin:20px 0; }
@@ -189,6 +189,10 @@ export const DAILY_BRIEF_STYLES = `
   .homework-spelling-mode button,.homework-peek { min-height:44px;border:0;border-radius:14px;padding:10px 16px;background:var(--daily-soft);color:var(--daily-muted); }
   .homework-spelling-mode [aria-pressed=true] { color:var(--daily-accent);background:var(--daily-accent-soft); }
   .homework-speak { display:flex;gap:12px;align-items:center;justify-content:center;width:100%;min-height:80px;border:0;border-radius:20px;background:var(--daily-accent-soft);color:var(--daily-accent);font-size:22px;margin:18px 0; }
+  .homework-voice { margin:12px 0;color:var(--daily-muted);font-size:14px; }
+  .homework-voice summary { cursor:pointer;min-height:44px;padding:10px 0;overflow-wrap:anywhere; }
+  .homework-voice label { margin:10px 0; }
+  .homework-voice select { min-width:0;max-width:100%;font-size:16px; }
   .homework-spelling-answer { margin:20px 0; }
   .homework-spelling-answer input { font-size:24px; }
   .homework-spelling-score { font-size:48px;font-weight:500;margin:0;letter-spacing:-.04em; }
