@@ -22,7 +22,7 @@ const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", imp
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
   .replace(/import \{ schoolLunchForDate[^\n]+from "\.\/readiness\.js[^";]+";/, `const {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents} = (()=>{${readinessSource.replace(/export /g, "")}return {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents};})();`)
   .replace(/export \{ schoolLunchForDate[^\n]+;/, "")
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.3";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.4";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -762,6 +762,18 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
   await page.addScriptTag({ type: "module", content: cardSource });
   await page.evaluate(async ({ familyConfig, states, runtimeOptions }) => {
     await customElements.whenDefined("family-hub-card");
+    if (runtimeOptions.speechVoices) {
+      let voices = runtimeOptions.speechVoices;
+      const speech = new EventTarget();
+      window.__spokenWords = [];
+      window.__speechCancels = 0;
+      speech.getVoices = () => voices;
+      speech.cancel = () => { window.__speechCancels++; };
+      speech.speak = utterance => window.__spokenWords.push(utterance);
+      window.__setSpellingVoices = value => { voices = value; speech.dispatchEvent(new Event("voiceschanged")); };
+      Object.defineProperty(window, "speechSynthesis", { configurable: true, value: speech });
+      Object.defineProperty(window, "SpeechSynthesisUtterance", { configurable: true, value: class { constructor(text) { this.text = text; } } });
+    }
     const card = document.createElement("family-hub-card");
     document.querySelector(".ha-main").append(card);
     card.setConfig({ family_config: familyConfig });
@@ -5043,6 +5055,77 @@ test("homework reading log saves centrally and fits the tablet",async({page},tes
   expect(errors).toEqual([]);
 });
 
+const spellingTestVoices = [
+  {voiceURI:"us",name:"English default",lang:"en-US",default:true},
+  {voiceURI:"gb-siri",name:"Siri Voice 2",lang:"en-GB"},
+  {voiceURI:"gb-enhanced",name:"Serena (Enhanced)",lang:"en-GB"},
+  {voiceURI:"fr",name:"French voice",lang:"fr-FR"}
+];
+
+test("spelling voice choice controls speech, keeps answers and survives reopening",async({page})=>{
+  await page.route("http://homeassistant.local/**",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html></html>"}));
+  await page.goto("http://homeassistant.local/family-dashboard/hub");
+  const family=locationDisabledConfig();family.school.homework_enabled=true;
+  const errors=await mount(page,family,{}, {homeworkData:homeworkFixture(),speechVoices:spellingTestVoices});
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="family"]').click();await card.locator('[data-task-section="homework"]').click();
+  await card.getByRole("button",{name:"Spelling practice",exact:true}).click();
+  await expect(card.locator(".homework-voice summary")).toHaveText("Voice: Siri Voice 2");
+  await card.getByRole("button",{name:"Hear the word",exact:true}).click();
+  expect(await page.evaluate(()=>window.__spokenWords.map(u=>({text:u.text,voice:u.voice.voiceURI,lang:u.lang})))).toEqual([{text:"cloud",voice:"gb-siri",lang:"en-GB"}]);
+  await card.getByRole("textbox",{name:"Your spelling",exact:true}).fill("clou");
+  await card.locator(".homework-voice summary").click();
+  const picker=card.getByRole("combobox",{name:"Spelling voice",exact:true});
+  await expect(picker.locator("option")).toHaveCount(4);
+  await picker.selectOption({label:"Serena (Enhanced) (en-GB)"});
+  await expect(card.getByRole("textbox",{name:"Your spelling",exact:true})).toHaveValue("clou");
+  await expect(card.locator(".homework-voice summary")).toHaveText("Voice: Serena (Enhanced)");
+  await card.getByRole("button",{name:"Hear the word",exact:true}).click();
+  expect(await page.evaluate(()=>window.__spokenWords.at(-1).voice.voiceURI)).toBe("gb-enhanced");
+  await card.getByRole("button",{name:"Close homework",exact:true}).click();
+  await card.getByRole("button",{name:"Spelling practice",exact:true}).click();
+  await expect(card.locator(".homework-voice summary")).toHaveText("Voice: Serena (Enhanced)");
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem("family-dashboard:spelling-voice:v1"))[0])).toBe("gb-enhanced");
+  // A fresh component reads the device preference, without sending it to Home Assistant.
+  await page.evaluate(()=>{const old=document.querySelector("family-hub-card"),fresh=document.createElement("family-hub-card");fresh.setConfig({type:"custom:family-hub-card",family_config:old._config});fresh.hass=old._hass;old.replaceWith(fresh);});
+  await card.locator('.hub-nav-button[data-view="family"]').click();await card.locator('[data-task-section="homework"]').click();
+  await card.getByRole("button",{name:"Spelling practice",exact:true}).click();
+  await expect(card.locator(".homework-voice summary")).toHaveText("Voice: Serena (Enhanced)");
+  expect(await page.evaluate(()=>window.__wsCalls.filter(call=>call.type==="family_dashboard_homework/progress"))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("late or removed spelling voices never replay or discard a typed answer",async({page})=>{
+  const family=locationDisabledConfig();family.school.homework_enabled=true;
+  const errors=await mount(page,family,{}, {homeworkData:homeworkFixture(),speechVoices:[]});
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="family"]').click();await card.locator('[data-task-section="homework"]').click();
+  await card.getByRole("button",{name:"Spelling practice",exact:true}).click();
+  await card.getByRole("button",{name:"Mock test",exact:true}).click();
+  await card.locator(".homework-voice summary").click();
+  await expect(card.getByRole("combobox",{name:"Spelling voice",exact:true})).toBeDisabled();
+  await card.getByRole("button",{name:"Hear the word",exact:true}).click();
+  expect(await page.evaluate(()=>window.__spokenWords.map(u=>({text:u.text,lang:u.lang,voice:u.voice||null})))).toEqual([{text:"cloud",lang:"en-GB",voice:null}]);
+  await card.getByRole("textbox",{name:"Your spelling",exact:true}).fill("clou");
+  await page.evaluate(voices=>window.__setSpellingVoices(voices),spellingTestVoices);
+  await card.getByRole("textbox",{name:"Your spelling",exact:true}).blur();
+  await expect(card.locator(".homework-voice summary")).toHaveText("Voice: Siri Voice 2");
+  await expect(card.getByRole("textbox",{name:"Your spelling",exact:true})).toHaveValue("clou");
+  expect(await page.evaluate(()=>window.__spokenWords.length)).toBe(1);
+  await page.evaluate(voices=>window.__setSpellingVoices(voices.filter(v=>v.voiceURI!=="gb-siri")),spellingTestVoices);
+  await expect(card.locator(".homework-voice summary")).toHaveText("Voice: Serena (Enhanced)");
+  await card.getByRole("button",{name:"Hear the word",exact:true}).click();
+  expect(await page.evaluate(()=>window.__spokenWords.at(-1).voice.voiceURI)).toBe("gb-enhanced");
+  await expect(card.locator("[data-homework-peek]")).toHaveCount(0);
+  await page.evaluate(()=>window.__spokenWords.at(-1).onerror({error:"audio-busy"}));
+  await expect(card.getByRole("alert")).toContainText("Sound is unavailable");
+  await card.getByRole("button",{name:"Hear the word",exact:true}).click();
+  await expect(card.getByRole("alert")).toHaveCount(0);
+  await card.getByRole("button",{name:"Close homework",exact:true}).click();
+  expect(await page.evaluate(()=>document.querySelector("family-hub-card")._spellingUtterance)).toBeNull();
+  expect(errors).toEqual([]);
+});
+
 test("homework mock spelling hides answers until the end and saves the result",async({page})=>{
   const family=locationDisabledConfig();family.school.homework_enabled=true;
   await mount(page,family,{}, {homeworkData:homeworkFixture()});
@@ -5334,7 +5417,7 @@ test("simple family view has child choices and always returns to the full dashbo
   const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-10T07:15:00Z",kiosk:true});
   const card=page.locator("family-hub-card");
   await card.locator('[data-family-picker-open]').click();
-  await expect(card.locator(".dashboard-version")).toContainText("0.25.3");
+  await expect(card.locator(".dashboard-version")).toContainText("0.25.4");
   await card.locator('[data-experience="simple"]').click();
   await expect(card.locator(".simple-child-card")).toHaveCount(2);
   expect(await card.locator(".simple-child-card .today-job>div").first().evaluate(node=>node.getBoundingClientRect().width)).toBeGreaterThan(200);

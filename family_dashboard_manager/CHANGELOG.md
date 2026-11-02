@@ -1,3 +1,8 @@
+## 0.25.4
+
+- Choose an English spelling voice from those offered by the device and remember the choice locally. Prefer British English automatically, including Siri or enhanced voices when exposed by the browser.
+- Refresh the choices when voices finish loading, preserve typed answers, and stop old speech when changing voice, word or mode. Siri voices visible only in iPad accessibility settings cannot be selected by a web dashboard.
+
 ## 0.25.3
 
 - Label the spelling action “Spelling practice” consistently in Homework and the daily summary.
