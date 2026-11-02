@@ -1,3 +1,7 @@
+## 0.25.3
+
+- Label the spelling action “Spelling practice” consistently in Homework and the daily summary.
+
 ## 0.25.2
 
 - Restore scroll positions after Home Assistant’s asynchronous card layout is ready, so background updates cannot reset the iPad view to the top.
