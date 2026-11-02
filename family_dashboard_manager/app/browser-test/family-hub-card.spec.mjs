@@ -22,7 +22,7 @@ const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", imp
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
   .replace(/import \{ schoolLunchForDate[^\n]+from "\.\/readiness\.js[^";]+";/, `const {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents} = (()=>{${readinessSource.replace(/export /g, "")}return {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents};})();`)
   .replace(/export \{ schoolLunchForDate[^\n]+;/, "")
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.1";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.2";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -1863,6 +1863,25 @@ test("opens heating schedules in a readable dialog, preserves drafts and saves o
   expect(await page.evaluate(() => window.__serviceCalls)).toHaveLength(calls.length);
   await expectNoRootOverflow(page);
   expect(pageErrors).toEqual([]);
+});
+
+test("finishes a tap after editing before applying a background refresh",async({page})=>{
+  const errors=await mount(page);
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
+  await card.locator('[data-home-section="heating"]').click();
+  await card.locator('[data-heating-schedule-open="living_room"]').click();
+  const schedule=card.locator('.heating-schedule-modal');
+  await schedule.locator('[data-schedule-temperature="0"]').fill("40");
+  await updateEntityState(card,state("climate.kitchen","heat",{current_temperature:19.3,temperature:20,hvac_action:"idle"}));
+  const save=await schedule.locator('[data-heating-schedule-apply]').boundingBox();
+  await page.mouse.move(save.x+save.width/2,save.y+save.height/2);
+  await page.mouse.down();
+  await page.waitForTimeout(100);
+  await page.mouse.up();
+  await expect(schedule.locator('[role="alert"]')).toBeVisible();
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
+  expect(errors).toEqual([]);
 });
 
 test("disables unavailable Home toggles and exposes switch state to assistive technology", async ({ page }) => {
@@ -5278,6 +5297,36 @@ test("iPad scrolling and open menu details survive background entity and clock u
   expect(errors).toEqual([]);
 });
 
+test("wheel scrolling at the end of a lunch menu survives repeated live updates",async({page})=>{
+  // HA's Lit card projects its contents after its first asynchronous update.
+  await page.evaluate(()=>customElements.define("ha-card",class extends HTMLElement{
+    constructor(){super();this.attachShadow({mode:"open"});this.updateComplete=Promise.resolve().then(()=>{this.shadowRoot.innerHTML="<slot></slot>";return true;});}
+  }));
+  const {family}=readinessFixture();
+  family.school.lunch_menus[0].weeks.forEach(week=>week.forEach(meal=>{meal.mains=["Slow-roasted chicken with roast potatoes, seasonal vegetables and gravy","Vegetarian roast with all the trimmings"];meal.sides=["Roasted carrots","Seasonal greens"];meal.dessert="Chocolate sponge with warm custard";}));
+  const errors=await mount(page,family,{}, {fixedNow:"2026-11-10T07:15:00Z",kiosk:true});
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-navigation [data-view="calendar"]').click();
+  await card.locator('.hub-navigation [data-view="today"]').click();
+  await card.getByRole("button",{name:"Weekly menu",exact:true}).click();
+  const menu=card.locator(".school-lunch-week");
+  await menu.locator("summary").nth(0).click();
+  await menu.locator("summary").nth(1).click();
+  await menu.hover();
+  await page.mouse.wheel(0,600);
+  await expect.poll(()=>menu.evaluate(n=>n.scrollTop)).toBeGreaterThan(100);
+  // WebKit delivers wheel scrolling across frames; measure after reaching the end.
+  await expect.poll(()=>menu.evaluate(n=>n.scrollHeight-n.clientHeight-n.scrollTop)).toBeLessThanOrEqual(1);
+  const position=await menu.evaluate(n=>n.scrollTop);
+  for(let i=0;i<10;i++){
+    await updateEntityState(card,state("sensor.child_one_choreops_points",String(100+i)));
+    await page.waitForTimeout(100);
+    await expect.poll(()=>menu.evaluate((n,top)=>Math.abs(n.scrollTop-top),position)).toBeLessThanOrEqual(1);
+    await expect(menu.locator("details[open]")).toHaveCount(2);
+  }
+  expect(errors).toEqual([]);
+});
+
 test("simple family view has child choices and always returns to the full dashboard",async({page},testInfo)=>{
   await page.route("http://homeassistant.local/family-dashboard/hub",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body></body></html>"}));
   await page.goto("http://homeassistant.local/family-dashboard/hub");
@@ -5285,7 +5334,7 @@ test("simple family view has child choices and always returns to the full dashbo
   const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-10T07:15:00Z",kiosk:true});
   const card=page.locator("family-hub-card");
   await card.locator('[data-family-picker-open]').click();
-  await expect(card.locator(".dashboard-version")).toContainText("0.25.1");
+  await expect(card.locator(".dashboard-version")).toContainText("0.25.2");
   await card.locator('[data-experience="simple"]').click();
   await expect(card.locator(".simple-child-card")).toHaveCount(2);
   expect(await card.locator(".simple-child-card .today-job>div").first().evaluate(node=>node.getBoundingClientRect().width)).toBeGreaterThan(200);
