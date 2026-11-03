@@ -89,8 +89,11 @@ export function schoolLunchForDate(config, personId, value = new Date()) {
   if (day > menu.end_date) return { status: "ended", day, title: "Term menu finished" };
   const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
   if (weekday === 0 || weekday === 6 || menu.closed_dates?.includes(day)) return { status: "closed", day, title: "No school lunch today" };
-  const elapsed = Math.round((Date.parse(`${mondayForDateKey(day)}T12:00:00Z`) - Date.parse(`${menu.week_one_date}T12:00:00Z`)) / 604800000);
-  const week = ((elapsed % menu.weeks.length) + menu.weeks.length) % menu.weeks.length + 1;
+  const monday = mondayForDateKey(day);
+  const scheduled = menu.week_start_dates?.find(entry => entry.date === monday);
+  if (menu.week_start_dates && !scheduled) return { status: "closed", day, title: "No lunch menu scheduled for this week" };
+  const elapsed = Math.round((Date.parse(`${monday}T12:00:00Z`) - Date.parse(`${menu.week_one_date}T12:00:00Z`)) / 604800000);
+  const week = scheduled?.week || ((elapsed % menu.weeks.length) + menu.weeks.length) % menu.weeks.length + 1;
   if (menu.packed_lunch_days?.some(rule => rule.week === week && rule.weekday === weekday)) return { status: "packed", day, week, title: "Packed lunch today" };
   const meal = menu.weeks[week - 1][weekday - 1];
   return { status: "meal", day, week, title: meal.mains[0], alternatives: meal.mains.slice(1), sides: meal.sides || [], dessert: meal.dessert || "" };

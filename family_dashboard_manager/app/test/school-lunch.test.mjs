@@ -34,6 +34,24 @@ test("packed lunches replace the entire school meal, only on the configured rota
   for(const day of ["2026-11-03","2026-11-17","2026-11-24","2026-12-08","2026-12-15"]) assert.equal(schoolLunchForDate(config,"child_one",day).status,"meal");
 });
 
+test("printed menu dates override rotation across holidays and leave unlisted weeks empty",()=>{
+  const config=fixture(),menu=config.school.lunch_menus[0];
+  menu.end_date="2027-03-26";
+  menu.week_start_dates=[{date:"2026-11-02",week:1},{date:"2027-01-04",week:2},{date:"2027-01-11",week:3},{date:"2027-03-22",week:3}];
+  assert.equal(validateConfig(config),config);
+  assert.equal(schoolLunchForDate(config,"child_one","2027-01-04").title,"Main 2-1");
+  assert.equal(schoolLunchForDate(config,"child_one","2027-01-05").status,"packed");
+  assert.equal(schoolLunchForDate(config,"child_one","2027-01-11").title,"Main 3-1");
+  assert.equal(schoolLunchForDate(config,"child_one","2027-03-22").week,3);
+  assert.equal(schoolLunchForDate(config,"child_one","2026-12-28").status,"closed");
+  assert.equal(schoolLunchForDate(config,"child_one","2027-02-15").status,"closed");
+  assert.equal(schoolLunchForDate(config,"child_two","2027-01-04").status,"pending");
+  for(const entries of [[{date:"2027-01-05",week:2}],[{date:"2027-02-30",week:2}],[{date:"2027-01-04",week:4}],[{date:"2027-01-04",week:2},{date:"2027-01-04",week:1}],[{date:"2027-03-29",week:1}]]) {
+    menu.week_start_dates=entries;
+    assert.throws(()=>validateConfig(config),/week_start_dates/);
+  }
+});
+
 test("weekends, closure dates, unpublished menus and household-local dates are explicit",()=>{
   const config=fixture();
   assert.equal(schoolLunchForDate(config,"child_one","2026-11-07").status,"closed");
