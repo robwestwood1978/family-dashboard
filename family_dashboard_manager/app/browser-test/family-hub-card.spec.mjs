@@ -5094,6 +5094,7 @@ test("Google spelling audio plays on the tablet and sends only the active word",
   await card.getByRole("button",{name:"Hear the word",exact:true}).click();
   expect(await page.evaluate(()=>window.__apiCalls.filter(c=>c.path==="tts_get_url").length)).toBe(1);
   await card.getByRole("textbox",{name:"Your spelling",exact:true}).fill("cloud");await card.getByRole("button",{name:"Check & next",exact:true}).click();
+  await expect(card.locator(".homework-spelling-position")).toHaveText("Word 2 of 2");
   await expect(card.getByRole("button",{name:"Hear the word",exact:true})).toBeEnabled();
   expect(await page.evaluate(()=>window.__apiCalls.filter(c=>c.path==="tts_get_url").at(-1).payload.message)).toBe("solid");
   await card.getByRole("button",{name:"Close homework",exact:true}).click();
