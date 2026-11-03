@@ -1,3 +1,7 @@
+## 0.27.1
+
+- Keep all FPL score labels visible on short landscape screens with Home Assistant’s inherited text spacing. Preserve the full pitch and player touch targets.
+
 ## 0.27.0
 
 - Redesign Today around the current or next plan, two family actions and compact Home, lunch and Football shortcuts. Full preparation, menus, football and house controls stay one tap away.
