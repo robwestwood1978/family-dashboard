@@ -104,6 +104,24 @@ test("spelling audio accepts only local Home Assistant TTS paths", () => {
   for (const path of ["https://other.example/audio.mp3", "//other.example/api/tts_proxy/token", "/api/tts_proxy/../config", "/api/tts_proxy/token?redirect=elsewhere", "/media/recording.mp3", null]) assert.equal(isSafeSpellingAudioPath(path), false);
 });
 
+test("repeating Hear ignores an interrupted earlier audio play promise", async () => {
+  const rejects = [], state = {loading:false,error:"",audio:{pause(){},currentTime:0,play(){return new Promise((_resolve,reject)=>rejects.push(reject));}}};
+  const card = Object.create(FamilyHubCard.prototype);
+  card._config = {school:{spelling_tts_entity:"tts.example_google"}};
+  card._homeworkModal = {};
+  card._spellingAudioState = state;
+  card._prepareSpellingAudio = () => state;
+  card._scheduleRender = () => {};
+  card._speakSpellingWord("cloud");
+  card._speakSpellingWord("cloud");
+  rejects[0](new Error("First play interrupted"));
+  await Promise.resolve();
+  assert.equal(state.error, "");
+  rejects[1](new Error("Current play failed"));
+  await Promise.resolve();
+  assert.match(state.error, /Audio could not start/);
+});
+
 test("spelling practice uses the new week while school test records keep their original date", () => {
   const child = {id:"child_one",name:"Child",spelling_practice_due:"2026-10-20",routines:[{kind:"spelling",due:"2026-10-13",marks:{test_done:true}}],plans:[{id:"old",kind:"spelling",due:"2026-10-13",words:["cloud"]},{id:"next",kind:"spelling",due:"2026-10-20",words:["solid"]}]};
   assert.equal(spellingPracticePlan(child).id, "next");

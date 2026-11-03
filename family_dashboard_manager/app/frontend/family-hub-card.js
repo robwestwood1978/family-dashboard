@@ -5150,6 +5150,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._spellingUtterance = null;
     globalThis.speechSynthesis?.cancel();
     const state = this._spellingAudioState;
+    if (state) state.playRequest = (state.playRequest || 0) + 1;
     if (clearAudio) this._spellingAudioState = null;
     if (state?.audio) {
       state.audio.pause();
@@ -5164,11 +5165,12 @@ export class FamilyHubCard extends HTMLElementBase {
       if (state?.error) { this._stopSpellingSpeech(); this._prepareSpellingAudio(word); this._scheduleRender(true); return; }
       if (!state?.audio || state.loading) return;
       this._stopSpellingSpeech(false);
+      const playRequest = state.playRequest = (state.playRequest || 0) + 1;
       try {
         state.audio.currentTime = 0;
         const playing = state.audio.play();
         playing?.catch(() => {
-          if (this._spellingAudioState !== state) return;
+          if (this._spellingAudioState !== state || state.playRequest !== playRequest) return;
           state.error = "Audio could not start. Retry the voice, or choose a device voice under Voice options.";
           this._scheduleRender(true);
         });
