@@ -1,3 +1,9 @@
+## 0.26.0
+
+- Rebuild Football with a compact match centre, favourite-club and live filters, a current-matchweek shortcut, match details and club form views.
+- Redesign FPL with a lined pitch, touchable player cards, point multipliers and availability details, Pitch/Bench/List views, and family team comparison.
+- Improve the league table, team selection, tablet layouts, focus return and unavailable-data presentation without changing FPL accounts or making team edits.
+
 ## 0.25.6
 
 - Support the exact week-commencing dates printed on school lunch menus. Use the listed menu week after holidays and show no scheduled menu for unlisted weeks. Existing continuous rotations remain supported.

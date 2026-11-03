@@ -1,7 +1,7 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.25.6";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.26.0";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
 import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.6";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.26.0";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -13,7 +13,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
-const DASHBOARD_VERSION = "0.25.6";
+const DASHBOARD_VERSION = "0.26.0";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
@@ -2263,6 +2263,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._pendingConfirmation = null;
     this._confirmationReturnFocus = null;
     this._footballTab = "fixtures";
+    this._footballFilter = "all";
+    this._footballTableFilter = "all";
     this._fplEntryId = null;
     this._masterTemperature = 20;
     this._heatingScheduleDrafts = new Map();
@@ -3271,6 +3273,11 @@ export class FamilyHubCard extends HTMLElementBase {
     if (this._familyPickerOpen) this.shadowRoot.querySelector('.family-picker-options [aria-pressed="true"]')?.focus();
     else if (this._familyPickerReturnFocus) { this.shadowRoot.querySelector("[data-family-picker-open]")?.focus(); this._familyPickerReturnFocus=false; }
     if(this._departureReturnFocus){(this.shadowRoot.querySelector("[data-departure-edit]")||this.shadowRoot.querySelector("[data-departure-action]"))?.focus();this._departureReturnFocus=false;}
+    if (this._footballReturnFocus && !this._plannerModal) {
+      const identity = this._footballReturnFocus;
+      [...this.shadowRoot.querySelectorAll("button")].find(button => button.dataset[identity.key] === identity.value)?.focus();
+      this._footballReturnFocus = null;
+    }
     this._restoreEmbeddedRenderState(embeddedRenderState);
     this._syncViewportHeight();
     if (scrollState?.key === scrollKey) {
@@ -4940,6 +4947,7 @@ export class FamilyHubCard extends HTMLElementBase {
   _renderPlannerModal() {
     if (this._homeworkModal) return this._renderHomeworkModal();
     if (!this._plannerModal) return "";
+    if (this._plannerModal.type === "football") return this._renderFootballModal();
     if (this._plannerModal.type === "readiness") return this._renderReadiness(true);
     if (this._plannerModal.type === "departure") return this._renderDepartureModal();
     if (this._plannerModal.type === "heating") return this._renderHeatingScheduleModal();
@@ -5698,14 +5706,14 @@ export class FamilyHubCard extends HTMLElementBase {
     const name = player?.name || "Player";
     const team = player?.team_code || player?.position || "FPL";
     const crest = teamCrest(player);
-    return `<article class="fpl-player ${bench ? "is-bench" : ""} ${flagged ? "is-flagged" : ""}" title="${escapeHtml(`${name} · ${team} · ${displayedPoints} points`)}">
-      <span class="fpl-player-mark">${crest ? `<img src="${escapeHtml(crest)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true">` : ""}<b>${escapeHtml(team)}</b></span>
+    return `<button type="button" class="fpl-player ${bench ? "is-bench" : ""} ${flagged ? "is-flagged" : ""}" data-fpl-player="${escapeHtml(player.id)}" aria-haspopup="dialog" aria-label="${escapeHtml(`${name}, ${displayedPoints} points${badge ? `, ${player.captain ? "captain" : "vice-captain"}` : ""}. View player details`)}">
+      <span class="fpl-player-mark">${crest ? `<img data-team-crest src="${escapeHtml(crest)}" alt="">` : ""}<b>${escapeHtml(team)}</b></span>
       ${badge ? `<i class="fpl-player-badge" aria-label="${player.captain ? "Captain" : "Vice-captain"}">${badge}</i>` : ""}
       ${flagged ? `<ha-icon class="fpl-player-warning" icon="mdi:alert" aria-label="Availability warning"></ha-icon>` : ""}
       <strong>${escapeHtml(name)}</strong>
       <small>${escapeHtml(player?.position || "")}</small>
       <em>${displayedPoints}</em>
-    </article>`;
+    </button>`;
   }
 
   _renderFplSquad(squad, status = "live") {
@@ -5718,12 +5726,69 @@ export class FamilyHubCard extends HTMLElementBase {
       const players = starters.filter((player) => player.position === position);
       return players.length ? `<div class="fpl-pitch-row" data-position="${position}">${players.map((player) => this._renderFplPlayer(player)).join("")}</div>` : "";
     }).join("");
-    return `<div class="segments detail-segments squad-segments" role="group" aria-label="Squad selection"><button type="button" class="segment ${this._squadSection !== "bench" ? "is-selected" : ""}" data-squad-section="starters" aria-pressed="${this._squadSection !== "bench"}">Starting eleven</button><button type="button" class="segment ${this._squadSection === "bench" ? "is-selected" : ""}" data-squad-section="bench" aria-pressed="${this._squadSection === "bench"}">Bench · ${bench.length}</button></div><div class="fpl-pitch ux-section" aria-label="Starting eleven" ${this._squadSection === "bench" ? "hidden" : ""}>${rows}</div><div class="fpl-bench ux-section" ${this._squadSection === "bench" ? "" : "hidden"}><p class="eyebrow">Bench</p><div>${bench.map((player) => this._renderFplPlayer(player)).join("")}</div></div>`;
+    const section = this._squadSection || "starters";
+    const formation = ["DEF", "MID", "FWD"].map(position => starters.filter(player => player.position === position).length).join("–");
+    return `<div class="squad-view-bar"><div class="segments detail-segments squad-segments" role="group" aria-label="Squad selection">${[["starters","Pitch"],["bench",`Bench · ${bench.length}`],["list","List"]].map(([id,label]) => `<button type="button" class="segment ${section === id ? "is-selected" : ""}" data-squad-section="${id}" aria-pressed="${section === id}">${label}</button>`).join("")}</div><small>${formation}</small></div><div class="fpl-pitch ux-section" aria-label="Starting eleven" ${section === "starters" ? "" : "hidden"}><svg class="fpl-pitch-lines" viewBox="0 0 600 400" preserveAspectRatio="none" aria-hidden="true"><rect x="18" y="12" width="564" height="376" rx="3"/><path d="M18 200h564M200 12v63h200V12M250 12v25h100V12M200 388v-63h200v63M250 388v-25h100v25"/><circle cx="300" cy="200" r="48"/><circle class="pitch-spot" cx="300" cy="200" r="3"/></svg>${rows}</div><div class="fpl-bench ux-section" ${section === "bench" ? "" : "hidden"}><p class="eyebrow">Substitutes · in bench order</p><div>${bench.map((player) => this._renderFplPlayer(player)).join("")}</div><p>Tap a player for points and availability.</p></div><div class="fpl-squad-list" ${section === "list" ? "" : "hidden"}>${squad.map(player => `<button type="button" data-fpl-player="${escapeHtml(player.id)}"><span>${escapeHtml(player.position || "")}<small>${player.bench ? "Bench" : "Starting"}</small></span><strong>${escapeHtml(player.name)}${player.captain ? " · C" : player.vice_captain ? " · V" : ""}</strong><small>${escapeHtml(player.team_code || "")}</small><b>${player.bench ? safeNumber(player.event_points,0) : safeNumber(player.contribution_points,0)}</b></button>`).join("")}</div>`;
+  }
+
+  _fplTeamModels() {
+    return (this._config.football.entries || []).map(entry => {
+      const person = this._config.people.find(person => person.id === entry.person_id);
+      const state = this._hass?.states?.[`sensor.family_dashboard_fpl_${entry.person_id}`];
+      return {...entry, person, state, available:isEntityAvailable(state), attributes:state?.attributes || {}};
+    });
+  }
+
+  _renderFplComparison() {
+    const teams = this._fplTeamModels();
+    const weeks = new Set(teams.filter(team => team.available).map(team => team.attributes.gameweek));
+    return `<div class="fpl-comparison"><p class="eyebrow">Family head-to-head</p><h3>${weeks.size === 1 ? `Gameweek ${escapeHtml([...weeks][0] || "—")}` : "Latest team updates"}</h3><div>${teams.map(team => `<button type="button" data-football-team-open="${escapeHtml(team.person_id)}"><span class="comparison-person" style="--person-colour:${escapeHtml(team.person?.colour || this._config.theme.accent)}">${escapeHtml((team.person?.name || team.person_id).slice(0,1))}</span><span><strong>${escapeHtml(team.person?.name || team.person_id)}</strong><small>${escapeHtml(team.attributes.team_name || "Waiting for team")}</small></span><b>${team.available && team.attributes.gameweek_points != null ? escapeHtml(team.attributes.gameweek_points) : "—"}<small>GW ${escapeHtml(team.attributes.gameweek || "—")}</small></b><span class="comparison-total">${team.available ? escapeHtml(formatPoints(team.state.state,this._config.product.locale)) : "—"}<small>Total points</small></span></button>`).join("")}</div><p>Tap a team to explore its squad.</p></div>`;
+  }
+
+  _renderFootballModal() {
+    const modal = this._plannerModal;
+    let title = "Match centre", eyebrow = "Football", body = "";
+    if (modal.kind === "compare") {
+      title = "Our FPL teams"; eyebrow = "Friendly rivalry"; body = this._renderFplComparison();
+    } else if (modal.kind === "player") {
+      const team = this._fplTeamModels().find(team => team.person_id === modal.entry);
+      const player = team?.available && team.attributes.squad?.find(player => String(player.id) === modal.id);
+      if (player) {
+        title = player.name; eyebrow = `${player.team_name || player.team_code || "FPL"} · ${player.position || "Player"}`;
+        const raw = safeNumber(player.event_points,0), contribution = safeNumber(player.contribution_points,raw);
+        const counted = !player.bench || safeNumber(player.multiplier,0) > 0;
+        const explanation = counted ? `${raw} points × ${safeNumber(player.multiplier,1)} multiplier = ${contribution} for your team` : "Bench points are shown separately from your team score.";
+        const next = this._allFootballFixtures().filter(fixture => fixtureIncludesTeam(fixture,player.team_code) && normaliseFixtureStatus(fixture) === "upcoming").sort((a,b) => new Date(a.kickoff_time)-new Date(b.kickoff_time))[0];
+        const subs = team.attributes.automatic_subs || [];
+        const substitution = subs.find(sub => String(sub.in) === modal.id || String(sub.out) === modal.id);
+        const other = substitution && team.attributes.squad.find(candidate => candidate.id === (String(substitution.in) === modal.id ? substitution.out : substitution.in));
+        body = `<div class="football-player-hero">${this._renderTeamMark({code:player.team_code,name:player.team_name,crest_url:player.crest_url},"favourite")}<div><strong>${counted ? contribution : raw}<small>Gameweek ${escapeHtml(team.attributes.gameweek || "—")} points</small></strong><p>${escapeHtml(player.captain ? "Captain" : player.vice_captain ? "Vice-captain" : player.bench ? "Substitute" : "Starting eleven")}</p></div></div><p class="football-detail-note">${escapeHtml(explanation)}</p><div class="football-detail-facts"><span><small>Availability</small><strong>${escapeHtml(player.status === "a" ? "Available" : player.status === "d" ? "Doubtful" : player.status === "i" ? "Injured" : player.status === "s" ? "Suspended" : "Not confirmed")}</strong>${player.status !== "a" && player.chance_of_playing != null ? `<small>${escapeHtml(player.chance_of_playing)}% chance next round</small>` : ""}</span><span><small>Club</small><strong>${escapeHtml(player.team_name || player.team_code || "—")}</strong></span></div>${other ? `<p class="football-detail-note">Automatic substitution: ${escapeHtml(String(substitution.in) === modal.id ? `came in for ${other.name}` : `replaced by ${other.name}`)}.</p>` : ""}<h3>Next club fixture</h3>${next ? this._renderFixture(next) : '<p class="hub-empty-state compact">No upcoming fixture loaded.</p>'}${team.attributes.squad_status === "cached" ? '<p class="football-detail-note">Showing the last saved squad update.</p>' : ""}`;
+      }
+    } else if (modal.kind === "club") {
+      const code = modal.id;
+      const fixtures = this._allFootballFixtures().filter(fixture => fixtureIncludesTeam(fixture,code));
+      const rows = this._footballState().table?.attributes?.rows || [];
+      const standing = rows.find(row => row.code === code);
+      const model = this._clubOverviewModels().find(model => model.code === code);
+      const team = standing || model?.team || fixtures.flatMap(f => [f.home,f.away]).find(t => footballTeamCode(t) === code);
+      title = team?.name || code; eyebrow = "Club focus";
+      const recent = fixtures.filter(fixture => normaliseFixtureStatus(fixture) === "finished").sort((a,b) => new Date(b.kickoff_time)-new Date(a.kickoff_time)).slice(0,5);
+      const next = fixtures.filter(fixture => normaliseFixtureStatus(fixture) !== "finished").sort((a,b) => new Date(a.kickoff_time)-new Date(b.kickoff_time)).slice(0,3);
+      body = `<div class="football-detail-facts">${standing ? `<span><small>League position</small><strong>#${escapeHtml(standing.position)}</strong></span><span><small>Points</small><strong>${escapeHtml(standing.points)}</strong></span><span><small>Goal difference</small><strong>${standing.goal_difference > 0 ? "+" : ""}${escapeHtml(standing.goal_difference)}</strong></span>` : '<p>Table position unavailable.</p>'}</div><h3>Recent form <small>Latest first</small></h3><div class="club-form">${recent.map(fixture => {const own = footballTeamCode(fixture.home) === code ? fixture.home_score : fixture.away_score;const against = footballTeamCode(fixture.home) === code ? fixture.away_score : fixture.home_score;const result = own > against ? "W" : own < against ? "L" : "D";return `<span class="is-${result}" title="${escapeHtml(`${compactClubName(fixture.home)} ${fixture.home_score}–${fixture.away_score} ${compactClubName(fixture.away)}`)}">${result}</span>`;}).join("") || '<p>No completed matches loaded.</p>'}</div><h3>Coming up</h3>${next.map(fixture => this._renderFixture(fixture)).join("") || '<p>No upcoming fixtures loaded.</p>'}<h3>Recent results</h3>${recent.slice(0,3).map(fixture => this._renderFixture(fixture)).join("")}`;
+    } else if (modal.kind === "fixture") {
+      const fixture = this._allFootballFixtures().find(fixture => String(fixture.id || fixtureIdentity(fixture)) === modal.id);
+      if (fixture) {
+        title = `${compactClubName(fixture.home)} v ${compactClubName(fixture.away)}`;
+        eyebrow = `Matchweek ${fixture.gameweek || "—"} · ${formatDay(fixture.kickoff_time,this._config.product.locale,this._config.product.timezone)}`;
+        body = `<div class="match-detail-score"><div>${this._renderTeamMark(fixture.home,"favourite")}<strong>${escapeHtml(fixture.home.name)}</strong></div><div><b>${escapeHtml(this._footballMatchValue(fixture,normaliseFixtureStatus(fixture)))}</b><small>${escapeHtml(this._footballMatchDetail(fixture,normaliseFixtureStatus(fixture)))}</small></div><div>${this._renderTeamMark(fixture.away,"favourite")}<strong>${escapeHtml(fixture.away.name)}</strong></div></div><div class="football-detail-facts"><span><small>${escapeHtml(compactClubName(fixture.home))} scorers</small><strong>${escapeHtml((fixture.home_scorers || []).join(", ") || (normaliseFixtureStatus(fixture) === "upcoming" ? "To come" : "None recorded"))}</strong></span><span><small>${escapeHtml(compactClubName(fixture.away))} scorers</small><strong>${escapeHtml((fixture.away_scorers || []).join(", ") || (normaliseFixtureStatus(fixture) === "upcoming" ? "To come" : "None recorded"))}</strong></span></div><div class="match-club-actions">${[fixture.home,fixture.away].map(team => `<button type="button" data-football-club="${escapeHtml(footballTeamCode(team))}">Explore ${escapeHtml(compactClubName(team))} <ha-icon icon="mdi:arrow-right"></ha-icon></button>`).join("")}</div>`;
+      }
+    }
+    return `<div class="planner-modal-backdrop"><section class="planner-modal football-modal" role="dialog" aria-modal="true" aria-labelledby="football-modal-title"><header><p class="eyebrow">${escapeHtml(eyebrow)}</p><h2 id="football-modal-title">${escapeHtml(title)}</h2><button type="button" class="planner-modal-close" data-football-close aria-label="Close football details"><ha-icon icon="mdi:close"></ha-icon></button></header><div class="planner-modal-body">${body || '<p>This update is no longer available. Close this window to refresh.</p>'}</div><footer><span>From the latest football update</span><button type="button" data-football-close>Done</button></footer></section></div>`;
   }
 
   _renderFplTeams() {
     const entries = this._config.football.entries || [];
-    if (!entries.length) return '<div class="football-empty"><span class="football-orbit"><ha-icon icon="mdi:trophy-outline"></ha-icon></span><div><p class="eyebrow">Our FPL teams</p><h3>Add Rob and Ernie’s team IDs in Admin</h3><p>The IDs are the number in each team’s FPL URL. No password or FPL login is needed.</p></div></div>';
+    if (!entries.length) return '<div class="football-empty"><span class="football-orbit"><ha-icon icon="mdi:trophy-outline"></ha-icon></span><div><p class="eyebrow">Our FPL teams</p><h3>Add your family’s team IDs in Admin</h3><p>The IDs are the number in each team’s FPL URL. No password or FPL login is needed.</p></div></div>';
     if (!entries.some((entry) => entry.person_id === this._fplEntryId)) this._fplEntryId = entries[0].person_id;
     const selected = entries.find((entry) => entry.person_id === this._fplEntryId) || entries[0];
     const person = this._config.people.find((candidate) => candidate.id === selected.person_id);
@@ -5734,13 +5799,14 @@ export class FamilyHubCard extends HTMLElementBase {
     const eventPoints = safeNumber(attributes.gameweek_points, NaN);
     const transfers = safeNumber(attributes.transfers, NaN);
     const transferCost = safeNumber(attributes.transfer_cost, 0);
-    const leagues = Array.isArray(attributes.leagues) ? attributes.leagues : [];
+    const leagues = available && Array.isArray(attributes.leagues) ? attributes.leagues : [];
     const squad = Array.isArray(attributes.squad) ? attributes.squad : [];
     const squadStatus = attributes.squad_status || (squad.length ? "live" : "unavailable");
     const selectors = entries.map((entry) => {
       const candidate = this._config.people.find((personEntry) => personEntry.id === entry.person_id);
       const selectedEntry = entry.person_id === selected.person_id;
-      return `<button type="button" data-fpl-entry="${escapeHtml(entry.person_id)}" class="${selectedEntry ? "is-selected" : ""}" aria-pressed="${selectedEntry}"><span style="--person-colour:${escapeHtml(candidate?.colour || this._config.theme.accent)}">${escapeHtml((candidate?.name || entry.person_id).slice(0, 1))}</span>${escapeHtml(candidate?.name || entry.person_id)}</button>`;
+      const model = this._fplTeamModels().find(team => team.person_id === entry.person_id);
+      return `<button type="button" data-fpl-entry="${escapeHtml(entry.person_id)}" class="${selectedEntry ? "is-selected" : ""}" aria-pressed="${selectedEntry}"><span style="--person-colour:${escapeHtml(candidate?.colour || this._config.theme.accent)}">${escapeHtml((candidate?.name || entry.person_id).slice(0, 1))}</span><strong>${escapeHtml(candidate?.name || entry.person_id)}</strong><small>${model?.available && model.attributes.gameweek_points != null ? `${escapeHtml(model.attributes.gameweek_points)} pts · GW ${escapeHtml(model.attributes.gameweek || "—")}` : "Waiting for update"}</small></button>`;
     }).join("");
     const leagueRows = leagues.map((league) => {
       const currentRank = safeNumber(league.rank, NaN);
@@ -5752,12 +5818,12 @@ export class FamilyHubCard extends HTMLElementBase {
       return `<span class="${movement}"><strong>${escapeHtml(league.name)}</strong><b>${Number.isFinite(currentRank) ? `#${escapeHtml(formatPoints(currentRank, this._config.product.locale))}` : "—"}</b><ha-icon icon="${movementIcon}" aria-hidden="true"></ha-icon></span>`;
     }).join("");
     return `<section class="fpl-detail" style="--person-colour:${escapeHtml(person?.colour || this._config.theme.accent)}">
-      <div class="fpl-entry-selector" role="group" aria-label="Choose fantasy team">${selectors}</div>
+      <div class="fpl-entry-bar"><div class="fpl-entry-selector" role="group" aria-label="Choose fantasy team">${selectors}</div>${entries.length > 1 ? '<button type="button" class="fpl-compare-button" data-football-compare>Compare teams <ha-icon icon="mdi:compare-horizontal"></ha-icon></button>' : ""}</div>
       <article class="surface fpl-team-card"><header><span>${escapeHtml((person?.name || selected.person_id).slice(0, 1))}</span><div><p class="eyebrow">${escapeHtml(person?.name || selected.person_id)}</p><h3>${escapeHtml(available ? attributes.team_name || "FPL team" : "Waiting for FPL")}</h3></div><ha-icon icon="mdi:trophy"></ha-icon></header>
-        <div class="fpl-scoreboard"><span><strong>${available ? escapeHtml(formatPoints(state.state, this._config.product.locale)) : "—"}</strong><small>Total points</small></span><span><strong>${Number.isFinite(eventPoints) ? eventPoints : "—"}</strong><small>GW ${attributes.gameweek || "—"}</small></span><span><strong>${Number.isFinite(rank) ? `#${escapeHtml(formatPoints(rank, this._config.product.locale))}` : "—"}</strong><small>Overall rank</small></span><span><strong>${Number.isFinite(transfers) ? transfers : "—"}</strong><small>Transfers${transferCost ? ` · −${transferCost}` : ""}</small></span></div>
-        ${attributes.active_chip ? `<p class="fpl-chip"><ha-icon icon="mdi:star-circle"></ha-icon>${escapeHtml(titleCase(attributes.active_chip))} active</p>` : ""}
+        <div class="fpl-scoreboard"><span class="fpl-gw-score"><strong>${available && Number.isFinite(eventPoints) ? eventPoints : "—"}</strong><small>Gameweek ${attributes.gameweek || "—"}</small></span><span><strong>${available ? escapeHtml(formatPoints(state.state, this._config.product.locale)) : "—"}</strong><small>Total points</small></span><span><strong>${available && Number.isFinite(rank) ? `#${escapeHtml(formatPoints(rank, this._config.product.locale))}` : "—"}</strong><small>Overall rank</small></span><span><strong>${available && Number.isFinite(transfers) ? transfers : "—"}</strong><small>Transfers${transferCost ? ` · −${transferCost} pts` : ""}</small></span></div>
+        ${available && attributes.active_chip ? `<p class="fpl-chip"><ha-icon icon="mdi:star-circle"></ha-icon>${escapeHtml(titleCase(attributes.active_chip))} active</p>` : ""}
       </article>
-      <div class="fpl-detail-grid"><article class="surface fpl-squad-panel"><div class="section-heading"><div><p class="eyebrow">Gameweek ${attributes.gameweek || "—"}</p><h3>Squad points</h3></div>${Number.isFinite(safeNumber(attributes.points_on_bench, NaN)) ? `<span>${safeNumber(attributes.points_on_bench, 0)} on bench</span>` : squadStatus === "cached" ? "<span>Last update</span>" : ""}</div>${this._renderFplSquad(squad, squadStatus)}</article>
+      <div class="fpl-detail-grid"><article class="surface fpl-squad-panel"><div class="section-heading"><div><p class="eyebrow">Gameweek ${attributes.gameweek || "—"}</p><h3>Your squad</h3></div>${squadStatus === "cached" ? "<span>Saved squad</span>" : Number.isFinite(safeNumber(attributes.points_on_bench, NaN)) ? `<span>${safeNumber(attributes.points_on_bench, 0)} on bench</span>` : ""}</div>${available ? this._renderFplSquad(squad, squadStatus) : '<p class="hub-empty-state large">This team is unavailable. The next update will appear automatically.</p>'}</article>
       <article class="surface fpl-league-panel"><div class="section-heading"><div><p class="eyebrow">All competitions</p><h3>Leagues</h3></div><span>${leagues.length}</span></div>${leagues.length ? `<div class="fpl-leagues">${leagueRows}</div>` : '<p class="hub-empty-state compact">League positions will appear after the next manager refresh.</p>'}</article></div>
     </section>`;
   }
@@ -5770,16 +5836,20 @@ export class FamilyHubCard extends HTMLElementBase {
     this._gameweek = gameweek;
     const models = this._clubOverviewModels();
     const tabs = [["fixtures","Fixtures"],["results","Results"],["table","Table"],["fpl","FPL"]];
-    const shown = this._footballTab === "results" ? events.filter(fixture => normaliseFixtureStatus(fixture) === "finished") : events;
-    return `<section class="football-experience ${this._footballTab === "fpl" ? "is-fpl" : this._footballTab === "table" ? "is-table" : ""}">
+    const filtered = events.filter(fixture => this._footballFilter === "favourites" ? this._config.football.spotlight_team_codes.some(code => fixtureIncludesTeam(fixture,code)) : this._footballFilter === "live" ? normaliseFixtureStatus(fixture) === "live" : true);
+    const shown = this._footballTab === "results" ? filtered.filter(fixture => normaliseFixtureStatus(fixture) === "finished") : filtered;
+    const currentWeek = safeNumber(index?.attributes?.current_gameweek || index?.attributes?.next_gameweek || index?.state,1);
+    const filters = this._footballTab === "table" ? [["all","All clubs"],["favourites","Our clubs"]] : [["all","All matches"],["favourites","Our clubs"],...(this._footballTab === "results" ? [] : [["live","Live"]])];
+    return `<section class="football-experience football-v2 ${this._footballTab === "fpl" ? "is-fpl" : this._footballTab === "table" ? "is-table" : ""}">
 
-      <div class="football-club-overviews">${models.map(model => this._renderClubOverview(model)).join("")}</div>
-      <div class="football-layout ${this._footballTab === "fpl" ? "is-fpl" : ""}"><article class="football-main"><div class="segments football-tabs" role="group" aria-label="Football view">${tabs.map(([id,label]) => `<button type="button" class="segment ${this._footballTab === id ? "is-selected" : ""}" data-football-tab="${id}" aria-pressed="${this._footballTab === id}">${label}</button>`).join("")}</div><div class="football-toolbar"><h2>${this._footballTab === "results" ? "Results" : this._footballTab === "table" ? "Premier League" : this._footballTab === "fpl" ? "Our teams" : "Matchweek fixtures"}</h2>${this._footballTab === "fpl" ? "" : `<div class="matchweek-controls"><button type="button" data-gameweek="${Math.max(1,gameweek-1)}" ${gameweek <= 1 ? "disabled" : ""} aria-label="Previous matchweek"><ha-icon icon="mdi:chevron-left"></ha-icon></button><label><span class="sr-only">Choose matchweek</span><select data-gameweek-select>${available.map(week => `<option value="${week}" ${week === gameweek ? "selected" : ""}>Matchweek ${week}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down"></ha-icon></label><button type="button" data-gameweek="${Math.min(38,gameweek+1)}" ${gameweek >= 38 ? "disabled" : ""} aria-label="Next matchweek"><ha-icon icon="mdi:chevron-right"></ha-icon></button></div>`}</div>${this._footballTab === "fpl" ? this._renderFplTeams() : this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(shown,fixtureDataAvailable)}</article></div>
+      <div class="football-club-overviews">${models.map(model => this._renderClubOverview(model).replace('</header>',`<button type="button" class="club-focus-button" data-football-club="${escapeHtml(model.code)}" aria-label="Explore ${escapeHtml(this._clubPresentation(model.code).label)}">Club focus <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></header>`)).join("")}</div>
+      <div class="football-layout ${this._footballTab === "fpl" ? "is-fpl" : ""}"><article class="football-main"><div class="segments football-tabs" role="group" aria-label="Football view">${tabs.map(([id,label]) => `<button type="button" class="segment ${this._footballTab === id ? "is-selected" : ""}" data-football-tab="${id}" aria-pressed="${this._footballTab === id}">${label}</button>`).join("")}</div><div class="football-toolbar"><div><h2>${this._footballTab === "results" ? "Results" : this._footballTab === "table" ? "Premier League" : this._footballTab === "fpl" ? "Our teams" : "Match centre"}</h2><small>${this._footballTab === "table" ? "Tap a club to explore its form" : "Tap a match for the details"}</small></div>${this._footballTab === "fpl" || this._footballTab === "table" ? "" : `<div class="matchweek-controls"><button type="button" data-gameweek="${Math.max(1,gameweek-1)}" ${gameweek <= 1 ? "disabled" : ""} aria-label="Previous matchweek"><ha-icon icon="mdi:chevron-left"></ha-icon></button><label><span class="sr-only">Choose matchweek</span><select data-gameweek-select>${available.map(week => `<option value="${week}" ${week === gameweek ? "selected" : ""}>Matchweek ${week}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down"></ha-icon></label><button type="button" data-gameweek="${Math.min(38,gameweek+1)}" ${gameweek >= 38 ? "disabled" : ""} aria-label="Next matchweek"><ha-icon icon="mdi:chevron-right"></ha-icon></button><button type="button" data-gameweek="${currentWeek}" class="football-current-week" ${gameweek === currentWeek ? "disabled" : ""}>Current</button></div>`}</div>${this._footballTab === "fpl" ? "" : `<div class="football-filters" role="group" aria-label="${this._footballTab === "table" ? "Table filter" : "Match filter"}">${filters.map(([id,label]) => `<button type="button" ${this._footballTab === "table" ? 'data-football-table-filter' : 'data-football-filter'}="${id}" aria-pressed="${(this._footballTab === "table" ? this._footballTableFilter : this._footballFilter) === id}">${label}${id === "live" ? `<span>${events.filter(fixture => normaliseFixtureStatus(fixture) === "live").length}</span>` : ""}</button>`).join("")}</div>`}${this._footballTab === "fpl" ? this._renderFplTeams() : this._footballTab === "table" ? this._renderLeagueTable(table) : this._renderFixtures(shown,fixtureDataAvailable)}</article></div>
     </section>`;
   }
 
   _renderFixtures(events, available = true) {
     if (!available) return '<p class="hub-empty-state large">Fixture data is unavailable. Home Assistant will retry.</p>';
+    if (!events.length && (this._footballFilter !== "all" || this._footballTab === "results")) return `<div class="football-filter-empty"><ha-icon icon="mdi:soccer"></ha-icon><h3>${this._footballFilter === "live" ? "No live matches right now" : this._footballTab === "results" ? "No results in this selection" : "No matches for our clubs this week"}</h3><p>Try another matchweek or show all matches.</p><button type="button" data-football-reset>Show all matches</button></div>`;
     if (!events.length) return `
       <div class="football-empty">
         <span class="football-orbit"><ha-icon icon="mdi:soccer" aria-hidden="true"></ha-icon></span>
@@ -5809,22 +5879,22 @@ export class FamilyHubCard extends HTMLElementBase {
     ];
     const favouriteCodes = this._config.football.spotlight_team_codes.filter((code) => fixtureIncludesTeam(fixture, code));
     return `
-      <div data-fixture-id="${escapeHtml(String(fixture.id || fixtureIdentity(fixture)))}" data-fixture-status="${status}" class="fixture ${fixture.spotlight ? "is-spotlight" : ""} ${status === "live" ? "is-live" : ""} ${favouriteCodes.length > 1 ? "is-family-derby" : ""}"${favouriteCodes.length ? ` data-favourite-code="${escapeHtml(favouriteCodes.join(" "))}"` : ""}>
+      <button type="button" data-football-fixture="${escapeHtml(String(fixture.id || fixtureIdentity(fixture)))}" data-fixture-id="${escapeHtml(String(fixture.id || fixtureIdentity(fixture)))}" data-fixture-status="${status}" class="fixture ${fixture.spotlight ? "is-spotlight" : ""} ${status === "live" ? "is-live" : ""} ${favouriteCodes.length > 1 ? "is-family-derby" : ""}"${favouriteCodes.length ? ` data-favourite-code="${escapeHtml(favouriteCodes.join(" "))}"` : ""} aria-haspopup="dialog">
         <span class="team home-team">${this._renderTeamMark(fixture.home)}<span>${escapeHtml(fixture.home?.name || "Home")}</span></span>
         <strong class="fixture-score">${escapeHtml(score)}<small>${status === "live" ? `LIVE · ${fixture.minutes || 0}'` : status === "finished" ? "FT" : ""}</small></strong>
         <span class="team away-team"><span>${escapeHtml(fixture.away?.name || "Away")}</span>${this._renderTeamMark(fixture.away)}</span>
         ${scorers.length ? `<span class="scorers">${escapeHtml(scorers.join(" · "))}</span>` : ""}
-      </div>
+      </button>
     `;
   }
 
   _renderLeagueTable(tableState) {
     if (!isEntityAvailable(tableState)) return '<p class="hub-empty-state large">League table data is unavailable. Home Assistant will retry.</p>';
-    const rows = tableState?.attributes?.rows || [];
+    const rows = (tableState?.attributes?.rows || []).filter(row => this._footballTableFilter !== "favourites" || this._config.football.spotlight_team_codes.includes(row.code));
     if (!rows.length) return '<p class="hub-empty-state large">The league table will appear after the first results.</p>';
     return `
       <div class="league-table-wrap"><table class="league-table"><thead><tr><th>#</th><th>Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody>
-        ${rows.map((row) => `<tr class="${row.spotlight ? "is-spotlight" : ""}"><td>${row.position}</td><td><strong>${escapeHtml(row.name)}</strong></td><td>${row.played}</td><td>${row.won}</td><td>${row.drawn}</td><td>${row.lost}</td><td>${row.goal_difference > 0 ? "+" : ""}${row.goal_difference}</td><td><strong>${row.points}</strong></td></tr>`).join("")}
+        ${rows.map((row) => `<tr class="${row.spotlight ? "is-spotlight" : ""}"><td>${row.position}</td><td><button type="button" data-football-club="${escapeHtml(row.code)}">${this._renderTeamMark(row)}<strong>${escapeHtml(row.name)}</strong>${this._config.football.spotlight_team_codes.includes(row.code) ? '<span class="table-favourite" aria-label="Favourite club">★</span>' : ""}</button></td><td>${row.played}</td><td>${row.won}</td><td>${row.drawn}</td><td>${row.lost}</td><td>${row.goal_difference > 0 ? "+" : ""}${row.goal_difference}</td><td><strong>${row.points}</strong></td></tr>`).join("")}
       </tbody></table></div>
     `;
   }
@@ -6688,6 +6758,28 @@ export class FamilyHubCard extends HTMLElementBase {
       else if (target.dataset.devicePhotosPreview !== undefined) { this._closeDevicePhotos(); this._activatePhotoFrame(); }
       return;
     }
+    if (this._plannerModal?.type === "football" && target.dataset.footballClose !== undefined) {
+      this._plannerModal = null; this._scheduleRender(true); return;
+    }
+    if (this._config.features.football && !this._pendingConfirmation && !this._familyPickerOpen && !this._homeworkModal && (!this._plannerModal || this._plannerModal.type === "football")) {
+      let modal = null;
+      if (target.dataset.footballCompare !== undefined && this._fplTeamModels().length > 1) modal = {kind:"compare"};
+      if (target.dataset.fplPlayer) {
+        const team = this._fplTeamModels().find(team => team.person_id === this._fplEntryId);
+        if (team?.available && team.attributes.squad?.some(player => String(player.id) === target.dataset.fplPlayer)) modal = {kind:"player",id:target.dataset.fplPlayer,entry:this._fplEntryId};
+      }
+      const fixtureId = target.dataset.footballFixture || (this._view === "football" ? target.dataset.fixtureId : null);
+      if (fixtureId && this._allFootballFixtures().some(fixture => String(fixture.id || fixtureIdentity(fixture)) === fixtureId)) modal = {kind:"fixture",id:fixtureId};
+      if (target.dataset.footballClub && ((this._footballState().table?.attributes?.rows || []).some(row => row.code === target.dataset.footballClub) || this._config.football.spotlight_team_codes.includes(target.dataset.footballClub) || this._allFootballFixtures().some(fixture => fixtureIncludesTeam(fixture,target.dataset.footballClub)))) modal = {kind:"club",id:target.dataset.footballClub};
+      if (target.dataset.footballTeamOpen && this._fplTeamModels().some(team => team.person_id === target.dataset.footballTeamOpen)) {
+        this._plannerModal = null; this._view = "football"; this._footballTab = "fpl"; this._fplEntryId = target.dataset.footballTeamOpen; this._footballReturnFocus = {key:"fplEntry",value:this._fplEntryId}; this._scheduleRender(true); return;
+      }
+      if (modal) {
+        if (!this._plannerModal) { const key = ["fplPlayer","footballCompare","footballClub","footballFixture","fixtureId"].find(key => target.dataset[key] !== undefined); this._footballReturnFocus = {key,value:target.dataset[key]}; }
+        this._plannerModal = {type:"football",...modal}; this._scheduleRender(true); return;
+      }
+    }
+    if (this._plannerModal?.type === "football") return;
     if (target.dataset.experience && ["simple","full"].includes(target.dataset.experience) && !this._pendingConfirmation && !this._homeworkModal && !this._plannerModal) {
       this._setSimpleView(target.dataset.experience === "simple");return;
     }
@@ -6787,7 +6879,7 @@ export class FamilyHubCard extends HTMLElementBase {
       ["roomSection", "_roomDetailSection", ["lights", "comfort", "scenes", "music"]],
       ["taskSection", "_taskSection", ["jobs", "ready", "homework", "lunch", "rewards"]],
       ["cleaningSection", "_cleaningSection", ["clean", "settings", "care"]],
-      ["squadSection", "_squadSection", ["starters", "bench"]]
+      ["squadSection", "_squadSection", ["starters", "bench", "list"]]
     ]) {
       if (target.dataset[key] === undefined) continue;
       if (allowed.includes(target.dataset[key])) {
@@ -6957,8 +7049,15 @@ export class FamilyHubCard extends HTMLElementBase {
     if (target.dataset.footballTab) {
       if (!new Set(["fixtures", "results", "table", "fpl"]).has(target.dataset.footballTab)) return;
       this._footballTab = target.dataset.footballTab;
+      if (this._footballTab === "results" && this._footballFilter === "live") this._footballFilter = "all";
       this._scheduleRender(true);
       return;
+    }
+    if (target.dataset.footballFilter || target.dataset.footballTableFilter || target.dataset.footballReset !== undefined) {
+      if (["all","favourites","live"].includes(target.dataset.footballFilter)) this._footballFilter = target.dataset.footballFilter;
+      if (["all","favourites"].includes(target.dataset.footballTableFilter)) this._footballTableFilter = target.dataset.footballTableFilter;
+      if (target.dataset.footballReset !== undefined) { this._footballFilter = "all"; this._footballTab = "fixtures"; }
+      this._scheduleRender(true); return;
     }
     if (target.dataset.fplEntry) {
       const allowedEntries = new Set((this._config.football?.entries || []).map((entry) => entry.person_id));

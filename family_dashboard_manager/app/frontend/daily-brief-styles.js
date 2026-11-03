@@ -1868,4 +1868,177 @@ export const DAILY_BRIEF_STYLES = `
   .calendar-view .calendar-controls { gap:10px; }
   .calendar-view .calendar-navigation { gap:4px; }
   @media(max-width:850px) { .calendar-view .calendar-controls { flex-wrap:wrap; }.calendar-view .calendar-navigation {flex-wrap:wrap;width:100%}.calendar-view {grid-template-rows:auto auto auto minmax(0,1fr)}.calendar-view .calendar-jump>span {display:none} }
+  /* Football 2: compact match centre and a tactile, bounded squad surface. */
+  .football-v2 { grid-template-rows:156px minmax(0,1fr); gap:14px; }
+  .football-v2 .football-club-overviews { gap:14px; }
+  .football-v2 .club-overview { position:relative; border:1px solid var(--daily-line); border-radius:20px; padding:12px 16px; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:48px 18px minmax(0,1fr); gap:0 12px; background:var(--daily-surface); }
+  .football-v2 .club-overview > header { grid-column:1/-1; margin:0; }
+  .football-v2 .club-overview > .eyebrow { grid-column:1; font-size:12px; letter-spacing:.04em; }
+  .football-v2 .club-overview header h2 { font-size:19px; }
+  .football-v2 .club-overview .club-match-row { grid-row:3; padding:0; min-height:48px; border:0; gap:6px; }
+  .football-v2 .club-overview .club-match-row strong { font-size:13px; }
+  .football-v2 .club-overview .club-match-row small { font-size:12px; }
+  .football-v2 .club-overview .club-match-row b { font-size:25px; }
+  .football-v2 .club-overview .club-next-row { grid-column:2; padding-left:12px; border-left:1px solid var(--daily-line); }
+  .football-v2 .club-focus-button { margin-left:auto; display:flex; gap:5px; align-items:center; min-height:48px; padding:0 8px; border:0; border-radius:10px; background:var(--daily-soft); color:var(--daily-text); font:inherit; font-size:12px; }
+  .football-v2 .club-focus-button ha-icon { --mdc-icon-size:16px; }
+  .football-v2 .football-main { grid-template-rows:56px 50px 48px minmax(0,1fr); gap:8px; }
+  .football-v2 .football-tabs { width:max-content; max-width:100%; padding:4px; border:1px solid var(--daily-line); background:var(--daily-surface); border-radius:14px; }
+  .football-v2 .football-tabs .segment { min-height:48px; padding:0 22px; border-radius:10px; font-size:13px; }
+  .football-v2 .football-tabs .is-selected { background:var(--daily-text); color:var(--daily-surface); box-shadow:none; }
+  .football-v2 .football-toolbar h2 { font-size:20px; }
+  .football-v2 .football-toolbar small { color:var(--daily-muted); font-size:12px; }
+  .football-v2 .matchweek-controls { background:var(--daily-surface); border:1px solid var(--daily-line); padding:0 4px; border-radius:12px; }
+  .football-v2 .matchweek-controls button { min-height:48px; border-radius:8px; }
+  .football-v2 .matchweek-controls .football-current-week { width:auto; flex-basis:auto; padding:0 10px; font-size:12px; color:var(--daily-accent); }
+  .football-v2 .football-filters { display:flex; gap:6px; align-items:center; }
+  .football-filters button { min-height:48px; padding:0 14px; border:1px solid transparent; border-radius:20px; background:transparent; color:var(--daily-muted); font:inherit; font-size:12px; }
+  .football-filters button[aria-pressed=true] { background:var(--daily-accent-soft); color:var(--daily-accent); border-color:var(--daily-accent-line); }
+  .football-filters button span { margin-left:6px; font-size:12px; }
+  .football-v2 .fixture-groups { padding:0 4px 8px 0; }
+  .football-v2 .fixture-day { padding:10px 14px 0; margin-bottom:10px; border-radius:16px; background:var(--daily-surface); border:1px solid var(--daily-line); }
+  .football-v2 .fixture-day h3 { margin:0 0 4px; font-size:12px; }
+  .fixture[type=button] { width:100%; color:var(--daily-text); font:inherit; cursor:pointer; text-align:inherit; }
+  .football-v2 .fixture[type=button] { min-height:62px; border-radius:0; padding:9px 0; }
+  .football-v2 .fixture-day .fixture:last-child { border-bottom:0; }
+  .football-v2 .fixture.is-spotlight { box-shadow:inset 3px 0 var(--daily-accent); padding-left:10px; }
+  .football-v2 .fixture.is-live .fixture-score small { color:var(--daily-danger); }
+  .football-v2 .fixture-score { font-size:22px; font-weight:500; }
+  .football-v2 .fixture .team { font-size:13px; }
+  .football-v2 .fixture .team-mark { width:26px; height:26px; min-width:26px; }
+  .football-v2 .league-table-wrap { background:var(--daily-surface); border:1px solid var(--daily-line); border-radius:16px; }
+  .football-v2 .league-table { border-collapse:collapse; width:100%; }
+  .football-v2 .league-table thead { position:sticky; top:0; z-index:1; background:var(--daily-soft); }
+  .football-v2 .league-table th { padding:12px 8px; color:var(--daily-muted); font-size:12px; }
+  .football-v2 .league-table td { padding:4px 8px; height:50px; font-size:13px; border-bottom:1px solid var(--daily-line); }
+  .football-v2 .league-table td:nth-child(2) { width:42%; }
+  .league-table td button { width:100%; min-height:48px; display:flex; align-items:center; gap:10px; background:transparent; border:0; color:var(--daily-text); font:inherit; text-align:left; }
+  .league-table td button .team-mark { flex:none; width:25px; height:25px; min-width:25px; }
+  .league-table .table-favourite { margin-left:auto; color:var(--daily-accent); }
+  .football-filter-empty { min-height:0; align-self:center; text-align:center; color:var(--daily-muted); padding:12px; }
+  .football-filter-empty > ha-icon { --mdc-icon-size:32px; }
+  .football-filter-empty h3 { margin:8px 0; color:var(--daily-text); }
+  .football-filter-empty button { min-height:48px; padding:0 18px; color:var(--daily-accent); border:0; border-radius:10px; background:var(--daily-accent-soft); font:inherit; }
+  .football-v2.is-fpl,.football-v2.is-table { grid-template-rows:minmax(0,1fr); }
+  .football-v2.is-fpl .football-main { grid-template-rows:56px minmax(0,1fr); gap:12px; }
+  .football-v2 .fpl-detail,.football-v2 .fpl-detail:has(.fpl-chip) { grid-template-rows:50px 80px minmax(0,1fr); gap:12px; }
+  .fpl-entry-bar { min-width:0; display:flex; align-items:stretch; gap:12px; }
+  .football-v2 .fpl-entry-selector { display:flex; min-width:0; gap:8px; overflow-x:auto; }
+  .football-v2 .fpl-entry-selector button { min-height:48px; flex:none; display:grid; grid-template-columns:30px auto; grid-template-rows:1fr 1fr; gap:0 9px; padding:6px 15px 6px 8px; border:1px solid var(--daily-line); border-radius:14px; color:var(--daily-text); background:var(--daily-surface); text-align:left; }
+  .football-v2 .fpl-entry-selector button > span { width:30px; height:30px; grid-row:1/3; font-size:12px; }
+  .football-v2 .fpl-entry-selector button strong { font-weight:500; font-size:12px; }
+  .football-v2 .fpl-entry-selector button small { color:var(--daily-muted); font-size:12px; }
+  .football-v2 .fpl-entry-selector button.is-selected { border-color:var(--daily-accent); box-shadow:inset 0 0 0 1px var(--daily-accent); }
+  .fpl-compare-button { flex:none; margin-left:auto; min-height:48px; padding:0 14px; display:flex; gap:8px; align-items:center; border:1px solid var(--daily-line); border-radius:14px; background:var(--daily-surface); color:var(--daily-text); font:inherit; font-size:12px; }
+  .fpl-compare-button ha-icon { --mdc-icon-size:19px; }
+  .football-v2 .fpl-team-card { padding:10px 16px; border-radius:18px; border:1px solid var(--daily-line); background:var(--daily-surface); grid-template-columns:minmax(120px,1fr) minmax(0,3fr); gap:10px; }
+  .football-v2 .fpl-team-card header h3 { font-size:17px; line-height:1.2; }
+  .football-v2 .fpl-team-card header > ha-icon { display:none; }
+  .football-v2 .fpl-scoreboard { gap:8px; }
+  .football-v2 .fpl-scoreboard span { padding:5px; border-left:1px solid var(--daily-line); border-radius:0; }
+  .football-v2 .fpl-scoreboard strong { font-size:24px; font-weight:500; font-variant-numeric:tabular-nums; letter-spacing:-.04em; }
+  .football-v2 .fpl-scoreboard small { font-size:12px; }
+  .football-v2 .fpl-scoreboard .fpl-gw-score { background:var(--daily-accent-soft); border:0; border-radius:12px; }
+  .football-v2 .fpl-gw-score strong { color:var(--daily-accent); }
+  .football-v2 .fpl-team-card:has(.fpl-chip) { position:relative; }
+  .football-v2 .fpl-chip { position:absolute; top:-8px; right:8px; padding:3px 9px; border-radius:7px; background:var(--daily-success-soft); color:var(--daily-success); font-size:12px; }
+  .football-v2 .fpl-detail-grid { display:grid; grid-template-columns:minmax(0,2.15fr) minmax(210px,1fr); gap:14px; height:100%; min-height:0; }
+  .football-v2 .fpl-squad-panel { grid-template-rows:30px 54px minmax(0,1fr); gap:5px; padding:10px; border:1px solid var(--daily-line); border-radius:18px; }
+  .football-v2 .fpl-squad-panel h3,.football-v2 .fpl-league-panel h3 { font-size:15px; font-weight:500; }
+  .football-v2 .fpl-squad-panel .section-heading > span { font-size:12px; padding:4px 8px; border-radius:7px; }
+  .squad-view-bar { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+  .squad-view-bar > small { padding-right:6px; font-size:12px; color:var(--daily-muted); }
+  .football-v2 .squad-segments { width:auto; padding:3px; gap:2px; border-radius:10px; }
+  .football-v2 .squad-segments .segment { min-height:48px; padding:0 15px; border-radius:8px; font-size:12px; }
+  .football-v2 .fpl-pitch { position:relative; isolation:isolate; height:100%; min-height:224px; max-height:450px; margin:0; padding:8px 5px; border-radius:12px; background:repeating-linear-gradient(0deg,#1B654C 0,#1B654C 12.5%,#216E53 12.5%,#216E53 25%); box-shadow:none; grid-template-rows:repeat(4,minmax(48px,1fr)); gap:4px; overflow:hidden; }
+  .fpl-pitch-lines { position:absolute; z-index:-1; width:100%; height:100%; inset:0; fill:none; stroke:#ffffff38; stroke-width:1.5; pointer-events:none; }
+  .fpl-pitch-lines .pitch-spot { fill:#ffffff38; stroke:none; }
+  .football-v2 .fpl-pitch-row { position:relative; min-height:48px; justify-content:space-evenly; align-items:center; gap:3px; }
+  .football-v2 .fpl-player { appearance:none; width:min(18.5%,104px); min-width:0; min-height:48px; max-height:74px; padding:4px 3px; display:grid; grid-template-columns:1fr auto; grid-template-rows:24px auto; gap:2px; border:1px solid #ffffff3d; border-radius:9px; background:#ffffff; color:#172B23; box-shadow:0 3px 6px #082e2826; font:inherit; cursor:pointer; }
+  .football-v2 .fpl-player-mark { grid-column:1; width:24px; height:24px; background:#EDF3F0; color:#22372D; border-radius:50%; }
+  .football-v2 .fpl-player-mark img { inset:2px; width:20px; height:20px; }
+  .football-v2 .fpl-player-mark b { font-size:12px; color:#22372D; }
+  .football-v2 .fpl-player strong { grid-column:1/-1; grid-row:2; width:100%; max-width:100%; min-height:0; padding:0; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-radius:0; color:#172B23; background:transparent; font-size:12px; font-weight:500; line-height:1.2; }
+  .football-v2 .fpl-player em { position:static; grid-column:2; grid-row:1; min-width:23px; padding:4px; border-radius:6px; background:#243C35; color:#fff; font-size:12px; line-height:1; }
+  .football-v2 .fpl-player small { display:none; }
+  .football-v2 .fpl-player-badge { top:-6px; left:-5px; width:16px; height:16px; background:#D8EF8D; color:#20342A; font-size:12px; box-shadow:0 0 0 2px #216E53; }
+  .football-v2 .fpl-player-warning { right:-5px; top:-7px; --mdc-icon-size:13px; padding:1px; }
+  .football-v2 .fpl-bench { height:100%; margin:0; padding:14px; background:var(--daily-soft); border-radius:12px; display:grid; align-content:center; gap:16px; }
+  .football-v2 .fpl-bench > div { display:flex; justify-content:space-around; gap:8px; }
+  .football-v2 .fpl-bench .fpl-player { width:23%; min-height:64px; grid-template-rows:30px auto; }
+  .football-v2 .fpl-bench .fpl-player strong { font-size:12px; }
+  .football-v2 .fpl-bench > p { margin:0; color:var(--daily-muted); font-size:12px; text-align:center; }
+  .fpl-squad-list { min-height:0; overflow:auto; overscroll-behavior:contain; }
+  .fpl-squad-list button { width:100%; min-height:49px; display:grid; grid-template-columns:45px minmax(0,1fr) 35px 30px; gap:8px; align-items:center; background:var(--daily-surface); color:var(--daily-text); border:0; border-bottom:1px solid var(--daily-line); font:inherit; text-align:left; font-size:12px; }
+  .fpl-squad-list button small { display:block; font-size:12px; color:var(--daily-muted); }
+  .fpl-squad-list button b { color:var(--daily-accent); text-align:right; }
+  .football-v2 .fpl-league-panel { grid-template-rows:30px minmax(0,1fr); gap:5px; padding:10px 14px; border:1px solid var(--daily-line); border-radius:18px; }
+  .football-v2 .fpl-leagues { margin:0; }
+  .football-v2 .fpl-leagues > span { min-height:58px; gap:8px; font-size:12px; }
+  .football-v2 .fpl-leagues > span b { font-size:14px; }
+  .football-modal { width:min(660px,94%); }
+  .football-modal .planner-modal-body { padding:20px 24px; }
+  .football-modal h3 { margin:20px 0 10px; font-size:15px; }
+  .football-modal h3 small { margin-left:10px; font-size:12px; color:var(--daily-muted); font-weight:400; }
+  .football-modal .fixture { border:0; border-bottom:1px solid var(--daily-line); border-radius:0; background:var(--daily-surface); padding:12px 0; }
+  .football-modal .fixture .team { font-size:12px; }
+  .football-modal .fixture-score { font-size:19px; }
+  .football-detail-facts { display:flex; flex-wrap:wrap; gap:12px; margin-top:16px; }
+  .football-detail-facts > span { flex:1; min-width:120px; padding:14px; border-radius:12px; background:var(--daily-soft); }
+  .football-detail-facts small,.football-player-hero small { display:block; color:var(--daily-muted); font-size:12px; margin:0 0 5px; }
+  .football-detail-facts strong { display:block; font-size:16px; color:var(--daily-text); }
+  .football-detail-note { color:var(--daily-muted); font-size:13px; line-height:1.5; }
+  .football-player-hero { display:flex; align-items:center; gap:20px; }
+  .football-player-hero .team-mark { width:72px; height:72px; }
+  .football-player-hero strong { font-size:44px; font-variant-numeric:tabular-nums; }
+  .football-player-hero p { margin:4px 0 0; color:var(--daily-accent); }
+  .club-form { display:flex; gap:7px; }
+  .club-form > span { width:32px; height:32px; display:grid; place-items:center; border-radius:9px; font-size:13px; font-weight:500; background:var(--daily-soft); color:var(--daily-text); }
+  .club-form .is-W { background:var(--daily-success-soft); color:var(--daily-success); }
+  .club-form .is-L { background:var(--daily-danger-soft); color:var(--daily-danger); }
+  .match-detail-score { display:grid; grid-template-columns:1fr 1.1fr 1fr; gap:12px; text-align:center; align-items:center; padding:10px 0; }
+  .match-detail-score > div { display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .match-detail-score strong { font-size:13px; }
+  .match-detail-score b { font-size:36px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .match-detail-score small { color:var(--daily-muted); font-size:12px; }
+  .match-club-actions { display:flex; gap:10px; margin-top:20px; }
+  .match-club-actions button { flex:1; min-height:48px; display:flex; align-items:center; justify-content:space-between; padding:8px 14px; border:1px solid var(--daily-line); border-radius:12px; color:var(--daily-text); background:var(--daily-surface); font:inherit; font-size:12px; }
+  .fpl-comparison > div { display:grid; gap:10px; }
+  .fpl-comparison > p { font-size:12px; color:var(--daily-muted); }
+  .fpl-comparison > div > button { width:100%; min-height:80px; padding:14px; display:grid; grid-template-columns:36px minmax(0,1fr) 65px 90px; align-items:center; gap:12px; background:var(--daily-soft); color:var(--daily-text); border:1px solid var(--daily-line); border-radius:14px; text-align:left; font:inherit; }
+  .comparison-person { display:grid; place-items:center; width:36px; height:36px; border-radius:50%; background:color-mix(in srgb,var(--person-colour) 18%,var(--daily-surface)); }
+  .fpl-comparison button strong,.fpl-comparison button small { display:block; }
+  .fpl-comparison button strong { font-size:14px; }
+  .fpl-comparison button small { font-size:12px; color:var(--daily-muted); margin-top:4px; }
+  .fpl-comparison button b { font-size:28px; text-align:center; color:var(--daily-accent); }
+  .comparison-total { font-size:20px; text-align:right; }
+  .football-v2 [hidden] { display:none !important; }
+  .football-v2 button:focus-visible,.football-modal button:focus-visible { outline:3px solid var(--daily-accent); outline-offset:3px; }
+  @media(hover:hover) { .football-v2 .fixture:hover,.football-v2 .league-table td button:hover { background:var(--daily-soft); }.football-v2 .fpl-player:hover { transform:translateY(-2px); box-shadow:0 5px 10px #082e2850; } }
+  @media(max-height:800px) and (min-width:851px) { .football-v2 { grid-template-rows:148px minmax(0,1fr); }.football-v2 .club-overview { padding:8px 12px;grid-template-rows:48px 14px minmax(0,1fr); }.football-v2 .club-overview .team-mark {width:28px;height:28px;min-width:28px}.football-v2 .fpl-detail,.football-v2 .fpl-detail:has(.fpl-chip) { grid-template-rows:50px 72px minmax(0,1fr);gap:8px; }.football-v2.is-fpl .football-main{gap:8px}.football-v2 .fpl-squad-panel{grid-template-rows:25px 54px minmax(0,1fr)}.football-v2 .fpl-pitch{min-height:216px;padding:4px}.football-v2 .fpl-player{min-height:48px}.football-v2 .fpl-team-card{padding:7px 12px}.football-v2 .fpl-scoreboard strong{font-size:21px} }
+  @media(orientation:portrait),(max-width:850px) { .football-v2{grid-template-rows:156px minmax(0,1fr)}.football-v2 .football-club-overviews{gap:10px}.football-v2 .club-overview{display:block;padding:12px}.football-v2 .club-overview > .eyebrow{display:none}.football-v2 .club-overview .club-match-row{min-height:46px}.football-v2 .club-overview .club-next-row{border:0;border-top:1px solid var(--daily-line);padding-left:0}.football-v2 .club-focus-button{font-size:0;width:48px;padding:0;justify-content:center}.football-v2 .fpl-detail-grid{grid-template-columns:minmax(0,1.85fr) minmax(190px,1fr)}.football-v2 .fpl-team-card{grid-template-columns:1fr;grid-template-rows:auto auto;gap:4px}.football-v2 .fpl-team-card header h3{font-size:14px}.football-v2 .fpl-detail,.football-v2 .fpl-detail:has(.fpl-chip){grid-template-rows:50px 98px minmax(0,1fr)}.football-v2 .fpl-pitch{max-height:none}.football-v2 .squad-segments .segment{padding:0 10px}.football-v2 .fpl-player strong{font-size:12px}.football-v2 .fpl-player em{font-size:12px;min-width:20px}.football-v2 .fpl-player-mark{width:20px;height:22px}.football-v2 .fpl-player-mark img{width:18px;height:18px}.football-v2 .fpl-league-panel{padding:10px}.football-v2 .fpl-leagues>span{font-size:12px} }
+  @media(max-width:620px) { .football-v2,.football-v2.is-fpl,.football-v2.is-table {height:auto;display:flex;flex-direction:column;overflow:visible}.football-v2 .football-main,.football-v2.is-fpl .football-main {display:flex;height:auto;flex-direction:column;overflow:visible}.football-v2 .football-club-overviews{display:grid;grid-template-columns:1fr;width:100%}.football-v2.is-fpl .football-club-overviews,.football-v2.is-table .football-club-overviews{display:none}.football-v2 .football-toolbar{flex-wrap:wrap}.football-v2 .football-tabs{width:100%}.football-v2 .football-tabs .segment{flex:1;padding:0 8px}.football-v2 .fpl-detail,.football-v2 .fpl-detail-grid{display:flex;flex-direction:column;height:auto;overflow:visible}.football-v2 .fpl-squad-panel{min-height:420px;height:420px}.football-v2 .fpl-league-panel{height:320px;min-height:320px}.football-v2 .fpl-team-card{display:block}.football-v2 .fpl-scoreboard{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:12px}.football-v2 .fpl-scoreboard strong{font-size:19px}.fpl-entry-bar{flex-wrap:wrap;gap:8px}.fpl-compare-button{margin:0;min-height:42px}.football-v2 .fixture-groups{overflow:visible}.football-v2 .fixture .team{font-size:12px}.football-v2 .fpl-player strong{font-size:12px}.football-v2 .league-table td,.football-v2 .league-table th{padding:3px;font-size:12px}.league-table td button{gap:4px;font-size:12px}.league-table td button .team-mark{display:none}.football-modal .planner-modal-body{padding:16px}.fpl-comparison > div > button{grid-template-columns:28px minmax(0,1fr) 45px 60px;gap:8px;padding:10px}.comparison-total{font-size:17px}.fpl-comparison button b{font-size:24px} }
+  .hub-content:has(.football-v2) { padding:16px 20px 12px; grid-template-rows:42px minmax(0,1fr); gap:12px; }
+  .hub-content:has(.football-v2) .hub-topbar h1 { font-size:26px; }
+  .hub-content:has(.football-v2) .hub-topbar-date { font-size:12px; }
+  .football-v2 .matchweek-controls button { min-width:48px; width:48px; flex-basis:48px; }
+  .football-v2 .fpl-team-card header > ha-icon { display:none; }
+  .football-v2 .fpl-squad-panel { overflow:hidden; }
+  .football-v2 .fpl-player-mark b { line-height:24px; }
+  .football-v2 .fpl-player-mark img { z-index:1; background:#EDF3F0; }
+  .football-v2 .fpl-player-badge { width:20px; height:20px; font-size:12px; }
+  .football-v2 .fpl-player strong { font-weight:500; }
+  .football-v2 .football-tabs .segment,.football-v2 .squad-segments .segment { min-height:48px; }
+  .football-v2 .club-focus-button { min-width:48px; }
+  .hub-content:has(.football-v2) .football-freshness.is-stale { color:var(--daily-warning); }
+  .hub-content:has(.football-v2) .football-freshness.is-waiting { color:var(--daily-muted); }
+  .football-v2 .fpl-player-mark:has(img:not([hidden])) b { visibility:hidden; }
+  .football-v2 .team-mark strong[aria-hidden=true],.football-modal .team-mark strong[aria-hidden=true] { visibility:hidden; }
+  .football-modal footer button { min-height:48px; padding:0 20px; border:0; border-radius:10px; background:var(--daily-accent); color:var(--daily-on-accent); font:inherit; }
+  @media(orientation:portrait) and (min-width:621px) {
+    .football-v2 .fpl-detail-grid { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr) 180px; }
+    .football-v2 .fpl-league-panel { height:100%; }
+    .football-v2 .fpl-leagues > span { min-height:48px; }
+    .football-v2 .fpl-player { width:min(18.5%,104px); }
+  }
 `;
