@@ -1,7 +1,6 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.26.0";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.27.0";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
-import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.26.0";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.27.0";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -13,7 +12,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
-const DASHBOARD_VERSION = "0.26.0";
+const DASHBOARD_VERSION = "0.27.0";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
@@ -1399,6 +1398,22 @@ export function isCurrentOrFutureCalendarEvent(event, now = new Date(), timeZone
 
   const startDate = new Date(start);
   return !Number.isNaN(startDate.getTime()) && startDate.getTime() >= nowDate.getTime();
+}
+
+export function todayAgendaModel(events = [], now = new Date(), timeZone = "Europe/London") {
+  const current = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(current.getTime())) return {primary:null,status:"empty",day:null,remaining:[]};
+  const today = dateKey(current,timeZone);
+  const candidates = events.filter(event => Number.isFinite(Date.parse(calendarEventStart(event))) && isCurrentOrFutureCalendarEvent(event,current,timeZone));
+  const timed = candidates.filter(event => !isAllDayCalendarEvent(event)).sort((a,b) => new Date(calendarEventStart(a))-new Date(calendarEventStart(b)));
+  const allDay = candidates.filter(isAllDayCalendarEvent).sort((a,b) => String(calendarEventStart(a)).localeCompare(String(calendarEventStart(b))));
+  const primary = timed[0] || allDay[0] || null;
+  const eventDay = event => isAllDayCalendarEvent(event) ? String(calendarEventStart(event)).slice(0,10) : dateKey(calendarEventStart(event),timeZone);
+  const day = primary ? eventDay(primary) : null;
+  const ongoing = primary && !isAllDayCalendarEvent(primary) && new Date(calendarEventStart(primary)) <= current;
+  const status = !primary ? "empty" : isAllDayCalendarEvent(primary) ? "all-day" : ongoing ? "now" : day === today ? "next" : day === shiftDateKey(today,1) ? "tomorrow" : "later";
+  const remaining = [...allDay.filter(event => eventDay(event) === today), ...timed, ...allDay].filter(event => event !== primary);
+  return {primary,status,day,remaining:[...new Map(remaining.map(event => [familyPlannerEventKey(event),event])).values()].slice(0,2)};
 }
 
 export function formatPoints(value, locale = "en-GB") {
@@ -3828,35 +3843,64 @@ export class FamilyHubCard extends HTMLElementBase {
     }).join("")}</div></section>`;
   }
 
+  _renderTodayPreparation(model) {
+    const warning = this._preparationError || this._calendarError || (this._config.school?.homework_enabled ? this._homeworkError : "");
+    const pending = model.rows.filter(row => !row.completed).slice(0,2).map(row => row.title).join(" · ");
+    return `<article class="readiness-panel today-preparation-card"><div><p class="eyebrow">${model.evening ? "TOMORROW" : "BEFORE YOU GO"}</p><h3>${model.evening ? "Ready for tomorrow?" : "Ready for today?"}</h3><p class="readiness-progress" role="status">${warning ? "Some preparation information is unavailable" : this._preparationLoading ? "Checking the shared list…" : `${model.complete} of ${model.total} listed items ready`}</p>${pending && !warning ? `<p class="today-prep-preview">${escapeHtml(pending)}</p>` : ""}</div><button type="button" data-readiness-open aria-label="Open preparation">${outlineIcon("calendar")}<span>Open preparation</span><ha-icon icon="mdi:chevron-right"></ha-icon></button></article>`;
+  }
+
+  _renderTodayAgenda(model) {
+    const {primary,status,remaining,day} = model;
+    const locale = this._config.product.locale, zone = this._config.product.timezone;
+    const peopleLabel = event => {const people=familyPlannerPeople(event,this._config.people).filter(person=>person.role!=="household");return people.length > 2 ? "Family" : people.map(person=>person.name).join(" & ") || "Family";};
+    const timeLabel = event => isAllDayCalendarEvent(event) ? "All day" : formatTime(calendarEventStart(event),locale,zone);
+    const label = status === "now" ? "HAPPENING NOW" : status === "next" ? "UP NEXT" : status === "tomorrow" ? "TOMORROW" : status === "later" ? formatDay(calendarEventStart(primary),locale,zone) : status === "all-day" ? "ALL DAY" : this._calendarError ? "CHECK YOUR CALENDAR" : "A LITTLE BREATHING ROOM";
+    const today = dateKey(new Date(),zone);
+    const detail = primary ? [status === "now" && calendarEventEnd(primary) ? `Until ${formatTime(calendarEventEnd(primary),locale,zone)}` : status === "all-day" ? formatDay(calendarEventStart(primary),locale,zone) : timeLabel(primary),peopleLabel(primary),primary.location].filter(Boolean).join(" · ") : this._calendarError ? "Open Calendar to check your schedule." : "There are no more plans in the connected calendar.";
+    const key = primary ? familyPlannerEventKey(primary) : "";
+    const prep = primary ? preparationProgress(this._preparationItems,key) : null;
+    return `<article class="next-panel today-next today-agenda" aria-label="Now and next"><header><p class="eyebrow">YOUR DAY</p><button type="button" data-view="calendar">Calendar <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></header>${this._calendarError ? '<p class="today-source-warning" role="status">Calendar updates are delayed. These plans may be incomplete.</p>' : ""}<div class="today-current-plan is-${status}"><span class="today-plan-label">${escapeHtml(label)}</span><h2>${escapeHtml(primary?.summary || (this._calendarError ? "Plans unavailable" : "Nothing else planned"))}</h2><p>${escapeHtml(detail)}</p>${primary ? `<div class="today-plan-actions"><button type="button" class="today-plan-open" data-focus-open-plan="${escapeHtml(key)}">Open plan <ha-icon icon="mdi:arrow-right"></ha-icon></button>${prep?.total ? `<button type="button" class="today-plan-prep" data-focus-open-plan="${escapeHtml(key)}"><ha-icon icon="mdi:bag-personal-outline"></ha-icon>${prep.complete}/${prep.total} ready</button>` : ""}</div>` : '<button type="button" class="today-plan-open" data-view="calendar">Open calendar <ha-icon icon="mdi:arrow-right"></ha-icon></button>'}</div>${remaining.length ? `<div class="today-next-list"><p>On your calendar</p>${remaining.map(event => `<button type="button" data-focus-open-plan="${escapeHtml(familyPlannerEventKey(event))}"><span class="today-next-time">${escapeHtml(dateKey(calendarEventStart(event),zone) === today ? timeLabel(event) : `${formatDay(calendarEventStart(event),locale,zone)} · ${timeLabel(event)}`)}</span><span><strong>${escapeHtml(event.summary || "Family plan")}</strong><small>${escapeHtml(peopleLabel(event))}</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`).join("")}</div>` : ""}</article>`;
+  }
+
+  _renderTodayLunchShortcut(now) {
+    if (!this._config.school?.lunch_menus?.length) return "";
+    const children = this._config.people.filter(person => person.role === "child" && (this._familyViewPerson()?.role !== "child" || person.id === this._familyViewId));
+    if (!children.length) return "";
+    const zone=this._config.product.timezone,today=dateKey(now,zone);
+    const hour=Number(new Intl.DateTimeFormat("en-GB",{hour:"numeric",hourCycle:"h23",timeZone:zone}).format(now));
+    let day = hour < 13 ? today : shiftDateKey(today,1);
+    for (let offset=0;offset<14;offset++) {
+      const candidate=shiftDateKey(day,offset);
+      if(children.some(person => ["meal","packed"].includes(schoolLunchForDate(this._config,person.id,candidate).status))) {day=candidate;break;}
+    }
+    const label=day===today?"Today’s school lunch":day===shiftDateKey(today,1)?"Tomorrow’s school lunch":`School lunch · ${formatDay(`${day}T12:00:00Z`,this._config.product.locale,"UTC")}`;
+    return `<article class="school-lunch-today today-shortcut-lunch"><h3>${escapeHtml(label)}</h3><div class="school-lunch-children">${children.map(person=>{const lunch=schoolLunchForDate(this._config,person.id,day);return `<button type="button" class="school-lunch-child" data-school-lunch-open="${escapeHtml(person.id)}" data-lunch-date="${day}" style="--person-colour:${escapeHtml(person.colour)}"><span class="family-view-token">${escapeHtml(person.name.slice(0,1))}</span><span><small>${escapeHtml(person.name)}</small><strong>${escapeHtml(lunch.status === "packed" && day !== today ? "Packed lunch" : lunch.title)}</strong></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`;}).join("")}</div></article>`;
+  }
+
   _renderToday() {
     if(this._simpleView) return this._renderSimpleToday();
-    const states = this._hass?.states || {};
-    const features = this._config.features;
-    const home = features.rooms ? homeSummaryPresentation(this._config, states) : null;
-    const room = features.rooms ? this._config.rooms.find((entry) => entry.id === this._config.home?.default_room) || this._config.rooms[0] : null;
-    const summary = room ? deriveRoomState(room, states, this._config.theme.accent) : null;
-    const next = features.calendar ? this._familyViewCalendarEvents().filter((event) => isCurrentOrFutureCalendarEvent(event, new Date(), this._config.product.timezone)).sort((a,b) => new Date(calendarEventStart(a))-new Date(calendarEventStart(b)))[0] : null;
-    const football = features.football ? this._featuredFixtures() : null;
-    const readOnly = this._config.display.read_only;
-    const availableLights = (room?.lights || []).filter((id) => isEntityAvailable(states[id]));
-    const lighting = homeLightingCompactPresentation(home || {});
-    const heating = homeHeatingCompactPresentation(home || {});
-    const energy = features.energy ? energyCompactPresentation(this._energyPresentation()) : null;
-    const security = features.entry ? todaySecurityPresentation(states[this._config.entry?.alarm_entity], states[this._config.entry?.garage?.cover_entity], (this._config.entry?.cameras || []).flatMap((camera) => [camera.ringing_entity,camera.person_entity,camera.motion_entity]).filter(Boolean).map((id) => states[id])) : null;
+    const states=this._hass?.states || {},features=this._config.features,now=new Date();
+    const home=features.rooms ? homeSummaryPresentation(this._config,states) : null;
+    const heating=homeHeatingCompactPresentation(home || {}),lighting=homeLightingCompactPresentation(home || {});
+    const security=features.entry ? todaySecurityPresentation(states[this._config.entry?.alarm_entity],states[this._config.entry?.garage?.cover_entity],(this._config.entry?.cameras || []).flatMap(camera=>[camera.ringing_entity,camera.person_entity,camera.motion_entity]).filter(Boolean).map(id=>states[id])) : null;
+    const phase=familyDayPhase(now,this._config.product.timezone,this._config.display.day_rhythm);
+    const ready=this._readiness();
+    const showReady=features.family && this._config.calendar.preparation?.enabled && ready.total>0 && (ready.evening || phase.id==="morning");
+    const actions=features.family ? this._renderTodayHomeworkActions(phase) : "";
     const departure=this._renderDeparture();
-    const phase = familyDayPhase(new Date(),this._config.product.timezone,this._config.display.day_rhythm);
-    const homeworkActions = this._renderTodayHomeworkActions(phase);
-    const ready = this._readiness();
-    const showReady = features.family && this._config.calendar.preparation?.enabled && ready.total > 0 && (ready.evening || phase.id === "morning");
-    const preview = features.family && features.calendar ? todayPreparationPreview(this._preparationItems.filter((item) => (this._familyViewPerson()?.role !== "child" || item?._preparation?.personId === this._familyViewId) && (!next || item?._preparation?.eventKey !== familyPlannerEventKey(next))),this._calendarEvents.length ? this._calendarEvents : this._calendarFallbackEvents(),this._config.people,new Date(),this._config.product.timezone,2) : {total:0,complete:0,rows:[]};
-    return `<section class="today-grid focus-today" data-calendar="${features.calendar}" data-secondary-count="${[features.family, features.football, features.music].filter(Boolean).length}" aria-label="Today at a glance">
-      ${showReady ? this._renderReadiness() : room ? `<article class="surface hero-panel today-hero focus-home-card"><div class="daily-home-art" aria-hidden="true"><img src="${HOME_ILLUSTRATION}" alt="" decoding="async"></div><div class="today-hero-copy"><h2>${escapeHtml(room.name)}</h2><p>${Number.isFinite(summary.temperature) ? `${escapeHtml(room.name)} · ${formatTemperature(summary.temperature)}` : "Your home controls"}</p></div><button type="button" class="focus-home-open" data-focus-home-room="${escapeHtml(room.id)}" aria-label="Open ${escapeHtml(room.name)} controls"><ha-icon icon="mdi:arrow-top-right"></ha-icon></button><div class="focus-home-controls"><button type="button" data-room-lights="${escapeHtml(room.id)}" data-light-service="${summary.lightsOn ? "turn_off":"turn_on"}" aria-label="Turn ${escapeHtml(room.name)} lights ${summary.lightsOn ? "off":"on"}" aria-pressed="${Boolean(summary.lightsOn)}" ${readOnly || !availableLights.length ? "disabled" : ""}><ha-icon icon="mdi:lamp-outline"></ha-icon><span><strong>${availableLights.length ? summary.lightsOn ? "Lights on":"Lights off" : "Lighting unavailable"}</strong><small>${escapeHtml(room.name)}</small></span></button><button type="button" ${room.climate ? `data-focus-home-room="${escapeHtml(room.id)}" data-room-section-target="comfort"` : 'data-home-target="heating"'}><ha-icon icon="mdi:thermometer"></ha-icon><span><strong>${Number.isFinite(summary.targetTemperature) ? formatTemperature(summary.targetTemperature):Number.isFinite(home?.averageTemperature) ? formatTemperature(home.averageTemperature):"View heating"}</strong><small>${room.climate ? "Heating target" : "Home temperature"} <ha-icon icon="mdi:chevron-right"></ha-icon></small></span></button></div></article>` : `<article class="focus-hello"><h2>${escapeHtml(greetingForTime(new Date(),this._config.product.timezone))}</h2><p>Your family’s day, together.</p></article>`}
-      <div class="focus-today-plan">${this._preparationError ? `<p class="calendar-warning" role="alert">${escapeHtml(this._preparationError)}</p>` : ""}${departure || (features.calendar ? `<article class="next-panel today-next"><p class="eyebrow">${next ? `Next, ${isAllDayCalendarEvent(next) ? "all day" : `at ${escapeHtml(formatTime(calendarEventStart(next),this._config.product.locale,this._config.product.timezone))}`}` : "Coming up"}</p><h2>${escapeHtml(next?.summary || "No plans yet")}</h2><p class="supporting">${next ? `${escapeHtml(familyPlannerPeople(next,this._config.people).filter(person => person.role !== "household").map(person => person.name).join(", ") || "Everyone")}${next.location ? ` · ${escapeHtml(next.location)}` : ""}` : "The next family event will appear here."}</p>${next && !showReady ? this._renderFocusChecklist(next, { compact:true }) : ""}<button type="button" class="text-action" ${next ? `data-focus-open-plan="${escapeHtml(familyPlannerEventKey(next))}"`:'data-view="calendar"'}>See the plan <ha-icon icon="mdi:arrow-right"></ha-icon></button></article>`:"")}${features.family ? `<article class="children-panel today-family" data-day-phase="${phase.id}"><div class="section-heading"><h2>${homeworkActions?escapeHtml(phase.label):"A little left to do"}</h2><button type="button" data-view="family">Tasks <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="today-job-list">${homeworkActions || this._renderTodayJobs()}</div>${showReady ? "" : this._renderTodayTaskPreview(preview)}${this._renderHomeworkReminder()}</article>`:""}</div>
-      ${this._renderSchoolLunchToday()}
-      ${football ? `<article class="football-panel today-football" data-fixture-count="${football.fixtureCount || 0}"><div class="section-heading"><h2>This week in football</h2><button type="button" data-view="football">All football <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="featured-fixtures">${football.html}</div></article>`:""}
-      ${home || security || energy ? `<footer class="hero-metrics focus-home-summary">${home ? `<button type="button" data-home-target="heating"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon><span><strong>${escapeHtml(`${heating.value} · ${heating.detail}`)}</strong><small>${escapeHtml(heating.detail)}</small></span></button><button type="button" data-home-target="lights"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><span><strong>${escapeHtml(`${lighting.value} · ${lighting.detail}`)}</strong><small>${escapeHtml(lighting.detail)}</small></span></button>`:""}${security ? `<button type="button" data-view="entry"><ha-icon icon="${security.icon}"></ha-icon><span><strong>${escapeHtml(security.title)}</strong><small>${escapeHtml(security.detail)}</small></span></button>`:""}${energy ? `<button type="button" data-view="energy"><ha-icon icon="${ICONS.energy}"></ha-icon><span><strong>${escapeHtml(energy.value)}</strong><small>${escapeHtml(energy.detail)}</small></span></button>`:""}</footer>` : ""}
+    const agenda=todayAgendaModel(features.calendar ? this._familyViewCalendarEvents() : [],now,this._config.product.timezone);
+    const favouriteModels=features.football ? this._clubOverviewModels() : [];
+    const live=new Set(favouriteModels.map(model=>model.live).filter(Boolean).map(fixtureIdentity)).size;
+    const lunch=this._renderTodayLunchShortcut(now);
+    const shortcuts=Boolean(home || lunch || features.football);
+    return `<section class="today-grid today-v2" data-calendar="${features.calendar}" data-secondary-count="${[features.family,features.football,features.music].filter(Boolean).length}" data-has-family="${features.family}" data-has-shortcuts="${shortcuts}" data-has-attention="${security?.title==="Check home"}" aria-label="Today at a glance">
+      ${security?.title==="Check home" ? `<button type="button" class="today-attention" data-view="entry"><ha-icon icon="${security.icon}"></ha-icon><span><strong>${escapeHtml(security.title)}</strong><small>${escapeHtml(security.detail)}</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}
+      <div class="today-main-plan">${departure || (features.calendar ? this._renderTodayAgenda(agenda) : `<article class="today-welcome"><p class="eyebrow">YOUR HOME</p><h2>${escapeHtml(greetingForTime(now,this._config.product.timezone))}</h2><p>Your family’s day, together.</p>${features.rooms ? '<button type="button" data-view="rooms">Open Home <ha-icon icon="mdi:arrow-right"></ha-icon></button>' : ""}</article>`)}</div>
+      ${features.family ? `<article class="children-panel today-family" data-day-phase="${phase.id}"><div class="section-heading"><div><p class="eyebrow">FAMILY FOCUS</p><h2>${escapeHtml(phase.label)}</h2></div><button type="button" data-view="family">Tasks <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="today-job-list">${actions || this._renderTodayJobs()}</div>${showReady ? this._renderTodayPreparation(ready) : actions ? "" : this._renderHomeworkReminder()}</article>` : ""}
+      ${shortcuts ? `<footer class="today-shortcuts focus-home-summary" aria-label="Useful shortcuts">${home ? `<button type="button" class="today-home-shortcut" data-view="rooms">${outlineIcon("rooms")}<span><strong>Home</strong><small>${escapeHtml(`${heating.value} ${heating.detail} · ${lighting.value} ${lighting.detail}`)}</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}${lunch}${features.football ? `<button type="button" class="today-football" data-view="football">${outlineIcon("football")}<span><strong>Football${live ? ` · ${live} live` : ""}</strong><small>${escapeHtml(favouriteModels.map(model=>this._clubPresentation(model.code).label).join(" & "))} · Scores & FPL</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}</footer>` : ""}
     </section>`;
   }
+
 
   _setSimpleView(simple) {
     if(simple && (!this._config.features.family || !this._config.people.some(person=>person.role === "child"))) return;
@@ -6863,7 +6907,7 @@ export class FamilyHubCard extends HTMLElementBase {
       this._selectFamilyView(target.dataset.schoolLunchOpen);
       this._view = "family";
       this._taskSection = "lunch";
-      this._lunchWeekKey = null;
+      this._lunchWeekKey = /^\d{4}-\d{2}-\d{2}$/.test(target.dataset.lunchDate || "") ? mondayForDateKey(target.dataset.lunchDate) : null;
       this._scheduleRender(true);
       return;
     }

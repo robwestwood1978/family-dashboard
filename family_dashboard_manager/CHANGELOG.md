@@ -1,3 +1,10 @@
+## 0.27.0
+
+- Redesign Today around the current or next plan, two family actions and compact Home, lunch and Football shortcuts. Full preparation, menus, football and house controls stay one tap away.
+- Distinguish plans happening now from upcoming events and move the lunch shortcut to the next scheduled school meal after lunchtime, opening the correct week across weekends.
+- Keep preparation progress and ownership in the shared checklist, retain morning departure controls, and avoid duplicate homework and house-status panels.
+- Preserve the bounded music dock, child selection, read-only permissions and live-update scroll state. Adjust FPL pitch space for short landscape displays.
+
 ## 0.26.0
 
 - Rebuild Football with a compact match centre, favourite-club and live filters, a current-matchweek shortcut, match details and club form views.
