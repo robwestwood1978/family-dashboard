@@ -1,3 +1,7 @@
+## 0.25.6
+
+- Support the exact week-commencing dates printed on school lunch menus. Use the listed menu week after holidays and show no scheduled menu for unlisted weeks. Existing continuous rotations remain supported.
+
 ## 0.25.5
 
 - Play spelling words through a configured Home Assistant speech provider, including the existing Google Translate voice, directly on the tablet. Cache audio in Home Assistant, prepare playback before the tap, and offer device voices as an explicit fallback. Only the active word is sent for speech.

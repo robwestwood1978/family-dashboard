@@ -633,6 +633,15 @@ export function validateConfig(config) {
       if (menu.end_date < menu.start_date) fail(`${path}.end_date`, "must not precede the start date");
       if (new Date(`${menu.week_one_date}T12:00:00Z`).getUTCDay() !== 1) fail(`${path}.week_one_date`, "must be a Monday");
       if (menu.week_one_date > menu.start_date) fail(`${path}.week_one_date`, "must be on or before the start date");
+      if (menu.week_start_dates) {
+        validateUnique(menu.week_start_dates.map(entry => entry.date), `${path}.week_start_dates[].date`);
+        for (const entry of menu.week_start_dates) {
+          const date = new Date(`${entry.date}T12:00:00Z`);
+          if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0,10) !== entry.date || date.getUTCDay() !== 1) fail(`${path}.week_start_dates`, "must contain real Monday dates");
+          if (entry.date < menu.week_one_date || entry.date > menu.end_date) fail(`${path}.week_start_dates`, "must be within the menu dates");
+          if (entry.week > menu.weeks.length) fail(`${path}.week_start_dates`, "week must exist in the rotation");
+        }
+      }
       for (const day of menu.closed_dates || []) {
         const date = new Date(`${day}T12:00:00Z`);
         if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0,10) !== day || day < menu.start_date || day > menu.end_date) fail(`${path}.closed_dates`, "must contain real dates within the menu term");
