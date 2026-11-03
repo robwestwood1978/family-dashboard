@@ -43,7 +43,8 @@ class HomeworkStore:
         self.changed()
 
     def client(self):
-        return client_data(self.data, dt_util.now().date())
+        now = dt_util.now()
+        return client_data(self.data, now.date(), now)
 
 
 def authorised(user, policy):

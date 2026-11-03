@@ -73,6 +73,8 @@ import {
   spellingVoiceKey,
   spellingVoices,
   selectSpellingVoice,
+  isSafeSpellingAudioPath,
+  spellingPracticePlan,
   teamCrest,
   todaySecurityPresentation,
   weatherStateLabel
@@ -95,6 +97,19 @@ test("spelling prefers exposed British voices and honours a saved device choice"
   assert.equal(selectSpellingVoice([french, british, enhanced], spellingVoiceKey(siri)), enhanced);
   assert.equal(selectSpellingVoice([french]), null);
   assert.equal(selectSpellingVoice([]), null);
+});
+
+test("spelling audio accepts only local Home Assistant TTS paths", () => {
+  assert.equal(isSafeSpellingAudioPath("/api/tts_proxy/abc123.mp3"), true);
+  for (const path of ["https://other.example/audio.mp3", "//other.example/api/tts_proxy/token", "/api/tts_proxy/../config", "/api/tts_proxy/token?redirect=elsewhere", "/media/recording.mp3", null]) assert.equal(isSafeSpellingAudioPath(path), false);
+});
+
+test("spelling practice uses the new week while school test records keep their original date", () => {
+  const child = {id:"child_one",name:"Child",spelling_practice_due:"2026-10-20",routines:[{kind:"spelling",due:"2026-10-13",marks:{test_done:true}}],plans:[{id:"old",kind:"spelling",due:"2026-10-13",words:["cloud"]},{id:"next",kind:"spelling",due:"2026-10-20",words:["solid"]}]};
+  assert.equal(spellingPracticePlan(child).id, "next");
+  assert.equal(familyHomeworkActions([child], "afternoon", "2026-10-13")[0].planId, "next");
+  child.plans.pop();
+  assert.equal(spellingPracticePlan(child), null);
 });
 
 test("maps family planner events to people and stable preparation records", () => {
