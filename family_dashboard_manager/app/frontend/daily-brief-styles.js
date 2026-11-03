@@ -2158,6 +2158,9 @@ export const DAILY_BRIEF_STYLES = `
   @media(max-height:740px) and (min-width:851px) {
     .football-v2 .fpl-detail,.football-v2 .fpl-detail:has(.fpl-chip) { grid-template-rows:50px 60px minmax(0,1fr); }
     .football-v2 .fpl-team-card { padding:5px 10px; }
+    .football-v2 .fpl-scoreboard span { padding:3px; }
+    .football-v2 .fpl-scoreboard strong { line-height:1.15; }
+    .football-v2 .fpl-scoreboard small { line-height:1.25; }
   }
   .hub-card .today-v2 .today-main-plan { grid-column:1; grid-row:1; display:block; }
   .hub-card .today-v2 .today-next { grid-column:auto; grid-row:auto; width:100%; max-width:none; }
