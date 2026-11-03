@@ -2041,4 +2041,10 @@ export const DAILY_BRIEF_STYLES = `
     .football-v2 .fpl-leagues > span { min-height:48px; }
     .football-v2 .fpl-player { width:min(18.5%,104px); }
   }
+  @media(max-width:620px) {
+    .football-v2 .matchweek-controls { display:grid; grid-template-columns:48px minmax(0,1fr) 48px; width:100%; min-width:0; }
+    .football-v2 .matchweek-controls label,.football-v2 .matchweek-controls select { width:100%; min-width:0; max-width:100%; }
+    .football-v2 .matchweek-controls .football-current-week { grid-column:1/-1; width:100%; }
+    .football-v2 .football-filters { flex-wrap:wrap; }
+  }
 `;
