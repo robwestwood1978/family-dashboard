@@ -1,3 +1,8 @@
+## 0.25.5
+
+- Play spelling words through a configured Home Assistant speech provider, including the existing Google Translate voice, directly on the tablet. Cache audio in Home Assistant, prepare playback before the tap, and offer device voices as an explicit fallback. Only the active word is sent for speech.
+- Add an optional test-day spelling changeover time in Homework weekly rules. Advance practice after that time without changing the real test date, results or hand-in records; reveal only the next saved list when its set date is the following day.
+
 ## 0.25.4
 
 - Choose an English spelling voice from those offered by the device and remember the choice locally. Prefer British English automatically, including Siri or enhanced voices when exposed by the browser.

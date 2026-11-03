@@ -699,6 +699,8 @@
           }
         },
         "homework_enabled": { "type": "boolean", "description": "Show shared homework, spelling practice and reading logs in Tasks. Requires the local Family Dashboard Homework integration." },
+        "spelling_tts_entity": { "type": "string", "pattern": "^tts\\.[a-z0-9_]+$|^$", "description": "Home Assistant speech provider for spelling words. Choose the same Google provider as School mornings to play its voice on the tablet. Leave blank to use device voices." },
+        "spelling_tts_language": { "type": "string", "maxLength": 35, "pattern": "^(?:[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*|)$", "description": "Speech language, for example en-gb for Google British English. Leave blank to use the dashboard language." },
         "source": {
           "enum": ["classroom", "calendar"],
           "description": "Classroom uses the read-only API sensors. Calendar is the admin-independent fallback and uses the configured school calendars."

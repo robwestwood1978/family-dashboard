@@ -613,6 +613,7 @@ export function validateConfig(config) {
   validateUnique(fplIds, "config.football.entries[].entry_id");
 
   const school = requireObject(config.school, "config.school");
+  if (school.spelling_tts_entity) validateEntityId(school.spelling_tts_entity, "config.school.spelling_tts_entity", "tts");
   const schoolSource = school.source === undefined ? "classroom" : school.source;
   if (!["classroom", "calendar"].includes(schoolSource)) {
     fail("config.school.source", "must be classroom or calendar");

@@ -68,6 +68,10 @@ def validate_profile(raw):
         profile[key] = value
     if raw.get("paused_until"):
         profile["paused_until"] = iso(raw["paused_until"])
+    switch_time = raw.get("spelling_rollover_time") or None
+    if switch_time is not None and (not isinstance(switch_time, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", switch_time)):
+        raise ValueError("Choose a valid spelling changeover time")
+    profile["spelling_rollover_time"] = switch_time
     if (profile["maths_day"] is None) != (profile["maths_set_day"] is None):
         raise ValueError("Choose both the maths set day and hand-in day")
     return profile
@@ -136,13 +140,30 @@ def routines(profile, today, data):
     return result
 
 
-def client_data(data, today):
+def spelling_practice_due(profile, today, now=None):
+    """Advance practice after the test without moving the real school deadline."""
+    weekday = profile.get("spelling_day")
+    if weekday is None or profile.get("paused_until") and today.isoformat() <= profile["paused_until"]:
+        return None
+    due = next_due(today, weekday)
+    cutoff = profile.get("spelling_rollover_time")
+    if due == today and cutoff and now is not None and now.date() == today and now.strftime("%H:%M") >= cutoff:
+        due += timedelta(days=7)
+    return due.isoformat()
+
+
+def client_data(data, today, now=None):
     children = []
     for profile in data["profiles"]:
         child = deepcopy(profile)
         child["routines"] = routines(profile, today, data)
+        child["spelling_practice_due"] = practice_due = spelling_practice_due(profile, today, now)
+        # Existing term plans commonly start on Wednesday. The explicit test-day
+        # cutoff may reveal only the next practice list one day earlier.
+        early_practice = practice_due and practice_due > today.isoformat() and today.weekday() == profile.get("spelling_day")
         child["plans"] = [dict(deepcopy(p), marks=deepcopy(data["marks"].get(p["id"], {}))) for p in data["plans"]
-                          if p["person_id"] == profile["id"] and not p["archived"] and p["set_date"] <= today.isoformat()
+                          if p["person_id"] == profile["id"] and not p["archived"]
+                          and (p["set_date"] <= today.isoformat() or early_practice and p["kind"] == "spelling" and p["due"] == practice_due and p["set_date"] <= (today + timedelta(days=1)).isoformat())
                           and (p["due"] >= (today - timedelta(days=14)).isoformat() or not data["marks"].get(p["id"], {}).get("handed_in"))]
         child["logs"] = [deepcopy(log) for log in data["logs"] if log["person_id"] == profile["id"] and log["date"] >= (today - timedelta(days=14)).isoformat()]
         children.append(child)

@@ -1,7 +1,8 @@
 """School cycles, retained progress and parent edit boundaries."""
 import importlib.util
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime
+from copy import deepcopy
 import unittest
 
 spec = importlib.util.spec_from_file_location("homework_model", Path(__file__).parent / "family_dashboard_homework/model.py")
@@ -54,6 +55,35 @@ class HomeworkModelTest(unittest.TestCase):
         routine=next(r for r in next_week["routines"] if r["kind"]=="spelling")
         self.assertEqual(routine["plan_ids"],[])
         self.assertEqual(next_week["plans"][0]["due"],"2026-10-13")
+
+    def test_spelling_changes_after_test_time_without_moving_school_records(self):
+        self.data["profiles"][0]["spelling_rollover_time"] = "09:00"
+        for due, start, word in [("2026-10-13", "2026-10-07", "cloud"), ("2026-10-20", "2026-10-14", "solid"), ("2026-10-27", "2026-10-21", "matter")]:
+            self.data = model.apply_admin(self.data, "publish", {"plan": {"person_id": "child_one", "kind": "spelling", "title": "Weekly words", "due": due, "set_date": start, "words": [word]}})
+        original = deepcopy(self.data)
+        before = model.client_data(self.data, self.today, datetime(2026,10,13,8,59))["children"][0]
+        self.assertEqual(before["spelling_practice_due"], "2026-10-13")
+        self.assertEqual([p["words"] for p in before["plans"]], [["cloud"]])
+        after = model.client_data(self.data, self.today, datetime(2026,10,13,9,0))["children"][0]
+        self.assertEqual(after["spelling_practice_due"], "2026-10-20")
+        self.assertEqual([p["words"] for p in after["plans"]], [["cloud"], ["solid"]])
+        self.assertEqual(next(r for r in after["routines"] if r["kind"] == "spelling")["due"], "2026-10-13")
+        self.assertEqual(self.data, original)
+        wednesday = model.client_data(self.data, date(2026,10,14), datetime(2026,10,14,0,0))["children"][0]
+        self.assertEqual(wednesday["spelling_practice_due"], "2026-10-20")
+        # Another child and an unconfigured cutoff retain their normal school-day cycle.
+        other = model.client_data(self.data, self.today, datetime(2026,10,13,12,0))["children"][1]
+        self.assertEqual(other["spelling_practice_due"], "2026-10-13")
+
+    def test_spelling_cutoff_does_not_reuse_old_words_when_next_list_is_missing(self):
+        self.data["profiles"][0]["spelling_rollover_time"] = "09:00"
+        child = model.client_data(self.data, self.today, datetime(2026,10,13,10,0))["children"][0]
+        self.assertEqual(child["spelling_practice_due"], "2026-10-20")
+        self.assertEqual(child["plans"], [])
+        self.data["profiles"][0]["paused_until"] = "2026-10-13"
+        self.assertIsNone(model.client_data(self.data, self.today, datetime(2026,10,13,10,0))["children"][0]["spelling_practice_due"])
+        for invalid in ["9:00", "24:00", "09:60", 9]:
+            with self.assertRaises(ValueError): model.validate_profile({**profile(), "spelling_rollover_time": invalid})
 
     def test_school_submission_separate_from_completion(self):
         self.data=model.apply_admin(self.data,"publish",{"plan":{"person_id":"child_one","kind":"maths","title":"Fractions","due":"2026-10-16"}})

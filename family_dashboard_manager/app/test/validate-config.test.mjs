@@ -36,6 +36,17 @@ test("accepts the public schema-v7 configuration", () => {
   );
 });
 
+test("spelling speech is optional and limited to a TTS provider", () => {
+  const config = structuredClone(example);
+  config.school.spelling_tts_entity = "tts.example_google";
+  config.school.spelling_tts_language = "en-gb";
+  assert.equal(validateConfig(config).school.spelling_tts_entity, "tts.example_google");
+  config.school.spelling_tts_entity = "media_player.example_speaker";
+  assert.throws(() => validateConfig(config), /spelling_tts_entity/);
+  config.school.spelling_tts_entity = "";
+  assert.equal(validateConfig(config).school.spelling_tts_entity, "");
+});
+
 test("keeps Energy and the preferred Home room optional for existing schema-v7 households", () => {
   const config = structuredClone(example);
   delete config.features.energy;

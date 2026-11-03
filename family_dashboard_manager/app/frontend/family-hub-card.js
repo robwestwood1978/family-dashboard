@@ -1,7 +1,7 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.25.4";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.25.5";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
 import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.4";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.25.5";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -13,7 +13,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
-const DASHBOARD_VERSION = "0.25.4";
+const DASHBOARD_VERSION = "0.25.5";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
@@ -79,6 +79,11 @@ export function spellingVoices(voices = []) {
 export function selectSpellingVoice(voices, preference = "") {
   const available = spellingVoices(voices);
   return available.find(voice => spellingVoiceKey(voice) === preference) || available[0] || null;
+}
+
+export function isSafeSpellingAudioPath(value) {
+  return typeof value === "string" && value.length <= 512
+    && /^\/api\/tts_proxy\/[A-Za-z0-9_.-]+$/.test(value) && !value.includes("..");
 }
 
 export function isControlAction(dataset = {}) {
@@ -2146,6 +2151,11 @@ export function familyDayPhase(now = new Date(), timeZone = "Europe/London", rhy
   return hour < 12 ? {id:"morning",label:"This morning"} : hour < afterSchool ? {id:"midday",label:"Later today"} : hour < evening ? {id:"afternoon",label:schoolDay ? "After school" : "This afternoon"} : {id:"evening",label:"This evening"};
 }
 
+export function spellingPracticePlan(child) {
+  const due = child?.spelling_practice_due || child?.routines?.find(r => r.kind === "spelling")?.due;
+  return child?.plans?.find(plan => plan.kind === "spelling" && plan.due === due) || null;
+}
+
 export function familyHomeworkActions(children = [], phase = "afternoon", today = "", limit = 2) {
   if (!/^20\d{2}-\d{2}-\d{2}$/.test(today)) return [];
   const tomorrow = shiftDateKey(today,1), actions = [];
@@ -2162,11 +2172,11 @@ export function familyHomeworkActions(children = [], phase = "afternoon", today 
         if (plan.due <= tomorrow) add(child,"plan",`Hand in ${plan.title}`,"Finished at home",plan.due,1,plan.id);
       } else if (!["morning","midday"].includes(phase) || plan.due <= today) add(child,"plan",plan.title,plan.due < today ? "Overdue" : plan.due === today ? "Due today" : plan.subject || "School work",plan.due,plan.due <= today ? 1 : 3,plan.id);
     }
-    if (spelling && !spelling.marks?.test_done) {
-      const plan = plans.find(p => p.kind === "spelling" && p.due === spelling.due);
+    if (spelling) {
+      const plan = spellingPracticePlan(child), practiceDue = child.spelling_practice_due || spelling.due;
       if (["morning","midday"].includes(phase)) {
-        if (spelling.due <= today) add(child,"spell_record","Spelling test & sheet","Test today",spelling.due,2);
-      } else if (plan?.words?.length) add(child,"spelling","Spelling practice",`${plan.words.length} words for the next test`,spelling.due,3,plan.id);
+        if (spelling.due <= today && !spelling.marks?.test_done) add(child,"spell_record","Spelling test & sheet","Test today",spelling.due,2);
+      } else if (plan?.words?.length && (practiceDue !== spelling.due || !spelling.marks?.test_done)) add(child,"spelling","Spelling practice",`${plan.words.length} words for the next test`,practiceDue,3,plan.id);
     }
     if (tables && tables.count < tables.goal && phase === "afternoon") add(child,"tables","Tackling Tables",`${tables.goal-tables.count} session${tables.goal-tables.count===1?"":"s"} left this week`,tables.due,5);
   }
@@ -2316,6 +2326,7 @@ export class FamilyHubCard extends HTMLElementBase {
     };
     this._boundVisibilityChange = () => {
       if (globalThis.document?.visibilityState === "hidden") {
+        this._stopSpellingSpeech();
         this._activePointers.clear();
         this._renderAfterPointer = false;
         this._clearFreshnessTimer();
@@ -2416,6 +2427,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   setConfig(cardConfig) {
+    this._stopSpellingSpeech();
     this._homeworkGeneration = (this._homeworkGeneration || 0) + 1;
     this._homeworkData = null; this._homeworkModal = null; this._homeworkLoadedAt = 0;
     const config = typeof cardConfig?.config_json === "string"
@@ -4997,7 +5009,8 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!this._config?.school?.homework_enabled || !this._hass?.callWS || this._homeworkLoading) return;
     const revision = this._hass.states?.["sensor.family_dashboard_homework_revision"]?.state;
     const today = dateKey(new Date(), this._config.product.timezone);
-    if (!force && this._homeworkLoadedAt && Date.now() - this._homeworkLoadedAt < 30000 && this._homeworkRevision === revision && this._homeworkData?.today === today) return;
+    const clockMinute = Math.floor(Date.now() / 60000);
+    if (!force && this._homeworkLoadedAt && Date.now() - this._homeworkLoadedAt < 30000 && this._homeworkRevision === revision && this._homeworkData?.today === today && this._homeworkClockMinute === clockMinute) return;
     this._homeworkLoading = true;
     const generation = this._homeworkGeneration || 0;
     try {
@@ -5006,6 +5019,7 @@ export class FamilyHubCard extends HTMLElementBase {
       this._homeworkData = data; this._homeworkError = "";
       if (this._photoFrameActive) this._syncPhotoFrameContext();
       this._homeworkRevision = revision;
+      this._homeworkClockMinute = clockMinute;
     } catch { this._homeworkError = "Homework is not connected. A parent can check Homework in Family Dashboard Admin."; }
     finally { this._homeworkLoading = false; this._homeworkLoadedAt = Date.now(); this._scheduleRender(); }
   }
@@ -5056,15 +5070,15 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!child) return `<div class="homework-empty surface"><ha-icon icon="mdi:book-open-page-variant-outline"></ha-icon><h2>${escapeHtml(person.name)}’s homework</h2><p>${escapeHtml(this._homeworkError || "A parent can add the weekly rules and work in Family Dashboard Admin.")}</p><button type="button" data-homework-refresh>Check again</button></div>`;
     if (child.paused_until && this._homeworkData.today <= child.paused_until) return `<div class="homework-empty surface"><h2>A little break</h2><p>Homework routines are paused through ${escapeHtml(this._homeworkDate(child.paused_until))}.</p></div>`;
     const reading=child.routines.find(r=>r.kind==="reading"), spelling=child.routines.find(r=>r.kind==="spelling"), tables=child.routines.find(r=>r.kind==="tables");
-    const words=child.plans.find(p=>p.kind==="spelling" && p.due===spelling?.due);
-    const schoolwork=child.plans.filter(p=>(p.kind!=="spelling" || p.due!==spelling?.due) && !p.marks?.handed_in).sort((a,b)=>a.due.localeCompare(b.due));
+    const words=spellingPracticePlan(child), practiceDue=child.spelling_practice_due || spelling?.due;
+    const schoolwork=child.plans.filter(p=>(p.kind!=="spelling" || p.due!==practiceDue) && !p.marks?.handed_in).sort((a,b)=>a.due.localeCompare(b.due));
     const missing=child.routines.filter(r=>["maths","assignment"].includes(r.kind) && !r.plan_ids.length);
     const disabled=this._config.display.read_only ? "disabled" : "";
     const dots=r=>`<div class="homework-progress" aria-label="${r.count} of ${r.goal} sessions">${Array.from({length:r.goal},(_,i)=>`<i class="${i<r.count?"is-done":""}"><ha-icon icon="${i<r.count?"mdi:check":"mdi:circle-outline"}"></ha-icon></i>`).join("")}<span>${r.count}/${r.goal}</span></div>`;
     return `<section class="homework-workspace" data-homework-card-count="${2 + Number(Boolean(spelling)) + Number(Boolean(tables))}" aria-label="${escapeHtml(person.name)} homework">
       ${this._homeworkError?`<p class="calendar-warning" role="alert">${escapeHtml(this._homeworkError)} Showing the last saved progress.</p>`:""}
       <article class="homework-card homework-reading"><header><span class="homework-token"><ha-icon icon="mdi:book-open-page-variant-outline"></ha-icon></span><div><h2>Reading</h2><p>Books & record back ${escapeHtml(this._homeworkDate(reading?.due))}</p></div></header>${reading?dots(reading):""}<p class="homework-caption">${reading?.count>=reading?.goal ? "Your readings are logged. Check the school record is written and signed." : `Read ${reading?.goal || 3} times this week. Read aloud with an adult too.`}</p><div class="homework-actions"><button type="button" class="homework-primary" data-homework-modal="reading" ${disabled}>Log a reading</button><button type="button" data-homework-modal="record">Reading record</button></div></article>
-      ${spelling?`<article class="homework-card"><header><span class="homework-token"><ha-icon icon="mdi:alphabetical-variant"></ha-icon></span><div><h2>Spelling</h2><p>Test ${escapeHtml(this._homeworkDate(spelling.due))}</p></div></header><p class="homework-large-value">${words?.words.length ? `${words.words.length} words` : "Words needed"}</p><p class="homework-caption">${words?.words.length ? "Listen, spell, check. Then try a mock test." : "A parent needs to add this week’s word list."}</p><div class="homework-actions"><button type="button" class="homework-primary" data-homework-spell="${words?.id || ""}" ${disabled || !words?.words.length ? "disabled":""}>Spelling practice</button><button type="button" data-homework-modal="spell_record">Test & school sheet</button></div></article>`:""}
+      ${spelling?`<article class="homework-card"><header><span class="homework-token"><ha-icon icon="mdi:alphabetical-variant"></ha-icon></span><div><h2>Spelling</h2><p>Test ${escapeHtml(this._homeworkDate(practiceDue))}</p></div></header><p class="homework-large-value">${words?.words.length ? `${words.words.length} words` : "Words needed"}</p><p class="homework-caption">${words?.words.length ? "Listen, spell, check. Then try a mock test." : "A parent needs to add this week’s word list."}</p><div class="homework-actions"><button type="button" class="homework-primary" data-homework-spell="${words?.id || ""}" ${disabled || !words?.words.length ? "disabled":""}>Spelling practice</button><button type="button" data-homework-modal="spell_record">Test & school sheet</button></div></article>`:""}
       ${tables?`<article class="homework-card"><header><span class="homework-token"><ha-icon icon="mdi:calculator-variant-outline"></ha-icon></span><div><h2>Tackling Tables</h2><p>${tables.goal} sessions by ${escapeHtml(this._homeworkDate(tables.due))}</p></div></header>${dots(tables)}<p class="homework-caption">Use Learn, Play or Test with your school account. Log the session when you’ve finished.</p><div class="homework-actions"><a class="homework-primary" href="https://www.tacklingtables.co.uk/dashboard/login/" target="_blank" rel="noopener noreferrer">Start practice <ha-icon icon="mdi:arrow-top-right"></ha-icon></a><button type="button" data-homework-modal="tables" ${disabled}>Log a session</button></div></article>`:""}
       <article class="homework-card homework-schoolwork"><header><span class="homework-token"><ha-icon icon="mdi:clipboard-text-outline"></ha-icon></span><div><h2>School work</h2><p>Finish at home, then hand it in</p></div></header><div class="homework-work-list">${schoolwork.map(plan=>`<button type="button" data-homework-plan="${plan.id}"><span><strong>${escapeHtml(plan.title)}</strong><small>${escapeHtml(plan.subject || (plan.kind==="maths"?"Maths":"Homework"))} · ${escapeHtml(this._homeworkDate(plan.due))}</small></span><span>${plan.marks?.finished?"Finished":"Open"}<ha-icon icon="mdi:chevron-right"></ha-icon></span></button>`).join("")}${missing.map(r=>`<div class="homework-missing"><strong>${r.kind==="maths"?"Maths sheet needed":"Weekly homework needed"}</strong><small>Due ${escapeHtml(this._homeworkDate(r.due))}${r.kind==="maths"?" · set each Tuesday":""}</small></div>`).join("")}${!schoolwork.length&&!missing.length?`<p class="homework-caption">${child.plans.some(plan=>plan.kind!=="spelling")?"All current work handed in.":"No activities set yet."} New activities will appear here.</p>`:""}</div></article>
     </section>`;
@@ -5082,21 +5096,90 @@ export class FamilyHubCard extends HTMLElementBase {
     return this._spellingVoicePreference;
   }
 
+  _spellingSpeechProvider() {
+    const entity = this._config?.school?.spelling_tts_entity;
+    return /^tts\.[a-z0-9_]+$/.test(entity || "") ? entity : null;
+  }
+
+  _prepareSpellingAudio(word) {
+    const provider = this._spellingSpeechProvider(), modal = this._homeworkModal;
+    if (!provider || modal?.useDeviceVoice || !word) return null;
+    const language = this._config.school.spelling_tts_language || this._config.product.locale;
+    const key = JSON.stringify([provider, language, word]);
+    if (this._spellingAudioState?.key === key && this._spellingAudioState.modal === modal) return this._spellingAudioState;
+    this._stopSpellingSpeech();
+    const state = this._spellingAudioState = { key, modal, loading: true, error: "", audio: null };
+    const fail = () => {
+      if (this._spellingAudioState !== state || this._homeworkModal !== modal) return;
+      state.error = "The speech provider could not play this word. Try again or use a device voice.";
+      state.loading = false;
+      this._scheduleRender(true);
+    };
+    let timeout;
+    // Resolve before enabling Hear, so play() stays directly inside the iPad tap.
+    state.ready = Promise.race([
+      Promise.resolve().then(() => this._hass.callApi("POST", "tts_get_url", { engine_id: provider, message: word, language, cache: true })),
+      new Promise((_resolve, reject) => { timeout = setTimeout(() => reject(new Error("Speech timed out")), 10000); })
+    ]).then(result => {
+      if (this._spellingAudioState !== state || this._homeworkModal !== modal) return;
+      if (!isSafeSpellingAudioPath(result?.path)) throw new Error("Invalid speech audio path");
+      const audio = state.audio = new Audio(result.path);
+      audio.preload = "auto";
+      audio.onerror = fail;
+      state.loading = false;
+      this._scheduleRender(true);
+    }).catch(fail).finally(() => clearTimeout(timeout));
+    return state;
+  }
+
   _renderSpellingVoiceChoice() {
+    const provider = this._spellingSpeechProvider();
+    if (provider && !this._homeworkModal.useDeviceVoice) {
+      const state = this._spellingAudioState;
+      const label = this._hass?.states?.[provider]?.attributes?.friendly_name || "Home Assistant speech";
+      return `<div class="homework-voice"><p>Voice: ${escapeHtml(label)} · British English</p>${state?.error ? `<p role="alert" class="homework-error">${escapeHtml(state.error)}</p>` : ""}<details><summary>Voice options</summary><p class="homework-caption">Plays on this device using your saved speech provider. Only the spelling word is sent for speech.</p><button type="button" class="homework-peek" data-homework-speech-mode="device">Use a device voice instead</button></details></div>`;
+    }
     if (!globalThis.speechSynthesis || !globalThis.SpeechSynthesisUtterance) return "";
     const voices = this._spellingVoiceOptions(), preference = this._spellingVoiceChoice();
     const selected = selectSpellingVoice(voices, preference);
     const savedAvailable = voices.some(voice => spellingVoiceKey(voice) === preference);
-    return `<details class="homework-voice"><summary>Voice: ${escapeHtml(selected?.name || "Device default")}</summary><label>Spelling voice<select data-homework-voice ${voices.length ? "" : "disabled"}><option value="" ${!savedAvailable ? "selected" : ""}>Automatic · British English</option>${voices.map(voice => `<option value="${escapeHtml(spellingVoiceKey(voice))}" ${spellingVoiceKey(voice) === preference ? "selected" : ""}>${escapeHtml(voice.name)} (${escapeHtml(voice.lang)})</option>`).join("")}</select></label><p class="homework-caption">Saved on this device. Only voices available to the dashboard are listed. Siri may be available in iPad settings without appearing here.</p></details>`;
+    return `<details class="homework-voice"><summary>Voice: ${escapeHtml(selected?.name || "Device default")}</summary><label>Spelling voice<select data-homework-voice ${voices.length ? "" : "disabled"}><option value="" ${!savedAvailable ? "selected" : ""}>Automatic · British English</option>${voices.map(voice => `<option value="${escapeHtml(spellingVoiceKey(voice))}" ${spellingVoiceKey(voice) === preference ? "selected" : ""}>${escapeHtml(voice.name)} (${escapeHtml(voice.lang)})</option>`).join("")}</select></label><p class="homework-caption">Saved on this device. Only voices available to the dashboard are listed. Siri may be available in iPad settings without appearing here.</p>${provider ? '<button type="button" class="homework-peek" data-homework-speech-mode="provider">Use saved speech provider</button>' : ""}</details>`;
   }
 
-  _stopSpellingSpeech() {
+  _stopSpellingSpeech(clearAudio = true) {
     this._spellingUtterance = null;
     globalThis.speechSynthesis?.cancel();
+    const state = this._spellingAudioState;
+    if (state) state.playRequest = (state.playRequest || 0) + 1;
+    if (clearAudio) this._spellingAudioState = null;
+    if (state?.audio) {
+      state.audio.pause();
+      if (clearAudio) { state.audio.onerror = null; state.audio.removeAttribute("src"); state.audio.load(); }
+    }
   }
 
   _speakSpellingWord(word) {
     const modal = this._homeworkModal;
+    if (this._spellingSpeechProvider() && !modal.useDeviceVoice) {
+      let state = this._prepareSpellingAudio(word);
+      if (state?.error) { this._stopSpellingSpeech(); this._prepareSpellingAudio(word); this._scheduleRender(true); return; }
+      if (!state?.audio || state.loading) return;
+      this._stopSpellingSpeech(false);
+      const playRequest = state.playRequest = (state.playRequest || 0) + 1;
+      try {
+        state.audio.currentTime = 0;
+        const playing = state.audio.play();
+        playing?.catch(() => {
+          if (this._spellingAudioState !== state || state.playRequest !== playRequest) return;
+          state.error = "Audio could not start. Retry the voice, or choose a device voice under Voice options.";
+          this._scheduleRender(true);
+        });
+      } catch {
+        state.error = "Audio could not start. Try again or choose a device voice under Voice options.";
+        this._scheduleRender(true);
+      }
+      return;
+    }
     this._stopSpellingSpeech();
     const unavailable = () => {
       if (this._homeworkModal !== modal) return;
@@ -5147,8 +5230,9 @@ export class FamilyHubCard extends HTMLElementBase {
       const plan=child.plans.find(p=>p.id===modal.planId);if(!plan)return "";
       title=modal.mode==="Mock test"?"Mock spelling test":"Spelling practice";
       const result=modal.results || [], finished=result.length===plan.words.length;
+      const speech = finished ? null : this._prepareSpellingAudio(plan.words[result.length]);
       if(finished) body=`<p class="homework-spelling-score">${result.filter(r=>r.correct).length} / ${result.length}</p><p>${modal.mode==="Mock test"?"Your practice result. The school test is separate.":"Good practice. Look at any words to try again."}</p><div class="homework-spelling-results">${result.map(r=>`<div><span>${escapeHtml(r.word)}</span><small>${r.correct?"Correct":`You wrote: ${escapeHtml(r.answer || "—")}`}</small></div>`).join("")}</div><button type="button" class="homework-primary" data-homework-save-spelling ${disabled}>Save practice result</button>`;
-      else body=`<div class="homework-spelling-mode"><button type="button" data-homework-mode="Practice" aria-pressed="${modal.mode!=="Mock test"}" ${result.length?"disabled":""}>Practice</button><button type="button" data-homework-mode="Mock test" aria-pressed="${modal.mode==="Mock test"}" ${result.length?"disabled":""}>Mock test</button></div><p class="homework-spelling-position">Word ${result.length+1} of ${plan.words.length}</p><button type="button" class="homework-speak" data-homework-hear><ha-icon icon="mdi:volume-high"></ha-icon>Hear the word</button>${this._renderSpellingVoiceChoice()}<p class="homework-caption">If sound is unavailable, ask an adult to read the word aloud.</p>${modal.mode!=="Mock test"?`<button type="button" class="homework-peek" data-homework-peek>${modal.peek?escapeHtml(plan.words[result.length]):"Peek at this word"}</button>`:'<details><summary>Words for an adult to read aloud</summary><p>'+escapeHtml(plan.words.join(", "))+'</p></details>'}<label class="homework-spelling-answer">Your spelling<input data-homework-input="answer" value="${escapeHtml(modal.form?.answer || "")}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Your spelling"></label><button type="button" class="homework-primary" data-homework-answer>${modal.mode==="Mock test"?"Next word":"Check & next"}</button>${modal.feedback?`<p role="status">${escapeHtml(modal.feedback)}</p>`:""}`;
+      else body=`<div class="homework-spelling-mode"><button type="button" data-homework-mode="Practice" aria-pressed="${modal.mode!=="Mock test"}" ${result.length?"disabled":""}>Practice</button><button type="button" data-homework-mode="Mock test" aria-pressed="${modal.mode==="Mock test"}" ${result.length?"disabled":""}>Mock test</button></div><p class="homework-spelling-position">Word ${result.length+1} of ${plan.words.length}</p><button type="button" class="homework-speak" data-homework-hear ${speech?.loading?"disabled":""}><ha-icon icon="mdi:volume-high"></ha-icon>${speech?.loading?"Preparing voice…":speech?.error?"Retry voice":"Hear the word"}</button>${this._renderSpellingVoiceChoice()}<p class="homework-caption">If sound is unavailable, ask an adult to read the word aloud.</p>${modal.mode!=="Mock test"?`<button type="button" class="homework-peek" data-homework-peek>${modal.peek?escapeHtml(plan.words[result.length]):"Peek at this word"}</button>`:'<details><summary>Words for an adult to read aloud</summary><p>'+escapeHtml(plan.words.join(", "))+'</p></details>'}<label class="homework-spelling-answer">Your spelling<input data-homework-input="answer" value="${escapeHtml(modal.form?.answer || "")}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Your spelling"></label><button type="button" class="homework-primary" data-homework-answer>${modal.mode==="Mock test"?"Next word":"Check & next"}</button>${modal.feedback?`<p role="status">${escapeHtml(modal.feedback)}</p>`:""}`;
     }
     return `<div class="planner-modal-backdrop"><section class="planner-modal homework-modal" role="dialog" aria-modal="true" aria-labelledby="homework-modal-title"><header><p class="eyebrow">${escapeHtml(child.name)} · Homework</p><h2 id="homework-modal-title">${escapeHtml(title)}</h2><button type="button" class="planner-modal-close" data-homework-close aria-label="Close homework"><ha-icon icon="mdi:close"></ha-icon></button></header><div class="homework-modal-body">${modal.error?`<p role="alert" class="homework-error">${escapeHtml(modal.error)}</p>`:""}${body}</div><footer><button type="button" data-homework-close ${this._homeworkBusy?"disabled":""}>Done</button><small>Saved privately in Home Assistant</small></footer></section></div>`;
   }
@@ -5180,6 +5264,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if(target.dataset.homeworkSaveSession!==undefined){const values=Object.fromEntries([...this.shadowRoot.querySelectorAll("[data-homework-input]")].map(input=>[input.dataset.homeworkInput,input.type==="checkbox"?input.checked:input.value]));if(modal.type==="reading"&&!values.book?.trim()){modal.error="Enter the book you read.";this._scheduleRender(true);return true;}void this._saveHomeworkProgress({operation:"log",kind:modal.type,date:values.date,details:values},true);return true;}
     const plan=this._homeworkChild(modal.personId)?.plans.find(p=>p.id===modal.planId);
     if(modal.type!=="spelling" || !plan)return true;
+    if(target.dataset.homeworkSpeechMode){this._stopSpellingSpeech();modal.useDeviceVoice=target.dataset.homeworkSpeechMode==="device";this._scheduleRender(true);return true;}
     if(target.dataset.homeworkMode){this._stopSpellingSpeech();modal.mode=target.dataset.homeworkMode;this._scheduleRender(true);return true;}
     if(target.dataset.homeworkPeek!==undefined){modal.peek=!modal.peek;this._scheduleRender(true);return true;}
     if(target.dataset.homeworkHear!==undefined){this._speakSpellingWord(plan.words[modal.results.length]);return true;}
