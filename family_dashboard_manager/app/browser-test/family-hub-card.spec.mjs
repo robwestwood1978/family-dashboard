@@ -1426,6 +1426,13 @@ test("retains keyboard focus across equivalent full-card rerenders", async ({ pa
   await tableTab.press("Enter");
   await expect.poll(focusedControl).toMatchObject({ footballTab: "table" });
 
+  // The table represents the season, so matchweek navigation belongs to fixtures.
+  await expect(card.locator("select[data-gameweek-select]")).toHaveCount(0);
+  const fixturesTab = card.locator('[data-football-tab="fixtures"]');
+  await fixturesTab.focus();
+  await fixturesTab.press("Enter");
+  await expect.poll(focusedControl).toMatchObject({ footballTab: "fixtures" });
+
   const nextMatchweek = card.locator('button[data-gameweek][aria-label="Next matchweek"]');
   await nextMatchweek.focus();
   await nextMatchweek.press("Enter");
