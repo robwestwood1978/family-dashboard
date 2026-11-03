@@ -45,6 +45,7 @@ import {
   isCommandEntityAvailable,
   isControlAction,
   isCurrentOrFutureCalendarEvent,
+  todayAgendaModel,
   isAllowedPlannerAction,
   isPreparationWindowEvent,
   isEntityAvailable,
@@ -2999,6 +3000,30 @@ test("removes meaningless trailing zeroes from ChoreOps points", () => {
   assert.equal(formatPoints("35.0"), "35");
   assert.equal(formatPoints("55.5"), "55.5");
   assert.equal(formatPoints("unavailable"), "0");
+});
+
+test("Today distinguishes a current plan, the next day and all-day context", () => {
+  const event=(summary,start,end)=>({summary,start:{dateTime:start},end:{dateTime:end}});
+  const expired=event("Finished","2026-11-09T08:00:00Z","2026-11-09T09:00:00Z");
+  const active=event("Ongoing","2026-11-09T18:00:00Z","2026-11-09T20:00:00Z");
+  const tomorrow=event("Tomorrow","2026-11-10T16:00:00Z","2026-11-10T17:00:00Z");
+  const allDay={summary:"All-day context",start:{date:"2026-11-09"},end:{date:"2026-11-10"}};
+  const model=todayAgendaModel([allDay,tomorrow,expired,active],new Date("2026-11-09T19:00:00Z"));
+  assert.equal(model.primary,active);assert.equal(model.status,"now");
+  assert.deepEqual(model.remaining,[allDay,tomorrow]);
+  const evening=todayAgendaModel([expired,active,tomorrow],new Date("2026-11-09T20:30:00Z"));
+  assert.equal(evening.primary,tomorrow);assert.equal(evening.status,"tomorrow");
+  assert.equal(todayAgendaModel([allDay],new Date("2026-11-09T12:00:00Z")).status,"all-day");
+  assert.equal(todayAgendaModel([expired],new Date("2026-11-09T20:00:00Z")).status,"empty");
+  assert.equal(todayAgendaModel([event("Malformed","not-a-date","2026-11-10T17:00:00Z")],new Date("2026-11-09T20:00:00Z")).status,"empty");
+  assert.equal(todayAgendaModel([allDay],new Date("2026-11-09T12:00:00Z"),"America/Los_Angeles").day,"2026-11-09");
+});
+
+test("Today labels the next day in the household timezone across midnight and DST", () => {
+  const event={summary:"Later",start:{dateTime:"2026-07-03T08:00:00+01:00"},end:{dateTime:"2026-07-03T09:00:00+01:00"}};
+  assert.equal(todayAgendaModel([event],new Date("2026-07-01T23:30:00Z")).status,"tomorrow");
+  assert.equal(todayAgendaModel([event],new Date("2026-07-03T06:00:00Z")).status,"next");
+  assert.deepEqual(todayAgendaModel([],new Date("invalid")),{primary:null,status:"empty",day:null,remaining:[]});
 });
 
 test("crops excess floorplan margin while preserving hotspot alignment", () => {

@@ -2047,4 +2047,134 @@ export const DAILY_BRIEF_STYLES = `
     .football-v2 .matchweek-controls .football-current-week { grid-column:1/-1; width:100%; }
     .football-v2 .football-filters { flex-wrap:wrap; }
   }
+  /* Today 2: one current plan, two useful actions and quiet shortcuts. */
+  .hub-card .today-grid.today-v2 { display:grid; height:100%; min-height:0; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr) 100px; gap:18px; align-content:stretch; overflow:hidden; }
+  .hub-card .today-v2[data-has-attention=true] { grid-template-rows:54px minmax(0,1fr) 100px; }
+  .today-v2 .today-attention { grid-column:1/-1; display:flex; align-items:center; gap:12px; min-height:48px; padding:8px 16px; border:1px solid var(--daily-warning); border-radius:14px; background:var(--daily-warning-soft); color:var(--daily-text); font:inherit; text-align:left; }
+  .today-attention strong,.today-attention small { display:block; font-size:12px; }
+  .today-attention > ha-icon:last-child { margin-left:auto; }
+  .today-v2 .today-main-plan { min-width:0; min-height:0; display:grid; }
+  .hub-card .today-v2 .today-next,.today-v2 .today-welcome { min-height:0; height:100%; box-sizing:border-box; margin:0; padding:20px 22px; border:1px solid var(--daily-line); border-radius:24px; background:var(--daily-surface); color:var(--daily-text); overflow:auto; overscroll-behavior:contain; }
+  .today-v2 .today-agenda { display:flex; flex-direction:column; gap:14px; }
+  .today-agenda > header { min-height:48px; display:flex; align-items:center; justify-content:space-between; flex:none; }
+  .today-v2 .eyebrow { margin:0; color:var(--daily-muted); font-size:12px; letter-spacing:.08em; font-weight:400; }
+  .today-agenda > header button,.today-v2 .section-heading > button { min-height:48px; border:0; background:transparent; color:var(--daily-accent); font:inherit; font-size:12px; display:flex; align-items:center; gap:6px; padding:0 4px 0 12px; }
+  .today-agenda > header button ha-icon,.today-v2 .section-heading > button ha-icon { --mdc-icon-size:17px; }
+  .today-current-plan { flex:1 0 auto; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; padding:0 0 10px; }
+  .today-plan-label { display:inline-flex; align-items:center; min-height:26px; padding:0 9px; border-radius:8px; background:var(--daily-accent-soft); color:var(--daily-accent); font-size:12px; letter-spacing:.04em; }
+  .today-v2 .today-current-plan h2 { margin:12px 0 8px; font-size:clamp(24px,2.6vw,32px); font-weight:500; line-height:1.12; letter-spacing:-.035em; overflow-wrap:anywhere; }
+  .today-current-plan > p { margin:0 0 16px; font-size:13px; color:var(--daily-muted); line-height:1.4; }
+  .today-plan-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .today-plan-open { min-height:48px; display:flex; align-items:center; gap:16px; padding:0 16px; border:0; border-radius:12px; background:var(--daily-accent); color:var(--daily-on-accent); font:inherit; font-size:13px; }
+  .today-plan-open ha-icon { --mdc-icon-size:18px; }
+  .today-plan-prep { min-height:48px; padding:0 12px; border:0; border-radius:12px; background:var(--daily-soft); color:var(--daily-muted); font:inherit; font-size:12px; display:flex; align-items:center; gap:7px; }
+  .today-plan-prep ha-icon { --mdc-icon-size:18px; }
+  .today-next-list { flex:none; border-top:1px solid var(--daily-line); padding-top:10px; }
+  .today-next-list > p { margin:0 0 5px; color:var(--daily-muted); font-size:12px; }
+  .today-next-list > button { min-height:54px; width:100%; display:grid; grid-template-columns:100px minmax(0,1fr) 18px; gap:12px; align-items:center; padding:6px 0; border:0; background:transparent; color:var(--daily-text); text-align:left; font:inherit; }
+  .today-next-time { color:var(--daily-muted); font-size:12px; line-height:1.35; }
+  .today-next-list strong,.today-next-list small { display:block; font-size:13px; font-weight:400; }
+  .today-next-list small { font-size:12px; color:var(--daily-muted); margin-top:3px; }
+  .today-next-list ha-icon { --mdc-icon-size:18px; color:var(--daily-muted); }
+  .today-source-warning { margin:0; font-size:12px; color:var(--daily-warning); }
+  .hub-card .today-v2 .today-family { min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr) auto; gap:16px; box-sizing:border-box; padding:20px; border:1px solid var(--daily-line); border-radius:24px; background:var(--daily-surface); overflow:hidden; }
+  .today-v2 .today-family .section-heading { margin:0; min-height:48px; align-items:center; }
+  .today-v2 .today-family .section-heading h2 { margin:6px 0 0; font-size:22px; line-height:1.1; font-weight:500; }
+  .today-v2 .today-job-list { min-height:0; margin:0; display:flex; flex-direction:column; justify-content:center; gap:10px; overflow:auto; overscroll-behavior:contain; }
+  .today-v2 .today-focus-action { min-height:68px; flex:none; width:100%; display:grid; grid-template-columns:36px minmax(0,1fr) 18px; align-items:center; gap:12px; padding:10px 12px; box-sizing:border-box; border:0; border-radius:14px; background:var(--daily-soft); text-align:left; color:var(--daily-text); font:inherit; }
+  .today-v2 .today-person-token { display:grid; place-items:center; width:36px; height:36px; border-radius:50%; background:color-mix(in srgb,var(--person-colour) 18%,var(--daily-surface)); color:var(--daily-text); font-size:14px; }
+  .today-v2 .today-focus-action strong { display:block; font-size:14px; font-weight:500; line-height:1.3; }
+  .today-v2 .today-focus-action small { display:block; margin-top:4px; font-size:12px; color:var(--daily-muted); line-height:1.35; }
+  .today-v2 .today-focus-action > ha-icon { --mdc-icon-size:18px; color:var(--daily-muted); }
+  .today-v2 .today-job { min-height:64px; flex:none; margin:0; padding:8px 0; border-bottom:1px solid var(--daily-line); }
+  .today-v2 .today-job strong { font-size:14px; }
+  .today-v2 .today-job small { font-size:12px; }
+  .hub-card .today-v2 .today-preparation-card { height:auto; min-height:0; margin:0; padding:12px 0 0; display:flex; gap:8px; align-items:center; justify-content:space-between; border:0; border-top:1px solid var(--daily-line); border-radius:0; background:transparent; color:var(--daily-text); overflow:visible; }
+  .today-preparation-card > div { min-width:0; }
+  .today-v2 .today-preparation-card h3 { margin:4px 0; font-size:15px; font-weight:500; color:var(--daily-text); }
+  .today-v2 .today-preparation-card .readiness-progress { margin:4px 0; font-size:12px; color:var(--daily-muted); }
+  .today-prep-preview { max-width:100%; margin:5px 0 0; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; color:var(--daily-muted); font-size:12px; }
+  .today-preparation-card > button { min-width:48px; min-height:48px; flex:none; border:0; border-radius:12px; background:var(--daily-accent-soft); color:var(--daily-accent); display:grid; place-items:center; padding:0; }
+  .today-preparation-card > button > span,.today-preparation-card > button > ha-icon { display:none; }
+  .today-preparation-card > button svg { width:21px; height:21px; }
+  .today-v2 .homework-today { margin:0; border-top:1px solid var(--daily-line); padding-top:8px; }
+  .today-v2 .homework-today > button { min-height:48px; border:0; background:transparent; padding:4px 0; }
+  .today-v2 .homework-today > button strong,.today-v2 .homework-today > button small { font-size:12px; }
+  .hub-card .today-v2 .today-shortcuts { grid-column:1/-1; grid-row:auto; min-height:0; display:flex; align-items:stretch; gap:12px; margin:0; padding:0; border:0; border-radius:0; background:transparent; overflow:hidden; }
+  .today-v2 .today-shortcuts > button,.hub-card .today-v2 .school-lunch-today { flex:1 1 0; min-width:0; min-height:48px; margin:0; padding:14px 16px; box-sizing:border-box; display:flex; align-items:center; gap:10px; border:1px solid var(--daily-line); border-radius:18px; background:var(--daily-surface); color:var(--daily-text); font:inherit; text-align:left; }
+  .today-shortcuts > button > svg { width:24px; height:24px; flex:none; color:var(--daily-muted); }
+  .today-v2 .today-shortcuts > button > span:not(.today-club-marks) { min-width:0; flex:1; }
+  .today-v2 .today-shortcuts strong { display:block; font-size:14px; font-weight:500; line-height:1.25; }
+  .today-v2 .today-shortcuts small { display:block; margin-top:5px; color:var(--daily-muted); font-size:12px; line-height:1.3; }
+  .today-v2 .today-shortcuts > button > ha-icon { --mdc-icon-size:18px; flex:none; margin-left:auto; color:var(--daily-muted); }
+  .hub-card .today-v2 .school-lunch-today { flex:1.6 1 0; display:flex; flex-direction:column; align-items:stretch; justify-content:center; gap:6px; padding:10px 14px; }
+  .today-v2 .school-lunch-today h3 { margin:0; font-size:12px; color:var(--daily-muted); font-weight:400; }
+  .today-v2 .school-lunch-children { display:flex; gap:8px; margin:0; min-width:0; }
+  .today-v2 .school-lunch-child { flex:1; min-width:0; min-height:48px; border:0; border-radius:8px; padding:0; background:transparent; display:flex; align-items:center; gap:8px; }
+  .today-v2 .school-lunch-child .family-view-token { width:28px; height:28px; flex:none; font-size:12px; }
+  .today-v2 .school-lunch-child > span:nth-child(2) { min-width:0; flex:1; }
+  .today-v2 .school-lunch-child small { font-size:12px; margin:0 0 3px; }
+  .today-v2 .school-lunch-child strong { font-size:12px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .today-v2 .school-lunch-child > ha-icon { --mdc-icon-size:15px; color:var(--daily-muted); flex:none; }
+  .today-v2 .today-club-marks { display:flex; flex:none; gap:2px; align-items:center; }
+  .today-v2 .today-club-marks .team-mark { width:24px; height:24px; min-width:24px; }
+  .today-v2 .team-mark strong[aria-hidden=true] { visibility:hidden; }
+  .hub-card .today-v2[data-has-family=false] .today-main-plan { grid-column:1/-1; }
+  .hub-card .today-v2[data-has-shortcuts=false] { grid-template-rows:minmax(0,1fr); }
+  .today-v2 button:focus-visible { outline:3px solid var(--daily-accent); outline-offset:2px; }
+  @media(orientation:landscape) and (max-height:800px) {
+    .hub-card .today-grid.today-v2 { grid-template-rows:minmax(0,1fr) 88px; gap:12px; }
+    .hub-card .today-v2[data-has-attention=true] { grid-template-rows:50px minmax(0,1fr) 88px; }
+    .hub-card .today-v2 .today-next,.hub-card .today-v2 .today-family { padding:12px 16px; }
+    .today-v2 .today-agenda { gap:8px; }
+    .today-v2 .today-current-plan h2 { margin:8px 0; font-size:26px; }
+    .today-current-plan > p { margin-bottom:10px; }
+    .today-next-list > button:nth-of-type(n+2) { display:none; }
+    .hub-card .today-v2 .today-family { gap:8px; }
+    .today-v2 .today-job-list { gap:6px; }
+    .today-v2 .today-focus-action { min-height:62px; padding:8px 10px; }
+    .today-v2 .today-shortcuts > button { padding:10px 12px; }
+  }
+  @media(orientation:portrait) and (min-width:621px) {
+    .hub-card .today-grid.today-v2 { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1.05fr) minmax(0,1fr) 108px; gap:14px; }
+    .hub-card .today-v2[data-has-attention=true] { grid-template-rows:54px minmax(0,1.05fr) minmax(0,1fr) 108px; }
+    .hub-card .today-v2 .today-family { grid-template-rows:auto minmax(0,1fr); position:relative; }
+    .today-v2 .today-job-list { justify-content:flex-start; }
+    .today-v2 .today-preparation-card,.today-v2 .homework-today { margin-top:0; }
+    .today-v2 .today-club-marks .team-mark { width:21px; height:21px; min-width:21px; }
+    .today-v2 .today-shortcuts > button { padding:12px; gap:7px; }
+    .hub-card .today-v2 .school-lunch-today { flex:1.5 1 0; padding:10px; }
+  }
+  @media(max-width:620px) {
+    .hub-card .today-grid.today-v2,.hub-card .today-v2[data-has-attention=true] { display:flex; flex-direction:column; height:auto; min-height:100%; overflow:visible; gap:14px; }
+    .today-v2 .today-main-plan { flex:none; min-height:300px; }
+    .hub-card .today-v2 .today-family { flex:none; min-height:260px; overflow:visible; }
+    .today-v2 .today-job-list { overflow:visible; }
+    .hub-card .today-v2 .today-shortcuts { flex:none; display:flex; flex-direction:column; overflow:visible; }
+    .today-v2 .today-shortcuts > button,.hub-card .today-v2 .school-lunch-today { flex:none; min-height:80px; }
+    .today-next-list > button { grid-template-columns:72px minmax(0,1fr) 16px; gap:8px; }
+    .today-v2 .today-current-plan h2 { font-size:24px; }
+  }
+  @media(max-height:740px) and (min-width:851px) {
+    .football-v2 .fpl-detail,.football-v2 .fpl-detail:has(.fpl-chip) { grid-template-rows:50px 60px minmax(0,1fr); }
+    .football-v2 .fpl-team-card { padding:5px 10px; }
+  }
+  .hub-card .today-v2 .today-main-plan { grid-column:1; grid-row:1; display:block; }
+  .hub-card .today-v2 .today-next { grid-column:auto; grid-row:auto; width:100%; max-width:none; }
+  .hub-card .today-v2 .today-family { grid-column:2; grid-row:1; grid-template-columns:minmax(0,1fr); }
+  .hub-card .today-v2 .today-family > * { grid-column:1; grid-row:auto; width:auto; min-width:0; max-width:none; }
+  .hub-card .today-v2 .today-preparation-card { flex-direction:row; text-align:left; }
+  .today-v2 .today-preparation-card .eyebrow { display:none; }
+  .today-v2 .today-preparation-card > button { display:flex; align-items:center; justify-content:center; }
+  .today-v2 .today-preparation-card > button > svg { display:none; }
+  .today-v2 .today-preparation-card > button > ha-icon { display:inline-block; --mdc-icon-size:20px; }
+  .hub-card .today-v2 .today-shortcuts { grid-row:2; }
+  .hub-card .today-v2[data-has-attention=true] .today-main-plan,.hub-card .today-v2[data-has-attention=true] .today-family { grid-row:2; }
+  .hub-card .today-v2[data-has-attention=true] .today-shortcuts { grid-row:3; }
+  @media(orientation:portrait) and (min-width:621px) {
+    .hub-card .today-v2 .today-family { grid-column:1; grid-row:2; grid-template-rows:auto minmax(0,1fr) auto; }
+    .hub-card .today-v2 .today-shortcuts { grid-row:3; }
+    .hub-card .today-v2[data-has-attention=true] .today-family { grid-row:3; }
+    .hub-card .today-v2[data-has-attention=true] .today-shortcuts { grid-row:4; }
+  }
 `;
