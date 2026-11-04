@@ -1,6 +1,6 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.29.0";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.30.0";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.29.0";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.30.0";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -12,7 +12,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
-const DASHBOARD_VERSION = "0.29.0";
+const DASHBOARD_VERSION = "0.30.0";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
@@ -1110,7 +1110,8 @@ export function homeRoomPresentation(room, states = {}, config = {}) {
   const safeRoom = {...room,covers:(room.covers || []).filter(id=>config.features?.entry !== false || id !== config.entry?.garage?.cover_entity),media_players:config.features?.music === false ? [] : room.media_players || []};
   const summary=deriveRoomState(safeRoom,states,config.theme?.accent);
   const entities=[...new Set([...(safeRoom.lights || []),safeRoom.climate,safeRoom.temperature_sensor,...safeRoom.covers,...safeRoom.media_players].filter(Boolean))];
-  const unavailable=entities.filter(id=>!isEntityAvailable(states[id])).length;
+  const unavailableEntityIds=entities.filter(id=>!isEntityAvailable(states[id]));
+  const unavailable=unavailableEntityIds.length;
   const heating=heatingPresentation(states[safeRoom.climate]).tone === "heating";
   const active=Boolean(summary.lightsOn || heating || summary.openCovers || summary.playing);
   const details=[
@@ -1119,7 +1120,8 @@ export function homeRoomPresentation(room, states = {}, config = {}) {
     summary.openCovers ? `${summary.openCovers} open` : null,
     summary.playing ? "Music playing" : null
   ].filter(Boolean);
-  return {room,summary,active,unavailable,heating,detail:details.join(" · ") || (entities.length ? "Quiet" : "No controls configured")};
+  const hasControls=Boolean(safeRoom.lights?.length || safeRoom.climate || safeRoom.covers?.length || safeRoom.media_players?.length || safeRoom.scenes?.length);
+  return {room,summary,active,unavailable,unavailableEntityIds,heating,hasControls,detail:details.join(" · ") || (entities.length ? "Quiet" : "No controls configured")};
 }
 
 export function isAlarmActionSupported(state, service) {
@@ -2275,6 +2277,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._simpleView = false;
     this._homeSection = "overview";
     this._homeRoomFilter = "all";
+    this._homeFloorFilter = "all";
     this._calendarMode = "week";
     this._calendarSelectedKey = null;
     this._calendarFocusEvent = null;
@@ -2538,6 +2541,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._view = config.display.default_view || "today";
     this._homeSection = config.home.default_section || "overview";
     this._homeRoomFilter = "all";
+    this._homeFloorFilter = "all";
     this._simpleView = config.display.default_experience === "simple" && config.features.family && config.people.some(person=>person.role === "child");
     if (this._simpleView) this._view = "today";
     this._calendarMode = config.calendar.initial_view || "week";
@@ -3415,11 +3419,16 @@ export class FamilyHubCard extends HTMLElementBase {
         if (this.isConnected && this.shadowRoot.querySelector(".hub-card") === surface && this._viewScrollKey() === scrollKey) this._restoreViewScroll(scrollState);
       }, () => {});
     }
+    if(this._homeRailRestore) {
+      const rail=this.shadowRoot.querySelector('.room-rail-list');
+      if(rail){const unmapped=rail.querySelector(".unmapped-rooms");if(unmapped)unmapped.open=this._homeRailRestore.unmappedOpen;if(!this.shadowRoot.activeElement)[...rail.querySelectorAll("[data-home-room-select]")].find(button=>button.dataset.homeRoomSelect===this._room)?.focus({preventScroll:true});rail.scrollTop=this._homeRailRestore.top;rail.scrollLeft=this._homeRailRestore.left;}
+      this._homeRailRestore=null;
+    }
     this._renderedScrollKey = scrollKey;
   }
 
   _viewScrollKey() {
-    return [this._view,this._simpleView,this._familyViewId,this._taskSection,this._taskListDay,this._room,this._homeSection,this._homeRoomFilter,this._floor,this._footballTab,this._calendarMode,this._calendarAnchorKey,this._calendarSelectedKey,this._calendarFocusEvent].join("|");
+    return [this._view,this._simpleView,this._familyViewId,this._taskSection,this._taskListDay,this._room,this._homeSection,this._homeRoomFilter,this._homeFloorFilter,this._floor,this._footballTab,this._calendarMode,this._calendarAnchorKey,this._calendarSelectedKey,this._calendarFocusEvent].join("|");
   }
 
   _scrollIdentity(element) {
@@ -4365,8 +4374,8 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _renderRooms() {
     const sectionDefinitions = [
-      { id: "overview", label: "Overview", icon: "mdi:home-outline" },
-      { id: "rooms", label: "Rooms", icon: "mdi:floor-plan" },
+      { id: "overview", label: "Room controls", icon: "mdi:home-outline" },
+      { id: "rooms", label: "Floorplan", icon: "mdi:floor-plan" },
       { id: "lights", label: "Lights", icon: "mdi:lightbulb-group-outline" },
       { id: "heating", label: "Heating", icon: "mdi:radiator" },
       { id: "covers", label: "Blinds & doors", icon: "mdi:blinds-horizontal" },
@@ -4417,28 +4426,26 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderHomeOverview() {
-    const states=this._hass?.states || {}, summary=homeSummaryPresentation(this._config,states);
-    const rooms=this._config.rooms.map(room=>homeRoomPresentation(room,states,this._config)).sort((a,b)=>{
-      const priority=model=>model.room.id===this._config.home.default_room ? 0 : model.room.lights.length || model.room.climate || model.room.temperature_sensor || model.room.covers.length || model.room.media_players.length || model.room.scenes.length ? 1 : 2;
-      return priority(a)-priority(b);
+    const states=this._hass?.states || {};
+    const models=this._config.rooms.map(room=>homeRoomPresentation(room,states,this._config)).sort((a,b)=>{
+      const rank=model=>model.room.id===this._config.home.default_room ? 0 : model.room.lights.length || model.room.climate || model.room.covers.length || model.room.scenes.length ? 1 : 2;
+      return rank(a)-rank(b);
     });
-    const active=rooms.filter(room=>room.active), unavailable=rooms.filter(room=>room.unavailable);
-    const lights=homeLightingCompactPresentation(summary), heating=homeHeatingCompactPresentation(summary);
-    const energy=energyCompactPresentation(this._energyPresentation());
-    const coverDetail=summary.coverCount ? summary.availableCovers < summary.coverCount ? `${summary.availableCovers} of ${summary.coverCount} reporting` : "Blinds & doors" : "No blinds or doors";
-    const coverValue=summary.coverCount && summary.availableCovers===0 ? "Unavailable" : summary.openCovers ? `${summary.openCovers} open` : summary.coverCount ? "All closed" : "Not configured";
-    const vacuum=states[this._config.cleaning?.vacuum_entity];
-    const security=this._config.features.entry ? todaySecurityPresentation(states[this._config.entry.alarm_entity],states[this._config.entry.garage?.cover_entity],(this._config.entry.cameras || []).flatMap(camera=>[camera.ringing_entity,camera.person_entity,camera.motion_entity]).filter(Boolean).map(id=>states[id])) : null;
-    const filters=[{id:"all",name:"All rooms",count:rooms.length},{id:"active",name:"Active",count:active.length},...this._config.floorplan.floors.map(floor=>({id:floor.id,name:floor.name,count:rooms.filter(({room})=>room.floor_id===floor.id).length})),...(unavailable.length ? [{id:"unavailable",name:"Unavailable",count:unavailable.length}] : [])];
-    if(!filters.some(filter=>filter.id===this._homeRoomFilter))this._homeRoomFilter="all";
-    const filtered=rooms.filter(model=>this._homeRoomFilter === "all" || this._homeRoomFilter === "active" && model.active || this._homeRoomFilter === "unavailable" && model.unavailable || model.room.floor_id === this._homeRoomFilter);
+    const connected=models.filter(model=>model.hasControls), unmapped=models.filter(model=>!model.hasControls);
+    const selected=models.find(model=>model.room.id===this._room) || connected.find(model=>model.room.id===this._config.home.default_room) || connected[0] || models[0];
+    if(!selected)return '<p class="hub-empty-state">No rooms are available yet.</p>';
+    const scoped=connected.filter(model=>this._homeFloorFilter==="all" || model.room.floor_id===this._homeFloorFilter);
+    const otherRooms=unmapped.filter(model=>this._homeFloorFilter==="all" || model.room.floor_id===this._homeFloorFilter);
+    const active=scoped.filter(model=>model.active), issues=scoped.filter(model=>model.unavailable);
+    const filtered=connected.filter(model=>(this._homeFloorFilter === "all" || model.room.floor_id===this._homeFloorFilter) && (this._homeRoomFilter === "active" ? model.active : this._homeRoomFilter === "unavailable" ? model.unavailable : true));
     const internalOn=[...new Set(this._config.rooms.flatMap(room=>room.lights))].filter(id=>!this._config.home.exterior_lights?.includes(id) && states[id]?.state === "on").length;
-    const metrics=[{id:"lights",icon:"mdi:lightbulb-group-outline",value:lights.value,detail:lights.detail,label:"Lighting"},{id:"heating",icon:"mdi:radiator",value:heating.value,detail:heating.detail,label:"Heating"},{id:"covers",icon:"mdi:blinds-horizontal",value:coverValue,detail:coverDetail,label:"Blinds & doors"},...(this._config.features.cleaning ? [{id:"cleaning",icon:"mdi:robot-vacuum",value:titleCase(vacuum?.state || "unavailable"),detail:"Robot vacuum",label:"Cleaning"}] : [])];
-    return `<section class="home-v2" aria-label="Whole home overview">
-      <div class="home-v2-intro"><div><p class="eyebrow">YOUR HOME, NOW</p><h2>${Number.isFinite(summary.averageTemperature) ? `${formatTemperature(summary.averageTemperature)} at home` : "A little more comfortable"}</h2><p>${active.length ? `${active.length} room${active.length===1?"":"s"} active` : "No active rooms"}${unavailable.length ? ` · ${unavailable.length} room${unavailable.length===1?"":"s"} with unavailable devices` : " · Room devices reporting"}</p></div><div class="home-v2-actions"><button type="button" data-all-internal-lights data-light-service="turn_off" ${this._config.display.read_only || !internalOn ? "disabled aria-disabled=\"true\"" : ""}><ha-icon icon="mdi:lightbulb-group-off-outline" aria-hidden="true"></ha-icon>Inside lights off${internalOn ? ` · ${internalOn}` : ""}</button><button type="button" data-home-target="rooms"><ha-icon icon="mdi:floor-plan" aria-hidden="true"></ha-icon>Floorplan</button></div></div>
-      <div class="home-v2-metrics" aria-label="Home controls">${metrics.map(metric=>`<button type="button" data-home-target="${metric.id}"><span class="home-v2-metric-icon"><ha-icon icon="${metric.icon}" aria-hidden="true"></ha-icon></span><span><small>${metric.label}</small><strong>${escapeHtml(metric.value)}</strong><span>${escapeHtml(metric.detail)}</span></span><ha-icon icon="mdi:chevron-right" aria-hidden="true"></ha-icon></button>`).join("")}</div>
-      <div class="home-v2-workspace"><section class="home-v2-rooms" aria-label="Rooms"><header><h2>Your rooms</h2><span>Tap a room for controls</span></header><div class="home-room-filters" role="group" aria-label="Filter rooms">${filters.map(filter=>`<button type="button" data-home-room-filter="${escapeHtml(filter.id)}" aria-pressed="${this._homeRoomFilter===filter.id}">${escapeHtml(filter.name)}<span>${filter.count}</span></button>`).join("")}</div><div class="home-room-grid">${filtered.map(({room,summary:roomState,active,unavailable,heating,detail})=>`<button type="button" class="home-room-card ${active?"is-active":""}" data-home-room-open="${escapeHtml(room.id)}" aria-label="Open ${escapeHtml(room.name)} controls"><span class="home-room-card-top"><span class="home-room-icon"><ha-icon icon="${escapeHtml(room.icon)}" aria-hidden="true"></ha-icon></span><span class="home-room-temperature">${Number.isFinite(roomState.temperature)?formatTemperature(roomState.temperature):""}${heating?'<ha-icon icon="mdi:fire" aria-label="Heating"></ha-icon>':""}</span></span><strong>${escapeHtml(room.name)}</strong><span class="home-room-state">${escapeHtml(detail)}</span>${unavailable?`<small class="home-room-unavailable"><ha-icon icon="mdi:cloud-alert-outline" aria-hidden="true"></ha-icon>${unavailable} unavailable</small>`:""}<ha-icon class="home-room-chevron" icon="mdi:chevron-right" aria-hidden="true"></ha-icon></button>`).join("") || '<p class="home-v2-empty">No rooms are active. Choose All rooms to see the whole house.</p>'}</div></section>
-      <aside class="home-v2-sidebar" aria-label="Around the house"><h2>Around the house</h2>${energy ? `<button type="button" data-view="energy"><ha-icon icon="mdi:lightning-bolt-outline" aria-hidden="true"></ha-icon><span><small>Energy today</small><strong>${escapeHtml(energy.value)}</strong><span>${escapeHtml(energy.detail)}</span></span><ha-icon icon="mdi:chevron-right" aria-hidden="true"></ha-icon></button>` : ""}${this._config.features.entry ? `<button type="button" data-view="entry"><ha-icon icon="mdi:shield-home-outline" aria-hidden="true"></ha-icon><span><small>Security</small><strong>${escapeHtml(security.title)}</strong><span>Cameras, alarm & garage</span></span><ha-icon icon="mdi:chevron-right" aria-hidden="true"></ha-icon></button>` : ""}<div class="home-v2-notice"><ha-icon icon="${unavailable.length?"mdi:cloud-alert-outline":"mdi:check-circle-outline"}" aria-hidden="true"></ha-icon><strong>${unavailable.length ? "Some devices aren’t reporting" : "The house is in view"}</strong><p>${unavailable.length ? "Unavailable controls are kept visible, so you can see what needs checking." : "Room cards show live lights, heating, music and open blinds or doors."}</p>${unavailable.length?'<button type="button" data-home-room-filter="unavailable">See affected rooms <ha-icon icon="mdi:arrow-right" aria-hidden="true"></ha-icon></button>':""}</div></aside></div>
+    const roomButton=model=>`<button type="button" class="room-rail-item ${model.room.id===selected.room.id?"is-selected":""}" data-home-room-select="${escapeHtml(model.room.id)}" aria-pressed="${model.room.id===selected.room.id}" aria-label="Choose ${escapeHtml(model.room.name)}"><span class="room-rail-icon"><ha-icon icon="${escapeHtml(model.room.icon)}" aria-hidden="true"></ha-icon></span><span><strong>${escapeHtml(model.room.name)}</strong><small>${escapeHtml(model.unavailable ? "Needs checking" : model.active ? model.heating ? "Heating" : model.summary.lightsOn ? `${model.summary.lightsOn} light${model.summary.lightsOn===1?"":"s"} on` : model.summary.playing ? "Music playing" : "Open blinds or door" : model.hasControls ? "All quiet" : "No controls yet")}</small></span>${Number.isFinite(model.summary.temperature) ? `<span class="room-rail-temperature">${formatTemperature(model.summary.temperature)}</span>` : '<ha-icon class="room-rail-chevron" icon="mdi:chevron-right" aria-hidden="true"></ha-icon>'}</button>`;
+    return `<section class="home-control-room" aria-label="Home room controls">
+      <aside class="home-room-rail" aria-label="Choose a room"><header><h2>Your rooms</h2><span>${scoped.length} with controls</span></header><label class="home-floor-select"><span class="sr-only">Choose room floor</span><ha-icon icon="mdi:layers-outline" aria-hidden="true"></ha-icon><select data-home-floor aria-label="Choose room floor"><option value="all" ${this._homeFloorFilter==="all"?"selected":""}>All floors</option>${this._config.floorplan.floors.map(floor=>`<option value="${escapeHtml(floor.id)}" ${this._homeFloorFilter===floor.id?"selected":""}>${escapeHtml(floor.name)}</option>`).join("")}</select></label>
+      <div class="room-rail-filters" role="group" aria-label="Filter rooms">${[{id:"all",label:"All",count:scoped.length},{id:"active",label:"Active",count:active.length},{id:"unavailable",label:"Issues",count:issues.length}].map(filter=>`<button type="button" data-home-room-filter="${filter.id}" aria-pressed="${this._homeRoomFilter===filter.id}">${filter.label}<span>${filter.count}</span></button>`).join("")}</div>
+      <div class="room-rail-list">${filtered.map(roomButton).join("") || `<p class="room-rail-empty">${this._homeRoomFilter === "active" ? "No active rooms on this floor." : this._homeRoomFilter === "unavailable" ? "Nothing needs checking on this floor." : "No connected controls on this floor."}</p>`}${otherRooms.length ? `<details class="unmapped-rooms"><summary>Rooms without controls · ${otherRooms.length}</summary>${otherRooms.map(roomButton).join("")}</details>` : ""}</div>
+      <footer><button type="button" data-all-internal-lights data-light-service="turn_off" ${this._config.display.read_only || !internalOn ? 'disabled aria-disabled="true"' : ""}><ha-icon icon="mdi:lightbulb-group-off-outline" aria-hidden="true"></ha-icon><span>Inside lights off<small>${internalOn ? `${internalOn} on across the house` : "Already off"}</small></span></button></footer></aside>
+      <article class="home-room-canvas" aria-label="${escapeHtml(selected.room.name)} room controls">${this._renderRoomDetail(selected.room,{canvas:true})}</article>
     </section>`;
   }
 
@@ -4723,10 +4730,13 @@ export class FamilyHubCard extends HTMLElementBase {
     `;
   }
 
-  _renderRoomDetail(room) {
+  _renderRoomDetail(room, {canvas=false} = {}) {
     if (!room) return '<p class="hub-empty-state">Choose a room.</p>';
     const states = this._hass?.states || {};
     const summary = deriveRoomState(room, states, this._config.theme.accent);
+    const roomModel=canvas ? homeRoomPresentation(room,states,this._config) : null;
+    const missing=roomModel?.unavailableEntityIds || [];
+    const issueSection=missing.some(id=>room.lights.includes(id)) ? "lights" : missing.some(id=>(room.media_players || []).includes(id)) ? "music" : missing.some(id=>id===room.climate || room.covers.includes(id)) ? "comfort" : null;
     const readOnly = this._config.display.read_only === true;
     const disabled = readOnly ? ' disabled aria-disabled="true"' : "";
     const lights = room.lights.map((entityId) => {
@@ -4740,6 +4750,12 @@ export class FamilyHubCard extends HTMLElementBase {
         : titleCase(state?.state || "unavailable");
       const toggleDisabled = readOnly || !available ? ' disabled aria-disabled="true"' : "";
       const actionLabel = available ? `Turn ${name} ${isOn ? "off" : "on"}` : `${name} unavailable`;
+      if(canvas) {
+        const dimmable=lightSupportsBrightness(state,name);
+        const label=name.toLowerCase().startsWith(`${room.name.toLowerCase()} `) ? name.slice(room.name.length).trim() : name;
+        const level=Number.isFinite(reportedBrightness) ? Math.max(1,Math.min(100,Math.round(reportedBrightness/2.55))) : 100;
+        return `<div class="room-light-tile ${isOn?"is-on":""} ${available?"":"is-unavailable"}"><button type="button" class="room-light-toggle" data-toggle="${escapeHtml(entityId)}" aria-label="${escapeHtml(actionLabel)}" aria-pressed="${isOn}"${toggleDisabled}><span class="room-light-symbol"><ha-icon icon="${isOn?"mdi:lightbulb-on-outline":"mdi:lightbulb-outline"}" aria-hidden="true"></ha-icon></span><ha-icon class="room-light-power" icon="mdi:power" aria-hidden="true"></ha-icon><strong>${escapeHtml(label)}</strong><span>${escapeHtml(lightDetail)}</span></button>${dimmable ? `<label class="light-dimmer room-light-dimmer" style="--light-level:${level}%"><span class="sr-only">${escapeHtml(name)} brightness</span><ha-icon icon="mdi:brightness-6" aria-hidden="true"></ha-icon><input type="range" min="1" max="100" step="1" value="${level}" data-light-brightness="${escapeHtml(entityId)}" aria-label="${escapeHtml(name)} brightness"${toggleDisabled}><output>${level}%</output></label>` : `<div class="room-light-binary"><span>On / off</span><button type="button" data-more-info="${escapeHtml(entityId)}" aria-label="${escapeHtml(name)} details"${disabled}><ha-icon icon="mdi:tune" aria-hidden="true"></ha-icon></button></div>`}</div>`;
+      }
       return `
         <div class="control-row">
           <button type="button" class="control-main ${isOn ? "is-on" : ""}" data-toggle="${escapeHtml(entityId)}" aria-label="${escapeHtml(actionLabel)}" aria-pressed="${isOn}"${toggleDisabled}>
@@ -4754,12 +4770,13 @@ export class FamilyHubCard extends HTMLElementBase {
     const climateDisabled = readOnly || !climateAvailable ? ' disabled aria-disabled="true"' : "";
     const climateControl = room.climate ? `
       <div class="climate-control">
-        <div><span>Temperature</span><strong>${formatTemperature(summary.temperature)}</strong><small>Target ${formatTemperature(summary.targetTemperature)}</small></div>
+        <div><span>${canvas ? "Target temperature" : "Temperature"}</span><strong>${formatTemperature(canvas ? summary.targetTemperature : summary.temperature)}</strong><small>${canvas ? `Room ${formatTemperature(summary.temperature)} · ${escapeHtml(heatingPresentation(climate).label)}` : `Target ${formatTemperature(summary.targetTemperature)}`}</small></div>
         <div class="stepper">
           <button type="button" data-climate-adjust="-0.5" data-entity="${escapeHtml(room.climate)}" aria-label="${climateAvailable ? "Lower target temperature" : "Temperature control unavailable"}"${climateDisabled}>−</button>
           <button type="button" data-climate-adjust="0.5" data-entity="${escapeHtml(room.climate)}" aria-label="${climateAvailable ? "Raise target temperature" : "Temperature control unavailable"}"${climateDisabled}>+</button>
         </div>
       </div>
+      ${canvas && room.heating_schedule ? `<button type="button" class="room-schedule-link" data-heating-schedule-open="${escapeHtml(room.id)}"><ha-icon icon="mdi:calendar-clock" aria-hidden="true"></ha-icon>Daily heating schedule<ha-icon icon="mdi:chevron-right" aria-hidden="true"></ha-icon></button>` : ""}
     ` : "";
     const covers = room.covers.flatMap((entityId) => {
       const state = states[entityId];
@@ -4809,8 +4826,9 @@ export class FamilyHubCard extends HTMLElementBase {
     const sections = [["lights", "Lights", lights], ["comfort", "Comfort", climateControl + covers], ["scenes", "Scenes", scenes], ["music", "Music", media]].filter(([, , content]) => content);
     const selectedSection = sections.some(([id]) => id === this._roomDetailSection) ? this._roomDetailSection : sections[0]?.[0];
     return `
-      <div class="room-title"><span class="room-icon"><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><p class="eyebrow">${readOnly ? "Read-only room" : "Room controls"}</p><h2>${escapeHtml(room.name)}</h2><p>${escapeHtml(lightStatus)}${Number.isFinite(summary.temperature) ? ` · ${formatTemperature(summary.temperature)}` : ""}</p></div></div>
+      <div class="room-title"><span class="room-icon"><ha-icon icon="${escapeHtml(room.icon)}"></ha-icon></span><div><p class="eyebrow">${readOnly ? "Read-only room" : canvas ? escapeHtml(this._config.floorplan.floors.find(floor=>floor.id===room.floor_id)?.name || "Room controls") : "Room controls"}</p><h2>${escapeHtml(room.name)}</h2><p>${escapeHtml(canvas ? roomModel.detail : lightStatus)}${Number.isFinite(summary.temperature) ? ` · ${formatTemperature(summary.temperature)}` : ""}</p></div>${canvas ? '<div class="room-canvas-head-actions">' : ""}${canvas && room.lights.length ? `<button type="button" class="room-canvas-power ${summary.lightsOn?"is-on":""}" data-room-lights="${escapeHtml(room.id)}" data-light-service="${summary.lightsOn?"turn_off":"turn_on"}" ${readOnly || !summary.availableLights ? 'disabled aria-disabled="true"' : ""}><ha-icon icon="mdi:power" aria-hidden="true"></ha-icon>${summary.lightsOn?"Lights off":"Lights on"}</button>` : ""}${canvas ? `<button type="button" class="room-canvas-floorplan" data-focus-home-room="${escapeHtml(room.id)}" aria-label="Show ${escapeHtml(room.name)} on floorplan"><ha-icon icon="mdi:floor-plan" aria-hidden="true"></ha-icon></button></div>` : ""}</div>
       ${readOnly ? '<p class="read-only-note"><ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon>Controls are disabled while this version is being checked.</p>' : ""}
+      ${missing.length ? `<div class="room-canvas-issue" role="status"><ha-icon icon="mdi:cloud-alert-outline" aria-hidden="true"></ha-icon><span>${escapeHtml(missing.slice(0,2).map(id=>entityName(states[id],titleCase(id.split(".")[1]))).join(", "))}${missing.length>2?` +${missing.length-2} more`:""} unavailable</span>${issueSection ? `<button type="button" data-room-section="${issueSection}">Check ${issueSection === "music" ? "Music" : issueSection === "lights" ? "Lights" : "Comfort"}</button>` : ""}</div>` : ""}
       ${sections.length > 1 ? `<div class="segments detail-segments" role="group" aria-label="Room controls">${sections.map(([id, label]) => `<button type="button" class="segment ${selectedSection === id ? "is-selected" : ""}" data-room-section="${id}" aria-pressed="${selectedSection === id}">${label}</button>`).join("")}</div>` : ""}
       <div class="room-section-content">${sections.map(([id, , content]) => `<section class="room-control-list ux-section" data-room-panel="${id}" ${selectedSection === id ? "" : "hidden"}>${content}</section>`).join("")}</div>
       ${!climate && !lights && !covers && !scenes && !media ? '<p class="hub-empty-state">No controls are available for this room yet.</p>' : ""}
@@ -6711,6 +6729,18 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _handleChange(event) {
+    if(event.target.dataset?.homeFloor !== undefined && this._view === "rooms" && !this._plannerModal) {
+      const floor=event.target.value;
+      if(floor!=="all" && !this._config.floorplan.floors.some(entry=>entry.id===floor))return;
+      this._homeFloorFilter=floor;this._homeRoomFilter="all";
+      const selected=this._config.rooms.find(room=>room.id===this._room);
+      if(floor!=="all" && selected?.floor_id!==floor) {
+        const room=this._config.rooms.find(room=>room.floor_id===floor && room.id===this._config.home.default_room) || this._config.rooms.find(room=>room.floor_id===floor && (room.lights.length || room.climate || room.covers.length || room.scenes.length)) || this._config.rooms.find(room=>room.floor_id===floor && homeRoomPresentation(room,this._hass?.states || {},this._config).hasControls) || this._config.rooms.find(room=>room.floor_id===floor);
+        if(room){this._room=room.id;this._roomDetailSection="lights";}
+      }
+      this._scheduleRender(true);return;
+    }
+
     if (this._plannerModal?.type === 'add' && event.target.dataset?.plannerField) { this._plannerModal.form ||= this._newPlannerForm();this._plannerModal.form[event.target.dataset.plannerField]=event.target.value;return; }
     if (this._homeworkModal && event.target.dataset?.homeworkInput) { this._handleInput(event);return; }
     if (event.target.dataset?.homeworkVoice !== undefined && this._homeworkModal?.type === "spelling") {
@@ -7034,6 +7064,11 @@ export class FamilyHubCard extends HTMLElementBase {
       }
       if(target.dataset.view){this._plannerModal=null;}
     }
+    if(target.dataset.homeRoomSelect && !this._plannerModal && !this._pendingConfirmation && this._view === "rooms") {
+      const rail=this.shadowRoot.querySelector('.room-rail-list');
+      this._homeRailRestore=rail ? {top:rail.scrollTop,left:rail.scrollLeft,unmappedOpen:Boolean(this.shadowRoot.querySelector(".unmapped-rooms")?.open)} : null;
+      this._selectRoom(target.dataset.homeRoomSelect); return;
+    }
     if(target.dataset.homeRoomOpen && !this._plannerModal && !this._homeworkModal && !this._pendingConfirmation && !this._familyPickerOpen) {
       if(this._view !== "rooms" || !this._config.rooms.some(room=>room.id===target.dataset.homeRoomOpen))return;
       this._room=target.dataset.homeRoomOpen; this._roomDetailSection="lights";
@@ -7041,7 +7076,12 @@ export class FamilyHubCard extends HTMLElementBase {
     }
     if(target.dataset.homeRoomFilter && !this._plannerModal && !this._pendingConfirmation) {
       if(this._view !== "rooms")return;
-      this._homeRoomFilter=target.dataset.homeRoomFilter; this._scheduleRender(true); return;
+      if(!["all","active","unavailable"].includes(target.dataset.homeRoomFilter))return;
+      this._homeRoomFilter=target.dataset.homeRoomFilter;
+      const models=this._config.rooms.map(room=>homeRoomPresentation(room,this._hass?.states || {},this._config));
+      const matches=models.filter(model=>model.hasControls && (this._homeFloorFilter==="all" || model.room.floor_id===this._homeFloorFilter) && (this._homeRoomFilter==="active" ? model.active : this._homeRoomFilter==="unavailable" ? model.unavailable : true));
+      if(matches.length && !matches.some(model=>model.room.id===this._room)){this._room=matches[0].room.id;this._roomDetailSection="lights";}
+      this._scheduleRender(true); return;
     }
     if (this._plannerModal?.type === "football" && target.dataset.footballClose !== undefined) {
       this._plannerModal = null; this._scheduleRender(true); return;

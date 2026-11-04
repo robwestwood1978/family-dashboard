@@ -1,3 +1,9 @@
+## 0.30.0
+
+- Replace the Home overview’s repeated status cards with a room selector and direct room controls. Keep room selection stable during live updates, preserve the room list’s scroll position, and group rooms without configured controls separately.
+- Add large light tiles with clear on/off states, capability-aware brightness sliders and a room-wide light action. Retain comfort, covers, scenes and music for each room, plus the existing whole-home screens and private floorplans.
+- Fit four light controls on short landscape screens and adapt to portrait and enlarged text. Preserve independent Today/Calendar/Tasks selections, read-only behavior and bounded device services.
+
 ## 0.29.0
 
 - Give Today, Calendar, Tasks and the optional simple view independent person selections on each device. Migrate the previous shared selection to Tasks, start shared pages with everyone, and keep house controls explicitly whole-home.
