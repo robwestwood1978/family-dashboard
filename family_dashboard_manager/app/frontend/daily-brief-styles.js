@@ -2261,7 +2261,7 @@ export const DAILY_BRIEF_STYLES = `
   .task-group h3 { margin:0; font-size:16px; font-weight:500; }
   .task-group p,.task-list-note { margin:5px 0; color:var(--daily-muted); font-size:12px; line-height:1.4; }
   .task-group > header > button { min-width:48px; min-height:48px; border:0; border-radius:12px; background:var(--daily-surface); color:var(--daily-accent); }
-  .task-group ul,.tasks-completed ul { display:flex; flex-direction:column; padding:0; margin:0; gap:8px; list-style:none; }
+  .task-group ul,.task-disclosure ul { display:flex; flex-direction:column; padding:0; margin:0; gap:8px; list-style:none; }
   .tasks-v2 .task-row { display:block; min-height:0; padding:0; margin:0; border:0; background:transparent; }
   .tasks-v2 .task-check { display:flex; position:static; width:100%; min-height:68px; height:auto; padding:10px 14px; gap:12px; border:1px solid var(--daily-line); border-radius:16px; background:var(--daily-surface); color:var(--daily-text); font:inherit; text-align:left; box-sizing:border-box; opacity:1; }
   .task-check > span:nth-child(2) { min-width:0; flex:1; }
@@ -2272,8 +2272,8 @@ export const DAILY_BRIEF_STYLES = `
   .task-tick { margin-left:auto; color:var(--daily-muted); --mdc-icon-size:22px; }
   .task-row.is-waiting .task-status-icon,.task-row.is-waiting .task-tick { color:var(--daily-warning); }
   .task-row.is-done .task-status-icon,.task-row.is-done .task-tick { color:var(--daily-success); }
-  .tasks-completed { border-top:1px solid var(--daily-line); padding-top:8px; }
-  .tasks-completed > summary { display:list-item; min-height:48px; align-content:center; color:var(--daily-muted); font-size:14px; cursor:pointer; }
+  .task-disclosure { border-top:1px solid var(--daily-line); padding-top:8px; }
+  .task-disclosure > summary { display:list-item; min-height:48px; align-content:center; color:var(--daily-muted); font-size:14px; cursor:pointer; }
   .task-list-clear { padding:28px 16px; text-align:center; color:var(--daily-muted); }
   .task-list-clear > ha-icon { display:block; margin:0 auto 10px; --mdc-icon-size:32px; color:var(--daily-success); }
   .task-list-clear strong { color:var(--daily-text); font-weight:500; font-size:18px; }

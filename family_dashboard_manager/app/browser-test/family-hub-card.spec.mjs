@@ -5806,6 +5806,7 @@ test('reading entry keeps the focused field and save action above the tablet key
 
 test('one child task list combines daily jobs and packing with separate approval and completion states',async({page},testInfo)=>{
   const {family,preparationItems,calendarEventsByEntity}=readinessFixture();
+  family.features.location_map=true;
   const status='sensor.child_one_choreops_chore_status_brush_teeth',claim='button.child_one_choreops_claim_chore_brush_teeth';
   family.chores.users[0].status_entities=[status];
   const errors=await mount(page,family,{[status]:state(status,'pending',{chore_name:'Brush teeth',default_points:0}),[claim]:state(claim,'unknown')},{preparationItems,calendarEventsByEntity,fixedNow:'2026-11-10T07:15:00Z',kiosk:true});
