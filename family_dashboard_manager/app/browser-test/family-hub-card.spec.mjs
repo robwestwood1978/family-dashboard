@@ -4997,7 +4997,7 @@ test("approved Calendar inline preparation adds to the shared list and honours r
   await expect(card.locator('.focus-event-ready .focus-ready-item')).toContainText("Training top");
   const eventKey=await card.locator("[data-focus-add-prep]").getAttribute("data-focus-add-prep");
   await card.locator('[data-focus-tasks="child_one"]').click();
-  await expect(card.locator('.family-prep-item')).toContainText("Training top");
+  await expect(card.locator('.task-check[data-task-kind="prep"]')).toContainText("Training top");
   const count=await page.evaluate(()=>window.__serviceCalls.length);
   await card.evaluate(el=>{el._config.display.read_only=true;el._view="calendar";el._render();});
   await expect(card.locator('[data-focus-add-prep]')).toHaveCount(0);
