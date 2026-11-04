@@ -1,3 +1,8 @@
+## 0.31.1
+
+- Keep month previews readable on short landscape screens by showing one full-height event title and an accurate additional-event count. Keep neighbouring-month dates legible and remove the duplicated month heading.
+- Check preview text height and date-cell overflow with several events at both short landscape sizes.
+
 ## 0.31.0
 
 - Make Today more visual with an illustrated day panel, current-plan status and each child's progress ring based on completed jobs and packing. Retain school departure actions and short landscape layouts.

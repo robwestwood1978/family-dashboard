@@ -1,6 +1,6 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.31.0";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.31.1";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.31.0";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.31.1";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -12,7 +12,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
-const DASHBOARD_VERSION = "0.31.0";
+const DASHBOARD_VERSION = "0.31.1";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
@@ -4322,7 +4322,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if(this._calendarDetailsOpen)return this._renderCalendarDayDetails();
     return `<div class="calendar-month-layout"><div class="calendar-month-canvas"><div class="planner-month-headings">${["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(day=>`<span>${day}</span>`).join("")}</div><div class="planner-month-grid">${days.map(day=>{
       const list=calendarEventsOnDay(events,day.key,this._config.product.timezone);
-      return `<section class="planner-month-day ${day.isToday?"is-today":""} ${day.key.slice(0,7)!==month?"is-outside":""}"><button type="button" class="planner-date-select" data-calendar-day="${day.key}" aria-label="Select ${escapeHtml(`${day.day} ${day.month}`)}" aria-pressed="${this._focusCalendarDay()?.key===day.key}"><strong>${escapeHtml(day.day)}</strong><span class="month-day-events">${list.slice(0,2).map(event=>`<span class="month-event-preview" style="--calendar-colour:${escapeHtml(event._calendar?.colour || this._config.theme.accent)}">${escapeHtml(event.summary || "Family plan")}</span>`).join("")}${list.length>2?`<small class="planner-month-more">+${list.length-2} more</small>`:""}</span></button></section>`;
+      return `<section class="planner-month-day ${day.isToday?"is-today":""} ${day.key.slice(0,7)!==month?"is-outside":""}"><button type="button" class="planner-date-select" data-calendar-day="${day.key}" aria-label="Select ${escapeHtml(`${day.day} ${day.month}`)}" aria-pressed="${this._focusCalendarDay()?.key===day.key}"><strong>${escapeHtml(day.day)}</strong><span class="month-day-events">${list.slice(0,1).map(event=>`<span class="month-event-preview" style="--calendar-colour:${escapeHtml(event._calendar?.colour || this._config.theme.accent)}">${escapeHtml(event.summary || "Family plan")}</span>`).join("")}${list.length>1?`<small class="planner-month-more">+${list.length-1} more</small>`:""}</span></button></section>`;
     }).join("")}</div></div></div>`;
   }
 
