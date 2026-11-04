@@ -22,7 +22,7 @@ const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", imp
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
   .replace(/import \{ schoolLunchForDate[^\n]+from "\.\/readiness\.js[^";]+";/, `const {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents} = (()=>{${readinessSource.replace(/export /g, "")}return {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents};})();`)
   .replace(/export \{ schoolLunchForDate[^\n]+;/, "")
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.29.0";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.30.0";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -1222,7 +1222,7 @@ test("Home in focus keeps every screen readable in both appearances and preserve
         for (const section of ["overview", "lights", "heating", "covers", "cleaning"]) {
           await card.locator(`[data-home-section="${section}"]`).click();
           await expectApprovalQuality(page);
-          if (section === "overview") await expectContrast(card,[{foreground:".home-v2 h2,.home-room-card strong,.home-v2-metrics strong,.home-room-state,.home-room-filters button",background:".home-v2",minimum:4.5}]);
+          if (section === "overview") await expectContrast(card,[{foreground:".home-control-room h2,.room-rail-item strong,.room-rail-item small,.room-light-toggle strong,.room-light-toggle > span:last-child,.room-rail-filters button",background:".home-control-room",minimum:4.5}]);
           if (section === "lights" || section === "heating") {
             await expectContrast(card, [{ foreground: `.${section === "lights" ? "lighting" : "heating"}-master h2`, background: `.${section === "lights" ? "lighting" : "heating"}-master`, minimum: 4.5 }]);
           }
@@ -5658,7 +5658,7 @@ test("simple family view has child choices and always returns to the full dashbo
   const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-10T07:15:00Z",kiosk:true});
   const card=page.locator("family-hub-card");
   await card.locator('[data-family-picker-open]').click();
-  await expect(card.locator(".dashboard-version")).toContainText("0.29.0");
+  await expect(card.locator(".dashboard-version")).toContainText("0.30.0");
   await card.locator('[data-experience="simple"]').click();
   await expect(card.locator(".simple-child-card")).toHaveCount(2);
   expect(await card.locator(".simple-child-card .today-job>div").first().evaluate(node=>node.getBoundingClientRect().width)).toBeGreaterThan(200);
@@ -5843,49 +5843,103 @@ test('one child task list combines daily jobs and packing with separate approval
 });
 
 
-test("Home overview filters live rooms and opens focused bounded controls with keyboard recovery",async({page},testInfo)=>{
+test("Home gives direct room controls, live brightness and stable room selection",async({page},testInfo)=>{
   const family=locationDisabledConfig();family.home.default_section="overview";family.display.appearance="auto";
-  const errors=await mount(page,family);
-  const card=page.locator("family-hub-card"),room=family.rooms.find(room=>room.lights.length);
+  const room=family.rooms.find(room=>room.id==="kitchen") || family.rooms.find(room=>room.lights.length);
+  family.home.default_room=room.id;
+  const original=room.lights[0];
+  room.lights=[original,"light.test_pendants","light.test_table","light.test_cabinet"];
+  const lighting=Object.fromEntries(room.lights.map((id,index)=>[id,state(id,index===1?"on":"off",{friendly_name:["Downlights","Island pendants","Table lights","Under cabinet"][index],brightness:150,supported_color_modes:["brightness"]})]));
+  const errors=await mount(page,family,lighting);
+  const card=page.locator("family-hub-card");
   await card.locator('.hub-nav-button[data-view="rooms"]').click();
-  await expect(card.locator('.home-v2')).toBeVisible();
-  await expect(card.locator('[data-home-room-open]')).toHaveCount(family.rooms.length);
-  await card.locator('[data-home-room-filter="active"]').click();
-  const light=room.lights[0];
-  await updateEntityState(card,state(light,"on",{friendly_name:"Room test light",brightness:180,supported_color_modes:["brightness"]}));
-  await expect(card.locator(`[data-home-room-open="${room.id}"]`)).toContainText("1 light on");
-  const open=card.locator(`[data-home-room-open="${room.id}"]`);
-  await open.click();
-  const modal=card.getByRole("dialog",{name:room.name,exact:true});
-  await expect(modal).toBeVisible();
-  await expect(card.locator('.hub-shell')).toHaveAttribute('inert','');
-  await modal.locator(`[data-toggle="${light}"]`).click();
-  await expect.poll(()=>page.evaluate(()=>window.__serviceCalls)).toContainEqual({domain:"light",service:"toggle",data:{entity_id:light}});
-  await page.keyboard.press("Escape");
-  await expect(modal).toHaveCount(0);
-  await expect(open).toBeFocused();
-  await card.locator('[data-home-room-filter="all"]').click();
-  await expectNoRootOverflow(page);
+  await expect(card.locator('.home-control-room')).toBeVisible();
+  await expect(card.locator('.home-room-canvas .room-title h2')).toHaveText(room.name);
+  await expect(card.locator('.room-light-tile')).toHaveCount(4);
+  await expect(card.locator('.home-v2-metrics,.home-v2-sidebar,.home-v2-intro')).toHaveCount(0);
+  await card.locator(`.home-room-canvas [data-toggle="${original}"]`).click();
+  await expect.poll(()=>page.evaluate(()=>window.__serviceCalls)).toContainEqual({domain:"light",service:"toggle",data:{entity_id:original}});
+  const brightness=card.locator(`[data-light-brightness="${original}"]`);
+  await brightness.fill("35");await brightness.dispatchEvent("change");
+  await expect.poll(()=>page.evaluate(()=>window.__serviceCalls)).toContainEqual({domain:"light",service:"turn_on",data:{entity_id:original,brightness_pct:35}});
   for(const darkMode of [false,true]) {
     await card.evaluate((element,dark)=>{element.hass={...element._hass,themes:{darkMode:dark}};},darkMode);
     await expectApprovalQuality(page);
     if(process.env.DAILY_BRIEF_REVIEW_DIR) {
       const directory=resolve(process.env.DAILY_BRIEF_REVIEW_DIR,testInfo.project.name);await mkdir(directory,{recursive:true});
-      await page.screenshot({path:resolve(directory,`home-v2-${darkMode?"dark":"light"}.png`),fullPage:true});
+      await page.screenshot({path:resolve(directory,`home-direct-${darkMode?"dark":"light"}.png`),fullPage:true});
     }
   }
-  await page.setViewportSize({width:834,height:1112});
+  await page.setViewportSize({width:1280,height:720});
   await expectApprovalQuality(page);
-  await page.setViewportSize({width:512,height:768});
-  await expectApprovalQuality(page);
+  const bounds=await card.locator('.room-light-tile').evaluateAll(nodes=>nodes.map(node=>({bottom:node.getBoundingClientRect().bottom,top:node.getBoundingClientRect().top})));
+  const dock=await card.locator('.focus-music-dock').evaluate(node=>node.getBoundingClientRect().top);
+  expect(bounds.every(bound=>bound.bottom<=dock)).toBe(true);
+  await page.setViewportSize({width:834,height:1112});await expectApprovalQuality(page);
+  await page.setViewportSize({width:512,height:768});await expectApprovalQuality(page);
   await page.setViewportSize(testInfo.project.use.viewport);
-  await updateEntityState(card,state(light,"unavailable",{friendly_name:"Room test light"}));
-  await card.locator('[data-home-room-filter="unavailable"]').first().click();
-  await expect(open).toContainText('unavailable');
-  await open.click();
-  await expect(card.locator(`.home-room-modal [data-toggle="${light}"]`)).toBeDisabled();
-  await card.locator('[data-home-room-floorplan]').click();
-  await expect(card.locator('.room-title h2')).toHaveText(room.name);
+  await updateEntityState(card,state(original,"unavailable",{friendly_name:"Downlights",supported_color_modes:["brightness"]}));
+  await expect(card.locator(`.home-room-canvas [data-toggle="${original}"]`)).toBeDisabled();
+  await expect(card.locator(`[data-home-room-select="${room.id}"]`)).toContainText('Needs checking');
+  await card.locator('[data-home-room-filter="unavailable"]').click();
+  await expect(card.locator('.home-room-canvas .room-title h2')).toHaveText(room.name);
+  const other=family.rooms.find(entry=>entry.id!==room.id && entry.lights.length);
+  await card.locator('[data-home-room-filter="all"]').click();
+  await card.locator(`[data-home-room-select="${other.id}"]`).click();
+  await updateEntityState(card,state(original,"on",{friendly_name:"Downlights"}));
+  await expect(card.locator('.home-room-canvas .room-title h2')).toHaveText(other.name);
+  if(other.climate) {
+    await card.locator('.home-room-canvas [data-room-section="comfort"]').click();
+    await expect(card.locator('.climate-control')).toContainText('Target temperature');
+    const target=await card.evaluate((element,id)=>Number(element._hass.states[id].attributes.temperature),other.climate);
+    await card.locator('.home-room-canvas [data-climate-adjust="0.5"]').click();
+    await expect.poll(()=>page.evaluate(()=>window.__serviceCalls)).toContainEqual({domain:"climate",service:"set_temperature",data:{entity_id:other.climate,temperature:target+0.5}});
+  }
+  await card.locator(`.room-canvas-floorplan`).click();
   await expect(card.locator('[data-home-section-current="rooms"]')).toBeVisible();
+  await expect(card.locator('.room-title h2')).toHaveText(other.name);
   expect(errors).toEqual([]);
+});
+
+test("Home room controls retain read-only restrictions and keep unmapped rooms out of the main list",async({page})=>{
+ const family=locationDisabledConfig();family.home.default_section="overview";family.display.read_only=true;
+ family.rooms.push({id:"unmapped",name:"Spare room",floor_id:family.rooms[0].floor_id,icon:"mdi:bed-outline",lights:[],covers:[],scenes:[],media_players:[]});
+ const errors=await mount(page,family);const card=page.locator("family-hub-card");
+ await card.locator('.hub-nav-button[data-view="rooms"]').click();
+ await expect(card.locator('.unmapped-rooms')).toContainText('Spare room');
+ await expect(card.locator('[data-home-room-select="unmapped"]')).not.toBeVisible();
+ await expect(card.locator('.home-room-canvas [data-toggle]').first()).toBeDisabled();
+ await expect(card.locator('[data-all-internal-lights]')).toBeDisabled();
+ await expect(card.locator('.room-canvas-power')).toBeDisabled();
+ await card.locator('.unmapped-rooms summary').click();
+ await card.locator('[data-home-room-select="unmapped"]').click();
+ await expect(card.locator('.unmapped-rooms')).toHaveAttribute('open','');
+ await expect(card.locator('[data-home-room-select="unmapped"]')).toBeFocused();
+ await expect(card.locator('.home-room-canvas .room-title h2')).toHaveText('Spare room');
+ const floor=family.floorplan.floors.find(floor=>floor.id!==family.rooms[0].floor_id);
+ await card.locator('[data-home-floor]').selectOption(floor.id);
+ await expect(card.locator('[data-home-floor]')).toHaveValue(floor.id);
+ const expected=family.rooms.find(room=>room.floor_id===floor.id && (room.lights.length || room.climate || room.media_players.length));
+ await expect(card.locator('.home-room-canvas .room-title h2')).toHaveText(expected.name);
+ expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);expect(errors).toEqual([]);
+});
+
+
+test("Home keeps a long room list in place while switching rooms and receiving live updates",async({page})=>{
+ const family=locationDisabledConfig();family.home.default_section="overview";
+ const base=family.rooms[0],extra=[];
+ for(let index=0;index<13;index++)extra.push({...structuredClone(base),id:`extra_${index}`,name:`Extra room ${index+1}`,climate:null,temperature_sensor:null,lights:[],covers:[],media_players:[],scenes:[`scene.extra_${index}`]});
+ family.rooms.push(...extra);
+ const states=Object.fromEntries(extra.map(room=>[room.scenes[0],state(room.scenes[0],"2026-08-24T15:00:00Z")]));
+ const errors=await mount(page,family,states);const card=page.locator("family-hub-card");
+ await card.locator('.hub-nav-button[data-view="rooms"]').click();
+ const rail=card.locator('.room-rail-list');await rail.evaluate(node=>node.scrollTop=node.scrollHeight);
+ const top=await rail.evaluate(node=>node.scrollTop);
+ await card.locator('[data-home-room-select="extra_12"]').click();
+ await expect(card.locator('.home-room-canvas .room-title h2')).toHaveText('Extra room 13');
+ await expect.poll(()=>rail.evaluate(node=>node.scrollTop)).toBe(top);
+ await updateEntityState(card,state(base.lights[0],"off",{friendly_name:"Living room"}));
+ await expect(card.locator('.home-room-canvas .room-title h2')).toHaveText('Extra room 13');
+ await expect.poll(()=>rail.evaluate(node=>node.scrollTop)).toBe(top);
+ expect(errors).toEqual([]);
 });
