@@ -1,3 +1,10 @@
+## 0.28.0
+
+- Combine daily jobs and calendar packing into one child To do list, with Today, Tomorrow and Later views. Keep approval requests and completed items clearly separated, and retain the existing job and shared-checklist services.
+- Retain every calendar-event draft field across refreshes, validation errors and failed saves. Preserve input focus and the cursor position when a form must redraw.
+- Fit forms to the iPad’s visible screen while the keyboard is open, scroll the focused field into view, add Previous/Next/Hide keyboard controls and keep calendar and reading save actions visible.
+- Refine Today with child task summaries, a quieter school-run panel and the next calendar plan, and use a compact task toolbar on landscape tablets.
+
 ## 0.27.1
 
 - Keep all FPL score labels visible on short landscape screens with Home Assistant’s inherited text spacing. Preserve the full pitch and player touch targets.

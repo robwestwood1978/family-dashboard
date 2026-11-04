@@ -1,6 +1,6 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.27.1";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.28.0";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.27.1";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.28.0";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -12,7 +12,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
-const DASHBOARD_VERSION = "0.27.1";
+const DASHBOARD_VERSION = "0.28.0";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
@@ -2296,7 +2296,8 @@ export class FamilyHubCard extends HTMLElementBase {
       const target = event.target;
       if (target === globalThis.document || this.shadowRoot?.contains(target) || target?.contains?.(this)) this._lastScrollAt = performance.now();
     };
-    this._boundFocusOut = () => { if(this._renderAfterInput){this._renderAfterInput=false;queueMicrotask(()=>this._scheduleRender());} };
+    this._boundFocusIn = () => { const active=this.shadowRoot.activeElement;if(this._formControls().includes(active))this._lastFormControl=active;this._syncViewportHeight();this._queueFormFocus(); };
+    this._boundFocusOut = () => { requestAnimationFrame(() => { if(!this.isConnected)return;this._syncViewportHeight();if(this._renderAfterInput){this._renderAfterInput=false;this._scheduleRender();} }); };
     this._boundSpellingVoicesChanged = () => { if (this._homeworkModal?.type === "spelling") this._scheduleRender(true); };
     this._childCards = new Map();
     this._calendarEvents = [];
@@ -2386,6 +2387,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.addEventListener("pointerdown", this._boundPointerActivity, { passive: true });
     this.shadowRoot.addEventListener("scroll", this._boundScroll, { passive: true, capture: true });
     this.shadowRoot.addEventListener("focusout", this._boundFocusOut);
+    this.shadowRoot.addEventListener("focusin", this._boundFocusIn);
     globalThis.document?.addEventListener?.("scroll", this._boundScroll, { passive: true, capture: true });
     globalThis.document?.addEventListener?.("pointerup", this._boundPointerEnd, { passive: true, capture: true });
     globalThis.document?.addEventListener?.("pointercancel", this._boundPointerEnd, { passive: true, capture: true });
@@ -2393,6 +2395,7 @@ export class FamilyHubCard extends HTMLElementBase {
     globalThis.addEventListener?.("pagehide", this._boundPageHide);
     globalThis.addEventListener?.("resize", this._boundResize, { passive: true });
     globalThis.visualViewport?.addEventListener?.("resize", this._boundResize, { passive: true });
+    globalThis.visualViewport?.addEventListener?.("scroll", this._boundResize, { passive: true });
     if (globalThis.ResizeObserver && this.parentElement) {
       this._viewportObserver = new ResizeObserver(() => this._syncViewportHeight());
       this._viewportObserver.observe(this.parentElement);
@@ -2416,6 +2419,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this.shadowRoot.removeEventListener("pointerdown", this._boundPointerActivity);
     this.shadowRoot.removeEventListener("scroll", this._boundScroll, true);
     this.shadowRoot.removeEventListener("focusout", this._boundFocusOut);
+    this.shadowRoot.removeEventListener("focusin", this._boundFocusIn);
     globalThis.document?.removeEventListener?.("scroll", this._boundScroll, true);
     globalThis.document?.removeEventListener?.("pointerup", this._boundPointerEnd, true);
     globalThis.document?.removeEventListener?.("pointercancel", this._boundPointerEnd, true);
@@ -2427,9 +2431,12 @@ export class FamilyHubCard extends HTMLElementBase {
     globalThis.removeEventListener?.("pagehide", this._boundPageHide);
     globalThis.removeEventListener?.("resize", this._boundResize);
     globalThis.visualViewport?.removeEventListener?.("resize", this._boundResize);
+    globalThis.visualViewport?.removeEventListener?.("scroll", this._boundResize);
     this._viewportObserver?.disconnect();
     if (this._responsiveStyleFrame != null) globalThis.cancelAnimationFrame?.(this._responsiveStyleFrame);
     this._responsiveStyleFrame = null;
+    if (this._formFocusFrame) cancelAnimationFrame(this._formFocusFrame);
+    this._formFocusFrame = null;
     this._clearFreshnessTimer();
     this._clearPhotoFrameTimers();
     this._releaseDevicePhotoUrls();
@@ -2573,6 +2580,49 @@ export class FamilyHubCard extends HTMLElementBase {
     const top = this.getBoundingClientRect().top;
     const height = Math.max(160, Math.floor(bottom - top));
     if (Number.isFinite(height)) this.style.setProperty("--family-viewport-height", `${height}px`);
+    const visibleHeight = viewport?.height || globalThis.innerHeight;
+    const active = this.shadowRoot.activeElement;
+    const editing = active?.matches?.('input:not([type="range"]):not([type="checkbox"]),textarea,select') || this.shadowRoot.querySelector('.planner-modal') && this._lastFormControl?.isConnected;
+    if (!editing) this._formLayoutHeight = Math.max(visibleHeight, globalThis.innerHeight || 0);
+    const baseline = Math.max(this._formLayoutHeight || 0, globalThis.innerHeight || 0, globalThis.document?.documentElement?.clientHeight || 0);
+    this.toggleAttribute("data-keyboard-open", Boolean(editing && (viewport?.scale || 1) < 1.1 && baseline - visibleHeight > 120));
+    for (const [name,value] of Object.entries({height:visibleHeight,top:viewport?.offsetTop || 0,left:viewport?.offsetLeft || 0,width:viewport?.width || globalThis.innerWidth})) {
+      if (Number.isFinite(value)) this.style.setProperty(`--family-overlay-${name}`,`${Math.floor(value)}px`);
+    }
+    this._queueFormFocus();
+  }
+
+  _formControls() {
+    const modal = this.shadowRoot.querySelector('.planner-modal');
+    return [...(modal?.querySelectorAll('input:not([disabled]):not([type="checkbox"]):not([type="range"]):not([type="file"]),textarea:not([disabled]),select:not([disabled])') || [])].filter(control => control.getClientRects().length && !control.closest('[inert]'));
+  }
+
+  _renderFormNavigation() {
+    return '<div class="form-navigation" role="group" aria-label="Text entry controls"><button type="button" data-form-nav="previous" aria-label="Previous field"><ha-icon icon="mdi:chevron-up"></ha-icon>Previous</button><button type="button" data-form-nav="next" aria-label="Next field">Next<ha-icon icon="mdi:chevron-down"></ha-icon></button><button type="button" data-form-nav="done">Hide keyboard</button></div>';
+  }
+
+  _queueFormFocus() {
+    if (this._formFocusFrame) return;
+    this._formFocusFrame = requestAnimationFrame(() => {
+      this._formFocusFrame = null;
+      const active = this.shadowRoot.activeElement, controls = this._formControls(), index = controls.indexOf(controls.includes(active) ? active : this._lastFormControl);
+      for (const button of this.shadowRoot.querySelectorAll('[data-form-nav]')) button.disabled = index < 0 || (button.dataset.formNav === 'previous' && index === 0);
+      const body = active?.closest?.('.planner-event-form,.homework-modal-body,.planner-modal-body');
+      if (!body || index < 0) return;
+      const bounds = body.getBoundingClientRect(), field = active.getBoundingClientRect(), label = active.closest('label')?.getBoundingClientRect() || field;
+      const top = label.height <= bounds.height - 16 ? label.top : field.top;
+      const bottom = label.height <= bounds.height - 16 ? label.bottom : field.bottom;
+      if (top < bounds.top + 8) body.scrollTop -= bounds.top + 8 - top;
+      else if (bottom > bounds.bottom - 8) body.scrollTop += bottom - bounds.bottom + 8;
+    });
+  }
+
+  _navigateForm(direction) {
+    const controls = this._formControls(), active = controls.includes(this.shadowRoot.activeElement) ? this.shadowRoot.activeElement : this._lastFormControl, index = controls.indexOf(active);
+    if (direction === 'done' || direction === 'next' && index === controls.length - 1) { active?.blur?.(); this.shadowRoot.activeElement?.blur?.();this._lastFormControl=null;this._syncViewportHeight();return; }
+    const next = controls[index + (direction === 'previous' ? -1 : 1)];
+    next?.focus({preventScroll:true});
+    this._queueFormFocus();
   }
 
   getCardSize() {
@@ -2591,7 +2641,7 @@ export class FamilyHubCard extends HTMLElementBase {
     // the shadow tree for ordinary Home Assistant state ticks would replace
     // the current image and restart its reveal animation, which presents as a
     // recurring pulse between the configured slide changes.
-    if (this._devicePhotoBusy || (this._devicePhotoModal || this._photoFrameActive || this._homeworkModal) && !force) return;
+    if (this._devicePhotoBusy || (this._devicePhotoModal || this._photoFrameActive || this._homeworkModal || this._plannerModal && this._formControls().length) && !force) return;
     if (!force && this.shadowRoot?.activeElement?.matches?.('input:not([type="range"]),textarea')) { this._renderAfterInput=true; return; }
     if (!force && performance.now() - this._lastScrollAt < 220) {
       if (this._scrollRenderTimer) clearTimeout(this._scrollRenderTimer);
@@ -3254,6 +3304,8 @@ export class FamilyHubCard extends HTMLElementBase {
         ${this._renderPlannerModal()}
       </ha-card>
     `;
+    const formModal = this.shadowRoot.querySelector('.planner-modal');
+    if (formModal?.querySelector('input:not([type="checkbox"]),textarea,select') && !formModal.querySelector('.form-navigation')) formModal.querySelector('footer')?.insertAdjacentHTML('afterbegin',this._renderFormNavigation());
     for (const crest of this.shadowRoot.querySelectorAll("img[data-team-crest]")) {
       const showFallback = () => {
         crest.hidden = true;
@@ -3268,13 +3320,14 @@ export class FamilyHubCard extends HTMLElementBase {
     if (this._devicePhotoModal) this.shadowRoot.querySelector(".device-photos-modal button:not([disabled])")?.focus();
     if (this._plannerModal) {
       const modal = this.shadowRoot.querySelector(".planner-modal");
+      this._restoreRenderFocus(renderFocus);
       if (this._plannerModal.type === "readiness" && modal) {
         const identity = renderFocus?.dataset;
         const control = [...modal.querySelectorAll("button,select")].find(node=>identity?.prepOwner ? node.dataset.prepOwner === identity.prepOwner : identity?.prepItem ? node.dataset.prepItem === identity.prepItem : false);
         control?.focus();
       }
       if (modal && !modal.contains(this.shadowRoot.activeElement)) {
-        ((scheduleFocusSelector || departureFocusSelector) && modal.querySelector(scheduleFocusSelector || departureFocusSelector) || modal.querySelector('[data-planner-field="summary"]') || modal.querySelector("button:not([disabled])"))?.focus();
+        ((scheduleFocusSelector || departureFocusSelector) && modal.querySelector(scheduleFocusSelector || departureFocusSelector) || modal.querySelector('[data-planner-field="summary"]') || modal.querySelector("button:not([disabled])"))?.focus({preventScroll:true});
       }
     } else if (!confirmationFocusHandled) this._restoreRenderFocus(renderFocus);
     if (this._readinessReturnFocus && !this._plannerModal) {
@@ -3309,7 +3362,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _viewScrollKey() {
-    return [this._view,this._simpleView,this._familyViewId,this._taskSection,this._room,this._homeSection,this._floor,this._footballTab,this._calendarMode,this._calendarAnchorKey,this._calendarSelectedKey,this._calendarFocusEvent].join("|");
+    return [this._view,this._simpleView,this._familyViewId,this._taskSection,this._taskListDay,this._room,this._homeSection,this._floor,this._footballTab,this._calendarMode,this._calendarAnchorKey,this._calendarSelectedKey,this._calendarFocusEvent].join("|");
   }
 
   _scrollIdentity(element) {
@@ -3370,7 +3423,7 @@ export class FamilyHubCard extends HTMLElementBase {
   _applyFamilyViewContext(context = {}) {
     const today = dateKey(new Date(),this._config.product?.timezone || "Europe/London");
     this._calendarPersonFilter = this._familyViewId || "all";
-    this._taskSection = context?.taskSection || "jobs";
+    this._taskSection = context?.taskSection === "ready" ? "jobs" : context?.taskSection || "jobs";
     if (this._taskSection === "homework" && !this._config.school?.homework_enabled) this._taskSection = "jobs";
     if (this._taskSection === "lunch" && !this._config.school?.lunch_menus?.length) this._taskSection = "jobs";
     this._calendarMode = context?.calendarMode || this._config.calendar?.initial_view || "week";
@@ -3449,7 +3502,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderFamilyOverview(children) {
-    return `<section class="family-dashboard family-parent-overview"><header><p class="eyebrow">FAMILY TASKS</p><h2>Choose a child</h2><p>Jobs, reading and homework are organised for each child.</p></header><div class="family-overview-cards">${children.map(person=>{const child=this._homeworkChild(person.id), reading=child?.routines.find(r=>r.kind==="reading"), pending=(child?.plans||[]).filter(plan=>!plan.marks?.handed_in).length;return `<article style="--person-colour:${escapeHtml(person.colour)}"><span class="family-view-token">${escapeHtml(person.name.slice(0,1))}</span><h2>${escapeHtml(person.name)}</h2><p>${reading?`${reading.count}/${reading.goal} readings this week`:"Open jobs and rewards"}</p>${child?`<small>${pending} school task${pending===1?"":"s"} waiting</small>`:""}<div><button type="button" data-focus-tasks="${escapeHtml(person.id)}">Open jobs</button>${this._config.school?.homework_enabled?`<button type="button" data-homework-open="${escapeHtml(person.id)}">Open homework</button>`:""}</div></article>`;}).join("")}</div></section>`;
+    return `<section class="family-dashboard family-parent-overview"><header><p class="eyebrow">FAMILY TASKS</p><h2>Choose a child</h2><p>Jobs, reading and homework are organised for each child.</p></header><div class="family-overview-cards">${children.map(person=>{const child=this._homeworkChild(person.id), reading=child?.routines.find(r=>r.kind==="reading"), pending=(child?.plans||[]).filter(plan=>!plan.marks?.handed_in).length;return `<article style="--person-colour:${escapeHtml(person.colour)}"><span class="family-view-token">${escapeHtml(person.name.slice(0,1))}</span><h2>${escapeHtml(person.name)}</h2><p>${reading?`${reading.count}/${reading.goal} readings this week`:"Open jobs and rewards"}</p>${child?`<small>${pending} school task${pending===1?"":"s"} waiting</small>`:""}<div><button type="button" data-focus-tasks="${escapeHtml(person.id)}">Open list</button>${this._config.school?.homework_enabled?`<button type="button" data-homework-open="${escapeHtml(person.id)}">Open homework</button>`:""}</div></article>`;}).join("")}</div></section>`;
   }
 
   _renderTodayHomeworkActions(phase, children = this._familyViewHomeworkChildren(), limit = 2) {
@@ -3476,7 +3529,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (!presentation.visible) return "";
     const canManage=this._canManageDeparture(),finished=["left","skipped"].includes(view.status);
     const warning=view.last_announcement?.status==="failed",disabled=this._departureBusy?"disabled":"";
-    return `<article class="next-panel today-next departure-panel" data-departure-status="${escapeHtml(view.status)}"><p class="eyebrow">THE SCHOOL RUN</p><h2>${escapeHtml(presentation.heading)}</h2><p class="supporting">${escapeHtml(presentation.caption)}</p><p class="departure-guidance">${finished?"Your usual weekday schedule is unchanged.":"School bags, shoes and water bottles. Check today’s books and homework below."}</p>${canManage?`<div class="departure-actions">${finished?`<button type="button" data-departure-action="restore" ${disabled}>Restore today</button>`:`<button type="button" class="departure-primary" data-departure-action="left" ${disabled}>We’ve left <ha-icon icon="mdi:check"></ha-icon></button><button type="button" data-departure-edit ${disabled}>Change today</button><button type="button" data-departure-action="mute" ${disabled} aria-pressed="${Boolean(view.muted)}">${view.muted?"Unmute today":"Mute today"}</button><button type="button" data-departure-action="skip" ${disabled}>Skip today</button>`}</div>`:""}<small role="${this._departureError?"alert":"status"}">${this._departureError?escapeHtml(this._departureError):warning?"The last announcement could not play. Check the speaker in Admin.":view.muted?"Announcements muted for today":finished?"No more announcements today":"Spoken reminders use the speakers set in Parent Admin"}</small></article>`;
+    return `<article class="next-panel today-next departure-panel" data-departure-status="${escapeHtml(view.status)}"><p class="eyebrow">THE SCHOOL RUN</p><h2>${escapeHtml(presentation.heading)}</h2><p class="supporting">${escapeHtml(presentation.caption)}</p><p class="departure-guidance">${finished?"Your usual weekday schedule is unchanged.":"Check your task list, school bags and water bottles before you leave."}</p>${canManage?`<div class="departure-actions">${finished?`<button type="button" data-departure-action="restore" ${disabled}>Restore today</button>`:`<button type="button" class="departure-primary" data-departure-action="left" ${disabled}>We’ve left <ha-icon icon="mdi:check"></ha-icon></button><button type="button" data-departure-edit ${disabled}>Change today</button><details class="departure-more"><summary>More options</summary><div><button type="button" data-departure-action="mute" ${disabled} aria-pressed="${Boolean(view.muted)}">${view.muted?"Unmute today":"Mute today"}</button><button type="button" data-departure-action="skip" ${disabled}>Skip today</button></div></details>`}</div>`:""}<small role="${this._departureError?"alert":"status"}">${this._departureError?escapeHtml(this._departureError):warning?"The last announcement could not play. Check the speaker in Admin.":view.muted?"Announcements muted for today":finished?"No more announcements today":"Voice reminders are on"}</small></article>`;
   }
 
   _renderDepartureModal() {
@@ -3579,7 +3632,7 @@ export class FamilyHubCard extends HTMLElementBase {
   _captureRenderFocus() {
     if (this._pendingConfirmation) return null;
     const active = this.shadowRoot?.activeElement;
-    if (!active?.matches?.('button, select, input[type="date"], a[href], [role="button"][tabindex]')
+    if (!active?.matches?.('button, select, input, textarea, a[href], [role="button"][tabindex]')
       || active.closest?.(".confirmation-dialog")) return null;
     const currentView = active.closest?.(".hub-view")?.dataset?.currentView || null;
     const scope = active.closest?.(".hub-navigation")
@@ -3601,6 +3654,8 @@ export class FamilyHubCard extends HTMLElementBase {
       scope,
       currentView,
       tagName: active.tagName,
+      selectionStart: active.selectionStart,
+      selectionEnd: active.selectionEnd,
       markerClass,
       gameweekRole,
       dataset
@@ -3617,7 +3672,7 @@ export class FamilyHubCard extends HTMLElementBase {
         .find((view) => view.dataset.currentView === descriptor.currentView);
     }
     if (!scope) return;
-    const control = [...scope.querySelectorAll('button, select, input[type="date"], a[href], [role="button"][tabindex]')]
+    const control = [...scope.querySelectorAll('button, select, input, textarea, a[href], [role="button"][tabindex]')]
       .find((candidate) => (
         candidate.tagName === descriptor.tagName
         && (!descriptor.markerClass || candidate.classList.contains(descriptor.markerClass))
@@ -3630,6 +3685,8 @@ export class FamilyHubCard extends HTMLElementBase {
     } catch {
       control.focus();
     }
+    if (Number.isInteger(descriptor.selectionStart)) try { control.setSelectionRange(descriptor.selectionStart,descriptor.selectionEnd); } catch {}
+    return true;
   }
 
   _syncConfirmationFocus(confirmationFocusAction = null) {
@@ -3683,7 +3740,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const weekday = new Intl.DateTimeFormat(locale, {weekday:"long",timeZone:timezone}).format(now);
     const weather = this._config.features.weather ? this._hass?.states?.[this._config.weather.entity_id] : null;
     const definition = VIEW_DEFINITIONS.find(view => view.id === this._view) || VIEW_DEFINITIONS[0];
-    const subtitles = {rooms:"Your home, room by room.",family:"Jobs, rewards and a little progress.",entry:"Entry cameras and home protection.",energy:"Your home’s usage and cost.",music:"Browse, group and play.",football:"Results, fixtures and your FPL teams."};
+    const subtitles = {rooms:"Your home, room by room.",family:"Daily jobs, packing and school work, together.",entry:"Entry cameras and home protection.",energy:"Your home’s usage and cost.",music:"Browse, group and play.",football:"Results, fixtures and your FPL teams."};
     const title = this._view === "today" ? weekday : this._view === "football" ? this._config.football.spotlight_team_codes.map(code => this._clubPresentation(code).label).join(" & ") : definition.label;
     const football = this._view === "football" ? this._footballState() : null;
     const freshness = football ? (!isEntityAvailable(football.gameweekState) && isEntityAvailable(football.index) ? {status:"waiting",title:"Waiting for fixtures",detail:"The selected matchweek has not arrived yet."} : footballFreshness(football.index)) : null;
@@ -3788,7 +3845,7 @@ export class FamilyHubCard extends HTMLElementBase {
       </div>${children.length && !this._config.display.read_only ? `<p class="focus-prep-note">Also in ${escapeHtml(children[0].name)}’s task list.</p><div class="focus-prep-add"><input data-focus-prep-input="${escapeHtml(key)}" placeholder="Add an item" aria-label="Add a preparation item"><button type="button" data-focus-add-prep="${escapeHtml(key)}" data-preparation-person="${escapeHtml(children[0].id)}" aria-label="Add checklist item"><ha-icon icon="mdi:plus"></ha-icon></button></div>` : ""}
       <div class="focus-prep-links">
         <button type="button" data-planner-event="${escapeHtml(key)}" aria-label="Event details" title="Event details"><span class="prep-link-label">Event details</span> <ha-icon icon="mdi:arrow-top-right"></ha-icon></button>
-        ${this._config.features.family && children.length ? `<button type="button" data-focus-tasks="${escapeHtml(children[0].id)}" data-task-target="ready" aria-label="Open Tasks" title="Open Tasks"><span class="prep-link-label">Tasks</span> <ha-icon icon="mdi:arrow-right"></ha-icon></button>` : ""}
+        ${this._config.features.family && children.length ? `<button type="button" data-focus-tasks="${escapeHtml(children[0].id)}" data-task-target="ready" data-task-date="${dateKey(calendarEventStart(event),this._config.product.timezone)}" aria-label="Open Tasks" title="Open Tasks"><span class="prep-link-label">Tasks</span> <ha-icon icon="mdi:arrow-right"></ha-icon></button>` : ""}
       </div>
     </aside>`;
   }
@@ -3885,7 +3942,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const security=features.entry ? todaySecurityPresentation(states[this._config.entry?.alarm_entity],states[this._config.entry?.garage?.cover_entity],(this._config.entry?.cameras || []).flatMap(camera=>[camera.ringing_entity,camera.person_entity,camera.motion_entity]).filter(Boolean).map(id=>states[id])) : null;
     const phase=familyDayPhase(now,this._config.product.timezone,this._config.display.day_rhythm);
     const ready=this._readiness();
-    const showReady=features.family && this._config.calendar.preparation?.enabled && ready.total>0 && (ready.evening || phase.id==="morning");
+    const tomorrowPreparation=features.family && this._config.calendar.preparation?.enabled && ready.evening && ready.total>0 ? this._renderTodayPreparation(ready) : '';
     const actions=features.family ? this._renderTodayHomeworkActions(phase) : "";
     const departure=this._renderDeparture();
     const agenda=todayAgendaModel(features.calendar ? this._familyViewCalendarEvents() : [],now,this._config.product.timezone);
@@ -3895,10 +3952,25 @@ export class FamilyHubCard extends HTMLElementBase {
     const shortcuts=Boolean(home || lunch || features.football);
     return `<section class="today-grid today-v2" data-calendar="${features.calendar}" data-secondary-count="${[features.family,features.football,features.music].filter(Boolean).length}" data-has-family="${features.family}" data-has-shortcuts="${shortcuts}" data-has-attention="${security?.title==="Check home"}" aria-label="Today at a glance">
       ${security?.title==="Check home" ? `<button type="button" class="today-attention" data-view="entry"><ha-icon icon="${security.icon}"></ha-icon><span><strong>${escapeHtml(security.title)}</strong><small>${escapeHtml(security.detail)}</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}
-      <div class="today-main-plan">${departure || (features.calendar ? this._renderTodayAgenda(agenda) : `<article class="today-welcome"><p class="eyebrow">YOUR HOME</p><h2>${escapeHtml(greetingForTime(now,this._config.product.timezone))}</h2><p>Your family’s day, together.</p>${features.rooms ? '<button type="button" data-view="rooms">Open Home <ha-icon icon="mdi:arrow-right"></ha-icon></button>' : ""}</article>`)}</div>
-      ${features.family ? `<article class="children-panel today-family" data-day-phase="${phase.id}"><div class="section-heading"><div><p class="eyebrow">FAMILY FOCUS</p><h2>${escapeHtml(phase.label)}</h2></div><button type="button" data-view="family">Tasks <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="today-job-list">${actions || this._renderTodayJobs()}</div>${showReady ? this._renderTodayPreparation(ready) : actions ? "" : this._renderHomeworkReminder()}</article>` : ""}
+      <div class="today-main-plan">${departure || (features.calendar ? this._renderTodayAgenda(agenda) : `<article class="today-welcome"><p class="eyebrow">YOUR HOME</p><h2>${escapeHtml(greetingForTime(now,this._config.product.timezone))}</h2><p>Your family’s day, together.</p>${features.rooms ? '<button type="button" data-view="rooms">Open Home <ha-icon icon="mdi:arrow-right"></ha-icon></button>' : ""}</article>`)}${departure && agenda.primary ? `<button type="button" class="today-school-next" data-focus-open-plan="${escapeHtml(familyPlannerEventKey(agenda.primary))}"><span><small>${agenda.status==='tomorrow'?'TOMORROW':'COMING UP'} · ${isAllDayCalendarEvent(agenda.primary)?'All day':escapeHtml(formatTime(calendarEventStart(agenda.primary),this._config.product.locale,this._config.product.timezone))}</small><strong>${escapeHtml(agenda.primary.summary)}</strong></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`:''}</div>
+      ${features.family ? `<article class="children-panel today-family" data-day-phase="${phase.id}"><div class="section-heading"><div><p class="eyebrow">FAMILY FOCUS</p><h2>${escapeHtml(phase.label)}</h2></div><button type="button" data-view="family">Tasks <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="today-job-list">${this._renderTodayTaskLists()}${actions}</div>${tomorrowPreparation}</article>` : ""}
       ${shortcuts ? `<footer class="today-shortcuts focus-home-summary" aria-label="Useful shortcuts">${home ? `<button type="button" class="today-home-shortcut" data-view="rooms">${outlineIcon("rooms")}<span><strong>Home</strong><small>${escapeHtml(`${heating.value} ${heating.detail} · ${lighting.value} ${lighting.detail}`)}</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}${lunch}${features.football ? `<button type="button" class="today-football" data-view="football">${outlineIcon("football")}<span><strong>Football${live ? ` · ${live} live` : ""}</strong><small>${escapeHtml(favouriteModels.map(model=>this._clubPresentation(model.code).label).join(" & "))} · Scores & FPL</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}</footer>` : ""}
     </section>`;
+  }
+
+  _renderTodayTaskLists() {
+    const states=this._hass?.states || {},today=dateKey(new Date(),this._config.product.timezone);
+    return this._config.people.filter(person=>person.role==='child' && (this._familyViewPerson()?.role!=='child' || person.id===this._familyViewId)).map(person=>{
+      const user=this._config.features.chores?this._config.chores.users.find(entry=>entry.person_id===person.id):null;
+      const jobs=(user?.status_entities || []).map(id=>normaliseChoreStatus(states[id],id)).filter(job=>job.tone!=='standby');
+      const prep=this._personPreparationGroups(person).filter(group=>!group.due || dateKey(group.due,this._config.product.timezone)===today).flatMap(group=>group.items);
+      const left=jobs.filter(job=>['todo','overdue','missed'].includes(job.tone)).length+prep.filter(item=>String(item.status).toLowerCase()!=='completed').length;
+      const waiting=jobs.filter(job=>job.tone==='waiting').length;
+      const unavailable=jobs.some(job=>job.tone==='unavailable') || Boolean(this._preparationError);
+      const next=[...jobs.filter(job=>['todo','overdue','missed'].includes(job.tone)).map(job=>job.name),...prep.filter(item=>String(item.status).toLowerCase()!=='completed').map(item=>item.summary || item.item)].slice(0,2).join(' · ');
+      const status=unavailable?'Some tasks need checking':left?`${left} to do${waiting?` · ${waiting} awaiting approval`:''}`:waiting?`${waiting} awaiting approval`:jobs.length+prep.length?'All listed items done':'Open daily jobs & packing';
+      return `<button type="button" class="today-task-summary" data-focus-tasks="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}"><span class="today-person-token">${escapeHtml(person.name.slice(0,1))}</span><span><strong>${escapeHtml(person.name)}’s list <b>${left || (waiting?'…':unavailable?'!':jobs.length+prep.length?'✓':'→')}</b></strong><small>${escapeHtml(status)}</small>${next?`<small>${escapeHtml(next)}</small>`:''}</span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`;
+    }).join('');
   }
 
 
@@ -5027,27 +5099,30 @@ export class FamilyHubCard extends HTMLElementBase {
     </section></div>`;
   }
 
+  _newPlannerForm() {
+    const now = new Date(), zone = this._config.product.timezone;
+    const calendars = this._config.calendar.entities.filter(entry=>entry.allow_create === true);
+    return { calendar:(calendars.find(entry=>entry.person_ids?.includes(this._familyViewId)) || calendars[0])?.entity_id || '', summary:'', date:this._calendarSelectedKey || dateKey(now,zone), start:formatTimeInput(now,zone), end:formatTimeInput(new Date(now.getTime()+3_600_000),zone), location:'', template:'', 'custom-items':'' };
+  }
+
   _renderPlannerAddModal() {
-    const now = new Date(Date.now() + 3_600_000);
-    const date = dateKey(now, this._config.product.timezone);
-    const startTime = formatTimeInput(now, this._config.product.timezone);
-    const endTime = formatTimeInput(new Date(now.getTime() + 3_600_000), this._config.product.timezone);
     const calendars = this._config.calendar.entities.filter((entry) => entry.allow_create === true);
     const templates = this._config.calendar.preparation?.templates || [];
+    const form = this._plannerModal.form ||= this._newPlannerForm();
+    const disabled=this._plannerModal.saving?'disabled':'';
     return `<div class="planner-modal-backdrop" role="presentation"><section class="planner-modal planner-add-modal" role="dialog" aria-modal="true" aria-labelledby="planner-add-title">
-      <header><button type="button" class="planner-modal-close" data-planner-close aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">Family planner</p><h2 id="planner-add-title">Add an event</h2><p>This will be added to the selected Apple calendar.</p></header>
-      <div class="planner-event-form">
-        <label><span>Who is it for?</span><span class="select-shell"><select data-planner-field="calendar">${calendars.map((calendar) => `<option value="${escapeHtml(calendar.entity_id)}">${escapeHtml(calendar.label)}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span></label>
-        <label class="is-wide"><span>Event</span><input data-planner-field="summary" type="text" maxlength="120" autocomplete="off" placeholder="Football training" /></label>
-        <label><span>Date</span><input data-planner-field="date" type="date" value="${escapeHtml(date)}" /></label>
-        <label><span>Starts</span><input data-planner-field="start" type="time" value="${escapeHtml(startTime)}" /></label>
-        <label><span>Ends</span><input data-planner-field="end" type="time" value="${escapeHtml(endTime)}" /></label>
-        <label class="is-wide"><span>Location</span><input data-planner-field="location" type="text" maxlength="160" autocomplete="off" placeholder="Optional" /></label>
-        <label class="is-wide"><span>Get ready template</span><span class="select-shell"><select data-planner-field="template"><option value="">No checklist</option>${templates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.label)}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span></label>
-        <label class="is-wide"><span>Extra Ready items</span><textarea data-planner-field="custom-items" maxlength="600" placeholder="One item per line, for example:&#10;Birthday present&#10;Birthday card"></textarea><small>These are added alongside any template you choose.</small></label>
-        <p class="planner-form-error" role="alert">${escapeHtml(this._plannerModal.error || "")}</p>
+      <header><button type="button" class="planner-modal-close" data-planner-close aria-label="Close" ${disabled}><ha-icon icon="mdi:close"></ha-icon></button><p class="eyebrow">Family planner</p><h2 id="planner-add-title">Add an event</h2><p>This will be added to the selected Apple calendar.</p></header>
+      <div class="planner-event-form" ${this._plannerModal.saving?'inert':''}>
+        <label class="is-wide"><span>Event</span><input data-planner-field="summary" type="text" value="${escapeHtml(form.summary)}" maxlength="120" autocomplete="off" enterkeyhint="next" placeholder="Football training" /></label>
+        <label class="is-wide"><span>Who is it for?</span><span class="select-shell"><select data-planner-field="calendar">${calendars.map((calendar) => `<option value="${escapeHtml(calendar.entity_id)}" ${form.calendar===calendar.entity_id?'selected':''}>${escapeHtml(calendar.label)}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span></label>
+        <label><span>Date</span><input data-planner-field="date" type="date" value="${escapeHtml(form.date)}" /></label>
+        <label><span>Starts</span><input data-planner-field="start" type="time" value="${escapeHtml(form.start)}" /></label>
+        <label><span>Ends</span><input data-planner-field="end" type="time" value="${escapeHtml(form.end)}" /></label>
+        <label class="is-wide"><span>Location (optional)</span><input data-planner-field="location" type="text" value="${escapeHtml(form.location)}" maxlength="160" autocomplete="off" enterkeyhint="next" placeholder="Where are we going?" /></label>
+        <label class="is-wide"><span>Packing checklist</span><span class="select-shell"><select data-planner-field="template"><option value="">No checklist</option>${templates.map((template) => `<option value="${escapeHtml(template.id)}" ${form.template===template.id?'selected':''}>${escapeHtml(template.label)}</option>`).join("")}</select><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></span></label>
+        <label class="is-wide"><span>Extra packing items (optional)</span><textarea data-planner-field="custom-items" maxlength="600" placeholder="One item per line">${escapeHtml(form['custom-items'])}</textarea><small>These appear with daily jobs in Tasks.</small></label>
       </div>
-      <footer><button type="button" data-planner-close>Cancel</button><button type="button" class="planner-save" data-planner-save ${this._plannerModal.saving ? "disabled" : ""}>${this._plannerModal.saving ? "Adding…" : "Add to calendar"}</button></footer>
+      <footer>${this._renderFormNavigation()}${this._plannerModal.error?`<p class="planner-form-error" role="alert">${escapeHtml(this._plannerModal.error)}</p>`:''}<div class="form-actions"><button type="button" data-planner-close ${disabled}>Cancel</button><button type="button" class="planner-save" data-planner-save ${disabled}>${this._plannerModal.saving ? "Adding…" : "Add to calendar"}</button></div></footer>
     </section></div>`;
   }
 
@@ -5264,10 +5339,10 @@ export class FamilyHubCard extends HTMLElementBase {
     const reading=child.routines.find(r=>r.kind==="reading");
     const disabled=this._config.display.read_only || this._homeworkBusy ? "disabled":"";
     const mark=(target,field,label,marks={})=>`<button type="button" class="homework-check ${marks[field]?"is-done":""}" data-homework-mark="${escapeHtml(target)}" data-homework-field="${field}" data-homework-value="${!marks[field]}" aria-pressed="${Boolean(marks[field])}" ${disabled}><ha-icon icon="${marks[field]?"mdi:checkbox-marked":"mdi:checkbox-blank-outline"}"></ha-icon>${label}</button>`;
-    let title="Homework", body="";
+    let title="Homework", body="", primaryAction="";
     if (modal.type==="reading" || modal.type==="tables") {
       title=modal.type==="reading"?"Log a reading":"Log a tables session";
-      body=`<div class="homework-form"><label>Date<input type="date" data-homework-input="date" value="${escapeHtml(modal.form?.date || this._homeworkData.today)}" min="${shiftDateKey(this._homeworkData.today,-6)}" max="${escapeHtml(this._homeworkData.today)}"></label>${modal.type==="reading"?`<label>Book title<input value="${escapeHtml(modal.form?.book || "")}" data-homework-input="book" maxlength="160" placeholder="What did you read?"></label><label>Pages / chapter (optional)<input value="${escapeHtml(modal.form?.pages || "")}" data-homework-input="pages" maxlength="60" placeholder="For example: pages 12–20"></label><label class="homework-aloud"><input type="checkbox" data-homework-input="aloud" ${modal.form?.aloud ? "checked" : ""}> I read aloud with an adult</label>`:'<label>Practice mode<select data-homework-input="mode"><option>Learn</option><option>Play</option><option>Test</option></select></label><p>This is your family log. Your teacher’s record stays in Tackling Tables.</p>'}</div><button type="button" class="homework-primary" data-homework-save-session ${disabled}>${this._homeworkBusy?"Saving…":"Save session"}</button>`;
+      body=`<div class="homework-form"><label>Date<input type="date" data-homework-input="date" value="${escapeHtml(modal.form?.date || this._homeworkData.today)}" min="${shiftDateKey(this._homeworkData.today,-6)}" max="${escapeHtml(this._homeworkData.today)}"></label>${modal.type==="reading"?`<label>Book title<input value="${escapeHtml(modal.form?.book || "")}" data-homework-input="book" enterkeyhint="next" autocomplete="off" maxlength="160" placeholder="What did you read?"></label><label>Pages / chapter (optional)<input value="${escapeHtml(modal.form?.pages || "")}" data-homework-input="pages" enterkeyhint="done" autocomplete="off" maxlength="60" placeholder="For example: pages 12–20"></label><label class="homework-aloud"><input type="checkbox" data-homework-input="aloud" ${modal.form?.aloud ? "checked" : ""}> I read aloud with an adult</label>`:`<label>Practice mode<select data-homework-input="mode"><option ${modal.form?.mode==='Learn'?'selected':''}>Learn</option><option ${modal.form?.mode==='Play'?'selected':''}>Play</option><option ${modal.form?.mode==='Test'?'selected':''}>Test</option></select></label><p>This is your family log. Your teacher’s record stays in Tackling Tables.</p>`}</div>`;
     } else if (modal.type==="spell_record") {
       const routine=child.routines.find(r=>r.kind==="spelling"), plan=child.plans.find(p=>p.kind==="spelling" && p.due===routine?.due);
       title="Spelling test & school sheet";
@@ -5284,9 +5359,10 @@ export class FamilyHubCard extends HTMLElementBase {
       const result=modal.results || [], finished=result.length===plan.words.length;
       const speech = finished ? null : this._prepareSpellingAudio(plan.words[result.length]);
       if(finished) body=`<p class="homework-spelling-score">${result.filter(r=>r.correct).length} / ${result.length}</p><p>${modal.mode==="Mock test"?"Your practice result. The school test is separate.":"Good practice. Look at any words to try again."}</p><div class="homework-spelling-results">${result.map(r=>`<div><span>${escapeHtml(r.word)}</span><small>${r.correct?"Correct":`You wrote: ${escapeHtml(r.answer || "—")}`}</small></div>`).join("")}</div><button type="button" class="homework-primary" data-homework-save-spelling ${disabled}>Save practice result</button>`;
-      else body=`<div class="homework-spelling-mode"><button type="button" data-homework-mode="Practice" aria-pressed="${modal.mode!=="Mock test"}" ${result.length?"disabled":""}>Practice</button><button type="button" data-homework-mode="Mock test" aria-pressed="${modal.mode==="Mock test"}" ${result.length?"disabled":""}>Mock test</button></div><p class="homework-spelling-position">Word ${result.length+1} of ${plan.words.length}</p><button type="button" class="homework-speak" data-homework-hear ${speech?.loading?"disabled":""}><ha-icon icon="mdi:volume-high"></ha-icon>${speech?.loading?"Preparing voice…":speech?.error?"Retry voice":"Hear the word"}</button>${this._renderSpellingVoiceChoice()}<p class="homework-caption">If sound is unavailable, ask an adult to read the word aloud.</p>${modal.mode!=="Mock test"?`<button type="button" class="homework-peek" data-homework-peek>${modal.peek?escapeHtml(plan.words[result.length]):"Peek at this word"}</button>`:'<details><summary>Words for an adult to read aloud</summary><p>'+escapeHtml(plan.words.join(", "))+'</p></details>'}<label class="homework-spelling-answer">Your spelling<input data-homework-input="answer" value="${escapeHtml(modal.form?.answer || "")}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Your spelling"></label><button type="button" class="homework-primary" data-homework-answer>${modal.mode==="Mock test"?"Next word":"Check & next"}</button>${modal.feedback?`<p role="status">${escapeHtml(modal.feedback)}</p>`:""}`;
+      else body=`<div class="homework-spelling-mode"><button type="button" data-homework-mode="Practice" aria-pressed="${modal.mode!=="Mock test"}" ${result.length?"disabled":""}>Practice</button><button type="button" data-homework-mode="Mock test" aria-pressed="${modal.mode==="Mock test"}" ${result.length?"disabled":""}>Mock test</button></div><p class="homework-spelling-position">Word ${result.length+1} of ${plan.words.length}</p><button type="button" class="homework-speak" data-homework-hear ${speech?.loading?"disabled":""}><ha-icon icon="mdi:volume-high"></ha-icon>${speech?.loading?"Preparing voice…":speech?.error?"Retry voice":"Hear the word"}</button>${this._renderSpellingVoiceChoice()}<p class="homework-caption">If sound is unavailable, ask an adult to read the word aloud.</p>${modal.mode!=="Mock test"?`<button type="button" class="homework-peek" data-homework-peek>${modal.peek?escapeHtml(plan.words[result.length]):"Peek at this word"}</button>`:'<details><summary>Words for an adult to read aloud</summary><p>'+escapeHtml(plan.words.join(", "))+'</p></details>'}<label class="homework-spelling-answer">Your spelling<input data-homework-input="answer" enterkeyhint="go" value="${escapeHtml(modal.form?.answer || "")}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Your spelling"></label><button type="button" class="homework-primary" data-homework-answer>${modal.mode==="Mock test"?"Next word":"Check & next"}</button>${modal.feedback?`<p role="status">${escapeHtml(modal.feedback)}</p>`:""}`;
     }
-    return `<div class="planner-modal-backdrop"><section class="planner-modal homework-modal" role="dialog" aria-modal="true" aria-labelledby="homework-modal-title"><header><p class="eyebrow">${escapeHtml(child.name)} · Homework</p><h2 id="homework-modal-title">${escapeHtml(title)}</h2><button type="button" class="planner-modal-close" data-homework-close aria-label="Close homework"><ha-icon icon="mdi:close"></ha-icon></button></header><div class="homework-modal-body">${modal.error?`<p role="alert" class="homework-error">${escapeHtml(modal.error)}</p>`:""}${body}</div><footer><button type="button" data-homework-close ${this._homeworkBusy?"disabled":""}>Done</button><small>Saved privately in Home Assistant</small></footer></section></div>`;
+    if (['reading','tables'].includes(modal.type)) { primaryAction=`<button type="button" class="homework-primary" data-homework-save-session ${disabled}>${this._homeworkBusy?'Saving…':modal.type==='reading'?'Save reading':'Save session'}</button>`; }
+    return `<div class="planner-modal-backdrop"><section class="planner-modal homework-modal" role="dialog" aria-modal="true" aria-labelledby="homework-modal-title"><header><p class="eyebrow">${escapeHtml(child.name)} · Homework</p><h2 id="homework-modal-title">${escapeHtml(title)}</h2><button type="button" class="planner-modal-close" data-homework-close aria-label="Close homework"><ha-icon icon="mdi:close"></ha-icon></button></header><div class="homework-modal-body">${modal.error?`<p role="alert" class="homework-error">${escapeHtml(modal.error)}</p>`:""}${body}</div><footer><div class="form-actions"><button type="button" data-homework-close ${this._homeworkBusy?"disabled":""}>${primaryAction?'Cancel':'Done'}</button>${primaryAction || '<small>Saved privately in Home Assistant</small>'}</div></footer></section></div>`;
   }
 
   _closeHomeworkModal() { if(this._homeworkBusy)return;this._homeworkModal=null;this._stopSpellingSpeech();this._scheduleRender(true); }
@@ -5331,12 +5407,12 @@ export class FamilyHubCard extends HTMLElementBase {
     const familyTitle = choresEnabled ? "Tasks, jobs & rewards" : this._config.features.school ? "School & tasks" : "Tasks";
     const children = this._config.people.filter((person) => person.role === "child");
     if (this._familyViewPerson()?.role === "parent" && this._taskSection !== "lunch") return this._renderFamilyOverview(children);
-    if (!locationEnabled || ["homework","lunch"].includes(this._taskSection)) {
+    if (!locationEnabled || this._familyViewPerson()?.role === 'child' || ["homework","lunch"].includes(this._taskSection)) {
       const selected = children.find((person) => person.id === this._familyPersonId) || children[0];
       const tabs = children.map((person) => `<button type="button" class="family-kid-tab ${selected?.id === person.id ? "is-selected" : ""}" data-family-person="${escapeHtml(person.id)}" style="--person-colour:${escapeHtml(person.colour)}" aria-pressed="${selected?.id === person.id}"><span>${escapeHtml(person.name.slice(0, 1))}</span><strong>${escapeHtml(person.name)}</strong></button>`).join("");
       return `
         <section class="family-dashboard${children.length > 1 ? " has-kid-switcher" : ""}${this._choreClaimFeedback ? " has-claim-feedback" : ""}">
-          <header class="family-dashboard-heading"><div class="task-section-tabs segments" role="group" aria-label="Tasks section">${[["jobs", "Jobs"], ["ready", "Get ready"], ...(this._config.school?.homework_enabled ? [["homework", "Homework"]] : []), ...(this._config.school?.lunch_menus?.length ? [["lunch", "Lunch"]] : []), ["rewards", "Rewards"]].map(([id, label]) => `<button type="button" class="segment ${(this._taskSection || "jobs") === id ? "is-selected" : ""}" data-task-section="${id}" aria-pressed="${(this._taskSection || "jobs") === id}">${label}</button>`).join("")}</div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
+          <header class="family-dashboard-heading"><div class="task-section-tabs segments" role="group" aria-label="Tasks section">${[["jobs", "To do"], ...(this._config.school?.homework_enabled ? [["homework", "Homework"]] : []), ...(this._config.school?.lunch_menus?.length ? [["lunch", "Lunch"]] : []), ["rewards", "Rewards"]].map(([id, label]) => `<button type="button" class="segment ${(this._taskSection || "jobs") === id ? "is-selected" : ""}" data-task-section="${id}" aria-pressed="${(this._taskSection || "jobs") === id}">${label}</button>`).join("")}</div>${choresEnabled ? this._renderChoreOpsLink() : ""}</header>
           ${children.length > 1 ? `<div class="family-kid-switcher" role="group" aria-label="Choose family member">${tabs}</div>` : ""}
           ${this._choreClaimFeedback ? `<p class="chore-claim-feedback" role="status"><ha-icon icon="mdi:check-circle"></ha-icon>${escapeHtml(this._choreClaimFeedback)}</p>` : ""}
           <div class="family-kid-stage">${selected ? this._taskSection === "lunch" ? this._renderSchoolLunch(selected) : this._taskSection === "homework" ? this._renderHomework(selected) : this._renderFamilyPerson(selected, { kidMode: true }) : '<p class="hub-empty-state large">Add a child in Family Dashboard Admin to connect ChoreOps.</p>'}</div>
@@ -5408,8 +5484,8 @@ export class FamilyHubCard extends HTMLElementBase {
     return `<section class="family-summary-grid" aria-label="Rewards and progress">${rows}</section>`;
   }
 
-  _renderPersonPreparation(person) {
-    if (!this._config.calendar?.preparation?.enabled) return "";
+  _personPreparationGroups(person) {
+    if (!this._config.calendar?.preparation?.enabled) return [];
     const todayKey=dateKey(new Date(),this._config.product.timezone);
     const source=[...(this._calendarEvents.length ? this._calendarEvents:this._calendarFallbackEvents()),...(this._config.calendar.preparation.automatic_lunch ? packedLunchEvents(this._config,[todayKey,shiftDateKey(todayKey,1)]) : [])];
     const byKey=new Map(source.map((event)=>[familyPlannerEventKey(event),event]));
@@ -5425,10 +5501,38 @@ export class FamilyHubCard extends HTMLElementBase {
       if (!groups.has(key)) groups.set(key,{event,due,items:[]});
       groups.get(key).items.push(item);
     }
-    if (!groups.size) return "";
-    return `<section class="family-preparation" aria-label="Get ready for upcoming events"><div class="chore-heading"><p class="eyebrow">Get ready</p><span>From your calendar</span></div>${[...groups.values()].sort((a,b)=>String(a.due || "").localeCompare(String(b.due || ""))).map(({event,due,items})=>`<section class="focus-task-event"><header><ha-icon icon="mdi:bag-personal-outline"></ha-icon><div><h3>${escapeHtml(event?.summary || "Event checklist")}</h3>${due ? `<small>${escapeHtml(formatDay(due,this._config.product.locale,this._config.product.timezone))}</small>`:""}</div>${event ? `<button type="button" ${event._packedLunch ? `data-school-lunch-open="${escapeHtml(person.id)}" aria-label="Open school lunch menu"` : `data-focus-open-plan="${escapeHtml(familyPlannerEventKey(event))}" aria-label="Open ${escapeHtml(event.summary || "event")} in Calendar"`}><ha-icon icon="mdi:arrow-top-right"></ha-icon></button>`:""}</header><div class="family-prep-list">${items.map((item)=>{const done=String(item.status).toLowerCase()==="completed";return `<button type="button" class="family-prep-item ${done ? "is-complete":""}" data-prep-item="${escapeHtml(item.uid || item.id || item.summary)}" data-prep-status="${done ? "needs_action":"completed"}" aria-pressed="${done}" ${this._config.display.read_only ? "disabled":""}><span><ha-icon icon="${done ? "mdi:checkbox-marked":"mdi:checkbox-blank-outline"}"></ha-icon></span><div><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong></div></button>`}).join("")}</div><small>${items.filter((item)=>String(item.status).toLowerCase()==="completed").length} of ${items.length} ready</small></section>`).join("")}</section>`;
+    return [...groups.values()].sort((a,b)=>String(a.due || '').localeCompare(String(b.due || '')));
   }
+
+  _renderPersonPreparation(person) {
+    const groups = this._personPreparationGroups(person);
+    if (!groups.length) return '';
+    return `<section class="family-preparation" aria-label="Get ready for upcoming events"><div class="chore-heading"><p class="eyebrow">Get ready</p><span>From your calendar</span></div>${groups.map(({event,due,items})=>`<section class="focus-task-event"><header><ha-icon icon="mdi:bag-personal-outline"></ha-icon><div><h3>${escapeHtml(event?.summary || "Event checklist")}</h3>${due ? `<small>${escapeHtml(formatDay(due,this._config.product.locale,this._config.product.timezone))}</small>`:""}</div>${event ? `<button type="button" ${event._packedLunch ? `data-school-lunch-open="${escapeHtml(person.id)}" aria-label="Open school lunch menu"` : `data-focus-open-plan="${escapeHtml(familyPlannerEventKey(event))}" aria-label="Open ${escapeHtml(event.summary || "event")} in Calendar"`}><ha-icon icon="mdi:arrow-top-right"></ha-icon></button>`:""}</header><div class="family-prep-list">${items.map((item)=>{const done=String(item.status).toLowerCase()==="completed";return `<button type="button" class="family-prep-item ${done ? "is-complete":""}" data-prep-item="${escapeHtml(item.uid || item.id || item.summary)}" data-prep-status="${done ? "needs_action":"completed"}" aria-pressed="${done}" ${this._config.display.read_only ? "disabled":""}><span><ha-icon icon="${done ? "mdi:checkbox-marked":"mdi:checkbox-blank-outline"}"></ha-icon></span><div><strong>${escapeHtml(item.summary || item.item || "Preparation item")}</strong></div></button>`}).join("")}</div><small>${items.filter((item)=>String(item.status).toLowerCase()==="completed").length} of ${items.length} ready</small></section>`).join("")}</section>`;
+  }
+  _renderUnifiedTasks(person) {
+    const states=this._hass?.states || {}, chore=this._config.features.chores ? this._config.chores.users.find(user=>user.person_id===person.id) : null;
+    const points=chore && isEntityAvailable(states[chore.points_entity]) ? Number(states[chore.points_entity].state) : NaN;
+    const pointsLabel=Number.isFinite(points) ? `${formatPoints(points,this._config.product.locale)} points` : '';
+    if(this._taskSection==='rewards') return `<article class="surface tasks-rewards"><header><div><p class="eyebrow">${escapeHtml(person.name)}</p><h2>Rewards & progress</h2></div><span>${escapeHtml(pointsLabel)}</span></header>${this._renderChoreOpsSummary(chore,points,person.id) || '<p class="hub-empty-state">No rewards set yet.</p>'}</article>`;
+    const today=dateKey(new Date(),this._config.product.timezone), tomorrow=this._taskListDay==='tomorrow', upcoming=this._taskListDay==='upcoming', day=tomorrow?shiftDateKey(today,1):today;
+    const groups=[];
+    if(!tomorrow && !upcoming && chore) groups.push({title:'Daily jobs',detail:'Tap a job when it is finished. A grown-up may need to approve it.',rows:(chore.status_entities || []).map(entityId=>{
+      const presentation=normaliseChoreStatus(states[entityId],entityId), claim=choreClaimEntityId(entityId), pending=this._pendingChoreClaims.has(claim);
+      return {kind:'job',id:entityId,title:presentation.name,done:presentation.tone==='done',waiting:presentation.tone==='waiting' || pending,detail:pending?'Saving…':presentation.label,points:presentation.points,claim,enabled:!this._config.display.read_only && !pending && ['pending','due','overdue','missed'].includes(presentation.status) && claim && isCommandEntityAvailable(states[claim]),tone:presentation.tone};
+    }).filter(row=>row.tone!=='standby')});
+    for(const group of this._personPreparationGroups(person)) {
+      const due=group.due?dateKey(group.due,this._config.product.timezone):today;
+      if(upcoming ? due<=shiftDateKey(today,1) : due!==day) continue;
+      groups.push({title:group.event?.summary || 'Packing checklist',detail:[group.due?formatDay(group.due,this._config.product.locale,this._config.product.timezone):'',group.event && !isAllDayCalendarEvent(group.event)?formatTime(calendarEventStart(group.event),this._config.product.locale,this._config.product.timezone):'From your calendar'].filter(Boolean).join(' · '),event:group.event,rows:group.items.map(item=>({kind:'prep',id:String(item.uid || item.id || item.summary),title:item.summary || item.item || 'Packing item',done:String(item.status).toLowerCase()==='completed',detail:'Packing',enabled:!this._config.display.read_only && !this._pendingPreparation.has(String(item.uid || item.id || item.summary))}))});
+    }
+    const rows=groups.flatMap(group=>group.rows),done=rows.filter(row=>row.done),remaining=rows.filter(row=>!row.done&&!row.waiting),waiting=rows.filter(row=>row.waiting);
+    const renderRow=row=>`<li class="task-row ${row.done?'is-done':''} ${row.waiting?'is-waiting':''}"><button type="button" class="task-check" data-task-kind="${row.kind}" ${row.kind==='job'?row.enabled?`data-chore-claim="${escapeHtml(row.claim)}" data-chore-status="${escapeHtml(row.id)}" data-person-id="${escapeHtml(person.id)}"`:'' : `data-prep-item="${escapeHtml(row.id)}" data-prep-status="${row.done?'needs_action':'completed'}" aria-pressed="${row.done}"`} ${!row.enabled?'disabled':''} aria-label="${escapeHtml(`${row.done?'Completed':row.waiting?'Awaiting approval':row.kind==='job'?'Mark as done':'Pack'}: ${row.title}`)}"><span class="task-status-icon"><ha-icon icon="${row.done?'mdi:check':row.waiting?'mdi:clock-outline':row.kind==='prep'?'mdi:bag-personal-outline':choreIcon(row.title)}"></ha-icon></span><span><strong>${escapeHtml(row.title)}</strong><small>${escapeHtml(row.waiting?'Awaiting approval':row.done?'Done':row.detail)}</small></span>${Number.isFinite(row.points)&&row.points>0?`<b>+${row.points}</b>`:''}<ha-icon class="task-tick" icon="${row.done?'mdi:check':row.waiting?'mdi:clock-outline':'mdi:circle-outline'}"></ha-icon></button></li>`;
+    const warning=this._preparationError || this._calendarError || (this._config.features.chores && !chore ? 'Daily jobs are not connected for this child.' : '') || (chore && !isEntityAvailable(states[chore.chores_entity]) ? 'Daily jobs are unavailable. Please try again shortly.' : '');
+    return `<article class="surface family-person is-kid-mode tasks-v2" style="--person-colour:${escapeHtml(person.colour)}"><header class="task-list-header"><div><h2>${upcoming?'Coming up':tomorrow?'Tomorrow’s list':'Today’s list'}</h2><p>${warning?'Some items are unavailable':remaining.length?`${remaining.length} left to do`:waiting.length?'Waiting for a grown-up':rows.length?'Everything on this list is done':'Nothing listed yet'}${waiting.length?` · ${waiting.length} awaiting approval`:''}</p></div><span class="task-points">${escapeHtml(pointsLabel)}</span></header><div class="task-list-toolbar"><div class="segments" role="group" aria-label="Task day"><button type="button" data-task-day="today" aria-pressed="${!tomorrow&&!upcoming}" class="segment ${!tomorrow&&!upcoming?'is-selected':''}">Today</button><button type="button" data-task-day="tomorrow" aria-pressed="${tomorrow}" class="segment ${tomorrow?'is-selected':''}">Tomorrow</button><button type="button" data-task-day="upcoming" aria-pressed="${upcoming}" class="segment ${upcoming?'is-selected':''}">Later</button></div><span>${done.length}/${rows.length} complete</span>${this._config.calendar.preparation?.enabled && this._hass?.user?.is_admin ? '<button type="button" class="task-manage" data-readiness-manage>Manage packing</button>' : ''}</div><div class="task-list-scroll">${warning?`<p class="calendar-warning" role="status">${escapeHtml(warning)}</p>`:''}${tomorrow?'<p class="task-list-note">Packing for tomorrow. Daily jobs appear on the day they are due.</p>':''}${groups.map(group=>{const active=group.rows.filter(row=>!row.done&&!row.waiting);return active.length?`<section class="task-group"><header><div><h3>${escapeHtml(group.title)}</h3><p>${escapeHtml(group.detail)}</p></div>${group.event?`<button type="button" data-focus-open-plan="${escapeHtml(familyPlannerEventKey(group.event))}" aria-label="Open ${escapeHtml(group.title)} in Calendar"><ha-icon icon="mdi:arrow-top-right"></ha-icon></button>`:''}</header><ul>${active.map(renderRow).join('')}</ul></section>`:'';}).join('')}${!remaining.length&&!waiting.length&&!warning?`<div class="task-list-clear"><ha-icon icon="${rows.length?'mdi:check-circle-outline':'mdi:calendar-check-outline'}"></ha-icon><strong>${rows.length?'All set for '+(tomorrow?'tomorrow':'today'):'A little breathing room'}</strong><p>${rows.length?'Completed items are below if you need to check them.':'Event packing lists will appear here alongside daily jobs.'}</p></div>`:''}${waiting.length?`<details class="task-disclosure tasks-waiting"><summary>Awaiting approval (${waiting.length})</summary><ul>${waiting.map(renderRow).join('')}</ul></details>`:''}${done.length?`<details class="task-disclosure tasks-completed"><summary>Completed (${done.length})</summary><ul>${done.map(renderRow).join('')}</ul></details>`:''}</div></article>`;
+  }
+
   _renderFamilyPerson(person, { kidMode = false } = {}) {
+    if (kidMode) return this._renderUnifiedTasks(person);
     const states = this._hass?.states || {};
     const choresEnabled = this._config.features.chores === true;
     const schoolEnabled = this._config.features.school === true;
@@ -6410,6 +6514,9 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     this._armPhotoFrameIdleTimer();
+    if (event.key === 'Enter' && !event.isComposing && event.target.matches?.('.planner-modal input:not([type="checkbox"]):not([type="date"]):not([type="time"])') && event.target.dataset.homeworkInput !== 'answer') {
+      event.preventDefault(); this._navigateForm('next'); return;
+    }
     if (this._familyPickerOpen) {
       if (event.key === "Escape") { event.preventDefault(); this._familyPickerOpen=false; this._familyPickerReturnFocus=true; this._scheduleRender(true); }
       if (event.key === "Tab") {
@@ -6423,7 +6530,7 @@ export class FamilyHubCard extends HTMLElementBase {
       if (event.key === "Escape") { event.preventDefault(); this._closeHomeworkModal(); }
       if (event.key === "Enter" && event.target.matches?.('[data-homework-input="answer"]')) { event.preventDefault(); this.shadowRoot.querySelector("[data-homework-answer]")?.click(); }
       if (event.key === "Tab") {
-        const controls=[...this.shadowRoot.querySelectorAll('.homework-modal button:not([disabled]), .homework-modal input, .homework-modal select, .homework-modal a, .homework-modal summary')];
+        const controls=[...this.shadowRoot.querySelectorAll('.homework-modal button:not([disabled]), .homework-modal input, .homework-modal select, .homework-modal a, .homework-modal summary')].filter(control=>control.getClientRects().length);
         const first=controls[0],last=controls.at(-1),active=this.shadowRoot.activeElement;
         if(event.shiftKey&&(active===first||!controls.includes(active))){event.preventDefault();last?.focus();}
         else if(!event.shiftKey&&(active===last||!controls.includes(active))){event.preventDefault();first?.focus();}
@@ -6441,6 +6548,7 @@ export class FamilyHubCard extends HTMLElementBase {
       return;
     }
     if (this._plannerModal) {
+      if(this._plannerModal.type==='add' && this._plannerModal.saving && event.key==='Escape'){event.preventDefault();return;}
       if(this._plannerModal.type==="departure" && this._departureBusy)return;
       if (event.key === "Escape") {
         event.preventDefault();
@@ -6449,7 +6557,7 @@ export class FamilyHubCard extends HTMLElementBase {
         return;
       }
       if (event.key === "Tab") {
-        const controls = [...this.shadowRoot.querySelectorAll('.planner-modal button:not([disabled]),.planner-modal input:not([disabled]),.planner-modal select:not([disabled]),.planner-modal textarea:not([disabled])')];
+        const controls = [...this.shadowRoot.querySelectorAll('.planner-modal button:not([disabled]),.planner-modal input:not([disabled]),.planner-modal select:not([disabled]),.planner-modal textarea:not([disabled])')].filter(control=>control.getClientRects().length);
         if (!controls.length) return;
         const first = controls[0];
         const last = controls[controls.length - 1];
@@ -6494,6 +6602,8 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _handleChange(event) {
+    if (this._plannerModal?.type === 'add' && event.target.dataset?.plannerField) { this._plannerModal.form ||= this._newPlannerForm();this._plannerModal.form[event.target.dataset.plannerField]=event.target.value;return; }
+    if (this._homeworkModal && event.target.dataset?.homeworkInput) { this._handleInput(event);return; }
     if (event.target.dataset?.homeworkVoice !== undefined && this._homeworkModal?.type === "spelling") {
       const preference = event.target.value;
       if (preference && !this._spellingVoiceOptions().some(voice => spellingVoiceKey(voice) === preference)) return;
@@ -6579,6 +6689,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _handleInput(event) {
+    if (this._plannerModal?.type === 'add' && event.target.dataset?.plannerField) { this._plannerModal.form ||= this._newPlannerForm();this._plannerModal.form[event.target.dataset.plannerField]=event.target.value;return; }
     if(this._plannerModal?.type==="departure" && event.target.dataset?.departureField){this._plannerModal[event.target.dataset.departureField]=event.target.value;return;}
     if (this._homeworkModal && event.target.dataset?.homeworkInput) {
       this._homeworkModal.form ||= {};
@@ -6789,6 +6900,8 @@ export class FamilyHubCard extends HTMLElementBase {
   _handleClick(event) {
     const target = event.target.closest?.("button, [data-room]");
     if (!target) return;
+    if (target.dataset.formNav) { this._navigateForm(target.dataset.formNav);return; }
+    if (['today','tomorrow','upcoming'].includes(target.dataset.taskDay)) { this._taskListDay=target.dataset.taskDay;this._scheduleRender(true);return; }
     if (this._photoFrameActive || target.dataset.photoFrameDismiss !== undefined) {
       this._deactivatePhotoFrame();
       return;
@@ -6859,7 +6972,8 @@ export class FamilyHubCard extends HTMLElementBase {
       else return;
       if (!target.dataset.todayHomework) return;
     }
-    if (target.dataset.readinessOpen !== undefined && !this._pendingConfirmation && !this._plannerModal && !this._homeworkModal) { this._readinessDay=this._readiness().evening ? "tomorrow" : "today";this._plannerModal = {type:"readiness"}; this._scheduleRender(true); return; }
+    if (target.dataset.readinessOpen !== undefined && !this._pendingConfirmation && !this._plannerModal && !this._homeworkModal) { this._readinessDay=this._readiness().evening ? "tomorrow" : "today";if(this._familyViewPerson()?.role==='child'){this._view='family';this._taskSection='jobs';this._taskListDay=this._readinessDay;}else this._plannerModal = {type:"readiness"}; this._scheduleRender(true); return; }
+    if (target.dataset.readinessManage !== undefined && !this._plannerModal && !this._homeworkModal) { this._readinessDay=this._taskListDay || 'today';this._plannerModal={type:'readiness'};this._scheduleRender(true);return; }
     if (target.dataset.todayHomework && !this._pendingConfirmation && !this._plannerModal && !this._homeworkModal) {
       if (!this._config.school?.homework_enabled || !this._config.people.some(person=>person.role==="child" && person.id===target.dataset.personId)) return;
       this._selectFamilyView(target.dataset.personId); this._view="family"; this._taskSection="homework";
@@ -6948,7 +7062,9 @@ export class FamilyHubCard extends HTMLElementBase {
       if (!this._config.features.family || !this._config.people.some((person) => person.role === "child" && person.id === target.dataset.focusTasks)) return;
       this._view = "family";
       this._selectFamilyView(target.dataset.focusTasks);
-      this._taskSection = ["ready","homework","rewards"].includes(target.dataset.taskTarget) ? target.dataset.taskTarget : "jobs";
+      const taskDate=target.dataset.taskDate,today=dateKey(new Date(),this._config.product.timezone);
+      this._taskListDay=taskDate>shiftDateKey(today,1)?'upcoming':taskDate===shiftDateKey(today,1)?'tomorrow':'today';
+      this._taskSection = ["homework","rewards"].includes(target.dataset.taskTarget) ? target.dataset.taskTarget : "jobs";
       this._scheduleRender(true);
       return;
     }

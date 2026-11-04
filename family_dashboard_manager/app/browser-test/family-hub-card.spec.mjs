@@ -22,7 +22,7 @@ const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", imp
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
   .replace(/import \{ schoolLunchForDate[^\n]+from "\.\/readiness\.js[^";]+";/, `const {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents} = (()=>{${readinessSource.replace(/export /g, "")}return {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents};})();`)
   .replace(/export \{ schoolLunchForDate[^\n]+;/, "")
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.27.1";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.28.0";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -1190,8 +1190,8 @@ test("Home in focus keeps every screen readable in both appearances and preserve
     calendar: [{ foreground: ".calendar-person-filter,.family-planner-day > header strong,.calendar-navigation strong,.family-planner-event strong", background: ".calendar-view", minimum: 4.5 }],
     rooms: [{ foreground: ".home-toolbar h2,.room-title h2", background: ".home-surface", minimum: 4.5 }],
     family: [
-      { foreground: ".family-person-heading h2,.chore-row strong,.chore-row b,.chore-claim-action:not([disabled]),.family-summary-item strong", background: ".family-dashboard", minimum: 4.5 },
-      { foreground: ".kid-mission strong,.kid-mission p,.kid-mission em", background: ".kid-mission", minimum: 4.5 }
+      { foreground: ".task-list-header h2,.task-list-header p", background: ".family-dashboard", minimum: 4.5 },
+      { foreground: ".task-check strong,.task-check small,.task-check b", background: ".task-check", minimum: 4.5 }
     ],
     entry: [{ foreground: ".garage-heading h2,.garage-motion", background: ".garage-panel", minimum: 4.5 }],
     energy: [{ foreground: ".energy-meter-heading h2,.energy-freshness", background: ".energy-meter", minimum: 4.5 }],
@@ -3009,7 +3009,7 @@ test("Today 2 prioritises the current plan and preparation with quiet shortcuts"
   await expect(card.locator('.today-shortcuts > *')).toHaveCount(3);
   await expect(card.locator('.school-lunch-today')).toContainText("Tomorrow’s school lunch");
   await expect(card.locator('.school-lunch-today')).toContainText("Packed lunch");
-  await expect(card.locator('.today-preparation-card')).toContainText("0 of 5 listed items ready");
+  await expect(card.locator('.today-task-summary')).toHaveCount(2);
   await expect(card.locator('.today-preparation-card [data-prep-item],.today-preparation-card select')).toHaveCount(0);
   const capture=async(name)=>{if(process.env.TODAY_REVIEW_DIR){const directory=resolve(process.env.TODAY_REVIEW_DIR,testInfo.project.name);await mkdir(directory,{recursive:true});await page.screenshot({path:resolve(directory,`${name}.png`),fullPage:true});}};
   const fits=async()=>{
@@ -3021,12 +3021,12 @@ test("Today 2 prioritises the current plan and preparation with quiet shortcuts"
   await fits();await capture("today-evening");
   await page.setViewportSize({width:1280,height:720});await fits();await capture("today-720");
   await page.setViewportSize({width:834,height:1112});await fits();await capture("today-portrait");
-  await card.locator('.today-preparation-card [data-readiness-open]').click();
+  await card.locator('.hub-topbar [data-readiness-open]').click();
   await expect(card.locator('.readiness-modal .readiness-row')).toHaveCount(5);
   await card.locator('.readiness-modal [data-prep-owner="packed-lunch"]').selectOption("parent");
   await card.locator('.readiness-modal [data-prep-item="packed-lunch"]').click();
   await card.locator('.readiness-modal [data-planner-close]').first().click();
-  await expect(card.locator('.today-preparation-card')).toContainText("1 of 5 listed items ready");
+  await expect(card.locator('.today-task-summary')).toHaveCount(2);
   await card.locator('.school-lunch-child[data-school-lunch-open="child_one"]').click();
   await expect(card.locator('.school-lunch-day.is-packed')).toContainText("10 Nov");
   await card.locator('.hub-navigation [data-view="today"]').click();
@@ -3345,6 +3345,7 @@ test("suppresses an unsafe direct-card ChoreOps link and escapes generic summary
   const card = page.locator("family-hub-card");
   await card.locator('.hub-nav-button[data-view="family"]').click();
   await expect(card.locator(".choreops-link")).toHaveCount(0);
+  await card.locator('[data-task-section="rewards"]').click();
   await expect(card.locator(".family-summary-grid").first()).toContainText(maliciousName);
   await expect(card.locator(".family-summary-item img")).toHaveCount(0);
   expect(pageErrors).toEqual([]);
@@ -3356,7 +3357,7 @@ test("gives each child a large direct ChoreOps claim surface without approval au
   await card.locator('.hub-nav-button[data-view="family"]').click();
   await expect(card.locator(".family-kid-tab")).toHaveCount(2);
   await expect(card.locator(".family-kid-stage .family-person")).toHaveCount(1);
-  await expect(card.locator(".chore-row.is-kid-card")).toHaveCount(3);
+  await expect(card.locator('.task-check[data-task-kind="job"]')).toHaveCount(3);
   await card.locator('[data-chore-claim="button.child_one_choreops_claim_chore_brush_teeth"]').click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([{
     domain: "button",
@@ -3622,13 +3623,14 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
 
   await card.locator('.hub-nav-button[data-view="family"]').click();
   await expect(card.locator(".family-rhythm")).toHaveCount(0);
-  await expect(card.locator(".task-section-tabs .segment")).toHaveText(["Jobs", "Get ready", "Rewards"]);
+  await expect(card.locator(".task-section-tabs .segment")).toHaveText(["To do", "Rewards"]);
   await expect(card.locator(".family-dashboard-heading")).not.toContainText(/test|preview/i);
   await expect(card.locator(".choreops-link")).toHaveCount(0);
   await expect(card.locator(".family-kid-tab")).toHaveCount(2);
-  await expect(card.locator(".family-summary-grid")).toHaveCount(1);
+  await expect(card.locator(".tasks-v2")).toBeVisible();
+  await expect(card.locator('.task-check[data-task-kind="job"]')).toHaveCount(3);
+  await card.locator('[data-task-section="rewards"]').click();
   await expect(card.locator(".family-summary-item")).toHaveCount(3);
-  await expect(card.locator(".chore-row")).toHaveCount(3);
   await expect(card.locator('[data-card-type="map"]')).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });
@@ -4244,8 +4246,8 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
   await expect(card.locator(".today-attention")).toHaveCount(0);
   await expectContrast(card, [
     { foreground: ".today-current-plan h2,.today-current-plan > p", background: ".today-agenda", minimum: 4.5 },
-    { foreground: ".today-job small", background: ".today-job", minimum: 4.5 },
-    { foreground: ".today-job strong", background: ".today-job", minimum: 4.5 },
+    { foreground: ".today-task-summary small", background: ".today-task-summary", minimum: 4.5 },
+    { foreground: ".today-task-summary strong", background: ".today-task-summary", minimum: 4.5 },
     { foreground: ".today-person-token", background: ".today-person-token", minimum: 4.5 }
   ]);
   await captureApproval(page, testInfo, "today");
@@ -4318,7 +4320,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
     }
     if (view === "family") {
       await expect(card.locator(".family-rhythm,.location-off-badge")).toHaveCount(0);
-      await expect(card.locator(".task-section-tabs .segment")).toHaveText(["Jobs", "Get ready", "Rewards"]);
+      await expect(card.locator(".task-section-tabs .segment")).toHaveText(["To do", "Rewards"]);
       await expect(card.locator(".choreops-link")).toHaveCount(0);
       await expect(card.locator(".family-kid-tab")).toHaveCount(2);
       await expect(card.locator(".family-kid-stage .family-person")).toHaveCount(1);
@@ -4329,18 +4331,16 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       });
       expect(familyRows.switcherHeight).toBeGreaterThanOrEqual(48);
       expect(familyRows.switcherBottom).toBeLessThanOrEqual(familyRows.stageTop + 1);
-      await expect(card.locator(".family-kid-stage .family-person-heading h2")).toHaveText("Today’s jobs");
-      await expect(card.locator(".family-summary-grid")).toHaveCount(1);
-      await expect(card.locator(".family-summary-item")).toHaveCount(3);
-      await expect(card.locator(".chore-row.is-kid-card")).toHaveCount(3);
+      await expect(card.locator(".task-list-header h2")).toHaveText("Today’s list");
+      await expect(card.locator('.task-check[data-task-kind="job"]')).toHaveCount(3);
       await expect(card.locator(".map-panel,.family-sidebar,[data-card-type='map']")).toHaveCount(0);
-      const truncatedFamilyDetails = await card.locator(".family-kid-stage .chore-row strong,.family-kid-stage .chore-row small,.family-kid-stage .family-summary-item strong,.family-kid-stage .family-summary-item small").evaluateAll((nodes) => {
+      const truncatedFamilyDetails = await card.locator(".family-kid-stage .task-check strong,.family-kid-stage .task-check small,.family-kid-stage .family-summary-item strong,.family-kid-stage .family-summary-item small").evaluateAll((nodes) => {
         return nodes
           .filter((node) => node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1)
           .map((node) => node.textContent.trim());
       });
       expect(truncatedFamilyDetails).toEqual([]);
-      const overwrappedFamilyDetails = await card.locator(".family-kid-stage .chore-row strong,.family-kid-stage .chore-row small,.family-kid-stage .family-summary-item strong,.family-kid-stage .family-summary-item small").evaluateAll((nodes) => {
+      const overwrappedFamilyDetails = await card.locator(".family-kid-stage .task-check strong,.family-kid-stage .task-check small,.family-kid-stage .family-summary-item strong,.family-kid-stage .family-summary-item small").evaluateAll((nodes) => {
         return nodes
           .map((node) => {
             const range = document.createRange();
@@ -4352,11 +4352,11 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       });
       expect(overwrappedFamilyDetails).toEqual([]);
       await expectContrast(card, [
-        { foreground: ".chore-row small", background: ".chore-row", minimum: 4.5 },
-        { foreground: ".family-facts span", background: ".family-facts span", minimum: 4.5 },
+        { foreground: ".task-check small", background: ".task-check", minimum: 4.5 },
+        { foreground: ".task-points", background: ".task-points", minimum: 4.5 },
         { foreground: ".family-kid-tab > span", background: ".family-kid-tab > span", minimum: 4.5 },
-        { foreground: ".chore-row b", background: ".chore-row", minimum: 4.5 },
-        { foreground: ".chore-claim-action:not(:disabled)", background: ".chore-claim-action:not(:disabled)", minimum: 4.5 }
+        { foreground: ".task-check b", background: ".task-check", minimum: 4.5 },
+        { foreground: ".task-check:not(:disabled)", background: ".task-check:not(:disabled)", minimum: 4.5 }
       ]);
       await card.locator('[data-task-section="rewards"]').click();
       await expect(card.locator(".family-summary-grid")).toBeVisible();
@@ -4615,21 +4615,23 @@ test("Home in focus shares complete event checklists between Calendar, Tasks and
   await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.dataset?.prepItem)).toBe("boots");
   await expect(card.locator('.today-ready-item[data-prep-item="boots"]')).toHaveCount(0);
   await card.locator('.hub-navigation [data-view="family"]').click();
-  await expect(card.locator(".family-prep-item")).toHaveCount(9);
-  await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "true");
-  await expect(card.locator(".family-preparation")).not.toContainText("Other child bag");
-  await expect(card.locator(".focus-task-rewards")).toContainText("Weekend movie");
-  await card.locator('[data-task-section="ready"]').click();
-  await card.locator('.family-prep-item[data-prep-item="swim-7"]').click();
-  await card.locator('.focus-task-event').filter({ hasText: "Friday swimming" }).locator("[data-focus-open-plan]").click();
+  await expect(card.locator('.task-check[data-task-kind="prep"]')).toHaveCount(1);
+  await expect(card.locator('.tasks-v2 [data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(card.locator(".tasks-v2")).not.toContainText("Other child bag");
+  await card.locator('[data-task-section="rewards"]').click();
+  await expect(card.locator(".tasks-rewards")).toContainText("Weekend movie");
+  await card.locator('[data-task-section="jobs"]').click();
+  await card.locator('[data-task-day="upcoming"]').click();
+  await card.locator('.tasks-v2 [data-prep-item="swim-7"]').click();
+  await card.locator('.task-group').filter({ hasText: "Friday swimming" }).locator("[data-focus-open-plan]").click();
   await expect(card.locator('.focus-event-ready [data-prep-item="swim-7"]')).toHaveAttribute("aria-pressed", "true");
   await expect(card.locator(".focus-event-ready .focus-ready-item")).toHaveCount(8);
   await card.locator('.focus-event-ready [data-prep-item="swim-7"]').click();
-  await card.locator('[data-focus-tasks="child_one"]').click();
-  await expect(card.locator('.family-prep-item[data-prep-item="swim-7"]')).toHaveAttribute("aria-pressed", "false");
+  await card.getByRole('button',{name:'Open Tasks',exact:true}).click();
+  await expect(card.locator('.tasks-v2 [data-prep-item="swim-7"]')).toHaveAttribute("aria-pressed", "false");
   await card.locator('[data-family-person="child_two"]').click();
-  await expect(card.locator(".family-prep-item")).toHaveCount(1);
-  await expect(card.locator(".family-preparation")).toContainText("Other child bag");
+  await expect(card.locator('.task-check[data-task-kind="prep"]')).toHaveCount(1);
+  await expect(card.locator(".tasks-v2")).toContainText("Other child bag");
   const calls = await page.evaluate(() => window.__serviceCalls);
   expect(calls.filter((call) => call.domain === "todo" && call.service === "update_item").map((call) => [call.data.item, call.data.status])).toEqual([["boots", "completed"], ["swim-7", "completed"], ["swim-7", "needs_action"]]);
   expect(calls.some((call) => call.domain === "choreops" || call.domain === "button")).toBe(false);
@@ -4732,15 +4734,15 @@ test("Home in focus restores failed checklist updates and blocks read-only check
   await expect(card.locator('.focus-event-ready [data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "false");
   await expect(card.locator('[role="alert"]').first()).toBeVisible();
   await card.locator('.hub-navigation [data-view="family"]').click();
-  await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "false");
+  await expect(card.locator('.tasks-v2 [data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "false");
   await card.evaluate((element) => {
     element._config.display.read_only = true;
     element._scheduleRender(true);
   });
-  await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toBeDisabled();
-  await card.locator('.family-prep-item[data-prep-item="boots"]').evaluate((button) => { button.disabled = false; button.click(); });
+  await expect(card.locator('.tasks-v2 [data-prep-item="boots"]')).toBeDisabled();
+  await card.locator('.tasks-v2 [data-prep-item="boots"]').evaluate((button) => { button.disabled = false; button.click(); });
   expect(await page.evaluate(() => window.__serviceCalls.length)).toBe(1);
-  await expect(card.locator('.family-prep-item[data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "false");
+  await expect(card.locator('.tasks-v2 [data-prep-item="boots"]')).toHaveAttribute("aria-pressed", "false");
   expect(errors).toEqual([]);
 });
 
@@ -4781,7 +4783,7 @@ test("restored approved primary screens fit the actual HA shell in both orientat
         const zoneGeometry=await card.locator('.heating-card').evaluateAll(nodes=>nodes.map(node=>({name:node.querySelector('h3').textContent,overflow:node.scrollHeight-node.clientHeight,height:node.clientHeight, parentBottom:node.parentElement.getBoundingClientRect().bottom,bottom:node.getBoundingClientRect().bottom})));
         expect(zoneGeometry.filter(zone=>zone.overflow>1 || zone.bottom>zone.parentBottom+1), JSON.stringify(zoneGeometry)).toEqual([]);
       }
-      if (view==='family') await expect(card.locator('.progress-ring')).toHaveCount(1);
+      if (view==='family') await expect(card.locator('.task-list-header')).toHaveCount(1);
       const folder=process.env.RESTORED_DESIGN_REVIEW_DIR || resolve(tmpdir(), 'restored-design-review');
       await mkdir(folder,{recursive:true});
       await page.screenshot({path:resolve(folder,`${testInfo.project.name}-${portrait?'portrait':'landscape'}-${view}.png`)});
@@ -4995,7 +4997,7 @@ test("approved Calendar inline preparation adds to the shared list and honours r
   await expect(card.locator('.focus-event-ready .focus-ready-item')).toContainText("Training top");
   const eventKey=await card.locator("[data-focus-add-prep]").getAttribute("data-focus-add-prep");
   await card.locator('[data-focus-tasks="child_one"]').click();
-  await expect(card.locator('.family-prep-item')).toContainText("Training top");
+  await expect(card.locator('.task-check[data-task-kind="prep"]')).toContainText("Training top");
   const count=await page.evaluate(()=>window.__serviceCalls.length);
   await card.evaluate(el=>{el._config.display.read_only=true;el._view="calendar";el._render();});
   await expect(card.locator('[data-focus-add-prep]')).toHaveCount(0);
@@ -5024,10 +5026,10 @@ test("refined sections keep controls reachable without changing household state"
     await expect(card.locator('.room-section-content > .ux-section:visible')).toHaveCount(1);
   }
   await card.locator('.hub-navigation [data-view="family"]').click();
-  for (const section of ["jobs", "ready", "rewards"]) {
+  for (const section of ["jobs", "rewards"]) {
     await card.locator(`[data-task-section="${section}"]`).click();
     await expect(card.locator(`[data-task-section="${section}"]`)).toHaveAttribute("aria-pressed", "true");
-    await expect(card.locator('.focus-task-workspace > .ux-section:visible')).toHaveCount(1);
+    await expect(card.locator(section==='jobs'?'.tasks-v2':'.tasks-rewards')).toBeVisible();
     await expectApprovalQuality(page);
   }
   await card.locator('.hub-navigation [data-view="rooms"]').click();
@@ -5211,7 +5213,7 @@ test("homework reading log saves centrally and fits the tablet",async({page},tes
   await page.screenshot({path:resolve(tmpdir(),`homework-${testInfo.project.name}.png`)});
   await card.getByRole("button",{name:"Log a reading",exact:true}).click();
   await card.locator('[data-homework-input="book"]').fill("The little robot");
-  await card.getByRole("button",{name:"Save session",exact:true}).click();
+  await card.getByRole("button",{name:"Save reading",exact:true}).click();
   await expect(card.locator(".homework-modal")).toHaveCount(0);
   await expect(card.locator(".homework-reading")).toContainText("1/3");
   await card.getByRole("button",{name:"Reading record",exact:true}).click();
@@ -5387,10 +5389,10 @@ test("homework failed save retains progress and read-only cannot write",async({p
   const family=locationDisabledConfig();family.school.homework_enabled=true;
   await mount(page,family,{}, {homeworkData:homeworkFixture(),homeworkReject:true});
   const card=page.locator("family-hub-card");await card.locator('.hub-nav-button[data-view="family"]').click();await card.locator('[data-task-section="homework"]').click();
-  await card.getByRole("button",{name:"Log a reading",exact:true}).click();await card.locator('[data-homework-input="book"]').fill("Book");await card.getByRole("button",{name:"Save session",exact:true}).click();
+  await card.getByRole("button",{name:"Log a reading",exact:true}).click();await card.locator('[data-homework-input="book"]').fill("Book");await card.getByRole("button",{name:"Save reading",exact:true}).click();
   await expect(card.getByRole("alert")).toContainText("could not be saved");
   await expect(card.locator(".homework-reading")).toContainText("0/3");
-  await card.getByRole("button",{name:"Done",exact:true}).click();
+  await card.getByRole("button",{name:"Cancel",exact:true}).click();
   await card.evaluate(node=>{node._config.display.read_only=true;node._scheduleRender(true);});
   await expect(card.getByRole("button",{name:"Log a reading",exact:true})).toBeDisabled();
 });
@@ -5423,6 +5425,7 @@ test("School mornings countdown fits Today and saves a one-off walking departure
   await expect(panel).toContainText("Walking · Leave at 07:25 · Today only");
   expect(await page.evaluate(()=>window.__wsCalls.filter(c=>c.type==="family_dashboard_departures/today"))).toEqual([{type:"family_dashboard_departures/today",expected_revision:2,payload:{operation:"override",date:"2026-10-20",time:"07:25",mode:"walk"}}]);
   expect(await card.evaluate(e=>e._departureView().usual_time)).toBe("07:35");
+  await panel.locator('.departure-more summary').click();
   await panel.getByRole("button",{name:"Mute today",exact:true}).click();
   await expect(panel).toContainText("Announcements muted for today");
   await panel.getByRole("button",{name:"We’ve left",exact:false}).click();
@@ -5472,35 +5475,27 @@ function readinessFixture() {
 test("shared preparation carries evening completion and ownership into the morning",async({page},testInfo)=>{
   const {family,preparationItems,calendarEventsByEntity}=readinessFixture();
   const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-09T19:30:00Z",kiosk:true});
-  const card=page.locator("family-hub-card"),panel=card.locator(".readiness-panel");
-  await expect(panel).toContainText("Ready for tomorrow?");
-  await expect(panel.locator(".readiness-row")).toHaveCount(0);
-  await panel.locator("[data-readiness-open]").click();
-  const list=card.locator(".readiness-modal");
+  const card=page.locator("family-hub-card"),list=card.locator(".readiness-modal");
+  await card.locator('.hub-topbar [data-readiness-open]').click();
+  await expect(list).toContainText("Ready for tomorrow?");
   await list.locator('[data-prep-owner="packed-lunch"]').selectOption("parent");
   await expect(list.locator('[data-prep-owner="packed-lunch"]')).toHaveValue("parent");
   await list.locator('[data-prep-item="packed-lunch"]').click();
   await expect(list).toContainText("1 of 5 listed items ready");
-  await expect(card.locator(".readiness-modal .readiness-row")).toHaveCount(5);
-  await expect(card.locator('.readiness-modal [data-prep-item="packed-lunch"]')).toHaveAttribute("aria-pressed","true");
-  await card.locator('.readiness-modal [data-planner-close]').first().click();
+  await expect(list.locator('.readiness-row')).toHaveCount(5);
+  await list.locator('[data-planner-close]').first().click();
   await page.evaluate(installApprovalClock,{fixedNow:"2026-11-10T07:15:00Z"});
   await card.evaluate(el=>el._scheduleRender(true));
-  await expect(panel).toContainText("Ready for today?");
-  await expect(panel).toContainText("1 of 5 listed items ready");
-  await panel.locator('[data-readiness-open]').click();
-  await expect(card.locator('.readiness-modal [data-prep-owner="packed-lunch"]')).toHaveValue("parent");
-  await card.locator('.readiness-modal [data-planner-close]').first().click();
-  await expectNoRootOverflow(page);
-  const bounds=await panel.evaluate(el=>({scroll:el.scrollHeight,height:el.clientHeight}));
-  expect(bounds.scroll).toBeLessThanOrEqual(bounds.height+1);
-  const footballBounds=await card.evaluate(el=>({football:el.shadowRoot.querySelector(".today-football").getBoundingClientRect().bottom,summary:el.shadowRoot.querySelector(".focus-home-summary").getBoundingClientRect().top}));
-  expect(footballBounds.football).toBeGreaterThanOrEqual(footballBounds.summary-1);
-  const originalViewport=page.viewportSize();
+  await card.locator('.hub-topbar [data-readiness-open]').click();
+  await expect(list).toContainText("Ready for today?");
+  await expect(list).toContainText("1 of 5 listed items ready");
+  await expect(list.locator('[data-prep-owner="packed-lunch"]')).toHaveValue("parent");
+  await list.locator('[data-planner-close]').first().click();
+  await card.locator('.today-task-summary[data-focus-tasks="child_one"]').click();
+  await card.locator('.tasks-completed summary').click();
+  await expect(card.locator('.tasks-v2 [data-prep-item="packed-lunch"]')).toHaveAttribute('aria-pressed','true');
   await page.setViewportSize({width:834,height:1112});
-  await expect.poll(()=>panel.evaluate(el=>getComputedStyle(el.querySelector("h3")).color===getComputedStyle(el).color)).toBe(true);
-  await expectNoRootOverflow(page);
-  await page.setViewportSize(originalViewport);
+  await expectApprovalQuality(page);
   await mkdir(resolve("test-results/readiness"),{recursive:true});
   await page.screenshot({path:resolve(`test-results/readiness/${testInfo.project.name}-morning.png`)});
   const calls=await page.evaluate(()=>window.__serviceCalls.filter(call=>call.domain==="todo"&&call.service==="update_item"));
@@ -5516,15 +5511,16 @@ test("preparation respects child selection, read-only displays and unavailable s
   family.display.read_only=true;
   const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-09T19:30:00Z",kiosk:true});
   const card=page.locator("family-hub-card");
-  await card.locator('.readiness-panel [data-readiness-open]').click();
+  await card.locator('.hub-topbar [data-readiness-open]').click();
   await expect(card.locator('.readiness-modal [data-prep-item="packed-lunch"]')).toBeDisabled();
   await expect(card.locator('.readiness-modal [data-prep-owner="packed-lunch"]')).toBeDisabled();
   await card.locator('.readiness-modal [data-planner-close]').first().click();
   await card.evaluate(async el=>{el._hass.callWS=async()=>{throw new Error("List unavailable")};await el._loadPreparationItems(true)});
-  await expect(card.locator(".readiness-panel")).toContainText("Some preparation information is unavailable");
-  await expect(card.locator(".readiness-panel")).not.toContainText("0 of 5 listed items ready");
+  await expect(card.locator(".today-task-summary").first()).toContainText("Some tasks need checking");
+  await expect(card.locator(".today-task-summary").first()).not.toContainText("All listed items done");
   await card.evaluate(el=>{el._selectFamilyView("child_two");el._scheduleRender(true)});
-  await expect(card.locator(".readiness-panel")).toHaveCount(0);
+  await expect(card.locator(".today-task-summary")).toHaveCount(1);
+  await expect(card.locator(".today-task-summary")).not.toContainText("Pack lunch box");
   expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
   expect(errors).toEqual([]);
 });
@@ -5537,7 +5533,7 @@ test("preparation, school countdown and both children's jobs fit together",async
   const errors=await mount(page,family,{"sensor.family_dashboard_departure":departure},{preparationItems,calendarEventsByEntity,fixedNow:"2026-11-10T07:15:00Z",kiosk:true,departureAdmin:true});
   const card=page.locator("family-hub-card");
   await expect(card.locator(".departure-panel")).toContainText("Leave in 20 minutes");
-  await expect(card.locator(".readiness-panel")).toContainText("Pack lunch box");
+  await expect(card.locator(".today-task-summary").first()).toContainText("to do");
   const bounds=await card.evaluate(el=>{
     const root=el.shadowRoot,next=root.querySelector(".departure-panel"),jobs=root.querySelector(".today-family"),lunch=root.querySelector(".school-lunch-today");
     return {nextHeight:next.clientHeight,nextScroll:next.scrollHeight,jobsHeight:jobs.clientHeight,jobsScroll:jobs.scrollHeight,jobsBottom:jobs.getBoundingClientRect().bottom,lunchTop:lunch.getBoundingClientRect().top};
@@ -5658,7 +5654,7 @@ test("simple family view has child choices and always returns to the full dashbo
   const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-10T07:15:00Z",kiosk:true});
   const card=page.locator("family-hub-card");
   await card.locator('[data-family-picker-open]').click();
-  await expect(card.locator(".dashboard-version")).toContainText("0.27.1");
+  await expect(card.locator(".dashboard-version")).toContainText("0.28.0");
   await card.locator('[data-experience="simple"]').click();
   await expect(card.locator(".simple-child-card")).toHaveCount(2);
   expect(await card.locator(".simple-child-card .today-job>div").first().evaluate(node=>node.getBoundingClientRect().width)).toBeGreaterThan(200);
@@ -5707,5 +5703,137 @@ test("exports a working simple family view for review",async({page},testInfo)=>{
   await page.screenshot({path:resolve(directory,"full-dashboard.png")});
   await card.locator('.hub-navigation [data-view="calendar"]').click();
   await page.screenshot({path:resolve(directory,"calendar.png")});
+  expect(errors).toEqual([]);
+});
+
+async function mockTabletKeyboard(page) {
+  const size=page.viewportSize();
+  await page.evaluate(({width,height})=>{
+    const viewport=Object.assign(new EventTarget(),{width,height,offsetTop:0,offsetLeft:0,scale:1});
+    Object.defineProperty(window,'visualViewport',{configurable:true,value:viewport});
+    window.__keyboardViewport=viewport;
+  },size);
+}
+
+async function showTabletKeyboard(page) {
+  await page.evaluate(()=>{Object.assign(window.__keyboardViewport,{height:360,offsetTop:60});window.__keyboardViewport.dispatchEvent(new Event('resize'));});
+}
+
+async function expectVisibleFormField(card) {
+  await expect.poll(()=>card.evaluate(element=>{
+    const active=element.shadowRoot.activeElement,body=active?.closest('.planner-event-form,.homework-modal-body,.planner-modal-body');
+    if(!body)return false;
+    const field=active.getBoundingClientRect(),bounds=body.getBoundingClientRect(),modal=active.closest('.planner-modal'),footer=modal.querySelector('footer').getBoundingClientRect(),dialog=modal.getBoundingClientRect();
+    return field.top>=bounds.top && field.bottom<=bounds.bottom && footer.bottom<=420 && dialog.top>=60 && dialog.bottom<=420;
+  })).toBe(true);
+}
+
+test('calendar drafts survive refresh, field changes, validation and a failed save with the keyboard open',async({page})=>{
+  await mockTabletKeyboard(page);
+  const errors=await mount(page,locationDisabledConfig(),{}, {fixedNow:APPROVAL_NOW,kiosk:true});
+  const card=page.locator('family-hub-card');
+  await card.locator('.hub-nav-button[data-view="calendar"]').click();
+  await card.getByRole('button',{name:'Add event',exact:true}).click();
+  const title=card.locator('[data-planner-field="summary"]');
+  await title.fill('After-school football');
+  await updateEntityState(card,state('sensor.child_one_choreops_points','17'));
+  await card.locator('[data-planner-field="location"]').fill('Community pitch');
+  await card.locator('[data-planner-field="calendar"]').selectOption('calendar.child_one');
+  await card.locator('[data-planner-field="date"]').fill('2026-08-25');
+  await card.locator('[data-planner-field="start"]').fill('17:30');
+  await card.locator('[data-planner-field="end"]').fill('17:00');
+  await card.locator('[data-planner-field="template"]').selectOption('football');
+  await card.locator('[data-planner-field="custom-items"]').fill('Mouthguard\nClean socks');
+  await title.focus();
+  await title.evaluate(input=>input.setSelectionRange(5,5));
+  await card.evaluate(element=>element._scheduleRender(true));
+  await expect(title).toHaveValue('After-school football');
+  await expect(title).toBeFocused();
+  expect(await title.evaluate(input=>input.selectionStart)).toBe(5);
+  await showTabletKeyboard(page);
+  await expect(card).toHaveAttribute('data-keyboard-open','');
+  await expectVisibleFormField(card);
+  await card.getByRole('button',{name:'Next field',exact:true}).click();
+  await expect(card.locator('[data-planner-field="calendar"]')).toBeFocused();
+  await card.locator('[data-planner-field="custom-items"]').focus();
+  await expectVisibleFormField(card);
+  await card.getByRole('button',{name:'Add to calendar',exact:true}).click();
+  await expect(card.locator('.planner-form-error')).toContainText('end time must be after');
+  await expect(title).toHaveValue('After-school football');
+  await expect(card.locator('[data-planner-field="calendar"]')).toHaveValue('calendar.child_one');
+  await expect(card.locator('[data-planner-field="custom-items"]')).toHaveValue('Mouthguard\nClean socks');
+  await card.locator('[data-planner-field="end"]').fill('19:00');
+  await page.evaluate(()=>window.__serviceBehaviors['calendar.create_event:calendar.child_one']='reject');
+  await card.getByRole('button',{name:'Add to calendar',exact:true}).click();
+  await expect(card.locator('.planner-form-error')).toContainText('simulated');
+  await expect(card.locator('[data-planner-field="location"]')).toHaveValue('Community pitch');
+  await page.evaluate(()=>delete window.__serviceBehaviors['calendar.create_event:calendar.child_one']);
+  await card.getByRole('button',{name:'Add to calendar',exact:true}).click();
+  await expect(card.locator('.planner-add-modal')).toHaveCount(0);
+  const calls=await page.evaluate(()=>window.__serviceCalls.filter(call=>call.domain==='calendar'));
+  expect(calls).toHaveLength(2);
+  expect(calls[1].data).toMatchObject({summary:'After-school football',entity_id:'calendar.child_one',start_date_time:'2026-08-25T17:30:00',end_date_time:'2026-08-25T19:00:00',location:'Community pitch'});
+  expect(errors).toEqual([]);
+});
+
+test('reading entry keeps the focused field and save action above the tablet keyboard',async({page})=>{
+  await mockTabletKeyboard(page);
+  const family=locationDisabledConfig();family.school.homework_enabled=true;
+  const errors=await mount(page,family,{}, {homeworkData:homeworkFixture(),kiosk:true});
+  const card=page.locator('family-hub-card');
+  await card.locator('.hub-nav-button[data-view="family"]').click();
+  await card.locator('[data-task-section="homework"]').click();
+  await card.getByRole('button',{name:'Log a reading',exact:true}).click();
+  await card.locator('[data-homework-input="book"]').fill('The little robot');
+  await showTabletKeyboard(page);
+  await expectVisibleFormField(card);
+  await card.getByRole('button',{name:'Next field',exact:true}).click();
+  await expect(card.locator('[data-homework-input="pages"]')).toBeFocused();
+  await card.locator('[data-homework-input="pages"]').fill('Pages 12–20');
+  await expectVisibleFormField(card);
+  await updateEntityState(card,state('sensor.child_one_choreops_points','21'));
+  await card.evaluate(element=>element._scheduleRender(true));
+  await expect(card.locator('[data-homework-input="pages"]')).toBeFocused();
+  await expect(card.locator('[data-homework-input="book"]')).toHaveValue('The little robot');
+  await expectVisibleFormField(card);
+  await card.getByRole('button',{name:'Save reading',exact:true}).click();
+  await expect(card.locator('.homework-modal')).toHaveCount(0);
+  const calls=await page.evaluate(()=>window.__wsCalls.filter(call=>call.type==='family_dashboard_homework/progress'));
+  expect(calls).toHaveLength(1);
+  expect(calls[0].payload.details).toMatchObject({book:'The little robot',pages:'Pages 12–20'});
+  expect(errors).toEqual([]);
+});
+
+test('one child task list combines daily jobs and packing with separate approval and completion states',async({page},testInfo)=>{
+  const {family,preparationItems,calendarEventsByEntity}=readinessFixture();
+  family.features.location_map=true;
+  const status='sensor.child_one_choreops_chore_status_brush_teeth',claim='button.child_one_choreops_claim_chore_brush_teeth';
+  family.chores.users[0].status_entities=[status];
+  const errors=await mount(page,family,{[status]:state(status,'pending',{chore_name:'Brush teeth',default_points:0}),[claim]:state(claim,'unknown')},{preparationItems,calendarEventsByEntity,fixedNow:'2026-11-10T07:15:00Z',kiosk:true});
+  const card=page.locator('family-hub-card');
+  await card.locator('.today-task-summary[data-focus-tasks="child_one"]').click();
+  await expect(card.locator('[data-task-section="ready"]')).toHaveCount(0);
+  const list=card.locator('.tasks-v2');
+  await expect(list).toContainText('6 left to do');
+  await expect(list.getByRole('button',{name:'Mark as done: Brush teeth',exact:true})).toBeEnabled();
+  await list.locator('[data-prep-item="swim-0"]').click();
+  await expect(list.locator('.tasks-completed')).toContainText('Completed (1)');
+  await expect(list.locator('.task-group [data-prep-item="swim-0"]')).toHaveCount(0);
+  await list.getByRole('button',{name:'Mark as done: Brush teeth',exact:true}).click();
+  await updateEntityState(card,state(status,'claimed',{chore_name:'Brush teeth',default_points:0}));
+  await expect(list).toContainText('awaiting approval');
+  await list.locator('.tasks-waiting summary').click();
+  await expect(list.getByRole('button',{name:'Awaiting approval: Brush teeth',exact:true})).toBeDisabled();
+  await list.locator('.tasks-completed:not(.tasks-waiting) summary').click();
+  await list.locator('[data-prep-item="swim-0"]').click();
+  await expect(list.locator('.tasks-completed:not(.tasks-waiting)')).toHaveCount(0);
+  await list.getByRole('button',{name:'Tomorrow',exact:true}).click();
+  await expect(list).not.toContainText('Brush teeth');
+  await list.getByRole('button',{name:'Today',exact:true}).click();
+  await expectApprovalQuality(page);
+  expect(await list.locator('.task-check').evaluateAll(buttons=>buttons.filter(button=>button.getClientRects().length).every(button=>{const box=button.getBoundingClientRect(),row=button.closest('li').getBoundingClientRect(),title=button.querySelector('strong').getBoundingClientRect();return box.width>=row.width-2 && box.height>=48 && title.right<=box.right && title.bottom<=box.bottom;}))).toBe(true);
+  if(process.env.TASK_FORMS_REVIEW_DIR){await mkdir(resolve(process.env.TASK_FORMS_REVIEW_DIR,testInfo.project.name),{recursive:true});await page.screenshot({path:resolve(process.env.TASK_FORMS_REVIEW_DIR,testInfo.project.name,'combined-tasks.png')});}
+  const calls=await page.evaluate(()=>window.__serviceCalls.filter(call=>call.domain!=='todo'));
+  expect(calls).toEqual([{domain:'button',service:'press',data:{entity_id:claim}}]);
   expect(errors).toEqual([]);
 });
