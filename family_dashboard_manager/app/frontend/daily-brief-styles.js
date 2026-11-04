@@ -2187,7 +2187,7 @@ export const DAILY_BRIEF_STYLES = `
   .today-task-summary > span:nth-child(2) { flex:1; min-width:0; }
   .today-task-summary strong { display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:16px; line-height:1.25; font-weight:500; }
   .today-task-summary strong b { display:grid; place-items:center; min-width:28px; height:28px; padding:0 4px; border-radius:9px; background:var(--daily-surface); color:var(--daily-accent); font-size:14px; font-weight:500; }
-  .today-task-summary small { display:block; margin-top:3px; color:var(--daily-muted); font-size:12px; line-height:1.35; }
+  .today-task-summary small { display:block; margin-top:3px; color:var(--daily-text); font-size:12px; line-height:1.35; }
   .today-task-summary > ha-icon { color:var(--daily-muted); --mdc-icon-size:18px; }
   .today-v2 .today-main-plan:has(.departure-panel) { display:flex; flex-direction:column; justify-content:flex-start; gap:12px; }
   .hub-card .today-v2 .departure-panel { flex:none; height:auto; padding:20px 22px; }
@@ -2291,4 +2291,9 @@ export const DAILY_BRIEF_STYLES = `
     .family-dashboard.has-kid-switcher.has-claim-feedback .family-kid-stage { grid-row:3; }
   }
   @media(max-width:620px) { .planner-modal-backdrop { padding:8px; }.planner-event-form { grid-template-columns:repeat(2,minmax(0,1fr));padding:14px; }.task-list-header h2 {font-size:21px}.task-points {padding:6px 8px;font-size:12px} }
+  @media(max-width:620px) {
+    .family-kid-stage .family-person.tasks-v2 { display:flex; flex-direction:column; height:auto; overflow:visible; }
+    .tasks-v2 .task-list-scroll { overflow:visible; }
+    .tasks-v2 .task-list-toolbar { flex-wrap:wrap; height:auto; min-height:54px; }
+  }
 `;

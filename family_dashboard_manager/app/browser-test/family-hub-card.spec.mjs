@@ -4246,8 +4246,8 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
   await expect(card.locator(".today-attention")).toHaveCount(0);
   await expectContrast(card, [
     { foreground: ".today-current-plan h2,.today-current-plan > p", background: ".today-agenda", minimum: 4.5 },
-    { foreground: ".today-job small", background: ".today-job", minimum: 4.5 },
-    { foreground: ".today-job strong", background: ".today-job", minimum: 4.5 },
+    { foreground: ".today-task-summary small", background: ".today-task-summary", minimum: 4.5 },
+    { foreground: ".today-task-summary strong", background: ".today-task-summary", minimum: 4.5 },
     { foreground: ".today-person-token", background: ".today-person-token", minimum: 4.5 }
   ]);
   await captureApproval(page, testInfo, "today");
@@ -4353,10 +4353,10 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       expect(overwrappedFamilyDetails).toEqual([]);
       await expectContrast(card, [
         { foreground: ".task-check small", background: ".task-check", minimum: 4.5 },
-        { foreground: ".family-facts span", background: ".family-facts span", minimum: 4.5 },
+        { foreground: ".task-points", background: ".task-points", minimum: 4.5 },
         { foreground: ".family-kid-tab > span", background: ".family-kid-tab > span", minimum: 4.5 },
         { foreground: ".task-check b", background: ".task-check", minimum: 4.5 },
-        { foreground: ".chore-claim-action:not(:disabled)", background: ".chore-claim-action:not(:disabled)", minimum: 4.5 }
+        { foreground: ".task-check:not(:disabled)", background: ".task-check:not(:disabled)", minimum: 4.5 }
       ]);
       await card.locator('[data-task-section="rewards"]').click();
       await expect(card.locator(".family-summary-grid")).toBeVisible();
