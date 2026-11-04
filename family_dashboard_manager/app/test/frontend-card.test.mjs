@@ -24,6 +24,8 @@ import {
   familyPlannerPeople,
   FamilyHubCard,
   normaliseFamilyViewPreferences,
+  normalisePageFamilyPreferences,
+  homeRoomPresentation,
   familyDayPhase,
   familyHomeworkActions,
   familyAmbientReminder,
@@ -3693,4 +3695,25 @@ test("school departure countdown respects its window, today-only mode and finish
   assert.equal(departurePresentation({...view,status:"left"},new Date(view.departure_at)).heading,"Have a lovely day");
   assert.match(departurePresentation({...view,mode:"walk",overridden:true},new Date(view.departure_at)).caption,/Walking.*Today only/);
   assert.equal(departurePresentation({...view,enabled:false},new Date(view.departure_at)).visible,false);
+});
+
+
+test("old global child selection migrates to Tasks while shared pages start with everyone",()=>{
+ const people=[{id:"child",role:"child"},{id:"parent",role:"parent"}];
+ const migrated=normalisePageFamilyPreferences({version:2,selected:"child",contexts:{child:{taskSection:"homework",calendarMode:"month"}}},people);
+ assert.equal(migrated.pages.family.selected,"child");assert.equal(migrated.pages.family.contexts.child.taskSection,"homework");
+ for(const page of ["today","calendar","simple"])assert.equal(migrated.pages[page].selected,"all");
+ migrated.pages.calendar.selected="parent";migrated.pages.today.selected="removed";
+ const saved=normalisePageFamilyPreferences(migrated,people);
+ assert.equal(saved.pages.calendar.selected,"parent");assert.equal(saved.pages.today.selected,"all");assert.equal(saved.pages.family.selected,"child");
+});
+
+test("room overview distinguishes activity, missing devices and excluded features",()=>{
+ const room={id:"room",lights:["light.test"],covers:["cover.garage"],media_players:["media_player.room"],climate:"climate.room",temperature_sensor:"sensor.temp"};
+ const states={"light.test":{state:"on",attributes:{}},"cover.garage":{state:"open",attributes:{}},"media_player.room":{state:"playing",attributes:{}},"climate.room":{state:"heat",attributes:{hvac_action:"heating",current_temperature:20}},"sensor.temp":{state:"20",attributes:{}}};
+ const active=homeRoomPresentation(room,states,{features:{entry:true,music:true}});
+ assert.equal(active.active,true);assert.equal(active.unavailable,0);assert.match(active.detail,/1 light on.*Heating.*1 open.*Music playing/);
+ const quiet=homeRoomPresentation({...room,climate:null,temperature_sensor:null},{"light.test":{state:"off",attributes:{}}},{features:{entry:false,music:false},entry:{garage:{cover_entity:"cover.garage"}}});
+ assert.equal(quiet.active,false);assert.equal(quiet.unavailable,0);
+ const missing=homeRoomPresentation(room,{},{});assert.equal(missing.active,false);assert.equal(missing.unavailable,5);assert.match(missing.detail,/unavailable/);
 });

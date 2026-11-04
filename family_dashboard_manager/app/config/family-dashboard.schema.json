@@ -278,7 +278,7 @@
       "required": ["default_section"],
       "properties": {
         "default_section": {
-          "enum": ["rooms", "lights", "heating", "covers", "cleaning"]
+          "enum": ["overview", "rooms", "lights", "heating", "covers", "cleaning"]
         },
         "default_room": {
           "$ref": "#/$defs/id",
