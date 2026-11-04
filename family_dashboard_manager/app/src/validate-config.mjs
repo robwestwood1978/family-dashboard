@@ -361,7 +361,7 @@ export function validateConfig(config) {
   validateEntityId(lists.shopping_entity, "config.lists.shopping_entity", "todo");
 
   const home = requireObject(config.home, "config.home");
-  if (!["rooms", "lights", "heating", "covers", "cleaning"].includes(home.default_section)) {
+  if (!["overview", "rooms", "lights", "heating", "covers", "cleaning"].includes(home.default_section)) {
     fail("config.home.default_section", "must name a schema-v7 Home section");
   }
   if (home.default_section === "cleaning" && !features.cleaning) {

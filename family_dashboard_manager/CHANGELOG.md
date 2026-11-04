@@ -1,3 +1,9 @@
+## 0.29.0
+
+- Give Today, Calendar, Tasks and the optional simple view independent person selections on each device. Migrate the previous shared selection to Tasks, start shared pages with everyone, and keep house controls explicitly whole-home.
+- Add a Home overview with live house summaries, internal-lights-off, room cards, active/floor/unavailable filters, energy and security shortcuts. Keep the existing floorplan and all lighting, heating, covers and cleaning screens available.
+- Open room controls in a focused, keyboard-accessible panel with focus return and a floorplan shortcut. Preserve existing service allowlists, read-only restrictions and protected security actions.
+
 ## 0.28.0
 
 - Combine daily jobs and calendar packing into one child To do list, with Today, Tomorrow and Later views. Keep approval requests and completed items clearly separated, and retain the existing job and shared-checklist services.

@@ -22,7 +22,7 @@ const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", imp
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
   .replace(/import \{ schoolLunchForDate[^\n]+from "\.\/readiness\.js[^";]+";/, `const {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents} = (()=>{${readinessSource.replace(/export /g, "")}return {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents};})();`)
   .replace(/export \{ schoolLunchForDate[^\n]+;/, "")
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.28.0";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.29.0";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -1219,9 +1219,10 @@ test("Home in focus keeps every screen readable in both appearances and preserve
         await page.screenshot({ path: resolve(directory, `${darkMode ? "dark" : "light"}-${view}.png`), fullPage: true, animations: "disabled" });
       }
       if (view === "rooms") {
-        for (const section of ["lights", "heating", "covers", "cleaning"]) {
+        for (const section of ["overview", "lights", "heating", "covers", "cleaning"]) {
           await card.locator(`[data-home-section="${section}"]`).click();
           await expectApprovalQuality(page);
+          if (section === "overview") await expectContrast(card,[{foreground:".home-v2 h2,.home-room-card strong,.home-v2-metrics strong,.home-room-state,.home-room-filters button",background:".home-v2",minimum:4.5}]);
           if (section === "lights" || section === "heating") {
             await expectContrast(card, [{ foreground: `.${section === "lights" ? "lighting" : "heating"}-master h2`, background: `.${section === "lights" ? "lighting" : "heating"}-master`, minimum: 4.5 }]);
           }
@@ -1714,7 +1715,7 @@ test("curates lights, heating, blinds and cleaning inside Home", async ({ page }
   const pageErrors = await mount(page);
   const card = page.locator("family-hub-card");
   await card.locator('.hub-nav-button[data-view="rooms"]').click();
-  await expect(card.locator("[data-home-section]")).toHaveCount(5);
+  await expect(card.locator("[data-home-section]")).toHaveCount(6);
 
   await card.locator('[data-home-section="lights"]').click();
   await expect(card.locator('[data-home-section-current="lights"] .whole-home-card')).toHaveCount(5);
@@ -4261,7 +4262,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
   await card.evaluate((element, familyConfig) => element.setConfig({ family_config: familyConfig }), structuralFloorplanConfig);
   await expect(card.locator('[data-current-view="today"]')).toBeVisible();
   await card.locator('.hub-nav-button[data-view="rooms"]').click();
-  const homeSections = ["rooms", "lights", "heating", "covers", "cleaning"];
+  const homeSections = ["overview", "rooms", "lights", "heating", "covers", "cleaning"];
   for (const section of homeSections) {
     await card.locator(`[data-home-section="${section}"]`).click();
     await expect(card.locator(`[data-home-section-current="${section}"]`)).toBeVisible();
@@ -5060,40 +5061,41 @@ function familyDayFixture() {
   return data;
 }
 
-test("Family day picker carries the child across Calendar, Tasks and Homework and remembers calendar modes and task sections",async({page})=>{
+test("page selections stay independent across Today, Calendar and Tasks and survive reload",async({page})=>{
   await page.route("http://homeassistant.local/family-dashboard/hub",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body></body></html>"}));
   await page.goto("http://homeassistant.local/family-dashboard/hub");
   const family=locationDisabledConfig();family.school.homework_enabled=true;
   const data=familyDayFixture(),first=data.children[0],second=data.children[1];
   const errors=await mount(page,family,{}, {homeworkData:data,fixedNow:"2026-10-14T14:30:00Z",kiosk:true});
   const card=page.locator("family-hub-card");
+  await card.locator('.hub-nav-button[data-view="family"]').click();
+  await card.locator(`[data-family-person="${second.id}"]`).click();
+  await card.locator('[data-task-section="homework"]').click();
+  await card.locator('[data-view="today"]').first().click();
+  await expect(card.locator("[data-family-picker-open]")).toHaveAccessibleName("Family view: Everyone");
   await card.locator("[data-family-picker-open]").click();
-  await expect(card.getByRole("dialog",{name:"Whose day?"})).toBeVisible();
+  await expect(card.getByRole("dialog",{name:"Whose day?"})).toContainText("Other pages keep their own selection");
   await expect(card.locator(".hub-shell")).toHaveAttribute("inert","");
   await card.locator(`[data-family-view="${first.id}"]`).click();
-  await expect(card.locator("[data-family-picker-open]")).toHaveAccessibleName(`Family view: ${first.name}`);
   await card.locator('.hub-nav-button[data-view="calendar"]').click();
-  await expect(card.locator(`[data-calendar-person="${first.id}"]`)).toHaveAttribute("aria-pressed","true");
+  await expect(card.locator('[data-calendar-person="all"]')).toHaveAttribute("aria-pressed","true");
+  await card.locator(`[data-calendar-person="${first.id}"]`).click();
   await card.locator('[data-calendar-mode="month"]').click();
   await card.locator('.hub-nav-button[data-view="family"]').click();
-  await expect(card.locator(`[data-family-person="${first.id}"]`)).toHaveAttribute("aria-pressed","true");
-  await card.locator('[data-task-section="homework"]').click();
-  await expect(card.locator(".homework-workspace")).toContainText("States of matter");
-  await card.locator(`[data-family-person="${second.id}"]`).click();
-  await expect(card.locator("[data-family-picker-open]")).toHaveAccessibleName(`Family view: ${second.name}`);
-  await card.locator('[data-task-section="homework"]').click();
-  await expect(card.locator(".homework-workspace")).not.toContainText("States of matter");
-  await card.locator('.hub-nav-button[data-view="calendar"]').click();
-  await expect(card.locator('[data-calendar-mode="week"]')).toHaveAttribute("aria-pressed","true");
-  await card.locator("[data-family-picker-open]").click();
-  await card.locator(`[data-family-view="${first.id}"]`).click();
-  await expect(card.locator('[data-calendar-mode="month"]')).toHaveAttribute("aria-pressed","true");
-  await card.locator('.hub-nav-button[data-view="family"]').click();
+  await expect(card.locator(`[data-family-person="${second.id}"]`)).toHaveAttribute("aria-pressed","true");
   await expect(card.locator('[data-task-section="homework"]')).toHaveAttribute("aria-pressed","true");
+  await expect(card.locator(".homework-workspace")).not.toContainText("States of matter");
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
+  await expect(card.locator("[data-family-picker-open]")).toHaveCount(0);
+  await expect(card.locator('.house-view-label')).toHaveText("Whole home");
   await page.reload();
   const reloadErrors=await mount(page,family,{}, {homeworkData:data,fixedNow:"2026-10-14T14:30:00Z",kiosk:true});
   await expect(card.locator("[data-family-picker-open]")).toHaveAccessibleName(`Family view: ${first.name}`);
+  await card.locator('.hub-nav-button[data-view="calendar"]').click();
+  await expect(card.locator(`[data-calendar-person="${first.id}"]`)).toHaveAttribute("aria-pressed","true");
+  await expect(card.locator('[data-calendar-mode="month"]')).toHaveAttribute("aria-pressed","true");
   await card.locator('.hub-nav-button[data-view="family"]').click();
+  await expect(card.locator(`[data-family-person="${second.id}"]`)).toHaveAttribute("aria-pressed","true");
   await expect(card.locator('[data-task-section="homework"]')).toHaveAttribute("aria-pressed","true");
   expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
   expect([...errors,...reloadErrors]).toEqual([]);
@@ -5112,6 +5114,8 @@ test("Family day parent view offers children and the picker traps focus without 
   expect(pickerBounds.bottom).toBeLessThanOrEqual(1112);
   await card.locator(`[data-family-view="${parent.id}"]`).click();
   await card.locator('.hub-nav-button[data-view="family"]').click();
+  await card.locator("[data-family-picker-open]").click();
+  await card.locator(`[data-family-view="${parent.id}"]`).click();
   await expect(card.locator(".family-parent-overview")).toContainText("Choose a child");
   await expect(card.locator(".family-overview-cards article")).toHaveCount(2);
   await expect(card.locator(".family-overview-cards")).not.toContainText(`${parent.name}’s jobs`);
@@ -5585,7 +5589,7 @@ test("calendar starts today after reopening, profile changes, reload and foregro
   await card.evaluate(el=>el._boundVisibilityChange());
   await expect(card.locator('[data-calendar-jump]')).toHaveValue("2026-10-27");
   const saved=await card.evaluate(el=>{el._persistFamilyViewPreferences();return JSON.parse(localStorage.getItem(el._familyPreferenceKey()));});
-  expect(Object.values(saved.contexts).some(context=>context.calendarAnchor||context.calendarSelected)).toBe(false);
+  expect(Object.values(saved.pages).flatMap(page=>Object.values(page.contexts)).some(context=>context.calendarAnchor||context.calendarSelected)).toBe(false);
   await card.evaluate(el=>{el._calendarAnchorKey="2026-12-18";el._restoreFamilyViewPreferences();el._scheduleRender(true)});
   await expect(card.locator('[data-calendar-jump]')).toHaveValue("2026-10-27");
   await page.evaluate(installApprovalClock,{fixedNow:"2026-10-28T00:01:00Z"});
@@ -5654,7 +5658,7 @@ test("simple family view has child choices and always returns to the full dashbo
   const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-10T07:15:00Z",kiosk:true});
   const card=page.locator("family-hub-card");
   await card.locator('[data-family-picker-open]').click();
-  await expect(card.locator(".dashboard-version")).toContainText("0.28.0");
+  await expect(card.locator(".dashboard-version")).toContainText("0.29.0");
   await card.locator('[data-experience="simple"]').click();
   await expect(card.locator(".simple-child-card")).toHaveCount(2);
   expect(await card.locator(".simple-child-card .today-job>div").first().evaluate(node=>node.getBoundingClientRect().width)).toBeGreaterThan(200);
@@ -5673,8 +5677,8 @@ test("simple family view has child choices and always returns to the full dashbo
   await expect(card.locator('.hub-navigation [data-view="rooms"]')).toBeVisible();
   await expect(card.locator(".hub-card")).toHaveAttribute("data-experience","full");
   await card.evaluate((element,family)=>{element._selectFamilyView("parent");family.display.default_view="rooms";family.display.default_experience="simple";element.setConfig({family_config:family})},family);
-  await expect(card.locator(".simple-child-card")).toHaveCount(2);
-  await expect(card.locator('[data-simple-person="all"]')).toHaveAttribute("aria-pressed","true");
+  await expect(card.locator(".simple-child-card")).toHaveCount(1);
+  await expect(card.locator('[data-simple-person="child_one"]')).toHaveAttribute("aria-pressed","true");
   await expect(card.locator('[data-experience="full"]')).toBeVisible();
   await expectNoRootOverflow(page);
   expect(errors).toEqual([]);
@@ -5835,5 +5839,53 @@ test('one child task list combines daily jobs and packing with separate approval
   if(process.env.TASK_FORMS_REVIEW_DIR){await mkdir(resolve(process.env.TASK_FORMS_REVIEW_DIR,testInfo.project.name),{recursive:true});await page.screenshot({path:resolve(process.env.TASK_FORMS_REVIEW_DIR,testInfo.project.name,'combined-tasks.png')});}
   const calls=await page.evaluate(()=>window.__serviceCalls.filter(call=>call.domain!=='todo'));
   expect(calls).toEqual([{domain:'button',service:'press',data:{entity_id:claim}}]);
+  expect(errors).toEqual([]);
+});
+
+
+test("Home overview filters live rooms and opens focused bounded controls with keyboard recovery",async({page},testInfo)=>{
+  const family=locationDisabledConfig();family.home.default_section="overview";family.display.appearance="auto";
+  const errors=await mount(page,family);
+  const card=page.locator("family-hub-card"),room=family.rooms.find(room=>room.lights.length);
+  await card.locator('.hub-nav-button[data-view="rooms"]').click();
+  await expect(card.locator('.home-v2')).toBeVisible();
+  await expect(card.locator('[data-home-room-open]')).toHaveCount(family.rooms.length);
+  await card.locator('[data-home-room-filter="active"]').click();
+  const light=room.lights[0];
+  await updateEntityState(card,state(light,"on",{friendly_name:"Room test light",brightness:180,supported_color_modes:["brightness"]}));
+  await expect(card.locator(`[data-home-room-open="${room.id}"]`)).toContainText("1 light on");
+  const open=card.locator(`[data-home-room-open="${room.id}"]`);
+  await open.click();
+  const modal=card.getByRole("dialog",{name:room.name,exact:true});
+  await expect(modal).toBeVisible();
+  await expect(card.locator('.hub-shell')).toHaveAttribute('inert','');
+  await modal.locator(`[data-toggle="${light}"]`).click();
+  await expect.poll(()=>page.evaluate(()=>window.__serviceCalls)).toContainEqual({domain:"light",service:"toggle",data:{entity_id:light}});
+  await page.keyboard.press("Escape");
+  await expect(modal).toHaveCount(0);
+  await expect(open).toBeFocused();
+  await card.locator('[data-home-room-filter="all"]').click();
+  await expectNoRootOverflow(page);
+  for(const darkMode of [false,true]) {
+    await card.evaluate((element,dark)=>{element.hass={...element._hass,themes:{darkMode:dark}};},darkMode);
+    await expectApprovalQuality(page);
+    if(process.env.DAILY_BRIEF_REVIEW_DIR) {
+      const directory=resolve(process.env.DAILY_BRIEF_REVIEW_DIR,testInfo.project.name);await mkdir(directory,{recursive:true});
+      await page.screenshot({path:resolve(directory,`home-v2-${darkMode?"dark":"light"}.png`),fullPage:true});
+    }
+  }
+  await page.setViewportSize({width:834,height:1112});
+  await expectApprovalQuality(page);
+  await page.setViewportSize({width:512,height:768});
+  await expectApprovalQuality(page);
+  await page.setViewportSize(testInfo.project.use.viewport);
+  await updateEntityState(card,state(light,"unavailable",{friendly_name:"Room test light"}));
+  await card.locator('[data-home-room-filter="unavailable"]').first().click();
+  await expect(open).toContainText('unavailable');
+  await open.click();
+  await expect(card.locator(`.home-room-modal [data-toggle="${light}"]`)).toBeDisabled();
+  await card.locator('[data-home-room-floorplan]').click();
+  await expect(card.locator('.room-title h2')).toHaveText(room.name);
+  await expect(card.locator('[data-home-section-current="rooms"]')).toBeVisible();
   expect(errors).toEqual([]);
 });
