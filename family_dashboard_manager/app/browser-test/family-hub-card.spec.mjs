@@ -5921,6 +5921,9 @@ test("Home room controls retain read-only restrictions and keep unmapped rooms o
  await expect(card.locator('[data-home-floor]')).toHaveValue(floor.id);
  const expected=family.rooms.find(room=>room.floor_id===floor.id && (room.lights.length || room.climate || room.media_players.length));
  await expect(card.locator('.home-room-canvas .room-title h2')).toHaveText(expected.name);
+ const defaultRoom=family.rooms.find(room=>room.id===family.home.default_room);
+ await card.locator('[data-home-floor]').selectOption(defaultRoom.floor_id);
+ await expect(card.locator('.home-room-canvas .room-title h2')).toHaveText(defaultRoom.name);
  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);expect(errors).toEqual([]);
 });
 

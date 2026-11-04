@@ -6735,7 +6735,7 @@ export class FamilyHubCard extends HTMLElementBase {
       this._homeFloorFilter=floor;this._homeRoomFilter="all";
       const selected=this._config.rooms.find(room=>room.id===this._room);
       if(floor!=="all" && selected?.floor_id!==floor) {
-        const room=this._config.rooms.find(room=>room.floor_id===floor && homeRoomPresentation(room,this._hass?.states || {},this._config).hasControls) || this._config.rooms.find(room=>room.floor_id===floor);
+        const room=this._config.rooms.find(room=>room.floor_id===floor && room.id===this._config.home.default_room) || this._config.rooms.find(room=>room.floor_id===floor && (room.lights.length || room.climate || room.covers.length || room.scenes.length)) || this._config.rooms.find(room=>room.floor_id===floor && homeRoomPresentation(room,this._hass?.states || {},this._config).hasControls) || this._config.rooms.find(room=>room.floor_id===floor);
         if(room){this._room=room.id;this._roomDetailSection="lights";}
       }
       this._scheduleRender(true);return;
