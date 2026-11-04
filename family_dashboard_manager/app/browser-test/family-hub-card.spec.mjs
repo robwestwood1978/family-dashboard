@@ -5844,7 +5844,7 @@ test('one child task list combines daily jobs and packing with separate approval
 
 
 test("Home overview filters live rooms and opens focused bounded controls with keyboard recovery",async({page},testInfo)=>{
-  const family=locationDisabledConfig();family.home.default_section="overview";
+  const family=locationDisabledConfig();family.home.default_section="overview";family.display.appearance="auto";
   const errors=await mount(page,family);
   const card=page.locator("family-hub-card"),room=family.rooms.find(room=>room.lights.length);
   await card.locator('.hub-nav-button[data-view="rooms"]').click();

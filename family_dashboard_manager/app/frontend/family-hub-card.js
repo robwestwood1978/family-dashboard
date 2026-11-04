@@ -2180,6 +2180,7 @@ export function normalisePageFamilyPreferences(value, people = [], initialMode =
   for (const scope of ["today","calendar","family","simple"]) {
     const source = value?.version === 3 ? value.pages?.[scope] : scope === "family" ? value : null;
     const page = normaliseFamilyViewPreferences(source,people,initialMode);
+    for(const context of Object.values(page.contexts))if(context.taskSection === "ready")context.taskSection="jobs";
     if (scope === "simple" && people.find(person=>person.id===page.selected)?.role === "parent") page.selected = "all";
     pages[scope] = {selected:page.selected,contexts:page.contexts};
   }
@@ -4417,7 +4418,10 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _renderHomeOverview() {
     const states=this._hass?.states || {}, summary=homeSummaryPresentation(this._config,states);
-    const rooms=this._config.rooms.map(room=>homeRoomPresentation(room,states,this._config));
+    const rooms=this._config.rooms.map(room=>homeRoomPresentation(room,states,this._config)).sort((a,b)=>{
+      const priority=model=>model.room.id===this._config.home.default_room ? 0 : model.room.lights.length || model.room.climate || model.room.temperature_sensor || model.room.covers.length || model.room.media_players.length || model.room.scenes.length ? 1 : 2;
+      return priority(a)-priority(b);
+    });
     const active=rooms.filter(room=>room.active), unavailable=rooms.filter(room=>room.unavailable);
     const lights=homeLightingCompactPresentation(summary), heating=homeHeatingCompactPresentation(summary);
     const energy=energyCompactPresentation(this._energyPresentation());
