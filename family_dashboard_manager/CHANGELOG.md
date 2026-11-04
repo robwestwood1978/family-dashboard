@@ -1,3 +1,10 @@
+## 0.31.0
+
+- Make Today more visual with an illustrated day panel, current-plan status and each child's progress ring based on completed jobs and packing. Retain school departure actions and short landscape layouts.
+- Redesign Calendar around a full week of colour-coded event cards, family filters, direct date navigation and focused day details. Add a clearer month view with day drill-down and an explicit return, and refresh the Day and Agenda views.
+- Show multi-day and overnight plans on every applicable date, respect exclusive end dates, and label continuing overnight events accurately. Preserve event drafts, iPad keyboard handling and the shared preparation services.
+- Rename Tasks to Boys throughout the dashboard and use a people icon. Keep To do, Homework, Lunch and Rewards together, with page-specific viewing preferences and the full dashboard default unchanged.
+
 ## 0.30.0
 
 - Replace the Home overview’s repeated status cards with a room selector and direct room controls. Keep room selection stable during live updates, preserve the room list’s scroll position, and group rooms without configured controls separately.

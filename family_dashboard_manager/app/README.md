@@ -2,7 +2,10 @@
 
 This package is the testable core used by the Family Dashboard Manager Home Assistant app.
 
-Version 0.25.0 provides:
+Version 0.31.0 provides:
+
+- [a visual Today, redesigned Calendar and Boys section](docs/day-calendar-2.md), with independent page selections, focused day details and multi-day plans;
+- [direct room controls](docs/home-2.md), with live lighting, brightness, comfort, scenes and music beside a stable room selector;
 
 - stable iPad scrolling, a Calendar that opens on today, an always-available Preparation list, and an optional simple family screen with a persistent Parent view button;
 
@@ -13,7 +16,7 @@ Version 0.25.0 provides:
 - a kiosk photo frame with device-only photo selection, a private Home Assistant album option, and camera-motion return;
 - an explicit calendar-only School fallback that does not claim Classroom assignment access;
 - one generated Home Assistant panel containing the bundled `custom:family-hub-card`;
-- eight internal tablet surfaces: Today, Calendar, Home, Tasks, Security, Music, Energy and Football;
+- eight internal tablet surfaces: Today, Calendar, Home, Boys, Security, Music, Energy and Football;
 - Home sections for Rooms, Lights, Heating, Blinds & doors and Cleaning, backed only by explicitly configured entities, with an optional preferred starting room;
 - polished tablet-first Lighting and Heating controls with capability-aware dimmers, binary lamp controls, persistent schedule accordions and refresh-safe schedule drafts;
 - optional electricity and gas smart-meter summaries for honest today-so-far usage, cost, tariff and freshness presentation; no live-power value is inferred;

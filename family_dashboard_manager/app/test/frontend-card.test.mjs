@@ -26,6 +26,7 @@ import {
   normaliseFamilyViewPreferences,
   normalisePageFamilyPreferences,
   homeRoomPresentation,
+  calendarEventsOnDay,
   familyDayPhase,
   familyHomeworkActions,
   familyAmbientReminder,
@@ -3716,4 +3717,13 @@ test("room overview distinguishes activity, missing devices and excluded feature
  const quiet=homeRoomPresentation({...room,climate:null,temperature_sensor:null},{"light.test":{state:"off",attributes:{}}},{features:{entry:false,music:false},entry:{garage:{cover_entity:"cover.garage"}}});
  assert.equal(quiet.active,false);assert.equal(quiet.unavailable,0);
  const missing=homeRoomPresentation(room,{},{});assert.equal(missing.active,false);assert.equal(missing.unavailable,5);assert.match(missing.detail,/unavailable/);
+});
+
+
+test("calendar day plans include overnight and multi-day events with exclusive end dates",()=>{
+ const days=[{summary:"School holiday",start:{date:"2026-10-30"},end:{date:"2026-11-03"}},{summary:"Late journey",start:{dateTime:"2026-10-31T23:30:00Z"},end:{dateTime:"2026-11-01T01:00:00Z"}},{summary:"Ends at midnight",start:{dateTime:"2026-11-01T22:00:00Z"},end:{dateTime:"2026-11-02T00:00:00Z"}}];
+ assert.deepEqual(calendarEventsOnDay(days,"2026-11-01").map(e=>e.summary),["School holiday","Late journey","Ends at midnight"]);
+ assert.deepEqual(calendarEventsOnDay(days,"2026-11-02").map(e=>e.summary),["School holiday"]);
+ assert.deepEqual(calendarEventsOnDay(days,"2026-11-03"),[]);
+ assert.deepEqual(calendarEventsOnDay([{summary:"Invalid",start:null}],"2026-11-01"),[]);
 });
