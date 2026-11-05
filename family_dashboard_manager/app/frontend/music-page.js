@@ -65,6 +65,13 @@ export function musicMatches(item, state) {
       norm(item.artist) === norm(a.media_artist))
   );
 }
+export function musicManagedPlayback(native, assistant) {
+  const uri = native?.attributes?.media_content_id || "";
+  // Direct Spotify playback on Sonos owns its native queue, even if MA retains the same song.
+  if (/^(?:x-sonos-spotify:|spotify(?:--[^:]+)?:)/i.test(uri)) return false;
+  if (!['playing','paused'].includes(native?.state) || assistant?.state !== native.state) return false;
+  return musicMatches(normaliseMusicItem(assistant?.attributes), native);
+}
 export function musicQueue(response, entity, nativeState, source) {
   const raw = unwrapMusic(response)[entity];
   if (!Array.isArray(raw))
@@ -677,12 +684,7 @@ export class FamilyMusicPage extends (globalThis.HTMLElement || class {}) {
       let queue;
       if (
         room.ma_entity_id &&
-        musicMatches(
-          normaliseMusicItem(
-            this._hass.states?.[room.ma_entity_id]?.attributes,
-          ),
-          native,
-        ) &&
+        musicManagedPlayback(native, this._hass.states?.[room.ma_entity_id]) &&
         this._hass.services?.mass_queue?.get_queue_items
       ) {
         queue = musicQueue(
@@ -758,7 +760,7 @@ export class FamilyMusicPage extends (globalThis.HTMLElement || class {}) {
         ma = this._hass.states?.[room.ma_entity_id];
       const external =
         native?.attributes?.media_title &&
-        !musicMatches(normaliseMusicItem(ma?.attributes), native);
+        !musicManagedPlayback(native, ma);
       if (enqueue !== "replace" && external) {
         const id = musicIdentity(item.uri);
         if (

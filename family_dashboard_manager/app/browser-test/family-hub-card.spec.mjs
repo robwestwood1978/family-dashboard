@@ -4734,7 +4734,7 @@ test("Music 2 ignores late searches, retains input across updates and keeps exte
 
 test("Music 2 keeps saved results when the catalogue is empty and uses the matching MA queue",async({page})=>{
   const errors=await mount(page,config,{
-    'media_player.living_room':state('media_player.living_room','playing',{media_title:'Example track',media_artist:'Example artist',media_content_id:'spotify:track/current'}),
+    'media_player.living_room':state('media_player.living_room','playing',{media_title:'Example track',media_artist:'Example artist',media_content_id:'http://music.example/flow/stream'}),
     'media_player.living_room_music_assistant':state('media_player.living_room_music_assistant','playing',{media_title:'Example track',media_artist:'Example artist',media_content_id:'spotify://track/current'})
   },{musicCatalogueEmpty:true});
   const card=page.locator('family-hub-card');await card.locator('.hub-navigation [data-view="music"]').click();const music=card.locator('family-music-page');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {musicIdentity,musicImage,musicMatches,musicQueue,normaliseMusicItem} from '../frontend/music-page.js';
+import {musicIdentity,musicImage,musicMatches,musicQueue,musicManagedPlayback,normaliseMusicItem} from '../frontend/music-page.js';
 const current={attributes:{media_title:'Current song',media_artist:'Example artist',media_content_id:'x-sonos-spotify:spotify%3atrack%3acurrent?sid=9'}};
 test('Spotify identities agree across native Sonos and Music Assistant URIs',()=>{
   assert.equal(musicIdentity(current.attributes.media_content_id),musicIdentity('spotify://track/current'));
@@ -22,4 +22,12 @@ test('A retained Music Assistant track is never treated as the native current tr
   assert.equal(musicMatches(normaliseMusicItem({media_title:'Retained song',media_artist:'Other artist'}),current),false);
   assert.equal(musicMatches(normaliseMusicItem({media_title:'Current song',media_artist:'Example artist'}),current),true);
   assert.equal(musicMatches(normaliseMusicItem({media_title:'Current song'}),{attributes:{}}),false);
+});
+
+test('Direct Spotify ownership wins over a retained matching MA song',()=>{
+  const assistant={state:'playing',attributes:{media_title:'Current song',media_artist:'Example artist',media_content_id:'spotify--example://track/current'}};
+  assert.equal(musicManagedPlayback({...current,state:'playing'},assistant),false);
+  const managed={state:'playing',attributes:{media_title:'Current song',media_artist:'Example artist',media_content_id:'http://music.example/flow/stream'}};
+  assert.equal(musicManagedPlayback(managed,assistant),true);
+  assert.equal(musicManagedPlayback(managed,{...assistant,state:'paused'}),false);
 });
