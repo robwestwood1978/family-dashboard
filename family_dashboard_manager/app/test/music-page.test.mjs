@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {musicIdentity,musicImage,musicMatches,musicQueue,musicManagedPlayback,normaliseMusicItem} from '../frontend/music-page.js';
+import {musicIdentity,musicImage,musicMatches,musicQueue,musicManagedPlayback,musicProgress,normaliseMusicItem} from '../frontend/music-page.js';
 const current={attributes:{media_title:'Current song',media_artist:'Example artist',media_content_id:'x-sonos-spotify:spotify%3atrack%3acurrent?sid=9'}};
 test('Spotify identities agree across native Sonos and Music Assistant URIs',()=>{
   assert.equal(musicIdentity(current.attributes.media_content_id),musicIdentity('spotify://track/current'));
@@ -30,4 +30,13 @@ test('Direct Spotify ownership wins over a retained matching MA song',()=>{
   const managed={state:'playing',attributes:{media_title:'Current song',media_artist:'Example artist',media_content_id:'http://music.example/flow/stream'}};
   assert.equal(musicManagedPlayback(managed,assistant),true);
   assert.equal(musicManagedPlayback(managed,{...assistant,state:'paused'}),false);
+});
+
+test('Playback time advances only while playing and never exceeds the song',()=>{
+  const now=Date.parse('2026-08-24T15:08:00Z');
+  const attrs={media_duration:200,media_position:50,media_position_updated_at:'2026-08-24T15:07:30Z'};
+  assert.deepEqual(musicProgress({state:'playing',attributes:attrs},now),{duration:200,position:80});
+  assert.equal(musicProgress({state:'paused',attributes:attrs},now).position,50);
+  assert.equal(musicProgress({state:'playing',attributes:{...attrs,media_position:500}},now).position,200);
+  assert.deepEqual(musicProgress({state:'playing',attributes:{}},now),{duration:0,position:0});
 });

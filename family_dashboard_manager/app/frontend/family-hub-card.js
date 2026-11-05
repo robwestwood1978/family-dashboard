@@ -1,8 +1,8 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.32.0";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.33.0";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.32.0";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.33.0";
 
-import { FamilyMusicPage } from "./music-page.js?v=0.32.0";
+import { FamilyMusicPage } from "./music-page.js?v=0.33.0";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -14,7 +14,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
-const DASHBOARD_VERSION = "0.32.0";
+const DASHBOARD_VERSION = "0.33.0";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
@@ -2626,6 +2626,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._invalidateChildHass();
     this._hass = hass;
     if (this._musicPage) this._musicPage.hass = hass;
+    void this._resolveTodayPhoto();
     // Appearance can change without any entity state changing. Update the
     // palette in place so a theme switch preserves Music browsing and streams.
     this.shadowRoot?.querySelector?.(".hub-card")?.setAttribute("data-appearance", this._appearance());
@@ -2889,6 +2890,9 @@ export class FamilyHubCard extends HTMLElementBase {
     this._devicePhotoUrls = [];
     if (this._deviceFrameUrl) URL.revokeObjectURL(this._deviceFrameUrl);
     this._deviceFrameUrl = null;
+    if(this._todayPhotoObjectUrl) URL.revokeObjectURL(this._todayPhotoObjectUrl);
+    this._todayPhotoObjectUrl=null;this._todayPhotoUrl=null;this._todayPhotoKey=null;this._todayPhotoLoading=false;this._todayPhotoFailedAt=0;
+    this._todayPhotoRequest=(this._todayPhotoRequest||0)+1;
   }
 
   async _openDevicePhotos() {
@@ -2996,6 +3000,7 @@ export class FamilyHubCard extends HTMLElementBase {
       this._photoFrameMediaSourceKey = "device-local";
       this._photoFrameIndex %= Math.max(1, this._photoFrameItems.length);
       this._photoFrameLoading = false;
+      void this._resolveTodayPhoto();
       this._photoFrameError = this._photoFrameItems.length ? null : "Add photos to this device using Photos in the dashboard header.";
       if (this._photoFrameActive) {
         this._scheduleRender(true);
@@ -3035,6 +3040,7 @@ export class FamilyHubCard extends HTMLElementBase {
     } finally {
       if (request === this._photoFrameBrowseRequest) {
         this._photoFrameLoading = false;
+        void this._resolveTodayPhoto();
         if (this._photoFrameActive) {
           this._scheduleRender(true);
           if (this._photoFrameItems.length) void this._resolvePhotoFrameItem();
@@ -3349,6 +3355,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const scheduleFocus = this._plannerModal?.type === "heating" ? this.shadowRoot.activeElement?.dataset : null;
     const scheduleFocusSelector = scheduleFocus?.scheduleTime !== undefined ? `[data-schedule-time="${scheduleFocus.scheduleTime}"]`
       : scheduleFocus?.scheduleTemperature !== undefined ? `[data-schedule-temperature="${scheduleFocus.scheduleTemperature}"]` : null;
+    const retainedTodayPhoto = this._view==="today" ? this.shadowRoot.querySelector(".today-photo-feature") : null;
     const embeddedRenderState = this._captureEmbeddedRenderState();
     const confirmationFocusAction = this._pendingConfirmation
       ? this.shadowRoot.activeElement?.dataset?.confirmAction || "cancel"
@@ -3388,6 +3395,8 @@ export class FamilyHubCard extends HTMLElementBase {
         ${this._renderPlannerModal()}
       </ha-card>
     `;
+    const nextPhoto = this.shadowRoot.querySelector(".today-photo-feature");
+    if(retainedTodayPhoto && nextPhoto && retainedTodayPhoto.querySelector(".today-photo-image")?.getAttribute("src")===this._todayPhotoUrl)nextPhoto.replaceWith(retainedTodayPhoto);
     const formModal = this.shadowRoot.querySelector('.planner-modal');
     if (formModal?.querySelector('input:not([type="checkbox"]),textarea,select') && !formModal.querySelector('.form-navigation')) formModal.querySelector('footer')?.insertAdjacentHTML('afterbegin',this._renderFormNavigation());
     for (const crest of this.shadowRoot.querySelectorAll("img[data-team-crest]")) {
@@ -3892,7 +3901,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderMusicDock() {
-    if (this._simpleView || !this._config.features.music) return "";
+    if (this._simpleView || !this._config.features.music || (this._view==="music" && (this._musicMode||"playing")==="playing")) return "";
     const players=this._config.media.players;
     const playing=firstPlayingPlayer(this._config,this._hass?.states || {});
     const player=players.find((entry)=>entry.entity_id===this._dockPlayerId) || playing?.player || players[0];
@@ -3902,7 +3911,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const features=Number(state?.attributes?.supported_features || 0);
     const locked=this._config.display.read_only || !available;
     const mediaButton=(service,icon,label,capability=0)=>`<button type="button" class="focus-dock-action" data-media-service="${service}" data-entity="${escapeHtml(player.entity_id)}" aria-label="${label}" ${locked || (capability && !(features & capability)) ? "disabled":""}><ha-icon icon="${icon}"></ha-icon></button>`;
-    return `<footer class="focus-music-dock today-music" aria-label="Music playback"><div class="artwork">${state?.attributes?.entity_picture ? `<img src="${escapeHtml(state.attributes.entity_picture)}" alt="Album artwork">`:'<ha-icon icon="mdi:music-note"></ha-icon>'}</div><button type="button" class="focus-dock-track" data-view="music"><strong>${escapeHtml(available ? state.attributes?.media_title || "Choose something to play":"Player unavailable")}</strong><small>${escapeHtml(available ? state.attributes?.media_artist || player.name:player.name)}</small></button><div class="focus-dock-playback">${mediaButton("media_previous_track","mdi:skip-previous","Previous track",16)}<button type="button" class="focus-dock-action is-play" data-media-toggle="${escapeHtml(player.entity_id)}" aria-label="${state?.state === "playing" ? "Pause music":"Play music"}" ${locked || (state?.state === "playing" ? !(features & 1):!(features & 16384)) ? "disabled":""}><ha-icon icon="${state?.state === "playing" ? "mdi:pause":"mdi:play"}"></ha-icon></button>${mediaButton("media_next_track","mdi:skip-next","Next track",32)}</div><label class="focus-dock-output"><ha-icon icon="mdi:speaker"></ha-icon><select data-dock-player aria-label="Music output room">${players.map((entry)=>`<option value="${escapeHtml(entry.entity_id)}" ${entry.entity_id===player.entity_id ? "selected":""}>${escapeHtml(entry.name)}</option>`).join("")}</select></label><input class="focus-dock-volume" type="range" min="0" max="100" value="${Math.round(safeNumber(state?.attributes?.volume_level,0)*100)}" data-dock-volume="${escapeHtml(player.entity_id)}" aria-label="${escapeHtml(player.name)} volume" ${locked || !(features & 4) ? "disabled":""}></footer>`;
+    return `<footer class="focus-music-dock today-music" aria-label="Music playback"><div class="artwork">${state?.attributes?.entity_picture ? `<img src="${escapeHtml(state.attributes.entity_picture)}" alt="Album artwork">`:'<ha-icon icon="mdi:music-note"></ha-icon>'}</div><button type="button" class="focus-dock-track" data-view="music" data-music-now-playing><strong>${escapeHtml(available ? state.attributes?.media_title || "Choose something to play":"Player unavailable")}</strong><small>${escapeHtml(available ? state.attributes?.media_artist || player.name:player.name)}</small></button><div class="focus-dock-playback">${mediaButton("media_previous_track","mdi:skip-previous","Previous track",16)}<button type="button" class="focus-dock-action is-play" data-media-toggle="${escapeHtml(player.entity_id)}" aria-label="${state?.state === "playing" ? "Pause music":"Play music"}" ${locked || (state?.state === "playing" ? !(features & 1):!(features & 16384)) ? "disabled":""}><ha-icon icon="${state?.state === "playing" ? "mdi:pause":"mdi:play"}"></ha-icon></button>${mediaButton("media_next_track","mdi:skip-next","Next track",32)}</div><label class="focus-dock-output"><ha-icon icon="mdi:speaker"></ha-icon><select data-dock-player aria-label="Music output room">${players.map((entry)=>`<option value="${escapeHtml(entry.entity_id)}" ${entry.entity_id===player.entity_id ? "selected":""}>${escapeHtml(entry.name)}</option>`).join("")}</select></label><input class="focus-dock-volume" type="range" min="0" max="100" value="${Math.round(safeNumber(state?.attributes?.volume_level,0)*100)}" data-dock-volume="${escapeHtml(player.entity_id)}" aria-label="${escapeHtml(player.name)} volume" ${locked || !(features & 4) ? "disabled":""}></footer>`;
   }
 
   _focusCalendarDay() {
@@ -4041,6 +4050,44 @@ export class FamilyHubCard extends HTMLElementBase {
     return `<article class="school-lunch-today today-shortcut-lunch"><h3>${escapeHtml(label)}</h3><div class="school-lunch-children">${children.map(person=>{const lunch=schoolLunchForDate(this._config,person.id,day);return `<button type="button" class="school-lunch-child" data-school-lunch-open="${escapeHtml(person.id)}" data-lunch-date="${day}" style="--person-colour:${escapeHtml(person.colour)}"><span class="family-view-token">${escapeHtml(person.name.slice(0,1))}</span><span><small>${escapeHtml(person.name)}</small><strong>${escapeHtml(lunch.status === "packed" && day !== today ? "Packed lunch" : lunch.title)}</strong></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`;}).join("")}</div></article>`;
   }
 
+  _renderTodayPhoto() {
+    const url=this._todayPhotoUrl,count=this._photoFrameItems?.length||0;
+    return `<figure class="today-photo-feature" data-photo-loaded="${Boolean(url)}" aria-label="Family moments"><div class="today-photo-blur" aria-hidden="true">${url?`<img src="${escapeHtml(url)}" alt="">`:''}</div><img class="today-photo-image" ${url?`src="${escapeHtml(url)}"`:'hidden'} alt="Family photo"><div class="today-photo-placeholder" ${url?'hidden':''}>${outlineIcon('rooms')}<span>Family moments</span></div><figcaption><span data-today-photo-count>${count?`${(this._todayPhotoIndex||0)+1} / ${count}`:'Your family album'}</span><button type="button" data-today-photo-next aria-label="Next family photo" ${count<2?'hidden':''}>Next photo <ha-icon icon="mdi:arrow-right"></ha-icon></button></figcaption></figure>`;
+  }
+  async _resolveTodayPhoto({advance=false}={}) {
+    if(!this.isConnected||this._view!=='today'||this._photoFrameActive||this._simpleView||!this._photoFrameConfig()||!this._photoFrameItems?.length)return;
+    if(this._todayPhotoLoading&&!advance)return;
+    if(!advance&&this._todayPhotoFailedAt&&Date.now()-this._todayPhotoFailedAt<60000)return;
+    const count=this._photoFrameItems.length;
+    this._todayPhotoIndex=((this._todayPhotoIndex||0)+(advance?1:0))%count;
+    const item=this._photoFrameItems[this._todayPhotoIndex],key=item.local?.id||item.media_content_id;
+    if(!advance&&key===this._todayPhotoKey&&this._todayPhotoUrl&&Date.now()-(this._todayPhotoLoadedAt||0)<900000){this._syncTodayPhoto();return;}
+    const request=this._todayPhotoRequest=(this._todayPhotoRequest||0)+1;this._todayPhotoLoading=true;
+    let objectUrl;
+    try {
+      let url;
+      if(item.local&&this._devicePhotoSource==='local'){objectUrl=URL.createObjectURL(item.local.blob);url=objectUrl;}
+      else {
+        const photoFrame=this._photoFrameConfig();if(!isSafePhotoMediaId(item.media_content_id,photoFrame.media_source))return;
+        const result=await this._hass.callWS({type:'media_source/resolve_media',media_content_id:item.media_content_id});
+        if(!String(result?.mime_type||'').startsWith('image/')||!isSafeResolvedPhotoUrl(result.url))throw new Error('Photo unavailable');
+        url=result.url;
+      }
+      if(request!==this._todayPhotoRequest||!this.isConnected||this._view!=='today'){if(objectUrl)URL.revokeObjectURL(objectUrl);return;}
+      if(this._todayPhotoObjectUrl)URL.revokeObjectURL(this._todayPhotoObjectUrl);
+      this._todayPhotoObjectUrl=objectUrl||null;this._todayPhotoUrl=url;this._todayPhotoKey=key;this._todayPhotoLoadedAt=Date.now();this._todayPhotoFailedAt=0;this._syncTodayPhoto();
+    } catch {if(request===this._todayPhotoRequest){this._todayPhotoUrl=null;this._todayPhotoKey=null;this._todayPhotoFailedAt=Date.now();this._syncTodayPhoto();}}
+    finally {if(request===this._todayPhotoRequest)this._todayPhotoLoading=false;}
+  }
+  _syncTodayPhoto() {
+    const figure=this.shadowRoot?.querySelector('.today-photo-feature');if(!figure)return;
+    const url=this._todayPhotoUrl;figure.dataset.photoLoaded=Boolean(url);
+    const image=figure.querySelector('.today-photo-image');if(image){image.hidden=!url;image.onerror=()=>{if(url&&this._todayPhotoUrl===url){this._todayPhotoUrl=null;this._todayPhotoFailedAt=Date.now();this._syncTodayPhoto();}};if(url&&image.getAttribute('src')!==url)image.src=url;}
+    const backdrop=figure.querySelector('.today-photo-blur');if(backdrop&&url){if(!backdrop.querySelector('img'))backdrop.innerHTML='<img alt="">';const img=backdrop.querySelector('img');if(img.getAttribute('src')!==url)img.src=url;}
+    const placeholder=figure.querySelector('.today-photo-placeholder');if(placeholder)placeholder.hidden=Boolean(url);
+    const count=this._photoFrameItems?.length||0,label=figure.querySelector('[data-today-photo-count]'),button=figure.querySelector('[data-today-photo-next]');if(label)label.textContent=count?`${(this._todayPhotoIndex||0)+1} / ${count}`:'Your family album';if(button)button.hidden=count<2;
+  }
+
   _renderToday() {
     if(this._simpleView) return this._renderSimpleToday();
     const states=this._hass?.states || {},features=this._config.features,now=new Date();
@@ -4059,7 +4106,7 @@ export class FamilyHubCard extends HTMLElementBase {
     const shortcuts=Boolean(home || lunch || features.football);
     return `<section class="today-grid today-v2" data-calendar="${features.calendar}" data-secondary-count="${[features.family,features.football,features.music].filter(Boolean).length}" data-has-family="${features.family}" data-has-shortcuts="${shortcuts}" data-has-attention="${security?.title==="Check home"}" aria-label="Today at a glance">
       ${security?.title==="Check home" ? `<button type="button" class="today-attention" data-view="entry"><ha-icon icon="${security.icon}"></ha-icon><span><strong>${escapeHtml(security.title)}</strong><small>${escapeHtml(security.detail)}</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}
-      <div class="today-main-plan">${departure || (features.calendar ? this._renderTodayAgenda(agenda) : `<article class="today-welcome"><p class="eyebrow">YOUR HOME</p><h2>${escapeHtml(greetingForTime(now,this._config.product.timezone))}</h2><p>Your family’s day, together.</p>${features.rooms ? '<button type="button" data-view="rooms">Open Home <ha-icon icon="mdi:arrow-right"></ha-icon></button>' : ""}</article>`)}${departure && agenda.primary ? `<button type="button" class="today-school-next" data-focus-open-plan="${escapeHtml(familyPlannerEventKey(agenda.primary))}"><span><small>${agenda.status==='tomorrow'?'TOMORROW':'COMING UP'} · ${isAllDayCalendarEvent(agenda.primary)?'All day':escapeHtml(formatTime(calendarEventStart(agenda.primary),this._config.product.locale,this._config.product.timezone))}</small><strong>${escapeHtml(agenda.primary.summary)}</strong></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`:''}</div>
+      <div class="today-main-plan ${this._photoFrameConfig()?'has-family-photo':''}">${this._photoFrameConfig()?this._renderTodayPhoto():''}<div class="today-plan-details">${departure || (features.calendar ? this._renderTodayAgenda(agenda) : `<article class="today-welcome"><p class="eyebrow">YOUR HOME</p><h2>${escapeHtml(greetingForTime(now,this._config.product.timezone))}</h2><p>Your family’s day, together.</p>${features.rooms ? '<button type="button" data-view="rooms">Open Home <ha-icon icon="mdi:arrow-right"></ha-icon></button>' : ""}</article>`)}${departure && agenda.primary ? `<button type="button" class="today-school-next" data-focus-open-plan="${escapeHtml(familyPlannerEventKey(agenda.primary))}"><span><small>${agenda.status==='tomorrow'?'TOMORROW':'COMING UP'} · ${isAllDayCalendarEvent(agenda.primary)?'All day':escapeHtml(formatTime(calendarEventStart(agenda.primary),this._config.product.locale,this._config.product.timezone))}</small><strong>${escapeHtml(agenda.primary.summary)}</strong></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`:''}</div></div>
       ${features.family ? `<article class="children-panel today-family" data-day-phase="${phase.id}"><div class="section-heading"><div><p class="eyebrow">FAMILY FOCUS</p><h2>${escapeHtml(phase.label)}</h2></div><button type="button" data-view="family">Boys <ha-icon icon="mdi:arrow-top-right"></ha-icon></button></div><div class="today-job-list">${this._renderTodayTaskLists()}${actions}</div>${tomorrowPreparation}</article>` : ""}
       ${shortcuts ? `<footer class="today-shortcuts focus-home-summary" aria-label="Useful shortcuts">${home ? `<button type="button" class="today-home-shortcut" data-view="rooms">${outlineIcon("rooms")}<span><strong>Home</strong><small>${escapeHtml(`${heating.value} ${heating.detail} · ${lighting.value} ${lighting.detail}`)}</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}${lunch}${features.football ? `<button type="button" class="today-football" data-view="football">${outlineIcon("football")}<span><strong>Football${live ? ` · ${live} live` : ""}</strong><small>${escapeHtml(favouriteModels.map(model=>this._clubPresentation(model.code).label).join(" & "))} · Scores & FPL</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}</footer>` : ""}
     </section>`;
@@ -5785,7 +5832,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderMusic() {
-    return '<section class="music-experience music-v2"><div id="music-card-slot"></div></section>';
+    return `<section class="music-experience music-v2" data-mode="${this._musicMode||'playing'}"><div id="music-card-slot"></div></section>`;
   }
 
   _mountMusicPage() {
@@ -5793,10 +5840,12 @@ export class FamilyHubCard extends HTMLElementBase {
     const slot = this.shadowRoot.getElementById("music-card-slot");
     if (!slot) return;
     this._musicPage ||= new FamilyMusicPage();
-    this._musicPage.configure({players:this._config.media.players,initialPlayer:this._dockPlayerId || this._config.media.initial_player,readOnly:this._config.display.read_only,onRoomChange:id=>{this._dockPlayerId=id;this._refreshMusicDock();}});
+    this._musicPage.configure({players:this._config.media.players,initialPlayer:this._dockPlayerId || this._config.media.initial_player,readOnly:this._config.display.read_only,onRoomChange:id=>{this._dockPlayerId=id;this._refreshMusicDock();},onModeChange:mode=>{this._musicMode=mode;const page=this.shadowRoot.querySelector(".music-v2");if(page)page.dataset.mode=mode;this._refreshMusicDock();}});
     this._dockPlayerId = this._musicPage._player;
+    this._musicMode = this._musicPage._mode || "playing";
     this._musicPage.hass = this._hass;
     slot.append(this._musicPage);
+    this._refreshMusicDock();
   }
 
   _footballState() {
@@ -6240,6 +6289,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _mountChildCards() {
+    void this._resolveTodayPhoto();
     this._mountMusicPage();
     if (!this._hass || !globalThis.loadCardHelpers) return;
     this._pruneInactiveChildCards();
@@ -7033,6 +7083,8 @@ export class FamilyHubCard extends HTMLElementBase {
   _handleClick(event) {
     const target = event.target.closest?.("button, [data-room]");
     if (!target) return;
+    if(target.dataset.todayPhotoNext !== undefined){void this._resolveTodayPhoto({advance:true});return;}
+    if(target.dataset.musicNowPlaying !== undefined){this._musicMode="playing";this._musicPage?.setMode("playing");}
     if (target.dataset.formNav) { this._navigateForm(target.dataset.formNav);return; }
     if (['today','tomorrow','upcoming'].includes(target.dataset.taskDay)) { this._taskListDay=target.dataset.taskDay;this._scheduleRender(true);return; }
     if (this._photoFrameActive || target.dataset.photoFrameDismiss !== undefined) {

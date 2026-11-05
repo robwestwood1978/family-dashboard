@@ -1,3 +1,9 @@
+## 0.33.0
+
+- Restore a dedicated Now playing view with large album artwork, clear transport controls, a live timeline and room volume. Keep Browse and Up next available without losing a search or playlist; retain the compact player on other pages.
+- Bring the existing private family photo album onto Today beside the next plan. Preserve the whole photo, offer a Next photo control, and keep the image stable through background updates. Device-local photos remain on the device.
+- Give each child a clearer progress card on Today. Adapt artwork, controls and photos to landscape, portrait and keyboard layouts while preserving read-only and configured-room service boundaries.
+
 ## 0.32.0
 
 - Replace the embedded Music card with a first-party family Music page: room chips, artwork playlists/favourites, recent library tracks, collection browsing and explicit Play now / Play next / Add to queue actions.

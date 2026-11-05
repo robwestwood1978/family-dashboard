@@ -4,6 +4,12 @@ The Music view is a first-party `family-music-page` component. It replaces the e
 
 The selected room is shared by the Music room chips and persistent dashboard playback dock. Search and collection selection do not change rooms. Grouping is behind a labelled panel, uses only configured groupable rooms, and keeps the current configured coordinator as the main room. An unconfigured group coordinator cannot receive actions.
 
+## Now playing
+
+Music opens on a dedicated Now playing view: large album art, title, artist, album, transport, elapsed time, seeking and room volume. Native capabilities decide which controls are enabled; handlers independently enforce configured players/coordinators, value bounds and read-only mode. The progress clock advances only while playing and clamps to the known duration. A focused slider is not replaced by background updates.
+
+Browse retains the search, collection and scroll position when switching back from Now playing. Up next remains alongside the main panel on wider tablets and has its own tab on narrow screens. The compact dashboard player remains available in Browse and on other pages; tapping its song opens the full Now playing view.
+
 ## Search and library
 
 Search first calls `music_assistant.search` with `library_only: true`, then performs one full-catalogue request. Saved results can be used while the catalogue is loading. All shows a short section for each category; category buttons request the larger category result. Successful searches are cached for five minutes, empty responses briefly for thirty seconds, and matching in-flight requests are deduplicated. A manual retry refreshes the result. Late responses cannot overwrite a newer search.
@@ -26,6 +32,6 @@ An empty catalogue response can represent a service timeout, not proof that a so
 
 ## Layout and verification
 
-Browsing and Up next have separate bounded scroll areas in tablet landscape. Narrow layouts provide labelled Browse music / Up next switches. The same component survives parent shell redraws; the shell restores its focused input and both scroll positions. Playback updates do not rebuild the search form. Inputs use 16px text and controls use 48px touch targets.
+Browsing and Up next have separate bounded scroll areas in tablet landscape. Narrow layouts provide labelled Now playing / Browse / Up next tabs. The same component survives parent shell redraws; the shell restores its focused input and both scroll positions. Playback updates do not rebuild the search form. Inputs use 16px text and controls use 48px touch targets.
 
 Tests cover native/Music Assistant URI matching, queue source mismatch, exact playback targets, detached/read-only writes, late search responses, input and scroll preservation, provider failures, theme readability, portrait and keyboard-sized viewports. The module is included in the manager's fixed managed-frontend file list and snapshots.
