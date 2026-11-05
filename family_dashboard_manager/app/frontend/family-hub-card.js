@@ -4082,7 +4082,7 @@ export class FamilyHubCard extends HTMLElementBase {
   _syncTodayPhoto() {
     const figure=this.shadowRoot?.querySelector('.today-photo-feature');if(!figure)return;
     const url=this._todayPhotoUrl;figure.dataset.photoLoaded=Boolean(url);
-    const image=figure.querySelector('.today-photo-image');if(image){image.hidden=!url;if(url&&image.getAttribute('src')!==url){image.src=url;image.onerror=()=>{if(this._todayPhotoUrl===url){this._todayPhotoUrl=null;this._todayPhotoFailedAt=Date.now();this._syncTodayPhoto();}};}}
+    const image=figure.querySelector('.today-photo-image');if(image){image.hidden=!url;image.onerror=()=>{if(url&&this._todayPhotoUrl===url){this._todayPhotoUrl=null;this._todayPhotoFailedAt=Date.now();this._syncTodayPhoto();}};if(url&&image.getAttribute('src')!==url)image.src=url;}
     const backdrop=figure.querySelector('.today-photo-blur');if(backdrop&&url){if(!backdrop.querySelector('img'))backdrop.innerHTML='<img alt="">';const img=backdrop.querySelector('img');if(img.getAttribute('src')!==url)img.src=url;}
     const placeholder=figure.querySelector('.today-photo-placeholder');if(placeholder)placeholder.hidden=Boolean(url);
     const count=this._photoFrameItems?.length||0,label=figure.querySelector('[data-today-photo-count]'),button=figure.querySelector('[data-today-photo-next]');if(label)label.textContent=count?`${(this._todayPhotoIndex||0)+1} / ${count}`:'Your family album';if(button)button.hidden=count<2;

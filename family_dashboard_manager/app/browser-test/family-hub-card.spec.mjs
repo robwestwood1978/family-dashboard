@@ -2170,6 +2170,7 @@ test("Today uses the private photo album, retains the image through updates and 
   }
   await card.getByRole('button',{name:'Next family photo'}).click();await expect(photo).toHaveAttribute('src',/photo-002/);await expect(card.locator('[data-today-photo-count]')).toHaveText('2 / 2');
   expect(await page.evaluate(()=>window.__wsCalls.filter(c=>c.type==='media_source/resolve_media').map(c=>c.media_content_id))).toEqual([`${source}/photo-001.jpg`,`${source}/photo-002.jpg`]);
+  await card.locator('.hub-navigation [data-view="calendar"]').click();await card.locator('.hub-navigation [data-view="today"]').click();await photo.dispatchEvent('error');await expect(card.locator('.today-photo-placeholder')).toBeVisible();
   expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);expect(errors).toEqual([]);
 });
 
