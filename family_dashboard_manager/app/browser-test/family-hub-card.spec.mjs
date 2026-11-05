@@ -24,7 +24,7 @@ const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", imp
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
   .replace(/import \{ schoolLunchForDate[^\n]+from "\.\/readiness\.js[^";]+";/, `const {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents} = (()=>{${readinessSource.replace(/export /g, "")}return {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents};})();`)
   .replace(/export \{ schoolLunchForDate[^\n]+;/, "")
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.32.0";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.33.0";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -397,6 +397,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     });
   });
   await page.route("**/media/local/family-dashboard/**", async (route) => {
+    if(process.env.PRIVATE_PHOTO_PREVIEW_PATH){await route.fulfill({contentType:"image/jpeg",body:await readFile(process.env.PRIVATE_PHOTO_PREVIEW_PATH)});return;}
     await route.fulfill({
       status: 200,
       contentType: "image/svg+xml",
@@ -890,9 +891,10 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
         if (message?.type === "media_source/browse_media") return {
           children: runtimeOptions.photoMediaChildren || []
         };
+        if (message?.type === "media_source/resolve_media" && runtimeOptions.photoResolveReject) throw new Error("Photo unavailable");
         if (message?.type === "media_source/resolve_media") return {
           mime_type: "image/svg+xml",
-          url: "/media/local/family-dashboard/photos/photo-001.jpg?authSig=test"
+          url: `/media/local/family-dashboard/photos/${message.media_content_id.split("/").at(-1)}?authSig=test`
         };
         return {};
       }
@@ -1569,6 +1571,7 @@ test("shows private Home Assistant photos while idle and returns on kiosk camera
   await expect(card.locator(".hub-shell")).not.toHaveAttribute("inert", "");
   await expect.poll(() => page.evaluate(() => window.__wsCalls.filter((message) => message.type?.startsWith("media_source/")))).toEqual([
     { type: "media_source/browse_media", media_content_id: source },
+    { type: "media_source/resolve_media", media_content_id: `${source}/photo-001.jpg` },
     { type: "media_source/resolve_media", media_content_id: `${source}/photo-001.jpg` }
   ]);
   expect(pageErrors).toEqual([]);
@@ -2126,11 +2129,70 @@ test("v0.14 heating keeps six zones accessible without a nested heating scroller
   expect(pageErrors).toEqual([]);
 });
 
+test("Music hero opens on large artwork with direct bounded controls and keeps browsing",async({page})=>{
+  const errors=await mount(page,config,{'media_player.living_room':state('media_player.living_room','playing',{media_title:'A favourite song',media_artist:'Example artist',media_album_name:'The album',supported_features:16439,media_duration:200,media_position:50,media_position_updated_at:APPROVAL_NOW,volume_level:.32,entity_picture:'/fixture-art.svg'})},{kiosk:true});
+  const card=page.locator('family-hub-card');await card.locator('.hub-navigation [data-view="music"]').click();const music=card.locator('family-music-page');
+  await expect(music.getByRole('region',{name:'Now playing',exact:true})).toBeVisible();
+  await expect(music.getByRole('heading',{name:'A favourite song'})).toBeVisible();
+  await expect(card.locator('.focus-music-dock')).toHaveCount(0);
+  for(const size of [{width:1112,height:834},{width:1024,height:768},{width:834,height:1112}]){
+    await page.setViewportSize(size);await expect(music.locator('.hero-cover')).toBeVisible();
+    expect(await music.locator('.hero-cover').evaluate(n=>n.getBoundingClientRect().width)).toBeGreaterThan(200);
+    const bounds=await music.getByRole('button',{name:'Pause music',exact:true}).evaluate(n=>n.getBoundingClientRect().toJSON());
+    expect(bounds.bottom).toBeLessThan(size.height);await expectNoRootOverflow(page);
+    if(process.env.VISUAL_2_REVIEW_DIR){await mkdir(process.env.VISUAL_2_REVIEW_DIR,{recursive:true});await page.screenshot({path:resolve(process.env.VISUAL_2_REVIEW_DIR,`now-playing-${size.width}x${size.height}.png`)});}
+  }
+  await music.getByRole('button',{name:'Pause music',exact:true}).click();
+  await music.locator('[data-now-volume]').evaluate(n=>{n.value='55';n.dispatchEvent(new Event('change',{bubbles:true,composed:true}));});
+  await expect.poll(()=>page.evaluate(()=>window.__serviceCalls.length)).toBe(2);
+  await music.locator('[data-now-seek]').evaluate(n=>{n.value='80';n.dispatchEvent(new Event('change',{bubbles:true,composed:true}));});
+  await expect.poll(()=>page.evaluate(()=>window.__serviceCalls)).toEqual([
+    {domain:'media_player',service:'media_play_pause',data:{entity_id:'media_player.living_room'}},
+    {domain:'media_player',service:'volume_set',data:{volume_level:.55,entity_id:'media_player.living_room'}},
+    {domain:'media_player',service:'media_seek',data:{seek_position:80,entity_id:'media_player.living_room'}}
+  ]);
+  await music.getByRole('button',{name:'Browse',exact:true}).click();await music.getByRole('searchbox').fill('Example artist');await music.getByRole('button',{name:'Search',exact:true}).click();await expect(music.getByRole('heading',{name:'Results for “Example artist”'})).toBeVisible();
+  await music.getByRole('button',{name:'Now playing',exact:true}).click();await music.getByRole('button',{name:'Browse',exact:true}).click();await expect(music.getByRole('searchbox')).toHaveValue('Example artist');
+  const count=await page.evaluate(()=>window.__serviceCalls.length);await music.evaluate(async el=>{await el._native('volume',101);await el._native('volume',NaN);await el._native('seek',201);await el._native('arbitrary');el._readOnly=true;await el._native('toggle');await el._native('volume',55);await el._native('seek',80);});expect(await page.evaluate(()=>window.__serviceCalls.length)).toBe(count);
+  expect(errors).toEqual([]);
+});
+
+test("Today uses the private photo album, retains the image through updates and cycles safely",async({page})=>{
+  const family=structuredClone(config);family.display.photo_frame.enabled=true;const source=family.display.photo_frame.media_source;
+  const errors=await mount(page,family,{}, {kiosk:true,photoMediaChildren:[{media_class:'image',media_content_id:`${source}/photo-001.jpg`},{media_class:'image',media_content_id:`${source}/photo-002.jpg`},{media_class:'image',media_content_id:'media-source://media_source/local/unrelated/private.jpg'}]});
+  const card=page.locator('family-hub-card'),photo=card.locator('.today-photo-image');
+  await expect(photo).toBeVisible();await expect(photo).toHaveAttribute('src',/photo-001/);await expect(card.locator('[data-today-photo-count]')).toHaveText('1 / 2');
+  await photo.evaluate(n=>{window.__retainedTodayPhoto=n;});await updateEntityState(card,state('weather.home','rainy',{temperature:18}));
+  await expect.poll(()=>photo.evaluate(n=>n===window.__retainedTodayPhoto)).toBe(true);
+  for(const size of [{width:1112,height:834},{width:1024,height:768},{width:834,height:1112}]){
+    await page.setViewportSize(size);await expect(photo).toBeVisible();await expect(card.locator('.today-current-plan h2')).toBeVisible();const g=await card.locator('.has-family-photo').evaluate(n=>({cols:getComputedStyle(n).gridTemplateColumns,display:getComputedStyle(n).display,children:[...n.children].map(c=>({cls:c.className,left:c.getBoundingClientRect().left,right:c.getBoundingClientRect().right,column:getComputedStyle(c).gridColumn})),right:n.getBoundingClientRect().right}));expect(g.children[1].right,JSON.stringify(g)).toBeLessThanOrEqual(g.right+1);expect(g.children[0].right,JSON.stringify(g)).toBeLessThanOrEqual(g.children[1].left+1);await expectNoRootOverflow(page);
+    if(process.env.VISUAL_2_REVIEW_DIR){await mkdir(process.env.VISUAL_2_REVIEW_DIR,{recursive:true});await page.screenshot({path:resolve(process.env.VISUAL_2_REVIEW_DIR,`today-photo-${size.width}x${size.height}.png`)});}
+  }
+  await card.getByRole('button',{name:'Next family photo'}).click();await expect(photo).toHaveAttribute('src',/photo-002/);await expect(card.locator('[data-today-photo-count]')).toHaveText('2 / 2');
+  expect(await page.evaluate(()=>window.__wsCalls.filter(c=>c.type==='media_source/resolve_media').map(c=>c.media_content_id))).toEqual([`${source}/photo-001.jpg`,`${source}/photo-002.jpg`]);
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);expect(errors).toEqual([]);
+});
+
+test("Today photos keep school departure actions visible and failed photos back off",async({page})=>{
+  const family=locationDisabledConfig();family.display.photo_frame.enabled=true;const source=family.display.photo_frame.media_source;
+  const errors=await mount(page,family,{"sensor.family_dashboard_departure":schoolDepartureFixture()},{fixedNow:"2026-10-20T06:15:00Z",kiosk:true,departureAdmin:true,photoResolveReject:true,photoMediaChildren:[{media_class:'image',media_content_id:`${source}/photo-001.jpg`}]});
+  const card=page.locator('family-hub-card');await expect(card.locator('.today-photo-placeholder')).toBeVisible();
+  const requests=()=>page.evaluate(()=>window.__wsCalls.filter(c=>c.type==='media_source/resolve_media').length);
+  await expect.poll(requests).toBe(1);
+  for(const size of [{width:1112,height:834},{width:1024,height:768},{width:834,height:1112}]){
+    await page.setViewportSize(size);const left=card.getByRole('button',{name:'We’ve left',exact:false});await expect(left).toBeVisible();
+    const bounds=await left.boundingBox();expect(bounds.y+bounds.height).toBeLessThan(size.height);
+    await updateEntityState(card,state('weather.home','rainy',{temperature:18}));await expectNoRootOverflow(page);
+  }
+  expect(await requests()).toBe(1);expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);expect(errors).toEqual([]);
+});
+
 test("Music 2 keeps room selection and exact playback requests in the configured boundary", async ({ page }) => {
   const errors=await mount(page,fiveRoomMusicConfig(),fiveRoomMusicStates());
   const card=page.locator("family-hub-card");
   await card.locator('.hub-navigation [data-view="music"]').click();
   const music=card.locator('family-music-page');
+  await music.getByRole('button',{name:'Browse',exact:true}).click();
   await expect(music.locator('[data-room]')).toHaveCount(5);
   await music.getByRole('button',{name:'Open Weekend favourites',exact:true}).click();
   await expect(music.getByRole('heading',{name:'Weekend favourites'})).toBeVisible();
@@ -3526,6 +3588,7 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
 
   await card.locator('.hub-nav-button[data-view="music"]').click();
   const music=card.locator('family-music-page');
+  await music.getByRole('button',{name:'Browse',exact:true}).click();
   await expect(music).toBeVisible();
   await music.getByRole('button',{name:'Open Weekend favourites',exact:true}).click();
   await expect(music.getByRole('button',{name:'Play now',exact:true})).toBeDisabled();
@@ -4281,12 +4344,14 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
     }
     if (view === "music") {
       const music=card.locator('family-music-page');
+  await music.getByRole('button',{name:'Browse',exact:true}).click();
+      await music.getByRole("button",{name:"Now playing",exact:true}).click();
       await expect(music.locator('[data-room]')).toHaveCount(5);
-      await expect(music.getByRole('searchbox',{name:'Search music'})).toBeVisible();
+      await expect(music.getByRole('region',{name:'Now playing',exact:true})).toBeVisible();
       await expect(music.getByRole('complementary',{name:'Up next'})).toBeVisible();
-      await expect(music.getByRole('button',{name:'Open Weekend favourites',exact:true})).toBeVisible();
+      await expect(music.locator('.hero-cover')).toBeVisible();
       await expectContrast(music,[
-        {foreground:'.tile .name,.tile small',background:'.browse',minimum:4.5},
+        {foreground:'.hero-info h2,.hero-artist,.hero-room',background:'.now-playing',minimum:4.5},
         {foreground:'.queue h3,.queue small',background:'.queue',minimum:4.5}
       ]);
     }
@@ -4560,6 +4625,7 @@ test("Home in focus keeps the music dock live across views and bounds playback, 
   const dock = card.locator(".focus-music-dock");
   for (const view of ["today", "calendar", "rooms", "family", "entry", "energy", "football", "music"]) {
     await card.locator(`.hub-navigation [data-view="${view}"]`).click();
+    if(view==="music")await card.locator("family-music-page").getByRole("button",{name:"Browse",exact:true}).click();
     await expect(dock).toBeVisible();
     const bottom = await dock.evaluate((node) => node.getBoundingClientRect().bottom);
     expect(bottom).toBeLessThanOrEqual(page.viewportSize().height);
@@ -4610,6 +4676,7 @@ test("Home in focus adapts every screen to portrait and narrow layouts while pre
     for (const view of ["today", "calendar", "rooms", "family", "entry", "energy", "football", "music"]) {
       await card.locator(`.hub-navigation [data-view="${view}"]`).click();
       await expect(card.locator(`[data-current-view="${view}"]`)).toBeVisible();
+      if(view==="music")await card.locator("family-music-page").getByRole("button",{name:"Browse",exact:true}).click();
       await expect(card.locator(".focus-music-dock")).toBeVisible();
       const geometry = await card.evaluate((element) => {
         const card = element.shadowRoot.querySelector(".hub-card");
@@ -4712,6 +4779,7 @@ test("Music 2 ignores late searches, retains input across updates and keeps exte
     'media_player.living_room_music_assistant':state('media_player.living_room_music_assistant','paused',{media_title:'Retained unrelated track'})
   },{musicDelay:450});
   const card=page.locator('family-hub-card');await card.locator('.hub-navigation [data-view="music"]').click();const music=card.locator('family-music-page');
+  await music.getByRole('button',{name:'Browse',exact:true}).click();
   await expect(music.locator('[data-queue-body]')).toContainText('Next song');
   await expect(music.locator('[data-queue-body]')).not.toContainText('Retained unrelated track');
   await expect(music.locator('[data-queue-body]')).toContainText('Sonos queue');
@@ -4738,6 +4806,7 @@ test("Music 2 keeps saved results when the catalogue is empty and uses the match
     'media_player.living_room_music_assistant':state('media_player.living_room_music_assistant','playing',{media_title:'Example track',media_artist:'Example artist',media_content_id:'spotify://track/current'})
   },{musicCatalogueEmpty:true});
   const card=page.locator('family-hub-card');await card.locator('.hub-navigation [data-view="music"]').click();const music=card.locator('family-music-page');
+  await music.getByRole('button',{name:'Browse',exact:true}).click();
   await expect(music.locator('[data-queue-body]')).toContainText('Music Assistant queue');
   await music.getByRole('searchbox').fill('Example');await music.getByRole('button',{name:'Search',exact:true}).click();
   await expect(music.locator('.notice')).toContainText('temporarily limiting search');
@@ -4750,6 +4819,7 @@ test("Music 2 keeps saved results when the catalogue is empty and uses the match
 test("Music 2 shows connection failures and blocks read-only or removed-view writes",async({page})=>{
   const locked=structuredClone(config);locked.display.read_only=true;
   const errors=await mount(page,locked,{}, {musicReject:true});const card=page.locator('family-hub-card');await card.locator('.hub-navigation [data-view="music"]').click();const music=card.locator('family-music-page');
+  await music.getByRole('button',{name:'Browse',exact:true}).click();
   await expect(music.getByRole('alert')).toContainText('Music connection unavailable');
   await music.getByRole('searchbox').fill('Example');await music.getByRole('button',{name:'Search',exact:true}).click();await expect(music.getByRole('alert')).toBeVisible();
   await music.evaluate(async el=>{el._items=[{name:'Test',uri:'spotify://track/test',type:'track',playable:true}];await el.play(0,'replace');await el.playQueue(0);await el._applyGroup();});
@@ -4761,6 +4831,7 @@ test("Music 2 search stays usable in both orientations and a keyboard-sized view
   const card=page.locator("family-hub-card");
   await card.locator('.hub-navigation [data-view="music"]').click();
   const music=card.locator('family-music-page');
+  await music.getByRole('button',{name:'Browse',exact:true}).click();
   await music.getByRole('searchbox',{name:'Search music'}).fill('Example artist');
   await music.getByRole('button',{name:'Search',exact:true}).click();
   await expect(music.getByRole('heading',{name:'Artists',exact:true})).toBeVisible();
@@ -5565,7 +5636,7 @@ test("simple family view has child choices and always returns to the full dashbo
   const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-10T07:15:00Z",kiosk:true});
   const card=page.locator("family-hub-card");
   await card.locator('[data-family-picker-open]').click();
-  await expect(card.locator(".dashboard-version")).toContainText("0.32.0");
+  await expect(card.locator(".dashboard-version")).toContainText("0.33.0");
   await card.locator('[data-experience="simple"]').click();
   await expect(card.locator(".simple-child-card")).toHaveCount(2);
   expect(await card.locator(".simple-child-card .today-job>div").first().evaluate(node=>node.getBoundingClientRect().width)).toBeGreaterThan(200);
