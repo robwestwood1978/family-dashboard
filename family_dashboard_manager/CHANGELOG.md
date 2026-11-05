@@ -1,3 +1,11 @@
+## 0.32.0
+
+- Replace the embedded Music card with a first-party family Music page: room chips, artwork playlists/favourites, recent library tracks, collection browsing and explicit Play now / Play next / Add to queue actions.
+- Keep Up next separate from the collection being browsed. Read the native Sonos queue for external playback and the matching Music Assistant queue for managed playback; retain exact queue positions and label unlinked or unavailable queues honestly.
+- Search saved music first, then the full catalogue. Cache and deduplicate requests, ignore late responses, retain saved results when providers are slow, and expose loading, retry and provider-limiting explanations.
+- Add library paging, configured-room grouping and a single shared playback dock. Preserve search, focus and scroll through live updates and shell resizing; support portrait and short keyboard viewports and read-only browsing.
+- Include the Music module in hash-verified frontend deployment and rollback snapshots. Keep private household mappings and account details outside the public repository.
+
 ## 0.31.1
 
 - Keep month previews readable on short landscape screens by showing one full-height event title and an accurate additional-event count. Keep neighbouring-month dates legible and remove the duplicated month heading.

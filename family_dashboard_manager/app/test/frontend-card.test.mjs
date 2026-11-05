@@ -2721,9 +2721,9 @@ test("does not mint a child facade when an async card mount finishes after disco
     removeEventListener() {}
   };
   card._hass = { connected: true, states: {} };
-  card._config = { display: { read_only: false }, features: { music: true } };
+  card._config = { display: { read_only: false }, features: { location_map: true } };
   card._controlPolicy = buildControlPolicy({ rooms: [], media: { players: [] } });
-  card._view = "music";
+  card._view = "family";
   card._childCards = new Map();
   card._childHassTokens = new Map();
   card._childMountGeneration = 1;
@@ -2741,7 +2741,7 @@ test("does not mint a child facade when an async card mount finishes after disco
   card._clearCameraBlockTimer = () => undefined;
 
   try {
-    const mounting = card._ensureChildCard("music", { type: "custom:test" }, "music-card-slot");
+    const mounting = card._ensureChildCard("map", { type: "custom:test" }, "map-card-slot");
     card.isConnected = false;
     card.disconnectedCallback();
     resolveHelpers({
