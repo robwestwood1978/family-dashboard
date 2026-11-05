@@ -675,7 +675,14 @@ export class FamilyMusicPage extends (globalThis.HTMLElement || class {}) {
   async refreshQueue() {
     const room = this._coordinator(),
       serial = ++this._queueSerial;
-    if (!room || !this._hass || !this.isConnected) return;
+    if (!this._hass || !this.isConnected) return;
+    if (!room) {
+      this._queue = null;
+      this._queueLoading = false;
+      this._queueError = "This group is led by a room outside this dashboard. Choose an individual room to see its queue.";
+      this._renderQueue();
+      return;
+    }
     const native = this._hass.states?.[room.entity_id];
     this._queueLoading = true;
     this._queueError = "";
@@ -752,7 +759,11 @@ export class FamilyMusicPage extends (globalThis.HTMLElement || class {}) {
       return;
     const item = index === -1 ? this._detail : this._items[index],
       room = this._coordinator();
-    if (!item?.uri || !room || !room.ma_entity_id || !item.playable) return;
+    if (!item?.uri || !item.playable) return;
+    if (!room?.ma_entity_id) {
+      this._setStatus("Choose a room connected to Music Assistant to start this music.");
+      return;
+    }
     this._actionBusy = true;
     this._setStatus(`Sending to ${room.name}…`);
     try {
