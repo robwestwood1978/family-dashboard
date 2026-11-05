@@ -1,6 +1,8 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.31.1";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.32.0";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.31.1";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.32.0";
+
+import { FamilyMusicPage } from "./music-page.js?v=0.32.0";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -12,7 +14,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
-const DASHBOARD_VERSION = "0.31.1";
+const DASHBOARD_VERSION = "0.32.0";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
@@ -2477,6 +2479,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   disconnectedCallback() {
+    this._musicPage?.remove();
     this._homeworkGeneration = (this._homeworkGeneration || 0) + 1;
     this._stopSpellingSpeech();
     globalThis.speechSynthesis?.removeEventListener?.("voiceschanged", this._boundSpellingVoicesChanged);
@@ -2517,6 +2520,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._preparationRequest += 1;
     this._closeActiveCamera({ render: false, invalidate: true });
     this._clearCameraBlockTimer();
+    this._musicPage?.remove();
+    this._musicPage = null;
     this._childCards.clear();
   }
 
@@ -2536,6 +2541,8 @@ export class FamilyHubCard extends HTMLElementBase {
     this._cameraConfigGeneration = Number.isInteger(this._cameraConfigGeneration)
       ? this._cameraConfigGeneration + 1
       : 1;
+    this._musicPage?.remove();
+    this._musicPage = null;
     this._config = config;
     this._departureData = null;
     this._departureError = "";
@@ -2618,6 +2625,7 @@ export class FamilyHubCard extends HTMLElementBase {
   set hass(hass) {
     this._invalidateChildHass();
     this._hass = hass;
+    if (this._musicPage) this._musicPage.hass = hass;
     // Appearance can change without any entity state changing. Update the
     // palette in place so a theme switch preserves Music browsing and streams.
     this.shadowRoot?.querySelector?.(".hub-card")?.setAttribute("data-appearance", this._appearance());
@@ -2654,11 +2662,14 @@ export class FamilyHubCard extends HTMLElementBase {
     const height = Math.max(160, Math.floor(bottom - top));
     if (Number.isFinite(height)) this.style.setProperty("--family-viewport-height", `${height}px`);
     const visibleHeight = viewport?.height || globalThis.innerHeight;
-    const active = this.shadowRoot.activeElement;
+    let active = this.shadowRoot.activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
     const editing = active?.matches?.('input:not([type="range"]):not([type="checkbox"]),textarea,select') || this.shadowRoot.querySelector('.planner-modal') && this._lastFormControl?.isConnected;
     if (!editing) this._formLayoutHeight = Math.max(visibleHeight, globalThis.innerHeight || 0);
     const baseline = Math.max(this._formLayoutHeight || 0, globalThis.innerHeight || 0, globalThis.document?.documentElement?.clientHeight || 0);
-    this.toggleAttribute("data-keyboard-open", Boolean(editing && (viewport?.scale || 1) < 1.1 && baseline - visibleHeight > 120));
+    const keyboardOpen = Boolean(editing && (viewport?.scale || 1) < 1.1 && baseline - visibleHeight > 120);
+    this.toggleAttribute("data-keyboard-open", keyboardOpen);
+    this._musicPage?.toggleAttribute("data-keyboard-open", keyboardOpen);
     for (const [name,value] of Object.entries({height:visibleHeight,top:viewport?.offsetTop || 0,left:viewport?.offsetLeft || 0,width:viewport?.width || globalThis.innerWidth})) {
       if (Number.isFinite(value)) this.style.setProperty(`--family-overlay-${name}`,`${Math.floor(value)}px`);
     }
@@ -3694,8 +3705,8 @@ export class FamilyHubCard extends HTMLElementBase {
 
   _captureEmbeddedRenderState() {
     if (this._view !== "music") return null;
-    const stage = this.shadowRoot?.querySelector(".media-player-stage");
-    const child = this._childCards.get("music");
+    const stage = this.shadowRoot?.querySelector(".music-v2");
+    const child = this._musicPage;
     if (!stage || !child) return null;
     const rootActive = this.shadowRoot.activeElement;
     let focusedNode = rootActive === child || child.contains?.(rootActive) ? rootActive : null;
@@ -3703,18 +3714,20 @@ export class FamilyHubCard extends HTMLElementBase {
     return {
       child,
       focusedNode: focusedNode && focusedNode !== child ? focusedNode : null,
+      innerScroll: [...child.shadowRoot.querySelectorAll("[data-content],[data-queue-body]")].map(node=>({key:node.hasAttribute("data-content")?"data-content":"data-queue-body",top:node.scrollTop})),
       scrollLeft: stage.scrollLeft,
       scrollTop: stage.scrollTop
     };
   }
 
   _restoreEmbeddedRenderState(state) {
-    if (!state || this._view !== "music" || this._childCards.get("music") !== state.child) return;
-    const stage = this.shadowRoot?.querySelector(".media-player-stage");
+    if (!state || this._view !== "music" || this._musicPage !== state.child) return;
+    const stage = this.shadowRoot?.querySelector(".music-v2");
     if (stage) {
       stage.scrollLeft = state.scrollLeft;
       stage.scrollTop = state.scrollTop;
     }
+    for (const entry of state.innerScroll || []) { const node=state.child.shadowRoot.querySelector(`[${entry.key}]`); if(node)node.scrollTop=entry.top; }
     if (!state.focusedNode?.isConnected) return;
     try {
       state.focusedNode.focus({ preventScroll: true });
@@ -5772,17 +5785,18 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _renderMusic() {
-    const readOnly = this._config.display.read_only;
-    return `
-      <section class="music-experience">
-        <article class="surface media-player-panel">
-          <div class="section-heading music-heading"><div><p class="eyebrow">Spotify · Sonos</p><h2>${readOnly ? "Your full music player" : "Browse, group and play"}</h2></div><span class="music-meta">${this._config.media.players.length} rooms${readOnly ? ' · <ha-icon icon="mdi:lock-outline" aria-hidden="true"></ha-icon> playback locked' : ""}</span></div>
-          <div class="media-player-stage ${readOnly ? "is-read-only" : ""}">
-            <div id="music-card-slot" class="child-card-slot"></div>
-          </div>
-        </article>
-      </section>
-    `;
+    return '<section class="music-experience music-v2"><div id="music-card-slot"></div></section>';
+  }
+
+  _mountMusicPage() {
+    if (this._view !== "music" || !this._config.features.music) { this._musicPage?.remove(); return; }
+    const slot = this.shadowRoot.getElementById("music-card-slot");
+    if (!slot) return;
+    this._musicPage ||= new FamilyMusicPage();
+    this._musicPage.configure({players:this._config.media.players,initialPlayer:this._dockPlayerId || this._config.media.initial_player,readOnly:this._config.display.read_only,onRoomChange:id=>{this._dockPlayerId=id;this._refreshMusicDock();}});
+    this._dockPlayerId = this._musicPage._player;
+    this._musicPage.hass = this._hass;
+    slot.append(this._musicPage);
   }
 
   _footballState() {
@@ -6181,7 +6195,7 @@ export class FamilyHubCard extends HTMLElementBase {
       keys.add(`calendar:${this._calendarMode}`);
     }
     if (this._view === "family" && this._config.features?.location_map) keys.add("map");
-    if (this._view === "music" && this._config.features?.music !== false) keys.add("music");
+
     if (this._view === "energy" && this._config.features?.energy !== false) {
       keys.add("energy:electricity");
       keys.add("energy:gas");
@@ -6226,6 +6240,7 @@ export class FamilyHubCard extends HTMLElementBase {
   }
 
   _mountChildCards() {
+    this._mountMusicPage();
     if (!this._hass || !globalThis.loadCardHelpers) return;
     this._pruneInactiveChildCards();
     if (this._view === "family" && this._config.features.location_map) {
@@ -6236,28 +6251,6 @@ export class FamilyHubCard extends HTMLElementBase {
         hours_to_show: this._config.location.hours_to_show,
         entities: this._config.location.entities
       }, "map-card-slot");
-    }
-    if (this._view === "music") {
-      const mediaPlayers = this._config.media.players.map((player) => ({
-        ...player,
-        ...(player.ma_entity_id ? {
-          media_browser: player.media_browser || [{ entity_id: player.ma_entity_id, name: "Spotify & Music" }]
-        } : {})
-      }));
-      this._ensureChildCard("music", {
-        type: this._config.media.card_type,
-        size: "large",
-        mode: "in-card",
-        height: "100%",
-        entity_id: this._config.media.initial_player,
-        media_players: mediaPlayers,
-        options: {
-          player_is_active_when: "playing_or_paused",
-          show_volume_step_buttons: true,
-          default_tab: "massive",
-          transparent_background_on_home: false
-        }
-      }, "music-card-slot");
     }
     if (this._view === "rooms" && this._homeSection === "cleaning" && this._config.cleaning.map_entity) {
       this._ensureChildCard("vacuum-map", {
@@ -6774,6 +6767,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (dockPlayer) {
       if (this._config.media.players.some((player) => player.entity_id === dockPlayer.value)) {
         this._dockPlayerId = dockPlayer.value;
+        this._musicPage?.selectPlayer(dockPlayer.value, false);
         this._refreshMusicDock();
       }
       return;

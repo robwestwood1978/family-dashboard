@@ -18,11 +18,13 @@ const config = JSON.parse(await readFile(new URL("../config/example.json", impor
 const illustrationSource = await readFile(new URL("../frontend/assets/home-illustration.js", import.meta.url), "utf8");
 const readinessSource = await readFile(new URL("../frontend/readiness.js", import.meta.url), "utf8");
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
+const musicPageSource = await readFile(new URL("../frontend/music-page.js", import.meta.url), "utf8");
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
+  .replace(/import \{ FamilyMusicPage \} from "\.\/music-page\.js[^";]+";/, musicPageSource.replace(/export /g, ""))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
   .replace(/import \{ schoolLunchForDate[^\n]+from "\.\/readiness\.js[^";]+";/, `const {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents} = (()=>{${readinessSource.replace(/export /g, "")}return {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents};})();`)
   .replace(/export \{ schoolLunchForDate[^\n]+;/, "")
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.31.1";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.32.0";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -340,6 +342,7 @@ function approvalFootballStates(mode = "live") {
 }
 
 async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOptions = {}) {
+  await page.route("**/fixture-art.svg",route=>route.fulfill({contentType:"image/svg+xml",body:'<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" fill="#c9dcd8"/><circle cx="80" cy="80" r="49" fill="#334b51"/><circle cx="80" cy="80" r="14" fill="#e8b88e"/></svg>'}));
   let reviewHtml = "";
   const reviewSteps = [];
   if (runtimeOptions.reviewExportPath) {
@@ -787,7 +790,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
     window.__serviceBehaviors = runtimeOptions.serviceBehaviors || {};
     card.hass = {
       user: {is_admin:Boolean(runtimeOptions.departureAdmin)},
-      services: {},
+      services: {sonos:{get_queue:{},play_queue:{}},mass_queue:{get_queue_items:{}},music_assistant:{search:{},get_library:{},play_media:{}}},
       entities: {},
       devices: {},
       connected: true,
@@ -825,6 +828,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       },
       async callApi(method, path, payload) {
         window.__apiCalls.push({ method, path, ...(payload ? {payload} : {}) });
+        if (path === "config/config_entries/entry") return [{entry_id:"example-music-entry",domain:"music_assistant",state:"loaded"}];
         if (path === "tts_get_url") {
           if (runtimeOptions.spellingSpeechDelay) await new Promise(resolve=>setTimeout(resolve,runtimeOptions.spellingSpeechDelay));
           if (runtimeOptions.spellingSpeechReject) throw new Error("Speech unavailable");
@@ -848,6 +852,17 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
       },
       async callWS(message) {
         window.__wsCalls.push(message);
+        if (message?.type === "call_service" && ["sonos","mass_queue","music_assistant"].includes(message.domain)) {
+          const data=message.service_data||{};
+          if(runtimeOptions.musicDelay) await new Promise(resolve=>setTimeout(resolve,runtimeOptions.musicDelay));
+          if(runtimeOptions.musicReject)throw new Error("Music connection unavailable");
+          const tracks=Array.from({length:24},(_,i)=>({name:`Example song ${i+1}`,uri:`spotify://track/example${i+1}`,media_type:"track",artists:[{name:"Example artist"}],image:"/fixture-art.svg"}));
+          if(message.service==="search" && runtimeOptions.musicCatalogueEmpty && !data.library_only)return {response:{artists:[],tracks:[],albums:[],playlists:[]}};
+          if(message.service==="search")return {response:{artists:[{name:data.name,uri:"spotify://artist/example",media_type:"artist",image:"/fixture-art.svg"}],tracks,albums:[{name:"Example album",uri:"spotify://album/example",media_type:"album"}],playlists:[{name:"Weekend favourites",uri:"spotify://playlist/example",media_type:"playlist"}]}};
+          if(message.service==="get_library")return {response:{items:data.media_type==="track"?tracks:[{name:"Weekend favourites",uri:"spotify://playlist/example",media_type:"playlist",image:"/fixture-art.svg"}]}};
+          if(message.service==="get_queue"||message.service==="get_queue_items")return {response:{[message.target?.entity_id||data.entity]:runtimeOptions.musicQueue||[{media_title:"Example track",media_artist:"Example artist",media_content_id:"spotify:track/current",queue_item_id:"current"},{media_title:"Next song",media_artist:"Example artist",media_content_id:"spotify:track/next",queue_item_id:"next"}]}};
+        }
+        if(message?.type==="media_player/browse_media") return {children:Array.from({length:24},(_,i)=>({title:`Playlist song ${i+1}`,media_content_id:`spotify://track/list${i+1}`,media_content_type:"music",media_class:"track",can_play:true,can_expand:false}))};
         if(message?.type==="family_dashboard_departures/today"){
           if(runtimeOptions.departureReject)throw new Error("Could not save departure");
           const view=states["sensor.family_dashboard_departure"].attributes;
@@ -1239,8 +1254,9 @@ test("Home in focus keeps every screen readable in both appearances and preserve
       }
     }
   }
-  const player = card.locator(`[data-card-type="${familyConfig.media.card_type}"]`);
-  const instance = await player.getAttribute("data-instance-id");
+  const player = card.locator("family-music-page");
+  await player.evaluate(el=>{el.dataset.instanceId="retained";});
+  const instance = "retained";
   await card.evaluate((element) => { element.hass = { ...element._hass, themes: { darkMode: false } }; });
   await expect(card.locator(".hub-card")).toHaveAttribute("data-appearance", "light");
   await expect(player).toHaveAttribute("data-instance-id", instance);
@@ -2110,42 +2126,27 @@ test("v0.14 heating keeps six zones accessible without a nested heating scroller
   expect(pageErrors).toEqual([]);
 });
 
-test("keeps the live music card working inside its configured media boundary", async ({ page }) => {
-  const pageErrors = await mount(page, fiveRoomMusicConfig(), fiveRoomMusicStates());
-  const card = page.locator("family-hub-card");
-  await card.locator('.hub-nav-button[data-view="music"]').click();
-  const player = card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]');
-  await expect(player).toBeVisible();
-  await expect(player).toHaveAttribute("data-player-count", "5");
-  await expect(player).toHaveAttribute("data-media-browser-count", "3");
-  await expect(player).toHaveAttribute("data-card-height", "100%");
-  await expect(player).toHaveAttribute("data-transparent-background", "false");
-  await expect(card.locator("[data-mock-player]")).toHaveCount(5);
-  await expect(card.locator("[data-mock-player-row]")).toHaveCount(5);
-  await expect(card.locator("[data-mock-music-tab]")).toHaveCount(3);
-  await card.locator("[data-mock-service]").click();
-  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
-    { domain: "media_player", service: "media_play_pause", data: { entity_id: "media_player.kitchen" } }
-  ]);
-
-  await player.evaluate(async (child) => {
-    await child._hass.callService("media_player", "media_play_pause", { entity_id: "media_player.unmapped" });
-    await child._hass.callService("light", "toggle", { entity_id: "light.kitchen" });
-    window.__retainedMusicHass = child._hass;
-  });
-  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toHaveLength(1);
+test("Music 2 keeps room selection and exact playback requests in the configured boundary", async ({ page }) => {
+  const errors=await mount(page,fiveRoomMusicConfig(),fiveRoomMusicStates());
+  const card=page.locator("family-hub-card");
+  await card.locator('.hub-navigation [data-view="music"]').click();
+  const music=card.locator('family-music-page');
+  await expect(music.locator('[data-room]')).toHaveCount(5);
+  await music.getByRole('button',{name:'Open Weekend favourites',exact:true}).click();
+  await expect(music.getByRole('heading',{name:'Weekend favourites'})).toBeVisible();
+  await expect(music.getByRole('button',{name:'Options for Playlist song 1',exact:true}).first()).toBeVisible();
+  await music.getByRole('button',{name:'Add to queue',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.__serviceCalls)).toEqual([{domain:'media_player',service:'play_media',data:{media_content_id:'spotify:playlist:example',media_content_type:'playlist',enqueue:'add',entity_id:'media_player.living_room'}}]);
+  await music.locator('[data-room="media_player.living_room"]').click();
+  await expect(card.locator('[data-dock-player]')).toHaveValue('media_player.living_room');
+  await card.locator('[data-dock-player]').selectOption('media_player.kitchen');
+  await expect(music.locator('[data-room="media_player.kitchen"]')).toHaveAttribute('aria-pressed','true');
+  const count=await page.evaluate(()=>window.__serviceCalls.length);
+  await music.evaluate(async el=>{el.selectPlayer('media_player.unmapped');await el.play(999,'replace');window.__retainedMusic=el;});
   await card.locator('.hub-brand[data-view="today"]').click();
-  await page.evaluate(async () => {
-    await window.__retainedMusicHass.callService(
-      "media_player",
-      "media_play_pause",
-      { entity_id: "media_player.kitchen" },
-      {}
-    );
-  });
-  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toHaveLength(1);
-  await expect.poll(() => card.evaluate((element) => element._childCards.has("music"))).toBe(false);
-  expect(pageErrors).toEqual([]);
+  await page.evaluate(async()=>{await window.__retainedMusic.play(-1,'replace');});
+  expect(await page.evaluate(()=>window.__serviceCalls.length)).toBe(count);
+  expect(errors).toEqual([]);
 });
 
 test("browses three cameras without waking video and scales to a camera collection", async ({ page }) => {
@@ -3524,103 +3525,13 @@ test("enforces read-only mode at every interactive control boundary", async ({ p
   await expect(card.locator('button[data-vacuum-action="start"]')).toBeDisabled();
 
   await card.locator('.hub-nav-button[data-view="music"]').click();
-  await expect(card.locator(".media-player-panel")).toContainText("Your full music player");
-  await expect(card.locator(".music-meta")).toContainText("playback locked");
-  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toBeVisible();
-  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("aria-disabled", "true");
-  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-read-only-guard", "service-boundary");
-  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-mode", "in-card");
-  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-card-height", "100%");
-  await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-transparent-background", "false");
-  const mediaMetrics = await card.locator(".media-player-stage").evaluate((stage) => {
-    const slot = stage.querySelector(".child-card-slot");
-    const child = stage.querySelector("mock-child-card");
-    const childRoot = child.shadowRoot || child;
-    const chip = childRoot.querySelector(".mock-chip");
-    const chipScroll = childRoot.querySelector(".mock-chip-scroll");
-    const groupChips = childRoot.querySelector("#mmpc-group-chips-controller");
-    const speakerScroll = childRoot.querySelector(".mock-speaker-scroll");
-    const stageRect = stage.getBoundingClientRect();
-    const childRect = child.getBoundingClientRect();
-    const chipStyle = getComputedStyle(chip);
-    const stageStyle = getComputedStyle(stage);
-    const slotStyle = getComputedStyle(slot);
-    const childStyle = getComputedStyle(child);
-    stage.scrollTop = 48;
-    return {
-      childTop: childRect.top,
-      childBottom: childRect.bottom,
-      stageTop: stageRect.top,
-      stageBottom: stageRect.bottom,
-      chipColour: chipStyle.color,
-      chipBackground: chipStyle.backgroundColor,
-      stageBackground: stageStyle.backgroundColor,
-      stageOverflowX: stageStyle.overflowX,
-      stageOverflowY: stageStyle.overflowY,
-      stageScrollHeight: stage.scrollHeight,
-      stageClientHeight: stage.clientHeight,
-      stageScrollTop: stage.scrollTop,
-      slotOverflowX: slotStyle.overflowX,
-      slotOverflowY: slotStyle.overflowY,
-      childInlineHeight: child.style.height,
-      childOverflowX: childStyle.overflowX,
-      childOverflowY: childStyle.overflowY,
-      cardBackground: slotStyle.getPropertyValue("--card-background-color").trim(),
-      primaryBackground: slotStyle.getPropertyValue("--primary-background-color").trim(),
-      mmpcBackground: slotStyle.getPropertyValue("--mmpc-card").trim(),
-      speakerOverflow: getComputedStyle(speakerScroll).overflowY,
-      speakerScrollHeight: speakerScroll.scrollHeight,
-      speakerClientHeight: speakerScroll.clientHeight,
-      chipOverflow: getComputedStyle(chipScroll).overflowX,
-      chipScrollWidth: chipScroll.scrollWidth,
-      chipClientWidth: chipScroll.clientWidth,
-      groupFlexWrap: getComputedStyle(groupChips).flexWrap,
-      groupOverflow: getComputedStyle(groupChips).overflowX,
-      groupWidth: groupChips.getBoundingClientRect().width,
-      groupParentWidth: chipScroll.getBoundingClientRect().width,
-      childInert: child.inert
-    };
-  });
-  expect(mediaMetrics.childTop).toBeGreaterThanOrEqual(mediaMetrics.stageTop - 1);
-  expect(mediaMetrics.childBottom).toBeLessThanOrEqual(mediaMetrics.stageBottom + 1);
-  expect(mediaMetrics.chipColour).toBe("rgb(18, 102, 207)");
-  expect(mediaMetrics.chipBackground).toBe("rgb(232, 241, 255)");
-  expect(mediaMetrics.stageBackground).toBe("rgb(255, 255, 255)");
-  expect(mediaMetrics.stageOverflowX).toBe("hidden");
-  expect(mediaMetrics.stageOverflowY).toBe("hidden");
-  expect(mediaMetrics.stageScrollHeight).toBeLessThanOrEqual(mediaMetrics.stageClientHeight + 1);
-  expect(mediaMetrics.stageScrollTop).toBe(0);
-  expect(mediaMetrics.slotOverflowX).toBe("hidden");
-  expect(mediaMetrics.slotOverflowY).toBe("hidden");
-  expect(mediaMetrics.childInlineHeight).toBe("100%");
-  expect(mediaMetrics.childOverflowX).toBe("visible");
-  expect(mediaMetrics.childOverflowY).toBe("visible");
-  expect(mediaMetrics.cardBackground).toBe("#FFFFFF");
-  expect(mediaMetrics.primaryBackground).toBe("#FFFFFF");
-  expect(mediaMetrics.mmpcBackground).toBe("#FFFFFF");
-  expect(mediaMetrics.speakerOverflow).toBe("auto");
-  expect(mediaMetrics.speakerScrollHeight).toBeGreaterThanOrEqual(mediaMetrics.speakerClientHeight);
-  expect(mediaMetrics.chipOverflow).toBe("visible");
-  expect(mediaMetrics.chipScrollWidth).toBeLessThanOrEqual(mediaMetrics.chipClientWidth + 1);
-  expect(mediaMetrics.groupFlexWrap).toBe("wrap");
-  expect(mediaMetrics.groupOverflow).toBe("visible");
-  expect(mediaMetrics.groupWidth).toBeLessThanOrEqual(mediaMetrics.groupParentWidth + 1);
-  expect(mediaMetrics.childInert).toBe(false);
-
-  await card.evaluate((element) => {
-    const stage = element.shadowRoot.querySelector(".media-player-stage");
-    stage.dataset.persistenceMarker = "keep-music-stage";
-    element.shadowRoot.querySelector("[data-mock-service]").focus();
-  });
-  await updateEntityState(card, state("media_player.living_room", "playing", {
-    friendly_name: "Living room",
-    media_title: "Updated without a jump"
-  }));
-  await expect(card.locator('.media-player-stage[data-persistence-marker="keep-music-stage"]')).toHaveCount(1);
-  await expect.poll(() => card.locator(".media-player-stage").evaluate((stage) => stage.scrollTop)).toBe(0);
-  await expect.poll(() => card.evaluate((element) => element.shadowRoot.activeElement?.dataset?.mockService !== undefined)).toBe(true);
-
-  await card.locator("[data-mock-service]").evaluate((button) => button.click());
+  const music=card.locator('family-music-page');
+  await expect(music).toBeVisible();
+  await music.getByRole('button',{name:'Open Weekend favourites',exact:true}).click();
+  await expect(music.getByRole('button',{name:'Play now',exact:true})).toBeDisabled();
+  await expect(music.getByRole('button',{name:'Play next',exact:true})).toBeDisabled();
+  await expect(music.getByRole('button',{name:'Add to queue',exact:true})).toBeDisabled();
+  await music.evaluate(async element=>{await element.play(-1,'replace');await element.playQueue(0);await element._applyGroup();});
   await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([]);
 
   await card.locator('.hub-nav-button[data-view="family"]').click();
@@ -4297,7 +4208,7 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
     ["energy", "energy-today", ".energy-view"],
     ["calendar", "calendar-controls", ".calendar-view"],
     ["family", "family-location-off", ".family-dashboard"],
-    ["music", "music-five-room", ".media-player-panel"]
+    ["music", "music-five-room", "family-music-page"]
   ]) {
     const nextConfig = view === "family"
       ? locationDisabledConfig()
@@ -4369,15 +4280,14 @@ test("v0.9 design approval captures Today, every Home tab, and global palette sm
       await card.locator('[data-task-section="jobs"]').click();
     }
     if (view === "music") {
-      await expect(card.locator('[data-card-type="custom:mediocre-multi-media-player-card"]')).toHaveAttribute("data-player-count", "5");
-      await expect(card.locator("[data-mock-player]")).toHaveCount(5);
-      await expect(card.locator("[data-mock-player-row]")).toHaveCount(5);
-      await expect(card.locator("[data-mock-music-tab]")).toHaveCount(3);
-      await expectContrast(card, [
-        { foreground: ".mock-player-row small", background: ".mock-player-row", minimum: 4.5 },
-        { foreground: ".mock-media-player strong", background: ".media-player-stage", minimum: 4.5 },
-        { foreground: ".mock-media-player h3", background: ".media-player-stage", minimum: 4.5 },
-        { foreground: ".mock-media-player button", background: ".mock-media-player button", minimum: 4.5 }
+      const music=card.locator('family-music-page');
+      await expect(music.locator('[data-room]')).toHaveCount(5);
+      await expect(music.getByRole('searchbox',{name:'Search music'})).toBeVisible();
+      await expect(music.getByRole('complementary',{name:'Up next'})).toBeVisible();
+      await expect(music.getByRole('button',{name:'Open Weekend favourites',exact:true})).toBeVisible();
+      await expectContrast(music,[
+        {foreground:'.tile .name,.tile small',background:'.browse',minimum:4.5},
+        {foreground:'.queue h3,.queue small',background:'.queue',minimum:4.5}
       ]);
     }
     await captureApproval(page, testInfo, name);
@@ -4654,8 +4564,9 @@ test("Home in focus keeps the music dock live across views and bounds playback, 
     const bottom = await dock.evaluate((node) => node.getBoundingClientRect().bottom);
     expect(bottom).toBeLessThanOrEqual(page.viewportSize().height);
   }
-  const player = card.locator(`[data-card-type="${config.media.card_type}"]`);
-  const instance = await player.getAttribute("data-instance-id");
+  const player = card.locator("family-music-page");
+  await player.evaluate(el=>{el.dataset.instanceId="retained";});
+  const instance = "retained";
   await updateEntityState(card, state("media_player.living_room", "playing", { media_title: "Updated track", supported_features: 16437, volume_level: .4 }));
   await expect(dock).toContainText("Updated track");
   await expect(player).toHaveAttribute("data-instance-id", instance);
@@ -4795,78 +4706,71 @@ test("restored approved primary screens fit the actual HA shell in both orientat
 });
 
 
-test("native music player keeps playback and room controls inside both tablet orientations", async ({page}, testInfo) => {
-  test.skip(!nativeMusicSource, "Set NATIVE_MUSIC_CARD_PATH to the installed upstream player bundle for native validation");
-  const errors = await mount(page, config, {}, {nativeMusic:true});
-  const card = page.locator("family-hub-card");
-  await card.locator('.hub-navigation [data-view="music"]').click();
-  const player = card.locator("mediocre-multi-media-player-card");
-  await page.waitForTimeout(700);
-  expect(errors, await card.evaluate(el=>JSON.stringify({children:[...el._childCards.keys()], slot:el.shadowRoot.getElementById("music-card-slot").innerHTML.slice(0,400)}))).toEqual([]);
-  await expect(player).toBeVisible();
-  for (const size of [{width:1112,height:834},{width:834,height:1112}]) {
-    await page.setViewportSize(size);
-    await page.waitForTimeout(350);
-    await expect(player.locator("button").first()).toBeVisible();
-    const geometry=await player.evaluate(node=>({height:node.getBoundingClientRect().height, bottom:node.getBoundingClientRect().bottom, viewport:innerHeight, html:node.shadowRoot?.innerHTML.slice(0,200)}));
-    expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport+1);
-    expect(geometry.height).toBeGreaterThan(400);
-    const heavyText = await player.evaluate(node=>[...node.querySelectorAll("*")]
-      .filter(element=>element.getClientRects().length && [...element.childNodes].some(child=>child.nodeType===Node.TEXT_NODE && child.textContent.trim()))
-      .filter(element=>Number.parseInt(getComputedStyle(element).fontWeight,10)>500)
-      .map(element=>element.textContent.trim()));
-    expect(heavyText).toEqual([]);
-    const groupChipGeometry = await player.locator('#mmpc-group-chips-controller > button').evaluateAll(buttons => buttons.map(button => {
-      const bounds = button.getBoundingClientRect();
-      const range = document.createRange();
-      range.selectNodeContents(button);
-      const content = range.getBoundingClientRect();
-      return {label: button.textContent.trim(), width: bounds.width, height: bounds.height, contentLeft: content.left - bounds.left, contentRight: content.right - bounds.right};
-    }));
-    expect(groupChipGeometry.length).toBeGreaterThan(0);
-    for (const chip of groupChipGeometry) {
-      expect(chip.height, chip.label).toBeGreaterThanOrEqual(48);
-      expect(chip.contentLeft, chip.label).toBeGreaterThanOrEqual(-1);
-      expect(chip.contentRight, chip.label).toBeLessThanOrEqual(1);
-    }
-    await expectNoRootOverflow(page);
-    const folder=process.env.RESTORED_DESIGN_REVIEW_DIR || resolve(tmpdir(), 'restored-design-review');
-    await mkdir(folder,{recursive:true});
-    await page.screenshot({path:resolve(folder,`native-music-${size.width}x${size.height}.png`)});
-  }
+test("Music 2 ignores late searches, retains input across updates and keeps external queues distinct",async({page})=>{
+  const errors=await mount(page,config,{
+    'media_player.living_room':state('media_player.living_room','playing',{media_title:'Example track',media_artist:'Example artist',media_content_id:'spotify:track/current'}),
+    'media_player.living_room_music_assistant':state('media_player.living_room_music_assistant','paused',{media_title:'Retained unrelated track'})
+  },{musicDelay:450});
+  const card=page.locator('family-hub-card');await card.locator('.hub-navigation [data-view="music"]').click();const music=card.locator('family-music-page');
+  await expect(music.locator('[data-queue-body]')).toContainText('Next song');
+  await expect(music.locator('[data-queue-body]')).not.toContainText('Retained unrelated track');
+  await expect(music.locator('[data-queue-body]')).toContainText('Sonos queue');
+  await music.getByRole('searchbox').fill('First query');await music.getByRole('button',{name:'Search',exact:true}).click();
+  await expect(music.getByText('Searching…',{exact:true})).toBeVisible();
+  await expect(music.getByText('No matches yet',{exact:true})).toHaveCount(0);
+  await music.getByRole('searchbox').fill('Second query');await music.getByRole('button',{name:'Search',exact:true}).click();
+  await card.evaluate(el=>{el.hass={...el._hass,themes:{darkMode:true}};});
+  await expect(music.getByRole('heading',{name:'Results for “Second query”',exact:true})).toBeVisible();
+  await expect(music.getByRole('searchbox')).toHaveValue('Second query');
+  await music.locator('[data-content]').evaluate(n=>{n.scrollTop=150;});
+  await card.evaluate(el=>el._scheduleRender(true));
+  await expect(music.getByRole('searchbox')).toHaveValue('Second query');
+  await expect.poll(()=>music.locator('[data-content]').evaluate(n=>n.scrollTop)).toBeGreaterThan(100);
+  await music.getByRole('button',{name:'Play Next song',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.__serviceCalls)).toContainEqual({domain:'sonos',service:'play_queue',data:{queue_position:1,entity_id:'media_player.living_room'}});
+  expect(await page.evaluate(()=>window.__wsCalls.filter(c=>c.domain==='mass_queue'))).toEqual([]);
   expect(errors).toEqual([]);
 });
 
+test("Music 2 keeps saved results when the catalogue is empty and uses the matching MA queue",async({page})=>{
+  const errors=await mount(page,config,{
+    'media_player.living_room':state('media_player.living_room','playing',{media_title:'Example track',media_artist:'Example artist',media_content_id:'spotify:track/current'}),
+    'media_player.living_room_music_assistant':state('media_player.living_room_music_assistant','playing',{media_title:'Example track',media_artist:'Example artist',media_content_id:'spotify://track/current'})
+  },{musicCatalogueEmpty:true});
+  const card=page.locator('family-hub-card');await card.locator('.hub-navigation [data-view="music"]').click();const music=card.locator('family-music-page');
+  await expect(music.locator('[data-queue-body]')).toContainText('Music Assistant queue');
+  await music.getByRole('searchbox').fill('Example');await music.getByRole('button',{name:'Search',exact:true}).click();
+  await expect(music.locator('.notice')).toContainText('temporarily limiting search');
+  await expect(music.getByRole('button',{name:'Options for Example song 1',exact:true}).first()).toBeVisible();
+  await music.getByRole('button',{name:'Options for Example song 1',exact:true}).first().click();await music.getByRole('button',{name:'Play now',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.__serviceCalls)).toContainEqual({domain:'music_assistant',service:'play_media',data:{media_id:'spotify://track/example1',media_type:'track',enqueue:'replace',entity_id:'media_player.living_room_music_assistant'}});
+  expect(await page.evaluate(()=>window.__wsCalls.filter(c=>c.domain==='sonos'))).toEqual([]);expect(errors).toEqual([]);
+});
 
-test("Music search pills fit their labels and wrap in tablet landscape and portrait", async ({page}) => {
-  const errors=await mount(page,config,{}, {nativeMusic:Boolean(nativeMusicSource)});
+test("Music 2 shows connection failures and blocks read-only or removed-view writes",async({page})=>{
+  const locked=structuredClone(config);locked.display.read_only=true;
+  const errors=await mount(page,locked,{}, {musicReject:true});const card=page.locator('family-hub-card');await card.locator('.hub-navigation [data-view="music"]').click();const music=card.locator('family-music-page');
+  await expect(music.getByRole('alert')).toContainText('Music connection unavailable');
+  await music.getByRole('searchbox').fill('Example');await music.getByRole('button',{name:'Search',exact:true}).click();await expect(music.getByRole('alert')).toBeVisible();
+  await music.evaluate(async el=>{el._items=[{name:'Test',uri:'spotify://track/test',type:'track',playable:true}];await el.play(0,'replace');await el.playQueue(0);await el._applyGroup();});
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);expect(errors).toEqual([]);
+});
+
+test("Music 2 search stays usable in both orientations and a keyboard-sized viewport", async ({page}) => {
+  const errors=await mount(page);
   const card=page.locator("family-hub-card");
   await card.locator('.hub-navigation [data-view="music"]').click();
-  const player=card.locator(nativeMusicSource ? "mediocre-multi-media-player-card" : '[data-card-type="custom:mediocre-multi-media-player-card"]');
-  if(nativeMusicSource) await player.locator('button').filter({has:page.locator('ha-icon[data-mock-glyph="mdi:magnify"]')}).click();
-  else await player.locator('[data-mock-music-tab="search"]').click();
-  await expect(player.getByRole('button',{name:'Audiobooks',exact:true})).toBeVisible();
-  for(const size of [{width:1112,height:834},{width:1024,height:768},{width:834,height:1112}]) {
+  const music=card.locator('family-music-page');
+  await music.getByRole('searchbox',{name:'Search music'}).fill('Example artist');
+  await music.getByRole('button',{name:'Search',exact:true}).click();
+  await expect(music.getByRole('heading',{name:'Artists',exact:true})).toBeVisible();
+  for(const size of [{width:1112,height:834},{width:1024,height:768},{width:834,height:1112},{width:1024,height:460},{width:390,height:700}]) {
     await page.setViewportSize(size);
-    await page.waitForTimeout(350);
-    const chips=await player.locator('button[style*="--mmpc-chip-horizontal-margin"]').evaluateAll(buttons=>buttons.map(button=>{
-      const b=button.getBoundingClientRect(),p=button.parentElement.getBoundingClientRect();
-      const range=document.createRange();range.selectNodeContents(button);const text=range.getBoundingClientRect();
-      return {label:button.textContent.trim(),height:b.height,top:b.top,left:b.left,right:b.right,parentLeft:p.left,parentRight:p.right,textLeft:text.left,textRight:text.right};
-    }));
-    expect(chips.map(chip=>chip.label)).toEqual(['All','Artists','Albums','Tracks','Playlists','Radio','Audiobooks','Podcasts']);
-    expect(new Set(chips.map(chip=>Math.round(chip.top))).size).toBeGreaterThan(1);
-    for(const chip of chips){
-      expect(chip.height,chip.label).toBeGreaterThanOrEqual(48);
-      expect(chip.textLeft,chip.label).toBeGreaterThanOrEqual(chip.left-1);
-      expect(chip.textRight,chip.label).toBeLessThanOrEqual(chip.right+1);
-      expect(chip.left,chip.label).toBeGreaterThanOrEqual(chip.parentLeft-1);
-      expect(chip.right,chip.label).toBeLessThanOrEqual(chip.parentRight+1);
-    }
-    await player.getByRole('button',{name:'Playlists',exact:true}).click();
-    await expect(player.getByRole('button',{name:'Playlists',exact:true})).toBeVisible();
+    await expect(music.getByRole('searchbox')).toHaveValue('Example artist');
+    for(const label of ['All','Songs','Artists','Albums','Playlists']) await expect(music.getByRole('button',{name:label,exact:true})).toBeVisible();
     await expectNoRootOverflow(page);
-    await page.screenshot({path:resolve(tmpdir(), 'music-search-'+size.width+'x'+size.height+'.png')});
+    if(size.height===460)expect(await music.locator('[data-content]').evaluate(n=>n.clientHeight)).toBeGreaterThan(80);
+    if(process.env.MUSIC_REVIEW_DIR){await mkdir(process.env.MUSIC_REVIEW_DIR,{recursive:true});await page.screenshot({path:resolve(process.env.MUSIC_REVIEW_DIR,`music-${size.width}x${size.height}.png`)});}
   }
   expect(errors).toEqual([]);
 });
@@ -5661,7 +5565,7 @@ test("simple family view has child choices and always returns to the full dashbo
   const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-10T07:15:00Z",kiosk:true});
   const card=page.locator("family-hub-card");
   await card.locator('[data-family-picker-open]').click();
-  await expect(card.locator(".dashboard-version")).toContainText("0.31.1");
+  await expect(card.locator(".dashboard-version")).toContainText("0.32.0");
   await card.locator('[data-experience="simple"]').click();
   await expect(card.locator(".simple-child-card")).toHaveCount(2);
   expect(await card.locator(".simple-child-card .today-job>div").first().evaluate(node=>node.getBoundingClientRect().width)).toBeGreaterThan(200);
