@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  randomPhotoIndex,
   departurePresentation,
   binarySignalPresentation,
   buildFavouriteClubModels,
@@ -3726,4 +3727,40 @@ test("calendar day plans include overnight and multi-day events with exclusive e
  assert.deepEqual(calendarEventsOnDay(days,"2026-11-02").map(e=>e.summary),["School holiday"]);
  assert.deepEqual(calendarEventsOnDay(days,"2026-11-03"),[]);
  assert.deepEqual(calendarEventsOnDay([{summary:"Invalid",start:null}],"2026-11-01"),[]);
+});
+
+
+test("random photo selection can start anywhere and never immediately repeats on advance", () => {
+  for (let count = 2; count <= 8; count++) {
+    const starts = new Set(), choices = new Set();
+    for (let slot = 0; slot < count; slot++) starts.add(randomPhotoIndex(count, undefined, () => (slot + .5) / count));
+    assert.equal(starts.size, count);
+    for (let previous = 0; previous < count; previous++) {
+      choices.clear();
+      for (let slot = 0; slot < count - 1; slot++) {
+        const next = randomPhotoIndex(count, previous, () => (slot + .5) / (count - 1));
+        assert.notEqual(next, previous); assert.ok(next >= 0 && next < count); choices.add(next);
+      }
+      assert.equal(choices.size, count - 1);
+    }
+  }
+  assert.equal(randomPhotoIndex(0), 0); assert.equal(randomPhotoIndex(1, 0), 0);
+});
+
+
+test("screensaver timer chooses a different random photo and stops when inactive", t => {
+  let tick;
+  t.mock.method(globalThis, "setTimeout", fn => { tick = fn; return 1; });
+  t.mock.method(globalThis, "clearTimeout", () => {});
+  t.mock.method(Math, "random", () => .99);
+  const card = Object.create(FamilyHubCard.prototype), resolved = [];
+  card._photoFrameConfig = () => ({slide_seconds:20});
+  card._photoFrameActive = true; card._photoFrameItems = [{},{},{},{}]; card._photoFrameIndex = 3;
+  card._resolvePhotoFrameItem = () => { resolved.push(card._photoFrameIndex); };
+  card._armPhotoFrameSlideTimer(); tick();
+  assert.deepEqual(resolved, [2]);
+  card._armPhotoFrameSlideTimer(); tick();
+  assert.deepEqual(resolved, [2,3]);
+  card._photoFrameActive = false; tick();
+  assert.deepEqual(resolved, [2,3]);
 });

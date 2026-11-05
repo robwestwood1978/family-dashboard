@@ -24,7 +24,7 @@ const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", imp
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
   .replace(/import \{ schoolLunchForDate[^\n]+from "\.\/readiness\.js[^";]+";/, `const {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents} = (()=>{${readinessSource.replace(/export /g, "")}return {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents};})();`)
   .replace(/export \{ schoolLunchForDate[^\n]+;/, "")
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.33.0";', dailyBriefSource);
+  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.33.1";', dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -766,6 +766,7 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
   await page.addScriptTag({ type: "module", content: cardSource });
   await page.evaluate(async ({ familyConfig, states, runtimeOptions }) => {
     await customElements.whenDefined("family-hub-card");
+    if (runtimeOptions.photoRandom !== undefined) Math.random = () => runtimeOptions.photoRandom;
     if (runtimeOptions.speechVoices) {
       let voices = runtimeOptions.speechVoices;
       const speech = new EventTarget();
@@ -2159,7 +2160,7 @@ test("Music hero opens on large artwork with direct bounded controls and keeps b
 
 test("Today uses the private photo album, retains the image through updates and cycles safely",async({page})=>{
   const family=structuredClone(config);family.display.photo_frame.enabled=true;const source=family.display.photo_frame.media_source;
-  const errors=await mount(page,family,{}, {kiosk:true,photoMediaChildren:[{media_class:'image',media_content_id:`${source}/photo-001.jpg`},{media_class:'image',media_content_id:`${source}/photo-002.jpg`},{media_class:'image',media_content_id:'media-source://media_source/local/unrelated/private.jpg'}]});
+  const errors=await mount(page,family,{}, {kiosk:true,photoRandom:0,photoMediaChildren:[{media_class:'image',media_content_id:`${source}/photo-001.jpg`},{media_class:'image',media_content_id:`${source}/photo-002.jpg`},{media_class:'image',media_content_id:'media-source://media_source/local/unrelated/private.jpg'}]});
   const card=page.locator('family-hub-card'),photo=card.locator('.today-photo-image');
   await expect(photo).toBeVisible();await expect(photo).toHaveAttribute('src',/photo-001/);await expect(card.locator('[data-today-photo-count]')).toHaveText('1 / 2');
   await photo.evaluate(n=>{window.__retainedTodayPhoto=n;});await updateEntityState(card,state('weather.home','rainy',{temperature:18}));
@@ -2171,6 +2172,21 @@ test("Today uses the private photo album, retains the image through updates and 
   await card.getByRole('button',{name:'Next family photo'}).click();await expect(photo).toHaveAttribute('src',/photo-002/);await expect(card.locator('[data-today-photo-count]')).toHaveText('2 / 2');
   expect(await page.evaluate(()=>window.__wsCalls.filter(c=>c.type==='media_source/resolve_media').map(c=>c.media_content_id))).toEqual([`${source}/photo-001.jpg`,`${source}/photo-002.jpg`]);
   await card.locator('.hub-navigation [data-view="calendar"]').click();await card.locator('.hub-navigation [data-view="today"]').click();await photo.dispatchEvent('error');await expect(card.locator('.today-photo-placeholder')).toBeVisible();
+  expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);expect(errors).toEqual([]);
+});
+
+test("random photos share the approved album and stay stable until requested",async({page})=>{
+  const family=structuredClone(config);family.display.photo_frame.enabled=true;const source=family.display.photo_frame.media_source;
+  const errors=await mount(page,family,{}, {kiosk:true,photoRandom:.99,photoMediaChildren:[1,2,3,4].map(n=>({media_class:'image',media_content_id:`${source}/photo-00${n}.jpg`}))});
+  const card=page.locator('family-hub-card'),photo=card.locator('.today-photo-image');
+  await expect(photo).toHaveAttribute('src',/photo-004/);
+  await card.getByRole('button',{name:'Next family photo'}).click();await expect(photo).toHaveAttribute('src',/photo-003/);
+  await updateEntityState(card,state('weather.home','rainy',{temperature:18}));await expect(photo).toHaveAttribute('src',/photo-003/);
+  await card.locator('.hub-navigation [data-view="calendar"]').click();await card.locator('.hub-navigation [data-view="today"]').click();await expect(photo).toHaveAttribute('src',/photo-003/);
+  await card.evaluate(el=>el._activatePhotoFrame());await expect(card.locator('.photo-frame img')).toHaveAttribute('src',/photo-004/);
+  await card.locator('.photo-frame').click();await expect(photo).toHaveAttribute('src',/photo-003/);
+  const ids=await page.evaluate(()=>window.__wsCalls.filter(c=>c.type==='media_source/resolve_media').map(c=>c.media_content_id));
+  expect(ids).toEqual([`${source}/photo-004.jpg`,`${source}/photo-003.jpg`,`${source}/photo-004.jpg`]);
   expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);expect(errors).toEqual([]);
 });
 
@@ -5637,7 +5653,7 @@ test("simple family view has child choices and always returns to the full dashbo
   const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-10T07:15:00Z",kiosk:true});
   const card=page.locator("family-hub-card");
   await card.locator('[data-family-picker-open]').click();
-  await expect(card.locator(".dashboard-version")).toContainText("0.33.0");
+  await expect(card.locator(".dashboard-version")).toContainText("0.33.1");
   await card.locator('[data-experience="simple"]').click();
   await expect(card.locator(".simple-child-card")).toHaveCount(2);
   expect(await card.locator(".simple-child-card .today-job>div").first().evaluate(node=>node.getBoundingClientRect().width)).toBeGreaterThan(200);

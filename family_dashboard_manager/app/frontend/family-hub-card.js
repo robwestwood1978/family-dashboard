@@ -1,8 +1,8 @@
-import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.33.0";
+import { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents } from "./readiness.js?v=0.33.1";
 export { schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents };
-import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.33.0";
+import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.33.1";
 
-import { FamilyMusicPage } from "./music-page.js?v=0.33.0";
+import { FamilyMusicPage } from "./music-page.js?v=0.33.1";
 
 const VIEW_DEFINITIONS = [
   { id: "today", label: "Today", icon: "mdi:home-heart", feature: null, primary: true },
@@ -14,7 +14,7 @@ const VIEW_DEFINITIONS = [
   { id: "energy", label: "Energy", icon: "mdi:lightning-bolt-circle", feature: "energy" },
   { id: "football", label: "Football", icon: "mdi:soccer", feature: "football" }
 ];
-const DASHBOARD_VERSION = "0.33.0";
+const DASHBOARD_VERSION = "0.33.1";
 
 // Small outline icons keep the shared navigation independent of HA's filled glyphs.
 function outlineIcon(name) {
@@ -1715,6 +1715,14 @@ export function schoolDataSource(config = {}) {
   return config?.school?.source === "calendar" ? "calendar" : "classroom";
 }
 
+// Pick from the same approved album, excluding the current photo on advances.
+export function randomPhotoIndex(count, previous, random = Math.random) {
+  if (count < 2) return 0;
+  const exclude = Number.isInteger(previous) && previous >= 0 && previous < count;
+  const index = Math.floor(random() * (count - (exclude ? 1 : 0)));
+  return exclude && index >= previous ? index + 1 : index;
+}
+
 export function isSafePhotoFrameMediaSource(value) {
   const source = String(value || "");
   return source.length <= 300
@@ -2806,7 +2814,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._photoFrameSlideTimer = setTimeout(() => {
       this._photoFrameSlideTimer = null;
       if (!this._photoFrameActive || !this._photoFrameItems.length) return;
-      this._photoFrameIndex = (this._photoFrameIndex + 1) % this._photoFrameItems.length;
+      this._photoFrameIndex = randomPhotoIndex(this._photoFrameItems.length, this._photoFrameIndex);
       void this._resolvePhotoFrameItem();
     }, photoFrame.slide_seconds * 1_000);
   }
@@ -2831,6 +2839,7 @@ export class FamilyHubCard extends HTMLElementBase {
     this._pendingConfirmation = null;
     this._confirmationReturnFocus = null;
     this._photoFrameActive = true;
+    this._photoFrameIndex = randomPhotoIndex(this._photoFrameItems.length);
     this._familyPickerOpen = false;
     this._photoFrameUrl = null;
     this._closeActiveCamera({ render: false, invalidate: true });
@@ -2891,7 +2900,7 @@ export class FamilyHubCard extends HTMLElementBase {
     if (this._deviceFrameUrl) URL.revokeObjectURL(this._deviceFrameUrl);
     this._deviceFrameUrl = null;
     if(this._todayPhotoObjectUrl) URL.revokeObjectURL(this._todayPhotoObjectUrl);
-    this._todayPhotoObjectUrl=null;this._todayPhotoUrl=null;this._todayPhotoKey=null;this._todayPhotoLoading=false;this._todayPhotoFailedAt=0;
+    this._todayPhotoIndex=null;this._todayPhotoObjectUrl=null;this._todayPhotoUrl=null;this._todayPhotoKey=null;this._todayPhotoLoading=false;this._todayPhotoFailedAt=0;
     this._todayPhotoRequest=(this._todayPhotoRequest||0)+1;
   }
 
@@ -3004,7 +3013,10 @@ export class FamilyHubCard extends HTMLElementBase {
       this._photoFrameError = this._photoFrameItems.length ? null : "Add photos to this device using Photos in the dashboard header.";
       if (this._photoFrameActive) {
         this._scheduleRender(true);
-        if (this._photoFrameItems.length) void this._resolvePhotoFrameItem();
+        if (this._photoFrameItems.length) {
+          this._photoFrameIndex = randomPhotoIndex(this._photoFrameItems.length);
+          void this._resolvePhotoFrameItem();
+        }
       }
       return;
     }
@@ -3043,7 +3055,10 @@ export class FamilyHubCard extends HTMLElementBase {
         void this._resolveTodayPhoto();
         if (this._photoFrameActive) {
           this._scheduleRender(true);
-          if (this._photoFrameItems.length) void this._resolvePhotoFrameItem();
+          if (this._photoFrameItems.length) {
+            this._photoFrameIndex = randomPhotoIndex(this._photoFrameItems.length);
+            void this._resolvePhotoFrameItem();
+          }
         }
       }
     }
@@ -4059,7 +4074,9 @@ export class FamilyHubCard extends HTMLElementBase {
     if(this._todayPhotoLoading&&!advance)return;
     if(!advance&&this._todayPhotoFailedAt&&Date.now()-this._todayPhotoFailedAt<60000)return;
     const count=this._photoFrameItems.length;
-    this._todayPhotoIndex=((this._todayPhotoIndex||0)+(advance?1:0))%count;
+    if (advance || !Number.isInteger(this._todayPhotoIndex) || this._todayPhotoIndex >= count) {
+      this._todayPhotoIndex = randomPhotoIndex(count, advance ? this._todayPhotoIndex : undefined);
+    }
     const item=this._photoFrameItems[this._todayPhotoIndex],key=item.local?.id||item.media_content_id;
     if(!advance&&key===this._todayPhotoKey&&this._todayPhotoUrl&&Date.now()-(this._todayPhotoLoadedAt||0)<900000){this._syncTodayPhoto();return;}
     const request=this._todayPhotoRequest=(this._todayPhotoRequest||0)+1;this._todayPhotoLoading=true;

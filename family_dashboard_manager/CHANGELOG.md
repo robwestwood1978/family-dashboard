@@ -1,3 +1,8 @@
+## 0.33.1
+
+- Choose a random photo from the existing screensaver collection when Today opens. Keep it stable through live updates and page navigation; Next photo chooses a different random image.
+- Randomise screensaver photos at activation and each slide, without repeating the current photo when the collection has more than one image. Retain the same source, timing and device-local privacy behaviour.
+
 ## 0.33.0
 
 - Restore a dedicated Now playing view with large album artwork, clear transport controls, a live timeline and room volume. Keep Browse and Up next available without losing a search or playlist; retain the compact player on other pages.
