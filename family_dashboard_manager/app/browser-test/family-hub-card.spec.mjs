@@ -22,9 +22,9 @@ const musicPageSource = await readFile(new URL("../frontend/music-page.js", impo
 const cardSource = (await readFile(new URL("../frontend/family-hub-card.js", import.meta.url), "utf8"))
   .replace(/import \{ FamilyMusicPage \} from "\.\/music-page\.js[^";]+";/, musicPageSource.replace(/export /g, ""))
   .replace('import { HOME_ILLUSTRATION } from "./assets/home-illustration.js";', illustrationSource)
-  .replace(/import \{ schoolLunchForDate[^\n]+from "\.\/readiness\.js[^";]+";/, `const {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents} = (()=>{${readinessSource.replace(/export /g, "")}return {schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents};})();`)
+   .replace(/import \{ homeworkHandInTasks, schoolLunchForDate[^\n]+from "\.\/readiness\.js[^";]+";/, `const {homeworkHandInTasks, schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents} = (()=>{${readinessSource.replace(/export /g, "")}return {homeworkHandInTasks, schoolLunchForDate, familyPlannerEventKey, preparationDescription, parsePreparationDescription, extractPreparationItems, withPreparationOwner, packedLunchEvents};})();`)
   .replace(/export \{ schoolLunchForDate[^\n]+;/, "")
-  .replace('import { DAILY_BRIEF_STYLES } from "./daily-brief-styles.js?v=0.33.1";', dailyBriefSource);
+  .replace(/import \{ DAILY_BRIEF_STYLES \} from "\.\/daily-brief-styles\.js[^";]+";/, dailyBriefSource);
 const mdiGlyphPaths = JSON.parse(await readFile(new URL("./mdi-fixture.json", import.meta.url), "utf8"));
 const nativeMusicSource = process.env.NATIVE_MUSIC_CARD_PATH ? await readFile(process.env.NATIVE_MUSIC_CARD_PATH, "utf8") : null;
 const APPROVAL_NOW = "2026-08-24T15:08:00.000Z";
@@ -882,6 +882,11 @@ async function mount(page, familyConfig = config, stateOverrides = {}, runtimeOp
           if(message.payload.operation==="log") {
             child.logs.push({id:`log-${window.__wsCalls.length}`,person_id:child.id,kind:message.payload.kind,date:message.payload.date||runtimeOptions.homeworkData.today,details:message.payload.details});
             const routine=child.routines.find(r=>r.kind===message.payload.kind);if(routine)routine.count++;
+          }
+          if(message.payload.operation==="mark") {
+            const target=[...(child.plans || []),...(child.routines || [])].find(item=>item.id===message.payload.target);
+            if(!target)throw new Error("Homework target not found");
+            target.marks={...target.marks,[message.payload.field]:message.payload.value};
           }
           return runtimeOptions.homeworkData;
         }
@@ -5989,5 +5994,33 @@ test("Calendar week and month keep overnight plans visible and open a focused da
   await card.getByRole("button",{name:"Back to week",exact:true}).click();
   await expect(day("2026-11-04").locator('.calendar-week-events')).toBeVisible();
   expect(await page.evaluate(()=>window.__serviceCalls)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("maths hand-in appears without a sheet and shares its tick and undo with Homework",async({page})=>{
+  const family=locationDisabledConfig();
+  family.school.homework_enabled=true;
+  family.features.chores=false;
+  const target="child_one:maths:2026-11-06";
+  const homeworkData={today:"2026-11-06",revision:1,children:[{id:"child_one",name:"Child one",plans:[],logs:[],routines:[{id:target,kind:"maths",title:"Hand in maths homework",due:"2026-11-06",marks:{}}]}]};
+  const errors=await mount(page,family,{}, {homeworkData,fixedNow:"2026-11-06T08:00:00Z",kiosk:true});
+  const card=page.locator("family-hub-card");
+  await card.evaluate(el=>{el._view="family";el._selectFamilyView("child_one");el._taskSection="jobs";el._scheduleRender(true);});
+  const list=card.locator(".tasks-v2");
+  await expect(list).toContainText("School hand-ins");
+  const handIn=list.locator(`[data-homework-hand-in="${target}"]`);
+  await expect(handIn).toBeEnabled();
+  await handIn.click();
+  await expect(list.locator(".tasks-completed")).toContainText("Hand in maths homework");
+  await card.evaluate(async el=>{await el._loadHomework(true);});
+  await expect(list.locator(".tasks-completed")).toContainText("Hand in maths homework");
+  await list.locator(".tasks-completed summary").click();
+  await handIn.click();
+  await expect(list.locator(".task-group")).toContainText("Hand in maths homework");
+  const calls=await page.evaluate(()=>window.__wsCalls.filter(call=>call.type==="family_dashboard_homework/progress"));
+  expect(calls.map(call=>({person:call.payload.person_id,target:call.payload.target,field:call.payload.field,value:call.payload.value}))).toEqual([
+    {person:"child_one",target,field:"handed_in",value:true},
+    {person:"child_one",target,field:"handed_in",value:false}
+  ]);
   expect(errors).toEqual([]);
 });
