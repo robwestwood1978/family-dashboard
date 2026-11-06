@@ -15,6 +15,7 @@ import {
 import { preparationDescription, packedLunchEvents } from "../frontend/family-hub-card.js";
 
 const config = JSON.parse(await readFile(new URL("../config/example.json", import.meta.url), "utf8"));
+const managerVersion = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).version;
 const illustrationSource = await readFile(new URL("../frontend/assets/home-illustration.js", import.meta.url), "utf8");
 const readinessSource = await readFile(new URL("../frontend/readiness.js", import.meta.url), "utf8");
 const dailyBriefSource = await readFile(new URL("../frontend/daily-brief-styles.js", import.meta.url), "utf8");
@@ -5658,7 +5659,7 @@ test("simple family view has child choices and always returns to the full dashbo
   const errors=await mount(page,family,{}, {preparationItems,calendarEventsByEntity,fixedNow:"2026-11-10T07:15:00Z",kiosk:true});
   const card=page.locator("family-hub-card");
   await card.locator('[data-family-picker-open]').click();
-  await expect(card.locator(".dashboard-version")).toContainText("0.33.1");
+  await expect(card.locator(".dashboard-version")).toContainText(managerVersion);
   await card.locator('[data-experience="simple"]').click();
   await expect(card.locator(".simple-child-card")).toHaveCount(2);
   expect(await card.locator(".simple-child-card .today-job>div").first().evaluate(node=>node.getBoundingClientRect().width)).toBeGreaterThan(200);
