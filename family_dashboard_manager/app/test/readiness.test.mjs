@@ -33,11 +33,11 @@ test("tomorrow's shared lunch identity and progress carry into the school mornin
   assert.equal(familyReadiness(config,[],[],[],morning,"parent").rows[0].kind,"waiting");
 });
 
-test("school preparation uses existing reading marks and finished-at-home homework",()=>{
+test("school preparation keeps finished-at-home homework awaiting hand-in",()=>{
   const config = fixture();
   const children = [{id:"child_one",routines:[{id:"reading",kind:"reading",due:"2026-11-10",marks:{record_written:true,adult_signed:true,books_ready:true}}],plans:[{id:"work",title:"Science sheet",due:"2026-11-10",marks:{finished:true}}]}];
   const model = familyReadiness(config,[],[],children,evening);
-  assert.deepEqual(model.rows.map(row=>[row.kind,row.completed]),[["waiting",false],["record",true],["plan",true]]);
+  assert.deepEqual(model.rows.map(row=>[row.kind,row.completed]),[["waiting",false],["homework",false],["record",true]]);
   children[0].paused_until = "2026-11-10";
   assert.equal(familyReadiness(config,[],[],children,evening).total,1);
   config.school.lunch_menus[0].closed_dates = ["2026-11-10"];

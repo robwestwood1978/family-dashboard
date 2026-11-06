@@ -117,3 +117,21 @@ export function packedLunchEvent(personId, day) {
     _packedLunch:true
   };
 }
+
+/** Dated hand-ins share the existing homework marks; a missing sheet never hides a weekly deadline. */
+export function homeworkHandInTasks(child, day, {includeOverdue = false} = {}) {
+  if (!child || child.paused_until && child.paused_until >= day) return [];
+  const plans = (child.plans || []).filter(plan => !plan.archived && (!plan.set_date || plan.set_date <= day));
+  const tasks = plans.filter(plan => plan.due === day || includeOverdue && plan.due < day && !plan.marks?.handed_in).map(plan => ({
+    kind:"homework", id:plan.id, due:plan.due,
+    title:/^(?:hand in|bring|take|return)\b/i.test(plan.title) ? plan.title : `Hand in ${plan.title}`,
+    done:plan.marks?.handed_in === true,
+    detail:plan.marks?.handed_in ? "Handed in at school" : plan.due < day ? "Overdue · hand in at school" : plan.marks?.finished ? "Finished at home · hand in at school" : "Due at school"
+  }));
+  for (const routine of child.routines || []) {
+    if (!["maths","assignment"].includes(routine.kind) || routine.due !== day) continue;
+    if (plans.some(plan => plan.kind === routine.kind && plan.due === routine.due)) continue;
+    tasks.push({kind:"homework",id:routine.id,due:routine.due,title:routine.title,done:routine.marks?.handed_in === true,detail: routine.marks?.handed_in ? "Handed in at school" : "School hand-in day"});
+  }
+  return tasks.sort((a,b) => a.due.localeCompare(b.due) || a.title.localeCompare(b.title));
+}
