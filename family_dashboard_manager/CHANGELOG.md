@@ -1,3 +1,9 @@
+## 0.33.2
+
+- Add regular maths and weekly homework hand-ins to each child’s to-do list, including deadlines without an uploaded sheet.
+- Keep finished-at-home and handed-in progress separate; save task ticks to the existing shared Homework record.
+- Show upcoming and overdue dated hand-ins, preserve completed tasks for undo, and keep failed saves open with a retry message.
+
 ## 0.33.1
 
 - Choose a random photo from the existing screensaver collection when Today opens. Keep it stable through live updates and page navigation; Next photo chooses a different random image.
